@@ -1,10 +1,10 @@
 import { createServer } from 'node:http';
 import { get as requestHttps } from 'node:https';
-import { access, appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, appendFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright';
 import { GologinApi } from 'gologin';
@@ -40,7 +40,15 @@ const installedChromeAppPath = process.env.AUTOLEADPC_CHROME_APP || '/Applicatio
 const chromeChannelDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-channels');
 const chromeRegularBuildDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-regular-builds');
 const roboFormExtensionId = 'pnlccmojcmeohlpggmfnbbiapkmbliob';
-const chromeWebStoreUpdateUrl = 'https://clients2.google.com/service/update2/crx';
+const chromeTemplateProfileDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-template-profile');
+const chromeTemplateMetadataName = 'autoleadpc-template.json';
+// Khóa tiến trình, cache và phiên tab của profile mẫu không được chép sang profile mới.
+const chromeTemplateSkippedNames = new Set([
+  'SingletonLock', 'SingletonCookie', 'SingletonSocket', 'RunningChromeVersion', chromeTemplateMetadataName,
+  'Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'GrShaderCache', 'GraphiteDawnCache', 'DawnCache',
+  'DawnGraphiteCache', 'DawnWebGPUCache', 'Crashpad', 'Sessions',
+]);
+let templateProfileContext = null;
 const proxyUsageHistoryPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'proxy-usage.json');
 const port = Number(process.env.AUTOLEADPC_PORT) || 3210;
 
@@ -1155,6 +1163,9 @@ const runExclusively = (handler) => (requestBody) => enqueueExclusively(handler,
  */
 async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engine = 'chrome' } = {}) {
   const body = JSON.parse(requestBody);
+  if (engine === 'chrome' && templateProfileContext) {
+    throw new Error('Hãy đóng cửa sổ profile mẫu RoboForm trước khi tạo profile Chrome mới.');
+  }
   const autofillRecords = engine === 'chrome' ? parseAutofillRecords(body.autofillData) : [];
   const token = body.apiToken?.trim();
   if (engine === 'gologin' && !token) throw new Error('Hãy nhập GoLogin API token.');
@@ -2433,6 +2444,134 @@ async function listInstalledChromeChannels() {
 }
 
 /**
+ * So sánh hai số phiên bản Chrome dạng 150.0.1234.56.
+ *
+ * @param {string} left Phiên bản thứ nhất.
+ * @param {string} right Phiên bản thứ hai.
+ * @return {number} Số âm, 0 hoặc dương khi left nhỏ hơn, bằng hoặc lớn hơn right.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-14
+ */
+function compareChromeVersions(left, right) {
+  const leftParts = left.split('.').map(Number);
+  const rightParts = right.split('.').map(Number);
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/**
+ * Chép profile mẫu (đã cài RoboForm) vào thư mục profile Chrome mới tạo.
+ *
+ * Chỉ chép khi profile đích chưa từng được Chrome khởi tạo, để không ghi đè dữ liệu cũ.
+ * Bỏ qua khi profile mẫu được tạo bằng Chrome mới hơn bản sắp mở, vì Chrome không hỗ trợ
+ * mở profile của phiên bản mới hơn.
+ *
+ * @param {string} userDataDirectory Thư mục profile Chrome đích.
+ * @param {{version: string}} build Bản Chrome sẽ mở profile đích.
+ * @return {Promise<boolean>} True nếu đã chép profile mẫu.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-14
+ */
+async function seedChromeProfileFromTemplate(userDataDirectory, build) {
+  try {
+    await access(join(userDataDirectory, 'Local State'));
+    return false;
+  } catch {
+    // Profile chưa được Chrome khởi tạo nên có thể nhận dữ liệu mẫu.
+  }
+  let templateVersion;
+  try {
+    const metadata = JSON.parse(await readFile(join(chromeTemplateProfileDirectory, chromeTemplateMetadataName), 'utf8'));
+    templateVersion = metadata.chromeVersion;
+    await access(join(chromeTemplateProfileDirectory, 'Local State'));
+  } catch {
+    return false;
+  }
+  if (compareChromeVersions(templateVersion, build.version) > 0) {
+    console.warn(`Profile mẫu tạo bằng Chrome ${templateVersion}, mới hơn Chrome ${build.version}; `
+      + 'profile này mở không có RoboForm.');
+    return false;
+  }
+  await cp(chromeTemplateProfileDirectory, userDataDirectory, {
+    recursive: true,
+    filter: (source) => !chromeTemplateSkippedNames.has(basename(source)),
+  });
+  return true;
+}
+
+/**
+ * Mở profile mẫu không qua proxy để cài và đăng nhập RoboForm một lần.
+ *
+ * Profile mẫu dùng bản Chrome thấp nhất trên máy để mọi bản Chrome khác mở được bản chép.
+ * Sau khi người dùng đóng cửa sổ này, mỗi profile Chrome mới tạo sẽ được chép từ nó.
+ *
+ * @return {Promise<{results: string[], warnings: string[]}>} Hướng dẫn cho người dùng.
+ * @throws {Error} Khi không tìm thấy Chrome đã cài hoặc Chrome không khởi động được.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-14
+ */
+async function openTemplateProfile() {
+  if (templateProfileContext) {
+    await templateProfileContext.pages()[0]?.bringToFront().catch(() => {});
+    return { results: ['Cửa sổ profile mẫu RoboForm đang mở.'], warnings: [] };
+  }
+  const builds = await listInstalledChromeChannels();
+  const build = builds.toSorted((first, second) => compareChromeVersions(first.version, second.version))[0];
+  if (!build) throw new Error('Không tìm thấy Google Chrome từ bản 150 trở lên để mở profile mẫu.');
+
+  await mkdir(chromeTemplateProfileDirectory, { recursive: true, mode: 0o700 });
+  let previousVersion;
+  try {
+    previousVersion = JSON.parse(
+      await readFile(join(chromeTemplateProfileDirectory, chromeTemplateMetadataName), 'utf8'),
+    ).chromeVersion;
+  } catch {
+    // Lần đầu tạo profile mẫu.
+  }
+  const warnings = previousVersion && compareChromeVersions(previousVersion, build.version) > 0
+    ? [`Profile mẫu từng mở bằng Chrome ${previousVersion}, mới hơn bản thấp nhất hiện có (${build.version}). `
+      + 'Nếu Chrome báo lỗi profile, xóa thư mục chrome-template-profile rồi cài lại RoboForm.']
+    : [];
+
+  const context = await chromium.launchPersistentContext(chromeTemplateProfileDirectory, {
+    executablePath: build.executablePath,
+    ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking', '--disable-component-update'],
+    headless: false,
+    viewport: null,
+    args: ['--no-first-run', '--no-default-browser-check'],
+  });
+  const recordedVersion = previousVersion && compareChromeVersions(previousVersion, build.version) > 0
+    ? previousVersion
+    : build.version;
+  await writeFile(
+    join(chromeTemplateProfileDirectory, chromeTemplateMetadataName),
+    JSON.stringify({ chromeVersion: recordedVersion }),
+  );
+  templateProfileContext = context;
+  context.on('close', () => {
+    if (templateProfileContext === context) templateProfileContext = null;
+  });
+  const page = context.pages()[0] ?? await context.newPage();
+  await page.goto(`https://chromewebstore.google.com/detail/${roboFormExtensionId}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: navigationTimeout,
+  }).catch(() => {});
+  await page.bringToFront().catch(() => {});
+
+  return {
+    results: [
+      `Đã mở profile mẫu bằng Chrome ${build.version} (không qua proxy).`,
+      'Bấm "Thêm vào Chrome" để cài RoboForm, đăng nhập RoboForm, rồi đóng cửa sổ này.',
+      'Từ đó, mỗi profile Chrome mới mà app tạo sẽ có sẵn RoboForm. Profile đã tạo trước đây không thay đổi.',
+    ],
+    warnings,
+  };
+}
+
+/**
  * Mở một cửa sổ Google Chrome thường, xác minh IP và trang đích trong sổ proxy chung.
  *
  * Múi giờ lấy từ ipinfo qua proxy; IP dùng cho lịch sử được xác minh trong trình duyệt.
@@ -2448,13 +2587,8 @@ async function openBrowserWithInstalledChrome({
   build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords,
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
+  await seedChromeProfileFromTemplate(userDataDirectory, build);
   await mkdir(userDataDirectory, { recursive: true, mode: 0o700 });
-  const extensionDirectory = join(userDataDirectory, 'External Extensions');
-  await mkdir(extensionDirectory, { recursive: true, mode: 0o700 });
-  await writeFile(
-    join(extensionDirectory, `${roboFormExtensionId}.json`),
-    JSON.stringify({ external_update_url: chromeWebStoreUpdateUrl }),
-  );
 
   let timezoneId;
   try {
@@ -2694,6 +2828,7 @@ async function startLocalInterface() {
     '/orbita-versions/download': runExclusively(downloadOrbitaVersions),
     '/chrome-versions/download': runExclusively(downloadRealChromeVersions),
     '/chrome-versions/launch': runExclusively(launchUserRequestedBrowsers),
+    '/template-profile/open': runExclusively(openTemplateProfile),
   };
 
   const server = createServer(async (request, response) => {

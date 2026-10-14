@@ -149,6 +149,10 @@
         </div>
         <p id="auto-refill-status" class="hint" role="status" aria-live="polite">Tự bù sẽ mở profile khác khi một trình duyệt đóng.</p>
         <p id="chrome-ip-status" class="hint" role="status" aria-live="polite">Chưa có cửa sổ Chrome đang mở.</p>
+        <div class="actions">
+          <button id="template-profile-button" class="secondary" type="button">Cài RoboForm cho profile mới</button>
+        </div>
+        <p class="hint">Mở profile mẫu không qua proxy. Cài RoboForm từ Chrome Web Store, đăng nhập, rồi đóng cửa sổ đó. Từ lúc đó, mỗi profile Chrome mới mà app tạo sẽ có sẵn RoboForm. Chỉ dùng profile mẫu cho RoboForm vì cookie và phiên đăng nhập trong đó cũng được chép sang.</p>
         <p class="hint">Profile thay thế đang được tạo có thể hoàn tất sau khi tắt tự bù.</p>
         <details id="orbita-versions-advanced">
           <summary>Tải các bản Orbita cho chế độ nhiều phiên bản</summary>
@@ -220,7 +224,8 @@
     const status = document.querySelector('#status');
     const saveStatus = document.querySelector('#save-status');
     const warnings = document.querySelector('#warnings');
-    const buttons = [launchButton, qaRunButton, demoQaPresetButton, orbitaVersionsDownloadButton, chromeVersionsDownloadButton, gologinLaunchButton,
+    const templateProfileButton = document.querySelector('#template-profile-button');
+    const buttons = [templateProfileButton, launchButton, qaRunButton, demoQaPresetButton, orbitaVersionsDownloadButton, chromeVersionsDownloadButton, gologinLaunchButton,
       checkButton, usedIpsButton, saveButton, closeButton];
     const preferencesBridge = window.webkit?.messageHandlers?.autoleadPreferences;
     let autoRefillEnabled = true;
@@ -502,6 +507,10 @@
     }
 
     usedIpsButton.addEventListener('click', showUsedIps);
+    templateProfileButton.addEventListener('click', () => send(
+      '/template-profile/open',
+      'Đang mở profile mẫu để cài RoboForm…',
+    ));
     chromeVersionsDownloadButton.addEventListener('click', () => send(
       '/chrome-versions/download',
       'Đang tải Chrome for Testing từ Google vào kho riêng…',
