@@ -4,6 +4,7 @@ import {
   buildMacChromeUserAgent,
   buildUsedExitIpList,
   createProxyProfileKey,
+  hasTrafficBlocked,
   isRetryableGologinServiceFailure,
   mapWithLimit,
   normalizeUrl,
@@ -214,3 +215,38 @@ assert.notEqual(buildMacChromeUserAgent(144), buildMacChromeUserAgent(145));
 assert.throws(() => buildMacChromeUserAgent(0));
 assert.throws(() => buildMacChromeUserAgent('144'));
 assert.throws(() => buildMacChromeUserAgent(144.5));
+
+// hasTrafficBlocked phát hiện Traffic Blocked! qua nội dung hoặc tiêu đề trang
+assert.equal(await hasTrafficBlocked(null), false);
+assert.equal(await hasTrafficBlocked({ isClosed: () => true }), false);
+assert.equal(await hasTrafficBlocked({
+  isClosed: () => false,
+  evaluate: async () => false,
+}), false);
+assert.equal(await hasTrafficBlocked({
+  isClosed: () => false,
+  evaluate: async () => true,
+}), true);
+assert.equal(await hasTrafficBlocked({
+  isClosed: () => false,
+  evaluate: async () => { throw new Error('Evaluation error'); },
+}), false);
+
+const blockedTexts = [
+  'Traffic Blocked!',
+  'Traffic Blocked',
+  'TRAFFIC BLOCKED',
+  'Error 1020: Traffic Blocked by security rules',
+  'traffic   blocked',
+];
+for (const text of blockedTexts) {
+  assert.ok(/traffic\s+blocked/i.test(text), `phải nhận diện được "${text}"`);
+}
+const normalTexts = [
+  'Traffic Light System',
+  'Block user profile',
+  'Normal landing page',
+];
+for (const text of normalTexts) {
+  assert.ok(!/traffic\s+blocked/i.test(text), `không được nhận nhầm "${text}"`);
+}

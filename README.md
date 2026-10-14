@@ -12,7 +12,7 @@ Nút chính mở Chrome Stable từ `/Applications/Google Chrome.app`, các bả
 
 Ô **Dữ liệu tự điền** nhận CSV có hàng tiêu đề hoặc mảng JSON gồm các object cùng cột. Ví dụ CSV: `Họ tên,Địa chỉ,Số điện thoại` ở dòng đầu, các bản ghi ở những dòng tiếp theo. Tên cột được ghép với nhãn, `name`, `id` hoặc placeholder của ô trên form. Khi form hiện trong Chrome ở đúng origin website đích, app chọn ngẫu nhiên một bản ghi cho form đó rồi điền tối đa một lượt vào các ô trống khớp tên cột. Khi form đóng rồi mở lại, app có thể chọn bản ghi mới. App không tự gửi form, không điền trang ở origin khác và không hiện giá trị dữ liệu trong bảng trạng thái. Dữ liệu đã lưu tiếp tục được dùng cho profile tự bù. Mục QA có fixture riêng nên tắt tự điền trong lượt QA. Bảng phân tách bằng tab và các cột email, SSN hoặc thông tin tài khoản/ngân hàng bị từ chối.
 
-Nếu một tab Chrome hiển thị `Traffic Blocked!`, app đóng cửa sổ Chrome đó, hiện phiên bản và IP trong trạng thái, đồng thời tạm dừng tự bù để không tự mở lại cửa sổ bị chặn.
+Nếu một tab hiển thị `Traffic Blocked!`, app tự động đánh dấu proxy đó bị lỗi, đóng cửa sổ Chrome/GoLogin đó và tự động mở profile/tab khác với proxy và IP mới để thay thế.
 
 Khi người dùng đóng tab cuối cùng của một phiên Chrome bằng dấu X, app cũng kết thúc tiến trình Chrome của phiên đó và cập nhật số cửa sổ đang mở. Phiên đóng theo cách này không được tự bù bằng proxy khác.
 

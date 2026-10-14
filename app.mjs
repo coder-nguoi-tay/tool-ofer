@@ -447,8 +447,8 @@ async function openBrowserThroughProxy({
 /**
  * Mở profile GoLogin, xác nhận IP exit rồi kiểm tra website đích có tải đúng hay không.
  *
- * @param {{api: object, profileId: string, websiteUrl: string, usedExitIps: Set<string>, onExitIp: (ip: string) => Promise<void>, logFilePath: string, tile: object, tileIndex: number, orbitaExecutablePath: string|undefined}} options Profile, URL, callback lưu IP, vị trí cửa sổ và binary Orbita riêng.
- * @return {Promise<{exitIp: string, finalUrl: string}>} IP exit và URL cuối sau điều hướng.
+ * @param {{api: object, profileId: string, proxyKey?: string, websiteUrl: string, usedExitIps: Set<string>, onExitIp: (ip: string) => Promise<void>, logFilePath: string, tile: object, tileIndex: number, orbitaExecutablePath: string|undefined}} options Profile, URL, callback lưu IP, vị trí cửa sổ và binary Orbita riêng.
+ * @return {Promise<{exitIp: string, finalUrl: string, session: object}>} IP exit, URL cuối và phiên sau điều hướng.
  * @throws {Error} Khi IP đã dùng, proxy lỗi, website tải sai đích hoặc callback không lưu được IP.
  * @throws {IpVerificationError} Khi dịch vụ tra IP lỗi hoặc trả dữ liệu không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
@@ -457,6 +457,7 @@ async function openBrowserThroughProxy({
 async function openGologinProfile({
   api,
   profileId,
+  proxyKey,
   websiteUrl,
   usedExitIps,
   onExitIp,
@@ -474,35 +475,48 @@ async function openGologinProfile({
       `--window-size=${tile.width},${tile.height}`,
     ],
   });
-  const session = { api, browser, tileIndex, suppressAutoRefill: false };
+  const session = { api, browser, tileIndex, suppressAutoRefill: false, profileId, proxyKey };
   activeBrowsers.add(session);
   browser.on('disconnected', () => {
     activeBrowsers.delete(session);
     if (!session.suppressAutoRefill) {
-      autoRefill.message = `Slot ${(session.tileIndex ?? 0) + 1} trống; đang tìm proxy thay thế.`;
+      if (!session.closingDueToTrafficBlocked) {
+        autoRefill.message = `Slot ${(session.tileIndex ?? 0) + 1} trống; đang tìm proxy thay thế.`;
+      }
       queueAutomaticRefill();
     }
   });
   await attachInteractionLogging(browser, profileId, logFilePath);
 
-  const pages = await browser.pages();
-  const targetPage = pages[0] ?? (await browser.newPage());
-  const exitIp = await verifyBrowserExitIp(browser, usedExitIps, onExitIp);
+  try {
+    const pages = await browser.pages();
+    const targetPage = pages[0] ?? (await browser.newPage());
+    const exitIp = await verifyBrowserExitIp(browser, usedExitIps, onExitIp);
+    session.exitIp = exitIp;
 
-  const response = await targetPage.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
-  const expectedUrl = new URL(websiteUrl);
-  const finalUrl = targetPage.url();
-  const finalTargetUrl = new URL(finalUrl);
-  const expectedPath = expectedUrl.pathname.replace(/\/+$/, '') || '/';
-  const finalPath = finalTargetUrl.pathname.replace(/\/+$/, '') || '/';
-  if (!response || response.status() >= 400) {
-    throw new Error(`website trả HTTP ${response?.status() ?? 'không có phản hồi'}`);
+    const response = await targetPage.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+    const expectedUrl = new URL(websiteUrl);
+    const finalUrl = targetPage.url();
+    const finalTargetUrl = new URL(finalUrl);
+    const expectedPath = expectedUrl.pathname.replace(/\/+$/, '') || '/';
+    const finalPath = finalTargetUrl.pathname.replace(/\/+$/, '') || '/';
+    if (!response || response.status() >= 400) {
+      throw new Error(`website trả HTTP ${response?.status() ?? 'không có phản hồi'}`);
+    }
+    if (finalTargetUrl.origin !== expectedUrl.origin || finalPath !== expectedPath) {
+      throw new Error(`bị chuyển khỏi trang đích sang ${finalUrl}`);
+    }
+    if (await hasTrafficBlocked(targetPage)) {
+      throw new Error('trang đích hiển thị Traffic Blocked!');
+    }
+    await targetPage.bringToFront().catch(() => {});
+    return { exitIp, finalUrl, session };
+  } catch (error) {
+    session.suppressAutoRefill = true;
+    await browser.close().catch(() => {});
+    await api.exit().catch(() => {});
+    throw error;
   }
-  if (finalTargetUrl.origin !== expectedUrl.origin || finalPath !== expectedPath) {
-    throw new Error(`bị chuyển khỏi trang đích sang ${finalUrl}`);
-  }
-  await targetPage.bringToFront().catch(() => {});
-  return { exitIp, finalUrl };
 }
 
 /**
@@ -1248,6 +1262,19 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
       + 'khớp major đó, nên UA, Sec-CH-UA và engine cùng một phiên bản. Lần đầu mỗi profile tốn '
       + 'thêm một request API GoLogin để đổi UA; các lần sau dùng lại major đã lưu.');
   }
+  if (!autoRefill.settings) {
+    autoRefill.settings = {
+      engine,
+      apiToken: body.apiToken,
+      proxyList: body.proxyList,
+      proxyType: body.proxyType ?? 'socks5',
+      websiteUrl: body.websiteUrl,
+      autofillData: body.autofillData,
+    };
+    if (autoRefill.targetCount < 1) {
+      autoRefill.targetCount = targetSuccessCount;
+    }
+  }
   const results = [];
   let nextProxyIndex = 0;
   let successfulBrowsers = 0;
@@ -1278,7 +1305,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
       let logFilePath;
       let exitIp;
       let failureReason;
-      let chromeSession;
+      let activeSession;
       const attemptStartedAt = new Date().toISOString();
       const tileIndex = availableTileIndexes[workerIndex] ?? workerIndex;
 
@@ -1309,7 +1336,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
         if (engine === 'chrome') {
           const installedChrome = availableChromeBuilds[workerIndex];
           profileId = `chrome-${installedChrome.channel}-${installedChrome.major}`;
-          ({ finalUrl, session: chromeSession } = await openBrowserWithInstalledChrome({
+          ({ finalUrl, session: activeSession } = await openBrowserWithInstalledChrome({
             build: installedChrome,
             proxy,
             proxyKey,
@@ -1341,9 +1368,10 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
           }
           launchApi = GologinApi({ token });
           logFilePath = await createInteractionLogFile(profileId);
-          ({ finalUrl } = await openGologinProfile({
+          ({ finalUrl, session: activeSession } = await openGologinProfile({
             api: launchApi,
             profileId,
+            proxyKey,
             websiteUrl,
             usedExitIps,
             onExitIp: recordExitIp,
@@ -1366,7 +1394,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
         };
         usageHistory.proxies[proxyKey] = usageRecord;
         await persistProxyUsageHistory(usageHistory);
-        if (chromeSession) watchTrafficBlockedPage(chromeSession);
+        if (activeSession) watchTrafficBlockedPage(activeSession);
         const openedBrowserNumber = successfulBrowsers + 1;
         successfulBrowsers += 1;
         const orbitaLabel = engine === 'chrome'
@@ -1380,9 +1408,9 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
         return;
       } catch (error) {
         failureReason = error.message.split('\n')[0];
-        if (chromeSession) {
-          chromeSession.suppressAutoRefill = true;
-          await chromeSession.browser.close().catch(() => {});
+        if (activeSession) {
+          activeSession.suppressAutoRefill = true;
+          await activeSession.browser?.close?.().catch(() => {});
         }
         for (const session of activeBrowsers) {
           if (session.api === launchApi) session.suppressAutoRefill = true;
@@ -2678,6 +2706,7 @@ async function openBrowserWithInstalledChrome({
     tileIndex,
     chromeVersion: build.version,
     suppressAutoRefill: false,
+    proxyKey,
     extensions: extensionNames.length > 0
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
@@ -2688,7 +2717,9 @@ async function openBrowserWithInstalledChrome({
     activeBrowsers.delete(session);
     void relay?.close();
     if (!session.suppressAutoRefill) {
-      autoRefill.message = `Slot ${tileIndex + 1} trống; đang tìm proxy thay thế.`;
+      if (!session.closingDueToTrafficBlocked) {
+        autoRefill.message = `Slot ${tileIndex + 1} trống; đang tìm proxy thay thế.`;
+      }
       queueAutomaticRefill();
     }
   });
@@ -2707,6 +2738,9 @@ async function openBrowserWithInstalledChrome({
     }
     if (finalTargetUrl.origin !== expectedUrl.origin || finalPath !== expectedPath) {
       throw new Error(`bị chuyển khỏi trang đích sang ${finalUrl}`);
+    }
+    if (await hasTrafficBlocked(page)) {
+      throw new Error('trang đích hiển thị Traffic Blocked!');
     }
     await page.bringToFront().catch(() => {});
     closeChromeWhenLastTabCloses(session);
@@ -2737,7 +2771,7 @@ function closeChromeWhenLastTabCloses(session) {
    * @since 2026-10-15
    */
   function closeEmptyChromeSession() {
-    if (session.suppressAutoRefill) return;
+    if (session.suppressAutoRefill || session.closingDueToTrafficBlocked) return;
     for (const page of session.browser.pages()) {
       if (!page.isClosed()) return;
     }
@@ -2766,14 +2800,42 @@ function closeChromeWhenLastTabCloses(session) {
 }
 
 /**
- * Đóng Chrome khi trang hiển thị thông báo chặn lưu lượng và dừng tự bù.
+ * Kiểm tra xem trang có hiển thị thông báo "Traffic Blocked!" hay không.
  *
- * @param {object} session Phiên Chrome đã mở thành công.
+ * @param {object} page Tab của Playwright hoặc Puppeteer.
+ * @return {Promise<boolean>} True nếu phát hiện "Traffic Blocked!", ngược lại false.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+export async function hasTrafficBlocked(page) {
+  try {
+    if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return false;
+    const evaluatePromise = page.evaluate(() => {
+      const title = document.title || '';
+      const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+      const docText = document.documentElement ? (document.documentElement.innerText || document.documentElement.textContent || '') : '';
+      const fullText = `${title} ${bodyText} ${docText}`;
+      return /traffic\s+blocked/i.test(fullText);
+    });
+    const timeoutPromise = new Promise((resolve) => {
+      const timeoutId = setTimeout(() => resolve(false), 2000);
+      timeoutId.unref?.();
+    });
+    return Boolean(await Promise.race([evaluatePromise, timeoutPromise]));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Đóng cửa sổ và tự động mở proxy khác thay thế khi trang hiển thị thông báo "Traffic Blocked!".
+ *
+ * @param {object} session Phiên Chrome hoặc GoLogin đã mở thành công.
  * @return {void} Gắn lịch kiểm tra vào các tab của phiên.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-function watchTrafficBlockedPage(session) {
+export function watchTrafficBlockedPage(session) {
   let checking = false;
   let blocked = false;
   const timer = setInterval(() => {
@@ -2781,18 +2843,48 @@ function watchTrafficBlockedPage(session) {
     checking = true;
     void (async () => {
       try {
-        for (const page of session.browser.pages()) {
-          if (page.isClosed()) continue;
-          const blockedMessage = page.getByText('Traffic Blocked!', { exact: false }).first();
-          if (!(await blockedMessage.isVisible())) continue;
-          blocked = true;
-          clearInterval(timer);
-          session.suppressAutoRefill = true;
-          autoRefill.enabled = false;
-          autoRefill.message = `Chrome ${session.chromeVersion} (IP ${session.exitIp}) hiển thị Traffic Blocked!; `
-            + 'đã đóng cửa sổ và tạm dừng tự bù.';
-          await session.browser.close().catch(() => {});
-          break;
+        const pages = typeof session.browser?.pages === 'function'
+          ? await session.browser.pages()
+          : [];
+        for (const page of pages) {
+          if (typeof page?.isClosed === 'function' && page.isClosed()) continue;
+          if (await hasTrafficBlocked(page)) {
+            blocked = true;
+            clearInterval(timer);
+            session.closingDueToTrafficBlocked = true;
+            session.suppressAutoRefill = false;
+            autoRefill.enabled = true;
+
+            try {
+              if (session.proxyKey) {
+                const history = await readProxyUsageHistory();
+                if (history?.proxies?.[session.proxyKey]) {
+                  history.proxies[session.proxyKey] = {
+                    ...history.proxies[session.proxyKey],
+                    status: 'failed',
+                    reason: 'Traffic Blocked!',
+                    completedAt: new Date().toISOString(),
+                  };
+                  await persistProxyUsageHistory(history);
+                }
+              }
+            } catch {
+              // Bỏ qua lỗi ghi lịch sử nếu file bận
+            }
+
+            const label = session.chromeVersion
+              ? `Chrome ${session.chromeVersion}`
+              : (session.profileId ? `Profile ${session.profileId}` : `Slot ${(session.tileIndex ?? 0) + 1}`);
+
+            autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) hiển thị Traffic Blocked!; `
+              + 'đã đóng cửa sổ và đang tự động mở IP khác thay thế…';
+
+            await page.close().catch(() => {});
+            if (session.api) await session.api.exit().catch(() => {});
+            await session.browser?.close?.().catch(() => {});
+            queueAutomaticRefill();
+            break;
+          }
         }
       } catch {
         // Tab có thể đóng hoặc chuyển trang trong lúc kiểm tra.
@@ -2802,7 +2894,10 @@ function watchTrafficBlockedPage(session) {
     })();
   }, 1500);
   timer.unref?.();
-  session.browser.on('close', () => clearInterval(timer));
+  if (typeof session.browser?.on === 'function') {
+    session.browser.on('close', () => clearInterval(timer));
+    session.browser.on('disconnected', () => clearInterval(timer));
+  }
 }
 
 /**
