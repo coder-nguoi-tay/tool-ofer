@@ -1,28 +1,8 @@
-# Test cases: QA form DemoQA
+# Test cases thủ công
 
-## Chạy tự động
+Chạy `npm test` để chạy self-check và test bộ cài các phiên bản Chrome. Các ca dưới đây chạy tay trên app.
 
-Từ thư mục `AutoLeadPC-mac`, chạy:
-
-```sh
-npm test
-```
-
-`demoqa.test.mjs` dùng Chromium và fixture HTML cục bộ; toàn bộ request của trang giả lập được chặn khỏi Internet.
-
-| ID | Nội dung | Kết quả mong đợi |
-|---|---|---|
-| DQA-01 | Bấm nút nạp preset trong giao diện | URL DemoQA, một profile, bật tự chạy QA và nạp đúng plan. |
-| DQA-02 | Điền và gửi form giả lập | Các trường/tuỳ chọn được thao tác; dữ liệu tổng hợp và thông báo thành công khớp; bộ đếm là 9 trường, 2 câu trả lời. |
-| DQA-03 | Chạy helper với host hoặc path khác | Bị từ chối trước khi thao tác form. |
-| DQA-04 | Phân tích plan và số profile | Chỉ chấp nhận origin/path DemoQA; preset bị chặn nếu số profile khác 1, trước khi mở profile. |
-| DQA-05 | Hiển thị OTP/xác minh người dùng | Bộ nhận diện trả về challenge để lượt QA dừng. |
-
-Để mở đúng website công khai và gửi một lần dữ liệu tổng hợp, chạy riêng `npm run test:demoqa-live`. Test này không nằm trong `npm test`; nó cần mạng và có thể tạo bản ghi trên trang demo. Test tự dừng nếu phát hiện CAPTCHA/OTP.
-
-Lần chạy trực tiếp gần nhất (2026-10-11) đạt: form được gửi và DemoQA hiển thị thông báo xác nhận.
-
-### Nút Tạo profile và mở bằng Chrome thật
+## Nút Tạo profile và mở bằng Chrome thật
 
 `chrome-versions.test.mjs` kiểm dải major và việc chọn patch mới nhất từ đúng kho của Google. Các bước dưới đây cần tải thật từ mạng.
 
@@ -37,7 +17,7 @@ Lần chạy trực tiếp gần nhất (2026-10-11) đạt: form được gửi
 | CV-07 | Dùng proxy trả IP đã có trong **Xem IP đã dùng** | Cửa sổ đó đóng; lịch sử ghi IP và app thử proxy kế tiếp. |
 | CV-08 | Dùng SOCKS5 có user/password | Chrome đi qua relay local, trang đích hiện IP proxy; **Đóng tất cả** đóng cả cửa sổ và relay. |
 
-### Danh sách IP đã dùng
+## Danh sách IP đã dùng
 
 | ID | Thao tác | Kết quả mong đợi |
 |---|---|---|
@@ -45,7 +25,7 @@ Lần chạy trực tiếp gần nhất (2026-10-11) đạt: form được gửi
 | IP-02 | Mở thêm một profile thành công rồi bấm lại | IP mới xuất hiện ở đầu bảng. |
 | IP-03 | Hai proxy khác nhau cùng trả một IP | Bảng chỉ một dòng cho IP đó, cột Số lần là 2, cột Proxy là proxy dùng gần nhất. |
 
-### Mỗi profile GoLogin một phiên bản Orbita khác nhau
+## Mỗi profile GoLogin một phiên bản Orbita khác nhau
 
 Cần GoLogin token, đủ proxy chưa dùng và các bản Orbita đã tải.
 
@@ -56,16 +36,3 @@ Cần GoLogin token, đủ proxy chưa dùng và các bản Orbita đã tải.
 | OV-03 | Số cửa sổ nhiều hơn số bản Orbita đã tải | Các bản được dùng lại theo vòng, mọi cửa sổ vẫn có nhãn `[Orbita ...]`, kèm cảnh báo nên tải thêm; không profile nào bị chặn. |
 | OV-04 | Đóng tay một cửa sổ khi tự bù đang bật | Profile thay thế vào đúng slot đó và dùng lại đúng bản Orbita của slot, kể cả khi lượt bù chạy sau nhiều phút. |
 | OV-05 | Đổi tên thư mục `~/.gologin/browser` sang chỗ khác rồi mở lại | App cảnh báo chưa có bản Orbita nào và để GoLogin tự chọn engine; không có nhãn `[Orbita ...]`; không lỗi. |
-
-## Chạy thủ công trên app
-
-Các ca này dùng trang demo công khai và dữ liệu tổng hợp cố định của app. Chỉ chạy trên trang demo, không thay URL sang website production.
-
-| ID | Thao tác | Kết quả mong đợi |
-|---|---|---|
-| DQA-M01 | Mở app, vào **Trình duyệt** → **Nạp mẫu form DemoQA** | URL là `https://demoqa.com/automation-practice-form`; số cửa sổ là 1; plan QA được nạp. |
-| DQA-M02 | Chuẩn bị GoLogin và một proxy chưa dùng, xác nhận chưa có profile mở; bấm **Mở đủ cửa sổ và chạy QA** rồi xác nhận hộp thoại | Một profile mở; form được điền; kết quả có “Thanks for submitting the form”; báo cáo QA được lưu trong `~/Library/Application Support/AutoLeadPC/logs/qa-reports`. |
-| DQA-M03 | Nạp preset, đổi số cửa sổ thành 2, bấm chạy và xác nhận | App báo preset chỉ chạy một profile; không tạo profile GoLogin nào. |
-| DQA-M04 | Nạp preset rồi đổi website đích sang origin khác, bấm chạy | App báo origin trong plan không khớp website đích; không gửi yêu cầu mở profile. |
-
-Nếu DQA-M02 thất bại, giữ lại nội dung trạng thái và báo cáo QA để biết selector nào không còn khớp. Test tự động hiện kiểm tra hợp đồng selector trên fixture; nó không xác nhận DOM trực tiếp của DemoQA đang hoạt động.

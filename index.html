@@ -22,9 +22,6 @@
     .tab-panel[hidden] { display: none; }
     .section-title { margin: 0 0 13px; color: #25334b; font-size: 14px; font-weight: 700; }
     .panel-divider { margin: 19px 0 16px; border: 0; border-top: 1px solid #e7ebf2; }
-    #qa-advanced { margin-top: 18px; padding: 12px; border: 1px solid #e1e7f0; border-radius: 10px; background: #f8faff; }
-    #qa-advanced summary { color: #25334b; font-weight: 700; cursor: pointer; }
-    #qa-advanced[open] summary { margin-bottom: 10px; }
     label { display: block; margin: 11px 0 5px; font-size: 12px; font-weight: 650; }
     input, textarea, select { width: 100%; padding: 9px 10px; border: 1px solid #cbd4e2; border-radius: 8px; color: inherit; background: #fff; font: inherit; transition: border-color .15s, box-shadow .15s; }
     input[type="checkbox"] { width: 18px; height: 18px; vertical-align: middle; }
@@ -174,25 +171,7 @@
           <div class="actions">
             <button id="chrome-versions-download-button" class="secondary" type="button">Tải Chrome for Testing</button>
           </div>
-          <p class="hint">Lịch sử proxy, danh sách IP đã dùng, tự bù, QA và Đóng tất cả dùng chung với nút chính.</p>
-        </details>
-        <details id="qa-advanced">
-          <summary>Kịch bản QA form (tùy chọn)</summary>
-          <p class="hint">Fixture chạy trên đúng số cửa sổ đặt ở tab Thiết lập; từng profile dùng fixture riêng. Hãy đóng profile đang mở trước khi chạy và chuẩn bị đủ proxy chưa dùng. App dừng nếu sai màn hình, đổi origin hoặc gặp CAPTCHA/OTP. Tự bù tắt trong lượt đo.</p>
-          <label for="auto-run-qa">Tự chạy sau khi mở profile</label>
-          <div class="row">
-            <div>
-              <input id="auto-run-qa" name="autoRunQa" type="checkbox" value="true">
-            </div>
-          </div>
-          <label for="qa-plan">Kịch bản JSON</label>
-          <textarea id="qa-plan" name="qaPlanText" spellcheck="false" placeholder='{"origin":"https://qa.example.com","seed":"case-001","steps":[]}'></textarea>
-          <p class="hint">Hành động hỗ trợ: fill theo nhãn, answer radio trong nhóm câu hỏi, select theo nhãn và click button/link. Khi chạy nhiều cửa sổ, mỗi mảng values/options phải có đủ giá trị riêng cho từng cửa sổ; value đơn có thể dùng {{profileNumber}} (ví dụ qa-user-{{profileNumber}}). App kiểm tra trước khi mở profile để tránh lặp dữ liệu.</p>
-          <div class="actions">
-            <button id="demoqa-preset-button" class="secondary" type="button">Nạp mẫu form DemoQA (1 cửa sổ)</button>
-            <button id="qa-run-button" type="submit">Mở đủ cửa sổ và chạy QA</button>
-          </div>
-          <p class="hint">Mẫu DemoQA dùng dữ liệu tổng hợp cố định, để trống ảnh và chỉ chạy đúng trang practice form trên demoqa.com.</p>
+          <p class="hint">Lịch sử proxy, danh sách IP đã dùng, tự bù và Đóng tất cả dùng chung với nút chính.</p>
         </details>
       </section>
     </form>
@@ -211,13 +190,9 @@
     let lastCheckCsv = '';
     const saveButton = document.querySelector('#save-button');
     const closeButton = document.querySelector('#close-button');
-    const qaRunButton = document.querySelector('#qa-run-button');
-    const demoQaPresetButton = document.querySelector('#demoqa-preset-button');
     const orbitaVersionsDownloadButton = document.querySelector('#orbita-versions-download-button');
     const chromeVersionsDownloadButton = document.querySelector('#chrome-versions-download-button');
     const gologinLaunchButton = document.querySelector('#gologin-launch-button');
-    const qaPlanField = document.querySelector('#qa-plan');
-    const autoRunQaField = document.querySelector('#auto-run-qa');
     const autoRefillButton = document.querySelector('#auto-refill-button');
     const autoRefillStatus = document.querySelector('#auto-refill-status');
     const chromeIpStatus = document.querySelector('#chrome-ip-status');
@@ -225,7 +200,7 @@
     const saveStatus = document.querySelector('#save-status');
     const warnings = document.querySelector('#warnings');
     const templateProfileButton = document.querySelector('#template-profile-button');
-    const buttons = [templateProfileButton, launchButton, qaRunButton, demoQaPresetButton, orbitaVersionsDownloadButton, chromeVersionsDownloadButton, gologinLaunchButton,
+    const buttons = [templateProfileButton, launchButton, orbitaVersionsDownloadButton, chromeVersionsDownloadButton, gologinLaunchButton,
       checkButton, usedIpsButton, saveButton, closeButton];
     const preferencesBridge = window.webkit?.messageHandlers?.autoleadPreferences;
     let autoRefillEnabled = true;
@@ -409,7 +384,7 @@
     }
 
     /**
-     * Xác nhận origin trước khi mở profile và mở mục QA trong tab Trình duyệt nếu cấu hình sai.
+     * Mở Google Chrome thường qua proxy theo cấu hình hiện tại.
      * @param {SubmitEvent} event Sự kiện gửi cấu hình mở trình duyệt.
      * @return {void} Không trả về giá trị.
      * @author ductv <ductv@getflycrm.com>
@@ -418,67 +393,10 @@
     function handleLauncherSubmit(event) {
       event.preventDefault();
       activateTab('browsers');
-      const runQaForRequestedCount = autoRunQaField.checked || event.submitter?.id === 'qa-run-button';
-      if (!runQaForRequestedCount) {
-        send('/launch', 'Đang mở Google Chrome thường qua proxy…');
-        return;
-      }
-
-      let plan;
-      try {
-        plan = JSON.parse(qaPlanField.value);
-        const planOrigin = new URL(plan.origin).origin;
-        const websiteValue = form.elements.namedItem('websiteUrl').value.trim();
-        const targetOrigin = new URL(websiteValue.includes('://') ? websiteValue : 'https://' + websiteValue).origin;
-        if (planOrigin !== plan.origin || planOrigin !== targetOrigin) {
-          throw new Error('Origin trong QA phải trùng website đích.');
-        }
-      } catch (error) {
-        status.textContent = 'Không thể bật tự chạy QA: ' + error.message;
-        activateTab('browsers');
-        document.querySelector('#qa-advanced').open = true;
-        qaPlanField.focus();
-        return;
-      }
-      const requestedCount = form.elements.namedItem('requestedCount').value;
-      const confirmation = 'Mở ' + requestedCount + ' profile theo số cửa sổ đã đặt và chạy fixture trên ' + plan.origin + '? ' +
-        'Form có thể tạo bản ghi test trong backend. CAPTCHA/OTP sẽ dừng lượt chạy.';
-      if (!window.confirm(confirmation)) return;
-      send('/launch', 'Đang mở ' + requestedCount + ' profile rồi chạy QA trên toàn bộ lượt…', {
-        qaConfirmedOrigin: plan.origin,
-        autoRunQa: true,
-      });
-    }
-
-    /**
-     * Nạp kịch bản form DemoQA một profile với dữ liệu tổng hợp không thuộc người thật.
-     * @param {MouseEvent} event Sự kiện bấm nút nạp preset.
-     * @return {void} Không trả về giá trị.
-     * @author ductv <ductv@getflycrm.com>
-     * @since 2026-10-10
-     */
-    function loadDemoQaPreset(event) {
-      event.preventDefault();
-      form.elements.namedItem('websiteUrl').value = 'https://demoqa.com/automation-practice-form';
-      form.elements.namedItem('requestedCount').value = '1';
-      autoRunQaField.checked = true;
-      qaPlanField.value = JSON.stringify({
-        origin: 'https://demoqa.com',
-        seed: 'demoqa-practice-form',
-        steps: [{
-          name: 'Student Registration Form',
-          when: { urlIncludes: '/automation-practice-form', textIncludes: 'Student Registration Form' },
-          actions: [{ type: 'demoqaPracticeForm' }],
-          expect: { textIncludes: 'Thanks for submitting the form' },
-        }],
-      }, null, 2);
-      document.querySelector('#qa-advanced').open = true;
-      activateTab('browsers');
-      status.textContent = 'Đã nạp mẫu DemoQA. Mẫu dùng một profile và chỉ gửi dữ liệu tổng hợp trên trang demo.';
+      send('/launch', 'Đang mở Google Chrome thường qua proxy…');
     }
 
     form.addEventListener('submit', handleLauncherSubmit);
-    demoQaPresetButton.addEventListener('click', loadDemoQaPreset);
     /**
      * Hiện bảng các IP exit đã dùng để biết IP nào sẽ bị từ chối ở lượt sau.
      * @return {Promise<void>} Hoàn tất khi bảng đã được vẽ.
@@ -519,7 +437,6 @@
     gologinLaunchButton.addEventListener('click', () => send(
       '/gologin/launch',
       'Đang tạo profile GoLogin và mở trình duyệt Orbita…',
-      { autoRunQa: false },
     ));
     orbitaVersionsDownloadButton.addEventListener('click', () => send(
       '/orbita-versions/download',

@@ -26,7 +26,7 @@ fi
 
 # 3. Sync launcher files
 echo "Syncing launcher files into app bundle..."
-cp -p app.mjs autofill.mjs chrome-versions.mjs chrome-versions.test.mjs index.html package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md demoqa.test.mjs demoqa-live.test.mjs verify-logging.mjs "$LAUNCHER_DIR/"
+cp -p app.mjs autofill.mjs chrome-versions.mjs chrome-versions.test.mjs index.html package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md verify-logging.mjs "$LAUNCHER_DIR/"
 
 # If root has node_modules, copy or link to launcher
 if [ -d "node_modules" ] && [ ! -d "$LAUNCHER_DIR/node_modules" ]; then

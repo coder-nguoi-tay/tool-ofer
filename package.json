@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node app.mjs",
-    "test": "node selfcheck.mjs && node --test demoqa.test.mjs chrome-versions.test.mjs",
-    "test:demoqa-live": "node --test demoqa-live.test.mjs",
+    "test": "node selfcheck.mjs && node --test chrome-versions.test.mjs",
     "relay": "node relay.mjs",
     "verify:logging": "node verify-logging.mjs"
   },
