@@ -55,6 +55,7 @@
     #warnings { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #fff6e2; color: #6b4e13; font-size: 11px; white-space: pre-line; }
     #warnings:empty { display: none; padding: 0; }
     #auto-refill-status { margin-top: 12px; }
+    #chrome-ip-status { margin-top: 10px; padding: 10px 12px; border: 1px solid #e7ebf2; border-radius: 8px; background: #f7f9fc; white-space: pre-line; }
     .notice { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #f1f6ff; color: #4c5e7c; font-size: 11px; }
     @media (max-width: 560px) { body { padding: 8px; } main { min-height: 0; padding: 16px; border-radius: 12px; } .row { gap: 8px; } .tab { padding-inline: 4px; font-size: 12px; } }
   </style>
@@ -98,7 +99,7 @@
         <div class="row">
           <div>
             <label for="count">Số cửa sổ</label>
-            <input id="count" name="requestedCount" type="number" min="1" max="4" value="4">
+            <input id="count" name="requestedCount" type="number" min="1" max="6" value="6">
           </div>
           <div>
             <label for="proxy-type">Loại proxy mặc định</label>
@@ -111,6 +112,9 @@
         <label for="target-url">Website đích</label>
         <input id="target-url" name="websiteUrl" type="text" placeholder="https://example.com">
         <p class="hint">Có thể nhập example.com; app tự thêm https://.</p>
+        <label for="autofill-data">Dữ liệu tự điền (CSV hoặc JSON)</label>
+        <textarea id="autofill-data" name="autofillData" spellcheck="false" placeholder="Họ tên,Địa chỉ,Số điện thoại&#10;Nguyễn An,12 Đường Mẫu,0900000001&#10;Trần Bình,34 Đường Mẫu,0900000002"></textarea>
+        <p class="hint">Dòng đầu CSV là tên cột; hoặc dán mảng JSON gồm các object cùng cột. Tên cột cần khớp nhãn, name, id hoặc placeholder của trường trên form. Mỗi lần form Chrome xuất hiện, app chọn ngẫu nhiên một bản ghi và điền tối đa một lượt; app không tự gửi. Không hỗ trợ email, SSN hoặc thông tin tài khoản/ngân hàng.</p>
         <div class="actions">
           <button id="save-button" class="secondary" type="button">Lưu cấu hình</button>
         </div>
@@ -139,11 +143,12 @@
           <button id="launch-button" type="submit">Tạo profile và mở</button>
           <button id="close-button" class="secondary" type="button">Đóng tất cả</button>
         </div>
-        <p class="hint"><strong>Tạo profile và mở</strong> dùng Google Chrome thường từ bản 154 trở lên, tối đa 4 cửa sổ. Mỗi cửa sổ cần một số phiên bản đầy đủ khác nhau, một profile và một proxy riêng. Nếu máy thiếu phiên bản, app báo lỗi trước khi mở. User-Agent dùng mẫu Windows với đúng phiên bản của Chrome được mở. Lịch sử proxy chung hiện ở tab Proxy.</p>
+        <p class="hint"><strong>Tạo profile và mở</strong> dùng Google Chrome thường từ bản 150 trở lên, tối đa 6 cửa sổ. Mỗi cửa sổ cần một major khác nhau, một profile và một proxy riêng. Nếu máy thiếu phiên bản, app báo lỗi trước khi mở. User-Agent dùng mẫu Windows với đúng phiên bản của Chrome được mở. Dữ liệu tự điền nằm ở tab Thiết lập. Lịch sử proxy chung hiện ở tab Proxy.</p>
         <div class="actions">
           <button id="auto-refill-button" class="secondary" type="button" aria-pressed="true">Tự bù: Đang bật</button>
         </div>
         <p id="auto-refill-status" class="hint" role="status" aria-live="polite">Tự bù sẽ mở profile khác khi một trình duyệt đóng.</p>
+        <p id="chrome-ip-status" class="hint" role="status" aria-live="polite">Chưa có cửa sổ Chrome đang mở.</p>
         <p class="hint">Profile thay thế đang được tạo có thể hoàn tất sau khi tắt tự bù.</p>
         <details id="orbita-versions-advanced">
           <summary>Tải các bản Orbita cho chế độ nhiều phiên bản</summary>
@@ -189,7 +194,7 @@
     </form>
     <p id="warnings"></p>
     <p id="status" role="status" aria-live="polite"></p>
-    <p class="notice">Tối đa 4 trình duyệt chạy song song. Nếu máy chậm, giảm số cửa sổ trong tab Thiết lập.</p>
+    <p class="notice">Tối đa 6 trình duyệt chạy song song. Nếu máy chậm, giảm số cửa sổ trong tab Thiết lập.</p>
   </main>
   <script>
     const form = document.querySelector('#launcher-form');
@@ -211,6 +216,7 @@
     const autoRunQaField = document.querySelector('#auto-run-qa');
     const autoRefillButton = document.querySelector('#auto-refill-button');
     const autoRefillStatus = document.querySelector('#auto-refill-status');
+    const chromeIpStatus = document.querySelector('#chrome-ip-status');
     const status = document.querySelector('#status');
     const saveStatus = document.querySelector('#save-status');
     const warnings = document.querySelector('#warnings');
@@ -219,7 +225,7 @@
     const preferencesBridge = window.webkit?.messageHandlers?.autoleadPreferences;
     let autoRefillEnabled = true;
     let isRefreshingAutoRefillState = false;
-    const savedFieldNames = ['apiToken', 'proxyList', 'requestedCount', 'proxyType', 'websiteUrl'];
+    const savedFieldNames = ['apiToken', 'proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'autofillData'];
     const tabButtons = [...document.querySelectorAll('[role="tab"]')];
     const tabPanels = [...document.querySelectorAll('[role="tabpanel"]')];
 
@@ -260,8 +266,8 @@
      * Khôi phục cấu hình đã lưu và chặn số cửa sổ cũ vượt giới hạn hiện tại.
      * @param {string} encodedSettings Cấu hình UTF-8 mã hóa Base64 từ Keychain.
      * @return {void} Cập nhật các trường trong giao diện.
-     * @author ductv <ductv@getflycrm.com>
-     * @since 2026-10-14
+     * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+     * @since 2026-10-15
      */
     window.restoreSavedPreferencesFromBase64 = (encodedSettings) => {
       const bytes = Uint8Array.from(atob(encodedSettings), (character) => character.charCodeAt(0));
@@ -271,7 +277,7 @@
         if (field && preferences[fieldName] !== undefined) field.value = preferences[fieldName];
       }
       const countField = form.elements.namedItem('requestedCount');
-      countField.value = String(Math.min(4, Math.max(1, Math.floor(Number(countField.value) || 4))));
+      countField.value = String(Math.min(6, Math.max(1, Math.floor(Number(countField.value) || 6))));
       saveStatus.textContent = Object.keys(preferences).length ? 'Đã tải cấu hình đã lưu.' : 'Chưa có cấu hình đã lưu.';
     };
 
@@ -290,11 +296,11 @@
     });
 
     /**
-     * Cập nhật nhãn nút và tình trạng slot tự bù trên giao diện.
+     * Cập nhật trạng thái tự bù và IP của từng cửa sổ Chrome đang mở.
      * @param {object} state Trạng thái nhận từ máy chủ local.
      * @return {void} Không trả về giá trị.
-     * @author ductv <ductv@getflycrm.com>
-     * @since 2026-10-10
+     * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+     * @since 2026-10-15
      */
     function renderAutoRefillState(state) {
       autoRefillEnabled = state.enabled;
@@ -302,6 +308,13 @@
       autoRefillButton.setAttribute('aria-pressed', String(autoRefillEnabled));
       const slotSummary = state.targetCount > 0 ? ` (${state.activeCount}/${state.targetCount} trình duyệt)` : '';
       autoRefillStatus.textContent = `${state.message}${slotSummary}`;
+      chromeIpStatus.textContent = state.chromeSessions?.length
+        ? 'IP Chrome đang mở:\n' + state.chromeSessions
+          .map((session) => `Cửa sổ ${session.slot} · Chrome ${session.version} · IP ${session.exitIp}`
+            + (session.autofillRecord ? ` · dữ liệu dòng ${session.autofillRecord}, đã điền ${session.autofillFields} trường` : '')
+            + (session.autofillError ? ` · ${session.autofillError}` : ''))
+          .join('\n')
+        : 'Chưa có cửa sổ Chrome đang mở.';
     }
 
     /**

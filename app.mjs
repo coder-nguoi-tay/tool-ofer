@@ -17,6 +17,7 @@ import {
   listInstalledOrbitaVersions,
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
+import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
@@ -38,6 +39,8 @@ const chromeProfileDirectory = join(homedir(), 'Library', 'Application Support',
 const installedChromeAppPath = process.env.AUTOLEADPC_CHROME_APP || '/Applications/Google Chrome.app';
 const chromeChannelDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-channels');
 const chromeRegularBuildDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-regular-builds');
+const roboFormExtensionId = 'pnlccmojcmeohlpggmfnbbiapkmbliob';
+const chromeWebStoreUpdateUrl = 'https://clients2.google.com/service/update2/crx';
 const proxyUsageHistoryPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'proxy-usage.json');
 const port = Number(process.env.AUTOLEADPC_PORT) || 3210;
 
@@ -88,7 +91,7 @@ export function recommendedMaxAlive(cores, totalBytes) {
   return Math.max(1, Math.min(cores, byRam));
 }
 
-const maxAliveBrowsers = Math.max(1, Math.min(4, Math.floor(Number(process.env.AUTOLEADPC_MAX_ALIVE) || 4)));
+const maxAliveBrowsers = Math.max(1, Math.min(6, Math.floor(Number(process.env.AUTOLEADPC_MAX_ALIVE) || 6)));
 
 /** Giới hạn số profile cùng chạy một kịch bản QA để tránh tạo tải ngoài ý muốn. */
 const maxQaProfiles = maxAliveBrowsers;
@@ -1147,11 +1150,12 @@ const runExclusively = (handler) => (requestBody) => enqueueExclusively(handler,
  * @param {{layoutTarget?: number, engine?: 'chrome'|'gologin'}} options Số ô và engine của lượt mở.
  * @return {Promise<{results: string[], warnings: string[]}>} Kết quả proxy thành công/thất bại và cảnh báo.
  * @throws {Error} Khi cấu hình không hợp lệ hoặc sổ proxy không đọc/ghi được.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engine = 'chrome' } = {}) {
   const body = JSON.parse(requestBody);
+  const autofillRecords = engine === 'chrome' ? parseAutofillRecords(body.autofillData) : [];
   const token = body.apiToken?.trim();
   if (engine === 'gologin' && !token) throw new Error('Hãy nhập GoLogin API token.');
   const proxyType = body.proxyType ?? 'socks5';
@@ -1208,10 +1212,10 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
   const orbitaBuilds = engine === 'gologin' ? await listInstalledOrbitaVersions() : [];
   let availableChromeBuilds = [];
   if (engine === 'chrome') {
-    const occupiedChromeVersions = new Set([...activeBrowsers]
-      .map((session) => session.chromeVersion).filter(Boolean));
+    const occupiedChromeMajors = new Set([...activeBrowsers]
+      .map((session) => Number(session.chromeVersion?.split('.')[0])).filter(Boolean));
     availableChromeBuilds = (await listInstalledChromeChannels())
-      .filter((build) => !occupiedChromeVersions.has(build.version));
+      .filter((build) => !occupiedChromeMajors.has(build.major));
     if (availableChromeBuilds.length < targetSuccessCount) {
       throw new Error(`Cần ${targetSuccessCount} phiên bản Google Chrome thường khác nhau, `
         + `nhưng hiện chỉ còn ${availableChromeBuilds.length} phiên bản chưa mở. `
@@ -1303,6 +1307,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
             onExitIp: recordExitIp,
             tile: tileAt(tileIndex, layoutCount, screen),
             tileIndex,
+            autofillRecords,
           }));
         } else {
           const preparedProfile = await prepareGologinProfile({
@@ -1350,6 +1355,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
         };
         usageHistory.proxies[proxyKey] = usageRecord;
         await persistProxyUsageHistory(usageHistory);
+        if (chromeSession) watchTrafficBlockedPage(chromeSession);
         const openedBrowserNumber = successfulBrowsers + 1;
         successfulBrowsers += 1;
         const orbitaLabel = engine === 'chrome'
@@ -1442,8 +1448,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
  * @param {'chrome'|'gologin'} engine Engine của lượt mở.
  * @return {Promise<object>} Kết quả mở profile và trạng thái tự bù.
  * @throws {Error} Khi cấu hình launch hoặc kịch bản QA không hợp lệ.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 async function launchUserRequestedBrowsers(requestBody, engine = 'chrome') {
   const body = JSON.parse(requestBody);
@@ -1494,7 +1500,8 @@ async function launchUserRequestedBrowsers(requestBody, engine = 'chrome') {
   }
 
   const sessionsBeforeLaunch = new Set(activeBrowsers);
-  const result = await launchRequestedBrowsers(requestBody, { engine });
+  const launchBody = autoRunQa ? JSON.stringify({ ...body, autofillData: '' }) : requestBody;
+  const result = await launchRequestedBrowsers(launchBody, { engine });
   const requestedCount = body.requestedCount === undefined || body.requestedCount === ''
     ? selectProxies(body.proxyList, body.proxyType ?? 'socks5', '').length
     : Number(body.requestedCount);
@@ -1534,6 +1541,7 @@ async function launchUserRequestedBrowsers(requestBody, engine = 'chrome') {
       proxyList: body.proxyList,
       proxyType: body.proxyType ?? 'socks5',
       websiteUrl: body.websiteUrl,
+      autofillData: body.autofillData,
     };
     autoRefill.targetCount = Math.min(
       maxAliveBrowsers,
@@ -1604,11 +1612,11 @@ function updateAutoRefill(requestBody) {
 }
 
 /**
- * Trả trạng thái vận hành để giao diện hiển thị số slot đang mở và trạng thái tự bù.
+ * Trả trạng thái tự bù và IP đã xác minh của từng cửa sổ Chrome đang mở.
  *
  * @return {object} Trạng thái hiện tại của trình duyệt và cơ chế tự bù.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-10
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 function getAutoRefillStatus() {
   return {
@@ -1616,6 +1624,17 @@ function getAutoRefillStatus() {
     activeCount: activeBrowsers.size,
     targetCount: autoRefill.targetCount,
     message: autoRefill.message,
+    chromeSessions: [...activeBrowsers]
+      .filter((session) => session.chromeVersion && session.exitIp)
+      .map((session) => ({
+        slot: session.tileIndex + 1,
+        version: session.chromeVersion,
+        exitIp: session.exitIp,
+        autofillRecord: session.autofillRecord ?? null,
+        autofillFields: session.autofillFields ?? 0,
+        autofillError: session.autofillError ?? null,
+      }))
+      .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
   };
 }
 
@@ -2368,7 +2387,7 @@ async function readInstalledChromeChannel(appPath, channel) {
 }
 
 /**
- * Liệt kê Chrome thường từ bản 154 trở lên, mỗi số phiên bản đầy đủ chỉ một bản.
+ * Liệt kê Chrome thường từ bản 150 trở lên, mỗi major chỉ một bản.
  *
  * @return {Promise<{executablePath: string, version: string, major: number, channel: string}[]>} Các kênh khả dụng.
  * @throws {Error} Khi không tìm thấy kênh Stable mặc định.
@@ -2382,7 +2401,7 @@ async function listInstalledChromeChannels() {
     throw error;
   });
   const channelApps = [
-    ...archivedAppNames
+    ...archivedAppNames.sort()
       .map((appName) => {
         const archiveName = appName.match(/^Google Chrome(?: (Beta|Dev|Canary))? (1\d{2}(?:\.\d+){3})\.app$/);
         return archiveName
@@ -2396,13 +2415,13 @@ async function listInstalledChromeChannels() {
     ['canary', join(chromeChannelDirectory, 'Google Chrome Canary.app')],
   ];
   const builds = [];
-  const seenVersions = new Set();
+  const seenMajors = new Set();
   for (const [channel, appPath] of channelApps) {
     try {
       const build = await readInstalledChromeChannel(appPath, channel);
-      if (build.major >= 154 && !seenVersions.has(build.version)) {
+      if (build.major >= 150 && !seenMajors.has(build.major)) {
         builds.push(build);
-        seenVersions.add(build.version);
+        seenMajors.add(build.major);
       }
     } catch (error) {
       if (channel === 'stable') {
@@ -2419,17 +2438,23 @@ async function listInstalledChromeChannels() {
  * Múi giờ lấy từ ipinfo qua proxy; IP dùng cho lịch sử được xác minh trong trình duyệt.
  * Mọi lỗi trước khi tải đúng trang đích đều đóng cửa sổ.
  *
- * @param {{build: object, proxy: object, proxyKey: string, websiteUrl: string, usedExitIps: Set<string>, onExitIp: (ip: string) => Promise<void>, tile: object, tileIndex: number}} options Binary, danh tính proxy, callback lưu IP và vị trí.
+ * @param {{build: object, proxy: object, proxyKey: string, websiteUrl: string, usedExitIps: Set<string>, onExitIp: (ip: string) => Promise<void>, tile: object, tileIndex: number, autofillRecords: object[]}} options Binary, proxy, dữ liệu tự điền và vị trí.
  * @return {Promise<{exitIp: string, finalUrl: string, session: object}>} IP, URL và phiên mở thành công.
  * @throws {IpVerificationError|Error} Khi IP, proxy hoặc website không hợp lệ.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 async function openBrowserWithInstalledChrome({
-  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex,
+  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords,
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   await mkdir(userDataDirectory, { recursive: true, mode: 0o700 });
+  const extensionDirectory = join(userDataDirectory, 'External Extensions');
+  await mkdir(extensionDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(extensionDirectory, `${roboFormExtensionId}.json`),
+    JSON.stringify({ external_update_url: chromeWebStoreUpdateUrl }),
+  );
 
   let timezoneId;
   try {
@@ -2447,6 +2472,7 @@ async function openBrowserWithInstalledChrome({
     // viewport: null để cửa sổ thật quyết định khung nhìn.
     context = await chromium.launchPersistentContext(userDataDirectory, {
       executablePath: build.executablePath,
+      ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking', '--disable-component-update'],
       headless: false,
       viewport: null,
       userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 `
@@ -2465,6 +2491,7 @@ async function openBrowserWithInstalledChrome({
     throw error;
   }
   const session = { browser: context, tileIndex, chromeVersion: build.version, suppressAutoRefill: false };
+  attachAutofill(context, autofillRecords, new URL(websiteUrl).origin, session);
   activeBrowsers.add(session);
   context.on('close', () => {
     activeBrowsers.delete(session);
@@ -2477,6 +2504,7 @@ async function openBrowserWithInstalledChrome({
   try {
     const page = context.pages()[0] ?? await context.newPage();
     const exitIp = await verifyBrowserExitIp(context, usedExitIps, onExitIp);
+    session.exitIp = exitIp;
     const response = await page.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
     const expectedUrl = new URL(websiteUrl);
     const finalUrl = page.url();
@@ -2490,12 +2518,100 @@ async function openBrowserWithInstalledChrome({
       throw new Error(`bị chuyển khỏi trang đích sang ${finalUrl}`);
     }
     await page.bringToFront().catch(() => {});
+    closeChromeWhenLastTabCloses(session);
     return { exitIp, finalUrl, session };
   } catch (error) {
     session.suppressAutoRefill = true;
     await context.close().catch(() => {});
     throw error;
   }
+}
+
+/**
+ * Kết thúc phiên Chrome khi người dùng đóng tab cuối cùng bằng dấu X.
+ *
+ * @param {object} session Phiên Chrome cần theo dõi các tab.
+ * @return {void} Đăng ký sự kiện đóng tab cho phiên.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+function closeChromeWhenLastTabCloses(session) {
+  const watchedPages = new WeakSet();
+
+  /**
+   * Đóng tiến trình Chrome khi không còn tab nào và giữ slot ở trạng thái đã đóng.
+   *
+   * @return {void} Yêu cầu đóng phiên nếu tab cuối đã biến mất.
+   * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+   * @since 2026-10-15
+   */
+  function closeEmptyChromeSession() {
+    if (session.suppressAutoRefill) return;
+    for (const page of session.browser.pages()) {
+      if (!page.isClosed()) return;
+    }
+    session.suppressAutoRefill = true;
+    autoRefill.targetCount = Math.max(0, Math.min(autoRefill.targetCount, activeBrowsers.size - 1));
+    autoRefill.message = `Đã đóng Chrome ${session.chromeVersion} sau khi tab cuối cùng được đóng.`;
+    void session.browser.close().catch(() => {});
+  }
+
+  /**
+   * Theo dõi tab mới để cả tab mở sau cũng được tính khi đóng phiên.
+   *
+   * @param {object} page Tab Chrome vừa được mở.
+   * @return {void} Gắn sự kiện đóng cho tab chưa theo dõi.
+   * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+   * @since 2026-10-15
+   */
+  function watchTab(page) {
+    if (watchedPages.has(page)) return;
+    watchedPages.add(page);
+    page.on('close', closeEmptyChromeSession);
+  }
+
+  session.browser.on('page', watchTab);
+  for (const page of session.browser.pages()) watchTab(page);
+}
+
+/**
+ * Đóng Chrome khi trang hiển thị thông báo chặn lưu lượng và dừng tự bù.
+ *
+ * @param {object} session Phiên Chrome đã mở thành công.
+ * @return {void} Gắn lịch kiểm tra vào các tab của phiên.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+function watchTrafficBlockedPage(session) {
+  let checking = false;
+  let blocked = false;
+  const timer = setInterval(() => {
+    if (checking || blocked) return;
+    checking = true;
+    void (async () => {
+      try {
+        for (const page of session.browser.pages()) {
+          if (page.isClosed()) continue;
+          const blockedMessage = page.getByText('Traffic Blocked!', { exact: false }).first();
+          if (!(await blockedMessage.isVisible())) continue;
+          blocked = true;
+          clearInterval(timer);
+          session.suppressAutoRefill = true;
+          autoRefill.enabled = false;
+          autoRefill.message = `Chrome ${session.chromeVersion} (IP ${session.exitIp}) hiển thị Traffic Blocked!; `
+            + 'đã đóng cửa sổ và tạm dừng tự bù.';
+          await session.browser.close().catch(() => {});
+          break;
+        }
+      } catch {
+        // Tab có thể đóng hoặc chuyển trang trong lúc kiểm tra.
+      } finally {
+        checking = false;
+      }
+    })();
+  }, 1500);
+  timer.unref?.();
+  session.browser.on('close', () => clearInterval(timer));
 }
 
 /**
