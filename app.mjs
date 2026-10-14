@@ -1644,6 +1644,7 @@ function getAutoRefillStatus() {
         autofillRecord: session.autofillRecord ?? null,
         autofillFields: session.autofillFields ?? 0,
         autofillError: session.autofillError ?? null,
+        roboForm: session.roboForm ?? null,
       }))
       .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
   };
@@ -2471,14 +2472,14 @@ function compareChromeVersions(left, right) {
  *
  * @param {string} userDataDirectory Thư mục profile Chrome đích.
  * @param {{version: string}} build Bản Chrome sẽ mở profile đích.
- * @return {Promise<boolean>} True nếu đã chép profile mẫu.
+ * @return {Promise<string|null>} Null nếu đã chép, hoặc lý do không chép để hiện trên giao diện.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-14
  */
 async function seedChromeProfileFromTemplate(userDataDirectory, build) {
   try {
     await access(join(userDataDirectory, 'Local State'));
-    return false;
+    return 'profile này tạo trước khi có profile mẫu nên không được chép';
   } catch {
     // Profile chưa được Chrome khởi tạo nên có thể nhận dữ liệu mẫu.
   }
@@ -2488,18 +2489,36 @@ async function seedChromeProfileFromTemplate(userDataDirectory, build) {
     templateVersion = metadata.chromeVersion;
     await access(join(chromeTemplateProfileDirectory, 'Local State'));
   } catch {
-    return false;
+    return 'chưa có profile mẫu; bấm "Cài RoboForm cho profile mới"';
+  }
+  if (!(await hasRoboFormExtension(chromeTemplateProfileDirectory))) {
+    return 'profile mẫu chưa cài RoboForm';
   }
   if (compareChromeVersions(templateVersion, build.version) > 0) {
-    console.warn(`Profile mẫu tạo bằng Chrome ${templateVersion}, mới hơn Chrome ${build.version}; `
-      + 'profile này mở không có RoboForm.');
-    return false;
+    return `profile mẫu tạo bằng Chrome ${templateVersion}, mới hơn Chrome ${build.version}`;
   }
   await cp(chromeTemplateProfileDirectory, userDataDirectory, {
     recursive: true,
     filter: (source) => !chromeTemplateSkippedNames.has(basename(source)),
   });
-  return true;
+  return null;
+}
+
+/**
+ * Kiểm tra thư mục profile Chrome đã có file cài đặt của RoboForm chưa.
+ *
+ * @param {string} userDataDirectory Thư mục profile Chrome.
+ * @return {Promise<boolean>} True nếu profile mặc định chứa extension RoboForm.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-14
+ */
+async function hasRoboFormExtension(userDataDirectory) {
+  try {
+    await access(join(userDataDirectory, 'Default', 'Extensions', roboFormExtensionId));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -2561,6 +2580,9 @@ async function openTemplateProfile() {
   }).catch(() => {});
   await page.bringToFront().catch(() => {});
 
+  if (await hasRoboFormExtension(chromeTemplateProfileDirectory)) {
+    warnings.push('Profile mẫu đã có RoboForm. Chỉ cần kiểm tra đã đăng nhập rồi đóng cửa sổ.');
+  }
   return {
     results: [
       `Đã mở profile mẫu bằng Chrome ${build.version} (không qua proxy).`,
@@ -2587,7 +2609,8 @@ async function openBrowserWithInstalledChrome({
   build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords,
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
-  await seedChromeProfileFromTemplate(userDataDirectory, build);
+  const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
+  const roboFormInstalled = await hasRoboFormExtension(userDataDirectory);
   await mkdir(userDataDirectory, { recursive: true, mode: 0o700 });
 
   let timezoneId;
@@ -2624,7 +2647,13 @@ async function openBrowserWithInstalledChrome({
     await relay?.close();
     throw error;
   }
-  const session = { browser: context, tileIndex, chromeVersion: build.version, suppressAutoRefill: false };
+  const session = {
+    browser: context,
+    tileIndex,
+    chromeVersion: build.version,
+    suppressAutoRefill: false,
+    roboForm: roboFormInstalled ? 'có' : `không (${templateSkipReason ?? 'profile mẫu thiếu RoboForm'})`,
+  };
   attachAutofill(context, autofillRecords, new URL(websiteUrl).origin, session);
   activeBrowsers.add(session);
   context.on('close', () => {
