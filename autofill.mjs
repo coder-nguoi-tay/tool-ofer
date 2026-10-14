@@ -132,6 +132,8 @@ export function attachAutofill(context, records, allowedOrigin, session) {
     if (page.isClosed() || new URL(page.url()).origin !== allowedOrigin) return;
     const pageForms = page.locator('form, [role="form"]');
     const forms = await pageForms.count() ? await pageForms.all() : [page.locator('body')];
+    const unmatchedFieldNames = new Set();
+    let visibleFieldCount = 0;
     for (const form of forms) {
       if (!(await form.isVisible())) {
         await form.evaluate((element) => {
@@ -167,8 +169,14 @@ export function attachAutofill(context, records, allowedOrigin, session) {
         if (metadata.readOnly || ['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'email'].includes(metadata.type)) continue;
         const fieldNames = metadata.names.map(normalizeFieldName);
         if (fieldNames.some((name) => excludedFieldNamePattern.test(name))) continue;
+        visibleFieldCount += 1;
         const fieldName = fieldNames.find((name) => Object.hasOwn(record, name));
-        if (!fieldName || record[fieldName] === '') continue;
+        if (!fieldName) {
+          const displayName = metadata.names.map((name) => String(name ?? '').trim()).find(Boolean);
+          if (displayName) unmatchedFieldNames.add(displayName.slice(0, 40));
+          continue;
+        }
+        if (record[fieldName] === '') continue;
         if (metadata.kind !== 'select' && metadata.value) continue;
         try {
           if (metadata.kind === 'select') {
@@ -189,6 +197,13 @@ export function attachAutofill(context, records, allowedOrigin, session) {
       if (filledFieldCount) {
         await form.evaluate((element) => { element.dataset.autoleadComplete = '1'; });
       }
+    }
+    if (session.autofillFields) return;
+    if (unmatchedFieldNames.size) {
+      session.autofillError = 'Không ô nào khớp tên cột. Ô trên trang: '
+        + [...unmatchedFieldNames].slice(0, 12).join(', ');
+    } else if (!visibleFieldCount && page.frames().length > 1) {
+      session.autofillError = 'Không thấy ô nhập ở trang chính; form có thể nằm trong iframe nên app chưa điền được.';
     }
   }
 
