@@ -1644,7 +1644,7 @@ function getAutoRefillStatus() {
         autofillRecord: session.autofillRecord ?? null,
         autofillFields: session.autofillFields ?? 0,
         autofillError: session.autofillError ?? null,
-        roboForm: session.roboForm ?? null,
+        extensions: session.extensions ?? null,
       }))
       .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
   };
@@ -2491,8 +2491,8 @@ async function seedChromeProfileFromTemplate(userDataDirectory, build) {
   } catch {
     return 'chưa có profile mẫu; bấm "Cài RoboForm cho profile mới"';
   }
-  if (!(await hasRoboFormExtension(chromeTemplateProfileDirectory))) {
-    return 'profile mẫu chưa cài RoboForm';
+  if ((await listProfileExtensionNames(chromeTemplateProfileDirectory)).length === 0) {
+    return 'profile mẫu chưa cài extension nào';
   }
   if (compareChromeVersions(templateVersion, build.version) > 0) {
     return `profile mẫu tạo bằng Chrome ${templateVersion}, mới hơn Chrome ${build.version}`;
@@ -2505,20 +2505,44 @@ async function seedChromeProfileFromTemplate(userDataDirectory, build) {
 }
 
 /**
- * Kiểm tra thư mục profile Chrome đã có file cài đặt của RoboForm chưa.
+ * Đọc tên các extension đã cài trong profile mặc định của một thư mục Chrome.
+ *
+ * Tên lấy từ manifest; tên dạng __MSG_key__ được tra trong _locales theo ngôn ngữ mặc định.
  *
  * @param {string} userDataDirectory Thư mục profile Chrome.
- * @return {Promise<boolean>} True nếu profile mặc định chứa extension RoboForm.
+ * @return {Promise<string[]>} Tên extension, hoặc ID nếu không đọc được tên.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-14
  */
-async function hasRoboFormExtension(userDataDirectory) {
-  try {
-    await access(join(userDataDirectory, 'Default', 'Extensions', roboFormExtensionId));
-    return true;
-  } catch {
-    return false;
+async function listProfileExtensionNames(userDataDirectory) {
+  const extensionRoot = join(userDataDirectory, 'Default', 'Extensions');
+  const extensionIds = (await readdir(extensionRoot).catch(() => [])).filter((id) => /^[a-p]{32}$/.test(id));
+  const names = [];
+  for (const extensionId of extensionIds) {
+    const versions = await readdir(join(extensionRoot, extensionId)).catch(() => []);
+    let name = extensionId;
+    for (const version of versions) {
+      try {
+        const versionDirectory = join(extensionRoot, extensionId, version);
+        const manifest = JSON.parse((await readFile(join(versionDirectory, 'manifest.json'), 'utf8')).replace(/^\uFEFF/, ''));
+        name = manifest.name ?? extensionId;
+        const messageKey = /^__MSG_(.+)__$/.exec(name)?.[1];
+        if (messageKey) {
+          const messages = JSON.parse((await readFile(
+            join(versionDirectory, '_locales', manifest.default_locale ?? 'en', 'messages.json'),
+            'utf8',
+          )).replace(/^\uFEFF/, ''));
+          const entry = Object.entries(messages).find(([key]) => key.toLowerCase() === messageKey.toLowerCase());
+          name = entry?.[1]?.message ?? extensionId;
+        }
+        break;
+      } catch {
+        // Thư mục phiên bản dở dang; thử thư mục khác.
+      }
+    }
+    names.push(name);
   }
+  return names;
 }
 
 /**
@@ -2580,8 +2604,10 @@ async function openTemplateProfile() {
   }).catch(() => {});
   await page.bringToFront().catch(() => {});
 
-  if (await hasRoboFormExtension(chromeTemplateProfileDirectory)) {
-    warnings.push('Profile mẫu đã có RoboForm. Chỉ cần kiểm tra đã đăng nhập rồi đóng cửa sổ.');
+  const templateExtensionNames = await listProfileExtensionNames(chromeTemplateProfileDirectory);
+  if (templateExtensionNames.length > 0) {
+    warnings.push(`Profile mẫu đang có extension: ${templateExtensionNames.join(', ')}. `
+      + 'Kiểm tra đã đăng nhập rồi đóng cửa sổ.');
   }
   return {
     results: [
@@ -2610,7 +2636,7 @@ async function openBrowserWithInstalledChrome({
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
-  const roboFormInstalled = await hasRoboFormExtension(userDataDirectory);
+  const extensionNames = await listProfileExtensionNames(userDataDirectory);
   await mkdir(userDataDirectory, { recursive: true, mode: 0o700 });
 
   let timezoneId;
@@ -2652,7 +2678,9 @@ async function openBrowserWithInstalledChrome({
     tileIndex,
     chromeVersion: build.version,
     suppressAutoRefill: false,
-    roboForm: roboFormInstalled ? 'có' : `không (${templateSkipReason ?? 'profile mẫu thiếu RoboForm'})`,
+    extensions: extensionNames.length > 0
+      ? extensionNames.join(', ')
+      : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
   };
   attachAutofill(context, autofillRecords, new URL(websiteUrl).origin, session);
   activeBrowsers.add(session);

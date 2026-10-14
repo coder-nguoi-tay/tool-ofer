@@ -318,7 +318,7 @@
           .map((session) => `Cửa sổ ${session.slot} · Chrome ${session.version} · IP ${session.exitIp}`
             + (session.autofillRecord ? ` · dữ liệu dòng ${session.autofillRecord}, đã điền ${session.autofillFields} trường` : '')
             + (session.autofillError ? ` · ${session.autofillError}` : '')
-            + (session.roboForm ? ` · RoboForm: ${session.roboForm}` : ''))
+            + (session.extensions ? ` · Extension: ${session.extensions}` : ''))
           .join('\n')
         : 'Chưa có cửa sổ Chrome đang mở.';
     }
