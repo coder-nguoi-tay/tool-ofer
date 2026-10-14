@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Private/Active proxy lists (chứa IP và tài khoản proxy thực tế)
+proxies.txt
+proxies-auth.txt
+*.proxy.txt
+
+# Local application data, logs & databases
+*.log
+logs/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+proxy-usage.json
+profiles.json
+
+# Environment variables & secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+
+# macOS build artifacts & compiled bundles
+AutoLeadPC Mac.app/
+*.app/
+.DS_Store
+**/.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Temporary files
+*.tmp
+.tmp/
+*.partial/

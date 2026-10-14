@@ -1,0 +1,6 @@
+# Danh sách proxy mẫu (hỗ trợ host:port hoặc host:port|user|pass)
+# Sao chép file này thành proxies.txt rồi điền proxy thật của bạn:
+#   cp proxies.example.txt proxies.txt
+184.181.0.1:4145
+199.187.0.2:4145
+192.252.0.3:1080|username|password

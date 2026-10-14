@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoLeadPC Mac</title>
+  <style>
+    :root { color-scheme: light; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17243a; background: #eef2f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 12px; }
+    main { max-width: 560px; min-height: 570px; margin: auto; padding: 20px 22px; border: 1px solid #e1e7f0; border-radius: 16px; background: white; box-shadow: 0 12px 36px #172b4d12; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .brand-icon { width: 46px; height: 46px; flex: 0 0 auto; }
+    .brand-copy { min-width: 0; }
+    .eyebrow { display: inline-block; margin: 0 0 5px; color: #245bc3; font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+    h1 { margin: 0 0 4px; font-size: 21px; letter-spacing: -.025em; }
+    p { margin: 0; color: #5e6a7e; line-height: 1.45; }
+    .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 16px 0 18px; padding: 4px; border: 1px solid #e7ebf2; border-radius: 11px; background: #f5f7fb; }
+    .tab { min-height: 34px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; color: #66748a; font: inherit; font-weight: 650; cursor: pointer; }
+    .tab:hover { background: #e9eef7; color: #25334b; }
+    .tab[aria-selected="true"] { background: #fff; color: #245bc3; box-shadow: 0 1px 4px #172b4d20; }
+    .tab-panel[hidden] { display: none; }
+    .section-title { margin: 0 0 13px; color: #25334b; font-size: 14px; font-weight: 700; }
+    .panel-divider { margin: 19px 0 16px; border: 0; border-top: 1px solid #e7ebf2; }
+    #qa-advanced { margin-top: 18px; padding: 12px; border: 1px solid #e1e7f0; border-radius: 10px; background: #f8faff; }
+    #qa-advanced summary { color: #25334b; font-weight: 700; cursor: pointer; }
+    #qa-advanced[open] summary { margin-bottom: 10px; }
+    label { display: block; margin: 11px 0 5px; font-size: 12px; font-weight: 650; }
+    input, textarea, select { width: 100%; padding: 9px 10px; border: 1px solid #cbd4e2; border-radius: 8px; color: inherit; background: #fff; font: inherit; transition: border-color .15s, box-shadow .15s; }
+    input[type="checkbox"] { width: 18px; height: 18px; vertical-align: middle; }
+    input:focus, textarea:focus, select:focus { outline: 0; border-color: #4a7ddd; box-shadow: 0 0 0 3px #4a7ddd20; }
+    input:not([type="checkbox"]), select { height: 38px; }
+    select { appearance: none; padding-right: 34px; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23616f85' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 14px; }
+    textarea { min-height: 210px; resize: vertical; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.5; }
+    .hint { margin-top: 6px; color: #768197; font-size: 11px; }
+    #used-ips { margin-top: 10px; max-height: 220px; overflow: auto; }
+    #used-ips table { width: 100%; border-collapse: collapse; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #used-ips th, #used-ips td { padding: 5px 7px; border-bottom: 1px solid #e7ebf2; text-align: left; white-space: nowrap; }
+    #used-ips th { position: sticky; top: 0; background: #f7f9fc; color: #768197; font-weight: 600; }
+    #used-ips td.ok { color: #1c7c45; }
+    #used-ips td.bad { color: #a4401f; }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; min-width: 0; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 17px; }
+    button:not(.tab) { min-height: 36px; padding: 8px 12px; border: 0; border-radius: 8px; background: #245fce; color: white; font: inherit; font-weight: 700; cursor: pointer; transition: background .15s, transform .1s; }
+    button:not(.tab):hover { background: #194eaf; }
+    button:not(.tab):active { transform: translateY(1px); }
+    button.secondary:not(.tab) { border: 1px solid #d8dfeb; background: #f5f7fb; color: #34425a; }
+    button.secondary:not(.tab):hover { background: #eaf0f8; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #save-status { min-height: 16px; margin-top: 8px; color: #66748a; font-size: 11px; }
+    #save-status.error { color: #b42318; }
+    #status { max-height: 250px; overflow: auto; margin-top: 12px; padding: 11px 12px; border: 1px solid #e7ebf2; border-radius: 9px; background: #f7f9fc; white-space: pre-line; overflow-wrap: anywhere; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.55; }
+    #status:empty { display: none; }
+    #warnings { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #fff6e2; color: #6b4e13; font-size: 11px; white-space: pre-line; }
+    #warnings:empty { display: none; padding: 0; }
+    #auto-refill-status { margin-top: 12px; }
+    .notice { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #f1f6ff; color: #4c5e7c; font-size: 11px; }
+    @media (max-width: 560px) { body { padding: 8px; } main { min-height: 0; padding: 16px; border-radius: 12px; } .row { gap: 8px; } .tab { padding-inline: 4px; font-size: 12px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <svg class="brand-icon" viewBox="0 0 64 64" role="img" aria-label="Biểu tượng AutoLeadPC">
+        <defs>
+          <linearGradient id="brandBackground" x1="5" y1="4" x2="59" y2="62" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#2866E8"/><stop offset="1" stop-color="#182B68"/>
+          </linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="16" fill="url(#brandBackground)"/>
+        <rect x="11" y="13" width="42" height="36" rx="7" fill="#F5F8FF"/>
+        <path d="M11 20a7 7 0 0 1 7-7h28a7 7 0 0 1 7 7v4H11v-4Z" fill="#E6EDFA"/>
+        <circle cx="17" cy="18.5" r="1.7" fill="#FF746D"/><circle cx="23" cy="18.5" r="1.7" fill="#FFCA5D"/><circle cx="29" cy="18.5" r="1.7" fill="#45C98B"/>
+        <rect x="16" y="29" width="9" height="14" rx="3" fill="#3974E8"/>
+        <rect x="27.5" y="29" width="9" height="14" rx="3" fill="#30B5D5"/>
+        <rect x="39" y="29" width="9" height="14" rx="3" fill="#765DE8"/>
+        <path d="M17 55h30M23 50v5m9-5v5m9-5v5" stroke="#70DFFF" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="23" cy="57" r="2.8" fill="#70DFFF"/><circle cx="32" cy="57" r="2.8" fill="#70DFFF"/><circle cx="41" cy="57" r="2.8" fill="#70DFFF"/>
+      </svg>
+      <div class="brand-copy">
+        <span class="eyebrow">GoLogin profile launcher</span>
+        <h1>AutoLeadPC Mac</h1>
+        <p>Tạo profile GoLogin và chạy từng proxy riêng.</p>
+      </div>
+    </header>
+    <nav class="tabs" role="tablist" aria-label="Các tác vụ AutoLeadPC">
+      <button class="tab" id="tab-setup" type="button" role="tab" aria-selected="false" aria-controls="panel-setup" data-tab="setup" tabindex="-1">Thiết lập</button>
+      <button class="tab" id="tab-proxies" type="button" role="tab" aria-selected="false" aria-controls="panel-proxies" data-tab="proxies" tabindex="-1">Proxy</button>
+      <button class="tab" id="tab-browsers" type="button" role="tab" aria-selected="true" aria-controls="panel-browsers" data-tab="browsers">Trình duyệt</button>
+    </nav>
+    <form id="launcher-form" novalidate>
+      <section class="tab-panel" id="panel-setup" role="tabpanel" aria-labelledby="tab-setup" data-panel="setup" hidden>
+        <h2 class="section-title">Kết nối và cấu hình</h2>
+        <label for="api-token">GoLogin API token (chỉ dùng với nút GoLogin)</label>
+        <input id="api-token" name="apiToken" type="password" autocomplete="off" placeholder="Dán API token GoLogin">
+        <p class="hint">Cấu hình được lưu trong database cục bộ trên máy khi bạn bấm Lưu cấu hình.</p>
+        <div class="row">
+          <div>
+            <label for="count">Số cửa sổ</label>
+            <input id="count" name="requestedCount" type="number" min="1" max="4" value="4">
+          </div>
+          <div>
+            <label for="proxy-type">Loại proxy mặc định</label>
+            <select id="proxy-type" name="proxyType">
+              <option value="socks5">SOCKS5</option>
+              <option value="http">HTTP</option>
+            </select>
+          </div>
+        </div>
+        <label for="target-url">Website đích</label>
+        <input id="target-url" name="websiteUrl" type="text" placeholder="https://example.com">
+        <p class="hint">Có thể nhập example.com; app tự thêm https://.</p>
+        <div class="actions">
+          <button id="save-button" class="secondary" type="button">Lưu cấu hình</button>
+        </div>
+        <p id="save-status" role="status" aria-live="polite">Chưa tải cấu hình đã lưu.</p>
+      </section>
+
+      <section class="tab-panel" id="panel-proxies" role="tabpanel" aria-labelledby="tab-proxies" data-panel="proxies" hidden>
+        <h2 class="section-title">Danh sách proxy</h2>
+        <label for="proxy-list">Một proxy trên mỗi dòng</label>
+        <textarea id="proxy-list" name="proxyList" spellcheck="false" placeholder="host:port|username|password&#10;socks5://username:password@host:port"></textarea>
+        <p class="hint">Hỗ trợ host:port, host:port|user|pass hoặc socks5://user:pass@host:port.</p>
+        <div class="actions">
+          <button id="check-button" class="secondary" type="button">Kiểm tra proxy</button>
+          <button id="download-csv-button" class="secondary" type="button" hidden>Tải CSV</button>
+          <button id="usage-history-csv-button" class="secondary" type="button">Tải CSV lịch sử</button>
+          <button id="used-ips-button" class="secondary" type="button">Xem IP đã dùng</button>
+        </div>
+        <p class="hint">Kiểm tra sẽ đánh dấu proxy chết, trùng IP exit và dòng trùng. CSV lịch sử gồm các lần thử, IP exit và trạng thái mở trang đã lưu qua nhiều phiên.</p>
+        <div id="used-ips" role="region" aria-live="polite"></div>
+        <p class="hint">Danh sách IP exit đã tiêu qua các phiên; lượt mở sau sẽ từ chối proxy nào trả về đúng các IP này.</p>
+      </section>
+
+      <section class="tab-panel" id="panel-browsers" role="tabpanel" aria-labelledby="tab-browsers" data-panel="browsers">
+        <h2 class="section-title">Điều khiển trình duyệt</h2>
+        <div class="actions">
+          <button id="launch-button" type="submit">Tạo profile và mở</button>
+          <button id="close-button" class="secondary" type="button">Đóng tất cả</button>
+        </div>
+        <p class="hint"><strong>Tạo profile và mở</strong> dùng Google Chrome thường từ bản 154 trở lên, tối đa 4 cửa sổ. Mỗi cửa sổ cần một số phiên bản đầy đủ khác nhau, một profile và một proxy riêng. Nếu máy thiếu phiên bản, app báo lỗi trước khi mở. User-Agent dùng mẫu Windows với đúng phiên bản của Chrome được mở. Lịch sử proxy chung hiện ở tab Proxy.</p>
+        <div class="actions">
+          <button id="auto-refill-button" class="secondary" type="button" aria-pressed="true">Tự bù: Đang bật</button>
+        </div>
+        <p id="auto-refill-status" class="hint" role="status" aria-live="polite">Tự bù sẽ mở profile khác khi một trình duyệt đóng.</p>
+        <p class="hint">Profile thay thế đang được tạo có thể hoàn tất sau khi tắt tự bù.</p>
+        <details id="orbita-versions-advanced">
+          <summary>Tải các bản Orbita cho chế độ nhiều phiên bản</summary>
+          <p class="hint">GoLogin chạy Orbita — bản Chromium riêng của họ. App tải sẵn nhiều Orbita major vào <code>~/.gologin/browser</code> rồi mở mỗi slot bằng một binary khác nhau. CDN GoLogin chỉ còn phát hành một dải major nhất định; app dò từ Chrome Stable đi xuống và lấy các bản tải được. Mỗi bản khoảng 140–200 MB tải và 410 MB trên đĩa.</p>
+          <label for="orbita-version-count">Số bản Orbita cần có trên máy</label>
+          <input id="orbita-version-count" name="orbitaVersionCount" type="number" min="1" max="12" value="10">
+          <p class="hint">Phiên bản gắn theo slot cửa sổ, nên profile được tự bù vào slot nào sẽ dùng lại đúng bản của slot đó. Chuỗi User-Agent vẫn do fingerprint của profile GoLogin quyết định: nếu major của UA khác major của engine thì Sec-CH-UA và UA không khớp nhau — đặt UA của profile trong GoLogin cho khớp nếu bạn cần fingerprint nhất quán.</p>
+          <div class="actions">
+            <button id="orbita-versions-download-button" class="secondary" type="button">Tải các bản Orbita thật</button>
+            <button id="gologin-launch-button" class="secondary" type="button">Tạo profile GoLogin và mở</button>
+          </div>
+        </details>
+        <details id="chrome-versions-advanced">
+          <summary>Kho Chrome for Testing đã tải trước (không dùng để mở)</summary>
+          <p class="hint">Các bản Chrome for Testing đã tải ở lượt trước nằm riêng trong dữ liệu app. Nút <strong>Tạo profile và mở</strong> chỉ dùng ứng dụng Google Chrome thường đã cài; thao tác tải dưới đây không thêm phiên bản cho nút chính.</p>
+          <label for="chrome-version-count">Số bản Chrome for Testing lưu trong kho</label>
+          <input id="chrome-version-count" name="chromeVersionCount" type="number" min="2" max="12" value="10">
+          <p class="hint">Kho này dành riêng cho các bản thử nghiệm tải theo major; mỗi bản chiếm khoảng 350 MB trên đĩa.</p>
+          <div class="actions">
+            <button id="chrome-versions-download-button" class="secondary" type="button">Tải Chrome for Testing</button>
+          </div>
+          <p class="hint">Lịch sử proxy, danh sách IP đã dùng, tự bù, QA và Đóng tất cả dùng chung với nút chính.</p>
+        </details>
+        <details id="qa-advanced">
+          <summary>Kịch bản QA form (tùy chọn)</summary>
+          <p class="hint">Fixture chạy trên đúng số cửa sổ đặt ở tab Thiết lập; từng profile dùng fixture riêng. Hãy đóng profile đang mở trước khi chạy và chuẩn bị đủ proxy chưa dùng. App dừng nếu sai màn hình, đổi origin hoặc gặp CAPTCHA/OTP. Tự bù tắt trong lượt đo.</p>
+          <label for="auto-run-qa">Tự chạy sau khi mở profile</label>
+          <div class="row">
+            <div>
+              <input id="auto-run-qa" name="autoRunQa" type="checkbox" value="true">
+            </div>
+          </div>
+          <label for="qa-plan">Kịch bản JSON</label>
+          <textarea id="qa-plan" name="qaPlanText" spellcheck="false" placeholder='{"origin":"https://qa.example.com","seed":"case-001","steps":[]}'></textarea>
+          <p class="hint">Hành động hỗ trợ: fill theo nhãn, answer radio trong nhóm câu hỏi, select theo nhãn và click button/link. Khi chạy nhiều cửa sổ, mỗi mảng values/options phải có đủ giá trị riêng cho từng cửa sổ; value đơn có thể dùng {{profileNumber}} (ví dụ qa-user-{{profileNumber}}). App kiểm tra trước khi mở profile để tránh lặp dữ liệu.</p>
+          <div class="actions">
+            <button id="demoqa-preset-button" class="secondary" type="button">Nạp mẫu form DemoQA (1 cửa sổ)</button>
+            <button id="qa-run-button" type="submit">Mở đủ cửa sổ và chạy QA</button>
+          </div>
+          <p class="hint">Mẫu DemoQA dùng dữ liệu tổng hợp cố định, để trống ảnh và chỉ chạy đúng trang practice form trên demoqa.com.</p>
+        </details>
+      </section>
+    </form>
+    <p id="warnings"></p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <p class="notice">Tối đa 4 trình duyệt chạy song song. Nếu máy chậm, giảm số cửa sổ trong tab Thiết lập.</p>
+  </main>
+  <script>
+    const form = document.querySelector('#launcher-form');
+    const launchButton = document.querySelector('#launch-button');
+    const checkButton = document.querySelector('#check-button');
+    const downloadCsvButton = document.querySelector('#download-csv-button');
+    const usageHistoryCsvButton = document.querySelector('#usage-history-csv-button');
+    const usedIpsButton = document.querySelector('#used-ips-button');
+    const usedIpsBox = document.querySelector('#used-ips');
+    let lastCheckCsv = '';
+    const saveButton = document.querySelector('#save-button');
+    const closeButton = document.querySelector('#close-button');
+    const qaRunButton = document.querySelector('#qa-run-button');
+    const demoQaPresetButton = document.querySelector('#demoqa-preset-button');
+    const orbitaVersionsDownloadButton = document.querySelector('#orbita-versions-download-button');
+    const chromeVersionsDownloadButton = document.querySelector('#chrome-versions-download-button');
+    const gologinLaunchButton = document.querySelector('#gologin-launch-button');
+    const qaPlanField = document.querySelector('#qa-plan');
+    const autoRunQaField = document.querySelector('#auto-run-qa');
+    const autoRefillButton = document.querySelector('#auto-refill-button');
+    const autoRefillStatus = document.querySelector('#auto-refill-status');
+    const status = document.querySelector('#status');
+    const saveStatus = document.querySelector('#save-status');
+    const warnings = document.querySelector('#warnings');
+    const buttons = [launchButton, qaRunButton, demoQaPresetButton, orbitaVersionsDownloadButton, chromeVersionsDownloadButton, gologinLaunchButton,
+      checkButton, usedIpsButton, saveButton, closeButton];
+    const preferencesBridge = window.webkit?.messageHandlers?.autoleadPreferences;
+    let autoRefillEnabled = true;
+    let isRefreshingAutoRefillState = false;
+    const savedFieldNames = ['apiToken', 'proxyList', 'requestedCount', 'proxyType', 'websiteUrl'];
+    const tabButtons = [...document.querySelectorAll('[role="tab"]')];
+    const tabPanels = [...document.querySelectorAll('[role="tabpanel"]')];
+
+    /**
+     * Chuyển sang tab tác vụ được chọn và đồng bộ trạng thái trợ năng.
+     * @param {string} tabName Tên tab cần hiển thị.
+     * @return {void} Không trả về giá trị.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-10
+     */
+    function activateTab(tabName) {
+      tabButtons.forEach((tabButton) => {
+        const isSelected = tabButton.dataset.tab === tabName;
+        tabButton.setAttribute('aria-selected', String(isSelected));
+        tabButton.tabIndex = isSelected ? 0 : -1;
+      });
+      tabPanels.forEach((tabPanel) => {
+        tabPanel.hidden = tabPanel.dataset.panel !== tabName;
+      });
+    }
+
+    tabButtons.forEach((tabButton) => {
+      tabButton.addEventListener('click', () => activateTab(tabButton.dataset.tab));
+      tabButton.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const currentIndex = tabButtons.indexOf(tabButton);
+        const nextIndex = event.key === 'Home' ? 0
+          : event.key === 'End' ? tabButtons.length - 1
+            : (currentIndex + (event.key === 'ArrowRight' ? 1 : tabButtons.length - 1)) % tabButtons.length;
+        const nextTab = tabButtons[nextIndex];
+        activateTab(nextTab.dataset.tab);
+        nextTab.focus();
+      });
+    });
+
+    /**
+     * Khôi phục cấu hình đã lưu và chặn số cửa sổ cũ vượt giới hạn hiện tại.
+     * @param {string} encodedSettings Cấu hình UTF-8 mã hóa Base64 từ Keychain.
+     * @return {void} Cập nhật các trường trong giao diện.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-14
+     */
+    window.restoreSavedPreferencesFromBase64 = (encodedSettings) => {
+      const bytes = Uint8Array.from(atob(encodedSettings), (character) => character.charCodeAt(0));
+      const preferences = JSON.parse(new TextDecoder().decode(bytes));
+      for (const fieldName of savedFieldNames) {
+        const field = form.elements.namedItem(fieldName);
+        if (field && preferences[fieldName] !== undefined) field.value = preferences[fieldName];
+      }
+      const countField = form.elements.namedItem('requestedCount');
+      countField.value = String(Math.min(4, Math.max(1, Math.floor(Number(countField.value) || 4))));
+      saveStatus.textContent = Object.keys(preferences).length ? 'Đã tải cấu hình đã lưu.' : 'Chưa có cấu hình đã lưu.';
+    };
+
+    window.receivePreferenceSaveResult = (statusCode) => {
+      const saved = statusCode === 0;
+      saveStatus.textContent = saved ? 'Đã lưu cấu hình trên máy này.' : `Không lưu được vào database (mã ${statusCode}).`;
+      saveStatus.classList.toggle('error', !saved);
+    };
+
+    if (preferencesBridge) preferencesBridge.postMessage({ action: 'load' });
+    form.addEventListener('input', (event) => {
+      if (savedFieldNames.includes(event.target.name)) saveStatus.textContent = 'Có thay đổi chưa lưu.';
+    });
+    form.addEventListener('change', (event) => {
+      if (savedFieldNames.includes(event.target.name)) saveStatus.textContent = 'Có thay đổi chưa lưu.';
+    });
+
+    /**
+     * Cập nhật nhãn nút và tình trạng slot tự bù trên giao diện.
+     * @param {object} state Trạng thái nhận từ máy chủ local.
+     * @return {void} Không trả về giá trị.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-10
+     */
+    function renderAutoRefillState(state) {
+      autoRefillEnabled = state.enabled;
+      autoRefillButton.textContent = `Tự bù: Đang ${autoRefillEnabled ? 'bật' : 'tắt'}`;
+      autoRefillButton.setAttribute('aria-pressed', String(autoRefillEnabled));
+      const slotSummary = state.targetCount > 0 ? ` (${state.activeCount}/${state.targetCount} trình duyệt)` : '';
+      autoRefillStatus.textContent = `${state.message}${slotSummary}`;
+    }
+
+    /**
+     * Làm mới trạng thái tự bù để phản ánh cả các profile được mở nền.
+     * @return {Promise<void>} Hoàn tất khi đã cập nhật trạng thái.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-10
+     */
+    async function refreshAutoRefillState() {
+      if (isRefreshingAutoRefillState) return;
+      isRefreshingAutoRefillState = true;
+      try {
+        const response = await fetch('/state');
+        if (!response.ok) throw new Error('Không đọc được trạng thái tự bù.');
+        renderAutoRefillState(await response.json());
+      } catch (error) {
+        autoRefillStatus.textContent = error.message;
+      } finally {
+        isRefreshingAutoRefillState = false;
+      }
+    }
+
+    /**
+     * Bật hoặc tắt việc tự mở profile thay thế.
+     * @return {Promise<void>} Hoàn tất khi máy chủ cập nhật trạng thái.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-10
+     */
+    async function toggleAutoRefill() {
+      autoRefillButton.disabled = true;
+      try {
+        const response = await fetch('/auto-refill', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabled: !autoRefillEnabled }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+        await refreshAutoRefillState();
+      } catch (error) {
+        autoRefillStatus.textContent = error.message;
+      } finally {
+        autoRefillButton.disabled = false;
+      }
+    }
+
+    autoRefillButton.addEventListener('click', toggleAutoRefill);
+    refreshAutoRefillState();
+    setInterval(refreshAutoRefillState, 2000);
+
+    saveButton.addEventListener('click', () => {
+      if (!preferencesBridge) {
+        saveStatus.textContent = 'Lưu cấu hình chỉ khả dụng trong ứng dụng AutoLeadPC Mac.';
+        saveStatus.classList.add('error');
+        return;
+      }
+      saveStatus.classList.remove('error');
+      saveStatus.textContent = 'Đang lưu cấu hình…';
+      const values = Object.fromEntries(new FormData(form));
+      const settings = Object.fromEntries(savedFieldNames.map((fieldName) => [fieldName, values[fieldName] ?? '']));
+      preferencesBridge.postMessage({ action: 'save', settings });
+    });
+
+    async function send(endpoint, pendingText, overrides) {
+      buttons.forEach((b) => { b.disabled = true; });
+      status.textContent = pendingText;
+      warnings.textContent = '';
+      try {
+        const payload = { ...Object.fromEntries(new FormData(form)), ...overrides };
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+        status.textContent = result.results.join('\n');
+        warnings.textContent = (result.warnings ?? []).join('\n');
+        return result;
+      } catch (error) {
+        status.textContent = error.message;
+        return null;
+      } finally {
+        buttons.forEach((b) => { b.disabled = false; });
+      }
+    }
+
+    /**
+     * Xác nhận origin trước khi mở profile và mở mục QA trong tab Trình duyệt nếu cấu hình sai.
+     * @param {SubmitEvent} event Sự kiện gửi cấu hình mở trình duyệt.
+     * @return {void} Không trả về giá trị.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-10
+     */
+    function handleLauncherSubmit(event) {
+      event.preventDefault();
+      activateTab('browsers');
+      const runQaForRequestedCount = autoRunQaField.checked || event.submitter?.id === 'qa-run-button';
+      if (!runQaForRequestedCount) {
+        send('/launch', 'Đang mở Google Chrome thường qua proxy…');
+        return;
+      }
+
+      let plan;
+      try {
+        plan = JSON.parse(qaPlanField.value);
+        const planOrigin = new URL(plan.origin).origin;
+        const websiteValue = form.elements.namedItem('websiteUrl').value.trim();
+        const targetOrigin = new URL(websiteValue.includes('://') ? websiteValue : 'https://' + websiteValue).origin;
+        if (planOrigin !== plan.origin || planOrigin !== targetOrigin) {
+          throw new Error('Origin trong QA phải trùng website đích.');
+        }
+      } catch (error) {
+        status.textContent = 'Không thể bật tự chạy QA: ' + error.message;
+        activateTab('browsers');
+        document.querySelector('#qa-advanced').open = true;
+        qaPlanField.focus();
+        return;
+      }
+      const requestedCount = form.elements.namedItem('requestedCount').value;
+      const confirmation = 'Mở ' + requestedCount + ' profile theo số cửa sổ đã đặt và chạy fixture trên ' + plan.origin + '? ' +
+        'Form có thể tạo bản ghi test trong backend. CAPTCHA/OTP sẽ dừng lượt chạy.';
+      if (!window.confirm(confirmation)) return;
+      send('/launch', 'Đang mở ' + requestedCount + ' profile rồi chạy QA trên toàn bộ lượt…', {
+        qaConfirmedOrigin: plan.origin,
+        autoRunQa: true,
+      });
+    }
+
+    /**
+     * Nạp kịch bản form DemoQA một profile với dữ liệu tổng hợp không thuộc người thật.
+     * @param {MouseEvent} event Sự kiện bấm nút nạp preset.
+     * @return {void} Không trả về giá trị.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-10
+     */
+    function loadDemoQaPreset(event) {
+      event.preventDefault();
+      form.elements.namedItem('websiteUrl').value = 'https://demoqa.com/automation-practice-form';
+      form.elements.namedItem('requestedCount').value = '1';
+      autoRunQaField.checked = true;
+      qaPlanField.value = JSON.stringify({
+        origin: 'https://demoqa.com',
+        seed: 'demoqa-practice-form',
+        steps: [{
+          name: 'Student Registration Form',
+          when: { urlIncludes: '/automation-practice-form', textIncludes: 'Student Registration Form' },
+          actions: [{ type: 'demoqaPracticeForm' }],
+          expect: { textIncludes: 'Thanks for submitting the form' },
+        }],
+      }, null, 2);
+      document.querySelector('#qa-advanced').open = true;
+      activateTab('browsers');
+      status.textContent = 'Đã nạp mẫu DemoQA. Mẫu dùng một profile và chỉ gửi dữ liệu tổng hợp trên trang demo.';
+    }
+
+    form.addEventListener('submit', handleLauncherSubmit);
+    demoQaPresetButton.addEventListener('click', loadDemoQaPreset);
+    /**
+     * Hiện bảng các IP exit đã dùng để biết IP nào sẽ bị từ chối ở lượt sau.
+     * @return {Promise<void>} Hoàn tất khi bảng đã được vẽ.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-14
+     */
+    async function showUsedIps() {
+      const result = await send('/used-ips', 'Đang đọc lịch sử IP exit…');
+      usedIpsBox.textContent = '';
+      if (!result?.ips?.length) return;
+      const table = document.createElement('table');
+      const head = table.insertRow();
+      for (const title of ['IP exit', 'Proxy', 'Trạng thái', 'Lần dùng cuối', 'Số lần']) {
+        const cell = document.createElement('th');
+        cell.textContent = title;
+        head.append(cell);
+      }
+      for (const entry of result.ips) {
+        const row = table.insertRow();
+        const usedAt = entry.usedAt ? new Date(entry.usedAt).toLocaleString('vi-VN') : '—';
+        for (const value of [entry.exitIp, entry.proxy, entry.status, usedAt, String(entry.uses)]) {
+          row.insertCell().textContent = value;
+        }
+        row.cells[2].className = entry.status === 'success' ? 'ok' : 'bad';
+      }
+      usedIpsBox.append(table);
+    }
+
+    usedIpsButton.addEventListener('click', showUsedIps);
+    chromeVersionsDownloadButton.addEventListener('click', () => send(
+      '/chrome-versions/download',
+      'Đang tải Chrome for Testing từ Google vào kho riêng…',
+    ));
+    gologinLaunchButton.addEventListener('click', () => send(
+      '/gologin/launch',
+      'Đang tạo profile GoLogin và mở trình duyệt Orbita…',
+      { autoRunQa: false },
+    ));
+    orbitaVersionsDownloadButton.addEventListener('click', () => send(
+      '/orbita-versions/download',
+      'Đang tải các bản Orbita từ CDN GoLogin; có thể mất vài phút cho lần đầu…',
+    ));
+
+    checkButton.addEventListener('click', async () => {
+      const result = await send('/check', 'Đang kiểm tra toàn bộ danh sách proxy…', { requestedCount: '' });
+      lastCheckCsv = result?.csv ?? '';
+      downloadCsvButton.hidden = !lastCheckCsv;
+    });
+
+    downloadCsvButton.addEventListener('click', () => {
+      if (!lastCheckCsv) return;
+      // ﻿ (BOM) để Excel đọc đúng UTF-8 cho quốc gia/tổ chức có dấu.
+      const blob = new Blob([`﻿${lastCheckCsv}`], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `proxy-check-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+
+    usageHistoryCsvButton.addEventListener('click', async () => {
+      usageHistoryCsvButton.disabled = true;
+      try {
+        const response = await fetch('/proxy-usage.csv');
+        if (!response.ok) {
+          const result = await response.json();
+          throw new Error(result.error ?? 'Không tải được lịch sử proxy.');
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `proxy-usage-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        usageHistoryCsvButton.disabled = false;
+      }
+    });
+
+    closeButton.addEventListener('click', () => {
+      send('/close', 'Đang đóng trình duyệt…');
+    });
+
+  </script>
+</body>
+</html>

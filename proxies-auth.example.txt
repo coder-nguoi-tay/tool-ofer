@@ -1,0 +1,6 @@
+# Danh sach proxy SOCKS5 CO xac thuc, dung cho relay.mjs
+# Moi dong: host:port|user|pass   (moi dong duoc gan 1 port local rieng, bat dau tu 1080)
+# Copy file nay thanh proxies-auth.txt roi thay user/pass that.
+156.229.127.67:16430|user|pass
+156.229.127.67:16431|user|pass
+156.229.127.67:16432|user|pass
