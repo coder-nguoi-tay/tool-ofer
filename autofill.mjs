@@ -1072,6 +1072,11 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
         }
 
         if (radioLocator && (await radioLocator.count() > 0)) {
+          if (typeof radioLocator.scrollIntoViewIfNeeded === 'function') {
+            await radioLocator.scrollIntoViewIfNeeded().catch(() => {});
+          }
+          const radioPause = Math.floor(Math.random() * 120) + 120;
+          await new Promise((r) => setTimeout(r, radioPause));
           await radioLocator.click({ timeout: 1200 }).catch(async () => {
             await radioLocator.evaluate((el) => {
               const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
@@ -1264,6 +1269,11 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
         try {
           const locator = frame.locator(`[data-autolead-choice-id="${picked.uid}"]`).first();
           if (locator && (await locator.count() > 0)) {
+            if (typeof locator.scrollIntoViewIfNeeded === 'function') {
+              await locator.scrollIntoViewIfNeeded().catch(() => {});
+            }
+            const surveyPause = Math.floor(Math.random() * 200) + 200;
+            await new Promise((r) => setTimeout(r, surveyPause));
             await locator.click({ timeout: 1500, force: true }).catch(async () => {
               await locator.evaluate((el) => {
                 el.click();
@@ -1364,6 +1374,101 @@ export async function handleOfferwallCards(frame, page = null) {
     }
   } catch {}
   return openedCount;
+}
+
+/**
+ * Nhập văn bản mô phỏng hành vi gõ phím của người thật (Anti-bot detection avoidance):
+ * - Cuộn mượt tới phần tử, click để focus ô nhập liệu.
+ * - Nghỉ ngắn ngẫu nhiên (100ms - 220ms) như người thật chuẩn bị gõ.
+ * - Gõ tuần tự từng ký tự với độ trễ biến thiên tự nhiên (35ms - 85ms).
+ * - Dừng lâu hơn một chút (120ms - 200ms) tại các ký tự đặc biệt (@, ., space, -, /).
+ * - Bổ sung cơ chế fallback setter nếu ô có mask hoặc script trang can thiệp.
+ *
+ * @param {object} field Locator của trường nhập liệu.
+ * @param {string|number} text Nội dung cần nhập.
+ * @param {object} [page=null] Đối tượng Page của Playwright để dùng waitForTimeout.
+ * @return {Promise<void>}
+ */
+export async function humanType(field, text, page = null) {
+  const str = String(text ?? '');
+  if (!str) return;
+
+  try {
+    if (typeof field.scrollIntoViewIfNeeded === 'function') {
+      await field.scrollIntoViewIfNeeded().catch(() => {});
+    }
+    if (typeof field.click === 'function') {
+      await field.click({ force: true, timeout: 1500 }).catch(() => {});
+    }
+    if (typeof field.focus === 'function') {
+      await field.focus().catch(() => {});
+    }
+  } catch {}
+
+  const prePause = Math.floor(Math.random() * 120) + 100;
+  if (page && typeof page.waitForTimeout === 'function') {
+    await page.waitForTimeout(prePause).catch(() => {});
+  } else {
+    await new Promise((r) => setTimeout(r, prePause));
+  }
+
+  // Xóa giá trị cũ nếu đang có để tránh bị dính ký tự trước đó
+  if (typeof field.evaluate === 'function') {
+    await field.evaluate((el) => { el.value = ''; }).catch(() => {});
+  }
+
+  // Gõ tuần tự từng ký tự mô phỏng nhịp gõ của con người
+  let typedOk = false;
+  if (typeof field.pressSequentially === 'function') {
+    try {
+      for (let i = 0; i < str.length; i++) {
+        const char = str[i];
+        let charDelay = Math.floor(Math.random() * 50) + 35;
+        if ([' ', '@', '.', '-', '_', '/'].includes(char)) {
+          charDelay += Math.floor(Math.random() * 70) + 50;
+        }
+        await field.pressSequentially(char, { delay: charDelay });
+      }
+      typedOk = true;
+    } catch {
+      typedOk = false;
+    }
+  }
+
+  // Fallback: nếu pressSequentially bị gián đoạn hoặc chưa có, dùng fill
+  if (!typedOk && typeof field.fill === 'function') {
+    try {
+      await field.fill(str, { force: true, timeout: 2500 });
+      typedOk = true;
+    } catch {}
+  }
+
+  // Kiểm tra lại giá trị sau khi gõ: nếu rỗng (do mask hoặc validator trang), đặt trực tiếp qua property descriptor
+  let postVal = '';
+  if (typeof field.inputValue === 'function') {
+    postVal = await field.inputValue().catch(() => '');
+  }
+  if ((!postVal || postVal.trim() === '') && typeof field.evaluate === 'function') {
+    await field.evaluate((el, val) => {
+      const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (desc?.set) {
+        desc.set.call(el, val);
+      } else {
+        el.value = val;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, str).catch(() => {});
+  }
+
+  // Dừng nhẹ tự nhiên sau khi hoàn thành trường (80ms - 160ms)
+  const postPause = Math.floor(Math.random() * 80) + 80;
+  if (page && typeof page.waitForTimeout === 'function') {
+    await page.waitForTimeout(postPause).catch(() => {});
+  } else {
+    await new Promise((r) => setTimeout(r, postPause));
+  }
 }
 
 /**
@@ -1532,6 +1637,13 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               visibleFieldCount += 1;
               if (!metadata.checked) {
                 try {
+                  await field.scrollIntoViewIfNeeded().catch(() => {});
+                  const consentPause = Math.floor(Math.random() * 120) + 120;
+                  if (page && typeof page.waitForTimeout === 'function') {
+                    await page.waitForTimeout(consentPause).catch(() => {});
+                  } else {
+                    await new Promise((r) => setTimeout(r, consentPause));
+                  }
                   await field.click({ timeout: 1500 }).catch(() => {});
                   await field.evaluate((el) => {
                     if (!el.checked) {
@@ -1612,6 +1724,15 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           }
 
           if (metadata.kind === 'select') {
+            await field.scrollIntoViewIfNeeded().catch(() => {});
+            await field.click({ force: true, timeout: 1000 }).catch(() => {});
+            const selectPause = Math.floor(Math.random() * 100) + 120;
+            if (page && typeof page.waitForTimeout === 'function') {
+              await page.waitForTimeout(selectPause).catch(() => {});
+            } else {
+              await new Promise((r) => setTimeout(r, selectPause));
+            }
+
             const candidates = [valueToFill];
             const upper = valueToFill.toUpperCase();
             if (usStateNames[upper]) candidates.push(usStateNames[upper]);
@@ -1685,32 +1806,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               el.dispatchEvent(new Event('blur', { bubbles: true }));
             }).catch(() => {});
           } else {
-            await field.click({ force: true, timeout: 1500 }).catch(() => {});
-            await field.focus().catch(() => {});
-            // Xóa sạch giá trị cũ nếu đang có để tránh bị nối đuôi khi điền đè lại email/zip
-            await field.evaluate((el) => { el.value = ''; }).catch(() => {});
-            try {
-              await field.fill(String(valueToFill), { force: true, timeout: 3000 });
-            } catch {
-              await field.evaluate((el, val) => {
-                const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
-                const desc = Object.getOwnPropertyDescriptor(proto, 'value');
-                if (desc?.set) {
-                  desc.set.call(el, val);
-                } else {
-                  el.value = val;
-                }
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-              }, String(valueToFill));
-            }
-
-            // Đối với các ô có input mask (như ngày sinh MM/DD/YYYY) làm mất dữ liệu sau fill, tự động gõ tuần tự
-            const filledVal = await field.inputValue().catch(() => '');
-            if (!filledVal || (String(valueToFill).length >= 8 && filledVal.length < 5)) {
-              await field.click({ force: true, timeout: 1000 }).catch(() => {});
-              await field.pressSequentially(String(valueToFill), { delay: 25 }).catch(() => {});
-            }
+            // Nhập từ từ mô phỏng nhịp gõ phím của người thật (chống bị phát hiện bot autofill)
+            await humanType(field, valueToFill, page);
 
             // Với ô địa chỉ, nếu xuất hiện dropdown gợi ý autocomplete (như Google Places, Loqate/Loco, PCA), tự bấm gợi ý đầu
             const isAddressField = metadata.names.some((n) => /address|street|diachi/i.test(n));
@@ -1796,6 +1893,14 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             text: String(valueToFill).slice(0, 50),
             detail: `Đã điền [${metadata.names?.[0] || metadata.id || 'ô'}]: ${String(valueToFill).slice(0, 30)}`,
           });
+
+          // Dừng nhẹ giữa các trường (120ms - 250ms) như người dùng liếc mắt chuyển sang ô tiếp theo
+          const fieldPause = Math.floor(Math.random() * 130) + 120;
+          if (page && typeof page.waitForTimeout === 'function') {
+            await page.waitForTimeout(fieldPause).catch(() => {});
+          } else {
+            await new Promise((resolve) => setTimeout(resolve, fieldPause));
+          }
         } catch {
           // Trường có thể không tương tác được lúc này
         }
@@ -1921,10 +2026,13 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 detail: `Đã bấm nút submit/tiếp tục: <${btnInfo.tag}> "${submitLabel}"`,
               });
 
-              await new Promise((resolve) => { setTimeout(resolve, 500); });
+              // Mô phỏng người dùng dừng lại kiểm tra form trước khi bấm submit (500ms - 900ms)
+              const reviewPause = Math.floor(Math.random() * 400) + 500;
+              await new Promise((resolve) => { setTimeout(resolve, reviewPause); });
 
-              // Cuộn phần tử vào tầm nhìn nếu cần
+              // Cuộn phần tử vào tầm nhìn
               await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+              await new Promise((resolve) => { setTimeout(resolve, Math.floor(Math.random() * 200) + 150); });
 
               // Đảm bảo gỡ bỏ hoàn toàn disabled và pointer-events bị khóa
               await submitBtn.evaluate((b) => {

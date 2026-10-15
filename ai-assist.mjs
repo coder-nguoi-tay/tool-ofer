@@ -191,10 +191,37 @@ export async function executeAction(page, act, session = null) {
     if (session?.assignedEmail && (/email|mail/i.test(selector) || /@/.test(fillValue))) {
       fillValue = session.assignedEmail;
     }
+    if (typeof locator.scrollIntoViewIfNeeded === 'function') {
+      await locator.scrollIntoViewIfNeeded().catch(() => {});
+    }
     await locator.click({ force: true, timeout: 1500 }).catch(() => {});
-    await locator.fill(fillValue, { force: true, timeout: 3000 }).catch(async () => {
-      await locator.pressSequentially(fillValue, { delay: 25 }).catch(() => {});
-    });
+    const prePause = Math.floor(Math.random() * 100) + 100;
+    if (typeof page.waitForTimeout === 'function') {
+      await page.waitForTimeout(prePause).catch(() => {});
+    } else {
+      await new Promise((r) => setTimeout(r, prePause));
+    }
+    let typedOk = false;
+    if (typeof locator.pressSequentially === 'function') {
+      try {
+        for (let i = 0; i < fillValue.length; i++) {
+          const char = fillValue[i];
+          let keyDelay = Math.floor(Math.random() * 50) + 35;
+          if ([' ', '@', '.', '-', '_', '/'].includes(char)) keyDelay += 50;
+          await locator.pressSequentially(char, { delay: keyDelay });
+        }
+        typedOk = true;
+      } catch {}
+    }
+    if (!typedOk) {
+      await locator.fill(fillValue, { force: true, timeout: 3000 }).catch(() => {});
+    }
+    const postPause = Math.floor(Math.random() * 80) + 80;
+    if (typeof page.waitForTimeout === 'function') {
+      await page.waitForTimeout(postPause).catch(() => {});
+    } else {
+      await new Promise((r) => setTimeout(r, postPause));
+    }
     await locator.evaluate((el) => {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));

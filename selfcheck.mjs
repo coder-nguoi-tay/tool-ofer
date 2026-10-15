@@ -12,6 +12,7 @@ import {
   matchAgeRange,
   handleOfferwallCards,
   attachAutofill,
+  humanType,
 } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
 import { parseActions, pageHasWork, executeAction } from './ai-assist.mjs';
@@ -555,6 +556,23 @@ assert.equal(
   '100 Main St',
   'Khi record thiếu địa chỉ, phải có fallback địa chỉ mặc định hợp lệ để không bị chặn form'
 );
+
+// Test humanType mô phỏng gõ phím tuần tự có độ trễ từng ký tự (chống bị phát hiện bot autofill)
+const typedChars = [];
+const mockTypeField = {
+  scrollIntoViewIfNeeded: async () => {},
+  click: async () => {},
+  focus: async () => {},
+  evaluate: async (fn) => fn({ value: '' }),
+  pressSequentially: async (char, opts) => {
+    typedChars.push({ char, delay: opts?.delay });
+  },
+  inputValue: async () => typedChars.map((t) => t.char).join(''),
+};
+await humanType(mockTypeField, 'Hello 123');
+assert.equal(typedChars.map((t) => t.char).join(''), 'Hello 123');
+assert.equal(typedChars.length, 9);
+assert.ok(typedChars.every((t) => typeof t.delay === 'number' && t.delay >= 30), 'Độ trễ mỗi phím phải >= 30ms mô phỏng người thật');
 
 // Test findSubmitButton nhận diện nút data-vector-submit="true" và data-tf-element-role="submit"
 const mockVectorSubmitBtn = {
