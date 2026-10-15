@@ -26,6 +26,10 @@ import {
   recommendedMaxAlive,
   selectProxies,
   tileAt,
+  countSavedHtmlFiles,
+  clearAllLogsAndHtml,
+  interactionHtmlDirectory,
+  interactionLogFilePath,
 } from './app.mjs';
 
 const parse = (line, type = 'socks5') => parseProxyLine(line, 1, type);
@@ -723,3 +727,12 @@ const testAuthErr = new LeadApiError('Hết hạn', 'AUTH_EXPIRED', { status: 30
 assert.equal(testAuthErr.code, 'AUTH_EXPIRED');
 assert.equal(testAuthErr.name, 'LeadApiError');
 assert.equal(testAuthErr.details.status, 302);
+
+// Test kiểm tra cấu trúc thư mục lưu log và file HTML bền bỉ (không bị mất khi build app)
+assert.ok(interactionHtmlDirectory.includes('Library/Application Support/AutoLeadPC/logs/html'));
+assert.ok(interactionLogFilePath.endsWith('browser-logs.json'));
+assert.equal(typeof countSavedHtmlFiles, 'function');
+assert.equal(typeof clearAllLogsAndHtml, 'function');
+const htmlCount = await countSavedHtmlFiles();
+assert.equal(typeof htmlCount, 'number');
+assert.ok(htmlCount >= 0);

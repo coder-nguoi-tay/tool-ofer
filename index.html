@@ -256,6 +256,8 @@
         <p class="hint"><strong>Tạo profile và mở</strong> dùng Google Chrome thường từ bản 150 trở lên, tối đa 10 cửa sổ. Mỗi cửa sổ cần một major khác nhau, một profile và một proxy riêng. Nếu máy thiếu phiên bản, app báo lỗi trước khi mở. User-Agent dùng mẫu Windows với đúng phiên bản của Chrome được mở. Dữ liệu tự điền nằm ở tab Thiết lập. Lịch sử proxy chung hiện ở tab Proxy.</p>
         <div class="actions">
           <button id="auto-refill-button" class="secondary" type="button" aria-pressed="true">Tự bù: Đang bật</button>
+          <button id="sequential-start-btn" class="primary" type="button">Chạy tuần tự</button>
+          <button id="sequential-stop-btn" class="secondary" type="button" style="display:none;">Dừng tuần tự</button>
         </div>
         <p id="auto-refill-status" class="hint" role="status" aria-live="polite">Tự bù sẽ mở profile khác khi một trình duyệt đóng.</p>
         <div id="chrome-ip-status" role="status" aria-live="polite">
@@ -281,14 +283,20 @@
       </section>
     </form>
     <section class="tab-panel" id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" data-panel="logs" hidden>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
         <h2 class="section-title" style="margin:0;">Log hành động trình duyệt</h2>
         <div style="display:flex;gap:8px;align-items:center;">
           <label style="display:flex;align-items:center;gap:5px;margin:0;font-size:11px;font-weight:600;cursor:pointer;">
             <input type="checkbox" id="log-auto-refresh" checked style="width:14px;height:14px;"> Tự làm mới
           </label>
+          <button class="secondary" id="log-open-folder-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;" title="Mở thư mục lưu file HTML trong Finder">📁 Mở thư mục HTML</button>
           <button class="secondary" id="log-clear-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xoá bộ lọc</button>
+          <button class="secondary" id="log-clear-all-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;color:#dc2626;border-color:#fca5a5;" title="Xoá toàn bộ log thao tác và các file HTML đã lưu">🗑️ Xoá toàn bộ log & HTML</button>
         </div>
+      </div>
+      <div style="font-size:11px;color:#475569;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;background:#f8fafc;padding:6px 10px;border-radius:6px;border:1px solid #cbd5e1;">
+        <span id="log-storage-info">📁 Thư mục lưu HTML: <code style="background:#e2e8f0;padding:2px 5px;border-radius:3px;">...</code> (<strong id="log-html-count">0</strong> file)</span>
+        <button type="button" id="log-copy-dir-btn" style="background:none;border:none;color:#2563eb;font-size:11px;cursor:pointer;text-decoration:underline;">Sao chép đường dẫn</button>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <select id="log-filter-slot" style="flex:1;height:32px;font-size:11px;">
@@ -315,9 +323,16 @@
     </section>
     <div id="log-html-modal" role="dialog" aria-modal="true" aria-label="HTML của trang">
       <div id="log-html-box">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <strong id="log-html-title" style="font-size:12px;"></strong>
-          <button class="secondary" id="log-html-close" type="button" style="padding:4px 10px;min-height:0;font-size:11px;">Đóng</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong id="log-html-title" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:75%;"></strong>
+          <div style="display:flex;gap:6px;">
+            <button class="secondary" id="log-html-copy" type="button" style="padding:4px 10px;min-height:0;font-size:11px;">Sao chép HTML</button>
+            <button class="secondary" id="log-html-close" type="button" style="padding:4px 10px;min-height:0;font-size:11px;">Đóng</button>
+          </div>
+        </div>
+        <div id="log-html-file-bar" style="font-size:11px;color:#64748b;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;background:#f1f5f9;padding:4px 8px;border-radius:4px;" hidden>
+          <span id="log-html-filepath" style="word-break:break-all;"></span>
+          <button type="button" id="log-html-copy-path" class="secondary" style="padding:2px 8px;font-size:10px;min-height:0;margin-left:8px;white-space:nowrap;">Copy path</button>
         </div>
         <pre id="log-html-pre"></pre>
       </div>
@@ -451,6 +466,10 @@
       autoRefillEnabled = state.enabled;
       autoRefillButton.textContent = `Tự bù: Đang ${autoRefillEnabled ? 'bật' : 'tắt'}`;
       autoRefillButton.setAttribute('aria-pressed', String(autoRefillEnabled));
+      // Sequential mode buttons
+      const seqRunning = state.sequential;
+      document.querySelector('#sequential-start-btn').style.display = seqRunning ? 'none' : '';
+      document.querySelector('#sequential-stop-btn').style.display = seqRunning ? '' : 'none';
       const slotSummary = state.targetCount > 0 ? ` (${state.activeCount}/${state.targetCount} trình duyệt)` : '';
       autoRefillStatus.textContent = `${state.message}${slotSummary}`;
       if (!state.chromeSessions?.length) {
@@ -571,6 +590,34 @@
     }
 
     autoRefillButton.addEventListener('click', toggleAutoRefill);
+
+    // ── Chế độ tuần tự ────────────────────────────────────────────────────
+    document.querySelector('#sequential-start-btn').addEventListener('click', async () => {
+      const btn = document.querySelector('#sequential-start-btn');
+      btn.disabled = true;
+      try {
+        const settings = buildRequestBody(); // dùng cùng hàm build settings hiện có
+        const res = await fetch('/auto-refill/sequential', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: true, settings }),
+        }).then((r) => r.json());
+        autoRefillStatus.textContent = res.message;
+      } catch (err) {
+        autoRefillStatus.textContent = err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.querySelector('#sequential-stop-btn').addEventListener('click', async () => {
+      const res = await fetch('/auto-refill/sequential', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      }).then((r) => r.json());
+      autoRefillStatus.textContent = res.message;
+    });
     refreshAutoRefillState();
     setInterval(refreshAutoRefillState, 2000);
 
@@ -591,19 +638,23 @@
       preferencesBridge.postMessage({ action: 'save', settings });
     });
 
+    function buildRequestBody(overrides = {}) {
+      const autoSubmitEl = form.elements.namedItem('autoSubmitForm');
+      const enableLeadCheckEl = form.elements.namedItem('enableLeadCheck');
+      return {
+        ...Object.fromEntries(new FormData(form)),
+        autoSubmitForm: autoSubmitEl ? autoSubmitEl.checked : true,
+        enableLeadCheck: enableLeadCheckEl ? enableLeadCheckEl.checked : true,
+        ...overrides,
+      };
+    }
+
     async function send(endpoint, pendingText, overrides) {
       buttons.forEach((b) => { b.disabled = true; });
       status.textContent = pendingText;
       warnings.textContent = '';
       try {
-        const autoSubmitEl = form.elements.namedItem('autoSubmitForm');
-        const enableLeadCheckEl = form.elements.namedItem('enableLeadCheck');
-        const payload = {
-          ...Object.fromEntries(new FormData(form)),
-          autoSubmitForm: autoSubmitEl ? autoSubmitEl.checked : true,
-          enableLeadCheck: enableLeadCheckEl ? enableLeadCheckEl.checked : true,
-          ...overrides,
-        };
+        const payload = buildRequestBody(overrides);
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -754,6 +805,7 @@
     const logHtmlTitle = document.querySelector('#log-html-title');
     let logData = [];
     let logRefreshTimer = null;
+    let logStorageDir = '';
 
     function fmtTime(iso) {
       const d = new Date(iso);
@@ -785,13 +837,16 @@
           ? escHtml(entry.url)
           : `${escHtml(entry.tag ?? '')} ${escHtml(entry.text ?? '')}`.trim();
         const hasHtml = entry.type === 'navigate' && entry.html;
+        const fileTag = entry.htmlFilename
+          ? ` <span style="display:inline-block;margin-left:4px;font-size:10px;color:#0369a1;background:#e0f2fe;padding:1px 5px;border-radius:3px;font-family:monospace;" title="${escHtml(entry.htmlPath || '')}">📄 ${escHtml(entry.htmlFilename)}</span>`
+          : '';
         return `<tr class="${escHtml(entry.type)}">`
           + `<td>${fmtTime(entry.time)}</td>`
           + `<td>Slot ${session.slot} · ${escHtml(session.ip)}</td>`
           + `<td>${entry.type === 'navigate' ? '🔗 điều hướng' : '🖱 click'}</td>`
           + `<td style="cursor:${hasHtml ? 'pointer' : 'default'}" `
-          + `${hasHtml ? `data-html="${escHtml(entry.html)}" data-title="${escHtml(entry.url)}"` : ''}>`
-          + detail + (hasHtml ? ' <span style="color:#9aabb8;font-size:10px;">[xem HTML]</span>' : '')
+          + `${hasHtml ? `data-html="${escHtml(entry.html)}" data-title="${escHtml(entry.url)}" data-filepath="${escHtml(entry.htmlPath || '')}"` : ''}>`
+          + detail + (hasHtml ? ' <span style="color:#9aabb8;font-size:10px;">[xem HTML]</span>' : '') + fileTag
           + `</td></tr>`;
       }).join('');
     }
@@ -803,7 +858,16 @@
     async function fetchLogs() {
       try {
         const data = await fetch('/browser-logs').then((r) => r.json());
-        logData = data;
+        if (data && data.sessions) {
+          logData = data.sessions;
+          logStorageDir = data.htmlDir || '';
+          const infoEl = document.querySelector('#log-storage-info');
+          if (infoEl && logStorageDir) {
+            infoEl.innerHTML = `📁 Thư mục lưu HTML: <code style="background:#e2e8f0;padding:2px 5px;border-radius:3px;">${escHtml(logStorageDir)}</code> (<strong id="log-html-count">${data.htmlCount ?? 0}</strong> file)`;
+          }
+        } else if (Array.isArray(data)) {
+          logData = data;
+        }
         renderLogs();
       } catch {}
     }
@@ -833,12 +897,53 @@
       renderLogs();
     });
 
+    document.querySelector('#log-open-folder-btn').addEventListener('click', async () => {
+      const res = await fetch('/browser-logs/open-folder', { method: 'POST' }).then((r) => r.json());
+      status.textContent = res.message || 'Đã mở thư mục trong Finder.';
+    });
+
+    document.querySelector('#log-clear-all-btn').addEventListener('click', async () => {
+      if (!confirm('Bạn có chắc chắn muốn xoá toàn bộ log thao tác và tất cả các file HTML đã lưu?')) return;
+      const res = await fetch('/browser-logs/clear', { method: 'POST' }).then((r) => r.json());
+      status.textContent = res.message || 'Đã xoá toàn bộ log và các file HTML.';
+      await fetchLogs();
+    });
+
+    document.querySelector('#log-copy-dir-btn').addEventListener('click', () => {
+      if (logStorageDir) {
+        navigator.clipboard.writeText(logStorageDir).then(() => {
+          status.textContent = 'Đã sao chép đường dẫn thư mục lưu HTML vào clipboard.';
+        }).catch(() => {});
+      }
+    });
+
+    document.querySelector('#log-html-copy').addEventListener('click', () => {
+      navigator.clipboard.writeText(logHtmlPre.textContent).then(() => {
+        status.textContent = 'Đã sao chép nội dung HTML vào clipboard.';
+      }).catch(() => {});
+    });
+
+    document.querySelector('#log-html-copy-path').addEventListener('click', () => {
+      const pathText = document.querySelector('#log-html-filepath').textContent.replace(/^📁 File:\s*/, '');
+      navigator.clipboard.writeText(pathText).then(() => {
+        status.textContent = 'Đã sao chép đường dẫn file HTML vào clipboard.';
+      }).catch(() => {});
+    });
+
     // Mở modal HTML khi click ô có [xem HTML]
     logTbody.addEventListener('click', (e) => {
       const td = e.target.closest('td[data-html]');
       if (!td) return;
       logHtmlTitle.textContent = td.dataset.title ?? '';
       logHtmlPre.textContent = td.dataset.html ?? '';
+      const fileBar = document.querySelector('#log-html-file-bar');
+      const filePathEl = document.querySelector('#log-html-filepath');
+      if (td.dataset.filepath) {
+        filePathEl.textContent = `📁 File: ${td.dataset.filepath}`;
+        fileBar.hidden = false;
+      } else {
+        fileBar.hidden = true;
+      }
       logHtmlModal.classList.add('open');
     });
     document.querySelector('#log-html-close').addEventListener('click', () => logHtmlModal.classList.remove('open'));

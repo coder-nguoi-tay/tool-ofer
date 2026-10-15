@@ -27,18 +27,89 @@ const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
 let chromeBuildRotationCounter = 0;
 /** @type {Map<object, Array<{time:string,type:string,[key:string]:any}>>} */
-const browserSessionLogs = new Map();
 const autoRefill = {
   enabled: true,
   settings: null,
   targetCount: 0,
   queued: false,
   message: 'Tự bù đang bật; mở profile để bắt đầu.',
+  sequential: false, // Chế độ tuần tự: 1 tab, delay 5s giữa các phiên
 };
 let proxyHistoryWriteQueue = Promise.resolve();
 const userInterfacePath = new URL('./index.html', import.meta.url);
 const userAgentListPath = new URL('./useragents.txt', import.meta.url);
-const interactionLogDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'logs');
+export const interactionLogDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'logs');
+export const interactionHtmlDirectory = join(interactionLogDirectory, 'html');
+export const interactionLogFilePath = join(interactionLogDirectory, 'browser-logs.json');
+
+/** @type {Map<object, Array<{time:string,type:string,[key:string]:any}>>} */
+const browserSessionLogs = new Map();
+/** @type {Array<{id: string, slot: number, ip: string, version: string, startedAt: string, logs: Array<object>}>} */
+export let persistedBrowserLogs = [];
+let saveBrowserLogsTimer = null;
+
+export async function loadPersistedBrowserLogs() {
+  try {
+    await mkdir(interactionHtmlDirectory, { recursive: true });
+    const raw = await readFile(interactionLogFilePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      persistedBrowserLogs = parsed;
+    }
+  } catch {
+    persistedBrowserLogs = [];
+  }
+}
+
+export async function savePersistedBrowserLogs() {
+  try {
+    await mkdir(interactionLogDirectory, { recursive: true });
+    if (persistedBrowserLogs.length > 30) {
+      persistedBrowserLogs = persistedBrowserLogs.slice(0, 30);
+    }
+    await writeFile(interactionLogFilePath, JSON.stringify(persistedBrowserLogs, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Lỗi khi lưu browser-logs.json:', err.message);
+  }
+}
+
+export function queueSaveBrowserLogs() {
+  if (saveBrowserLogsTimer) return;
+  saveBrowserLogsTimer = setTimeout(() => {
+    saveBrowserLogsTimer = null;
+    void savePersistedBrowserLogs();
+  }, 1000);
+}
+
+export async function countSavedHtmlFiles() {
+  try {
+    await mkdir(interactionHtmlDirectory, { recursive: true });
+    const files = await readdir(interactionHtmlDirectory);
+    return files.filter((f) => f.endsWith('.html')).length;
+  } catch {
+    return 0;
+  }
+}
+
+export async function openLogsHtmlDirectoryInFinder() {
+  await mkdir(interactionHtmlDirectory, { recursive: true });
+  await executeFile('open', [interactionHtmlDirectory]);
+}
+
+export async function clearAllLogsAndHtml() {
+  try {
+    await rm(interactionHtmlDirectory, { recursive: true, force: true });
+    await mkdir(interactionHtmlDirectory, { recursive: true });
+    await rm(interactionLogFilePath, { force: true }).catch(() => {});
+    persistedBrowserLogs = [];
+    for (const logs of browserSessionLogs.values()) {
+      logs.length = 0;
+    }
+    return { success: true, message: 'Đã xóa toàn bộ log và các file HTML đã lưu.' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
 const chromeProfileDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-profiles');
 const chromeProfileCacheDirectory = join(homedir(), 'Library', 'Caches', 'AutoLeadPC', 'chrome-profiles');
 const installedChromeAppPath = process.env.AUTOLEADPC_CHROME_APP || '/Applications/Google Chrome.app';
@@ -1127,11 +1198,19 @@ function queueAutomaticRefill() {
     autoRefill.queued = false;
     if (!autoRefill.enabled || !autoRefill.settings) return;
 
-    const neededSlots = Math.min(autoRefill.targetCount, maxAliveBrowsers) - activeBrowsers.size;
+    if (autoRefill.sequential && activeBrowsers.size === 0) {
+      autoRefill.message = 'Chế độ tuần tự: chờ 5s trước khi mở phiên tiếp theo…';
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      if (!autoRefill.enabled || !autoRefill.settings) return;
+    }
+
+    const neededSlots = Math.min(autoRefill.sequential ? 1 : autoRefill.targetCount, maxAliveBrowsers) - activeBrowsers.size;
     if (neededSlots <= 0) return;
 
     const activeSettings = autoRefill.settings;
-    autoRefill.message = `Đang tìm proxy mới để bù ${neededSlots} slot trống…`;
+    autoRefill.message = autoRefill.sequential
+      ? 'Chế độ tuần tự: đang mở phiên tiếp theo…'
+      : `Đang tìm proxy mới để bù ${neededSlots} slot trống…`;
     const result = await launchRequestedBrowsers(JSON.stringify({
       ...activeSettings,
       requestedCount: neededSlots,
@@ -1175,6 +1254,7 @@ function updateAutoRefill(requestBody) {
 function getAutoRefillStatus() {
   return {
     enabled: autoRefill.enabled,
+    sequential: autoRefill.sequential,
     activeCount: activeBrowsers.size,
     targetCount: autoRefill.targetCount,
     message: autoRefill.message,
@@ -2118,19 +2198,35 @@ function closeChromeWhenLastTabCloses(session) {
 
 /**
  * Gắn logger hành động vào context Chrome: ghi nhận mọi điều hướng và click.
- * Log được giữ tối đa 500 mục, tự dọn 60 giây sau khi phiên đóng.
+ * Tự động chụp và lưu trọn vẹn mã nguồn HTML của các trang ra file trên đĩa bền bỉ.
  *
  * @param {object} context Playwright BrowserContext.
  * @param {object} session Phiên Chrome hiện tại.
  */
 function attachBrowserLogger(context, session) {
-  const logs = [];
-  browserSessionLogs.set(session, logs);
+  const sessionId = randomUUID();
+  const sessionItem = {
+    id: sessionId,
+    slot: session.tileIndex + 1,
+    ip: session.exitIp ?? '?',
+    version: session.chromeVersion ?? 'stable',
+    startedAt: new Date().toISOString(),
+    logs: [],
+  };
+
+  persistedBrowserLogs.unshift(sessionItem);
+  if (persistedBrowserLogs.length > 30) {
+    persistedBrowserLogs.pop();
+  }
+
+  browserSessionLogs.set(session, sessionItem.logs);
 
   function addLog(entry) {
-    logs.push({ time: new Date().toISOString(), ...entry });
-    // ponytail: giữ 500 mục gần nhất; nâng lên nếu cần nhiều hơn
-    if (logs.length > 500) logs.splice(0, logs.length - 500);
+    sessionItem.ip = session.exitIp ?? sessionItem.ip;
+    const logItem = { time: new Date().toISOString(), ...entry };
+    sessionItem.logs.push(logItem);
+    if (sessionItem.logs.length > 500) sessionItem.logs.shift();
+    queueSaveBrowserLogs();
   }
 
   // Tiêm listener click vào mọi trang (kể cả trang mở sau)
@@ -2148,17 +2244,46 @@ function attachBrowserLogger(context, session) {
     }, { capture: true });
   }).catch(() => {});
 
-  // Ghi nhận điều hướng + chụp HTML (tối đa 64 KB)
+  // Ghi nhận điều hướng + lưu đầy đủ 100% HTML ra file đĩa riêng biệt
   function hookPage(page) {
     page.on('framenavigated', async (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
-      if (!url || url === 'about:blank') return;
+      if (!url || url === 'about:blank' || url.startsWith('chrome:')) return;
       let html = '';
       let title = '';
-      try { html = (await page.content()).slice(0, 65536); } catch {}
-      try { title = await page.title(); } catch {}
-      addLog({ type: 'navigate', url, title, html });
+      let htmlFilename = '';
+      let htmlPath = '';
+
+      try {
+        html = await page.content();
+      } catch {}
+      try {
+        title = await page.title();
+      } catch {}
+
+      if (html) {
+        try {
+          await mkdir(interactionHtmlDirectory, { recursive: true });
+          const safeHost = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, '_') || 'page';
+          const nowStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const randSuffix = Math.random().toString(36).slice(2, 6);
+          htmlFilename = `${nowStr}_slot${session.tileIndex + 1}_${safeHost}_${randSuffix}.html`;
+          htmlPath = join(interactionHtmlDirectory, htmlFilename);
+          await writeFile(htmlPath, html, 'utf8');
+        } catch (err) {
+          console.error('Lỗi khi ghi file HTML:', err.message);
+        }
+      }
+
+      addLog({
+        type: 'navigate',
+        url,
+        title,
+        html: html ? html.slice(0, 65536) : '', // Preview nhanh trong modal web
+        htmlPath: htmlPath || null,
+        htmlFilename: htmlFilename || null,
+      });
     });
   }
 
@@ -2166,7 +2291,7 @@ function attachBrowserLogger(context, session) {
   for (const page of context.pages()) hookPage(page);
 
   context.on('close', () => {
-    setTimeout(() => browserSessionLogs.delete(session), 60_000);
+    queueSaveBrowserLogs();
   });
 }
 
@@ -2361,6 +2486,7 @@ async function startLocalInterface() {
   await loadAutofillUsed();
   await loadAutofillQueue();
   await loadProxyQueue();
+  await loadPersistedBrowserLogs();
   const interfaceHtml = await readFile(userInterfacePath, 'utf8');
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
@@ -2415,6 +2541,23 @@ async function startLocalInterface() {
         used: 0,
         message: `Đã đặt lại: ${proxyQueue.available.length} proxy sẵn sàng dùng lại.`,
       });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/auto-refill/sequential') {
+      const body = JSON.parse(await readRequestBody(request));
+      autoRefill.sequential = body.enabled !== false;
+      if (autoRefill.sequential) {
+        autoRefill.enabled = true;
+        autoRefill.targetCount = 1;
+        autoRefill.settings = body.settings ?? autoRefill.settings;
+        autoRefill.message = 'Chế độ tuần tự đã bật: mở 1 tab mỗi lần, delay 5s giữa các phiên.';
+        if (body.settings) queueAutomaticRefill();
+      } else {
+        autoRefill.sequential = false;
+        autoRefill.message = 'Chế độ tuần tự đã tắt.';
+      }
+      respondWithJson(response, 200, { sequential: autoRefill.sequential, message: autoRefill.message });
       return;
     }
 
@@ -2479,16 +2622,27 @@ async function startLocalInterface() {
     }
 
     if (request.method === 'GET' && request.url === '/browser-logs') {
-      const result = [];
-      for (const [s, logs] of browserSessionLogs) {
-        result.push({
-          slot: s.tileIndex + 1,
-          ip: s.exitIp ?? '?',
-          version: s.chromeVersion,
-          logs,
-        });
-      }
+      const htmlCount = await countSavedHtmlFiles();
+      respondWithJson(response, 200, {
+        htmlDir: interactionHtmlDirectory,
+        htmlCount,
+        sessions: persistedBrowserLogs,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/browser-logs/clear') {
+      const result = await clearAllLogsAndHtml();
       respondWithJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/browser-logs/open-folder') {
+      await openLogsHtmlDirectoryInFinder();
+      respondWithJson(response, 200, {
+        success: true,
+        message: 'Đã mở thư mục lưu file HTML trong Finder.',
+      });
       return;
     }
 
