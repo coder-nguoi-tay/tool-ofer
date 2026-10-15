@@ -293,6 +293,20 @@
         </div>
         <p id="auto-refill-status" class="hint" role="status" aria-live="polite">Tự bù sẽ mở profile khác khi một trình duyệt đóng.</p>
 
+        <!-- Device profiles -->
+        <div id="device-profiles-panel" style="margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+          <div style="margin-bottom:8px;"><strong style="font-size:14px;">📱 Chế độ thiết bị</strong> <span class="hint" style="font-size:12px;">— mỗi Chrome giả lập một thiết bị khác nhau</span></div>
+          <div id="device-profile-checkboxes" style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px;">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="windows" checked> 🪟 Windows</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="macos"> 🍎 macOS</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="linux"> 🐧 Linux</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="android"> 🤖 Android</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="ipad"> 📟 iPad</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="ios"> 📱 iPhone</label>
+          </div>
+          <p class="hint" style="margin:8px 0 0;font-size:11px;">Tích nhiều → Chrome xoay vòng thiết bị. Ít nhất 1 phải được chọn. Áp dụng ngay lần mở tiếp theo.</p>
+        </div>
+
         <!-- Agent panel -->
         <div id="agents-panel" style="margin-top:16px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
@@ -568,7 +582,11 @@
               session.extensions && !session.extensions.startsWith('không có') ? `Ext: ${session.extensions}` : '',
             ].filter(Boolean).join(' · ');
 
-            const tooltipText = `IP Exit: ${session.exitIp}\nCửa sổ ${session.slot} (Chrome ${session.version})\nProxy: ${session.proxy || 'Trực tiếp'}${session.assignedEmail ? '\nEmail: ' + session.assignedEmail : ''}${session.leadCheckMessage ? '\n' + session.leadCheckMessage : ''}`;
+            const deviceIcons = { windows:'🪟', macos:'🍎', linux:'🐧', android:'🤖', ipad:'📟', ios:'📱' };
+            const deviceLabels = { windows:'Windows', macos:'macOS', linux:'Linux', android:'Android', ipad:'iPad', ios:'iPhone' };
+            const deviceIcon = deviceIcons[session.deviceProfile] ?? '🖥';
+            const deviceLabel = deviceLabels[session.deviceProfile] ?? session.deviceProfile ?? 'Desktop';
+            const tooltipText = `IP Exit: ${session.exitIp}\nCửa sổ ${session.slot} (Chrome ${session.version})\nThiết bị: ${deviceLabel}\nProxy: ${session.proxy || 'Trực tiếp'}${session.assignedEmail ? '\nEmail: ' + session.assignedEmail : ''}${session.leadCheckMessage ? '\n' + session.leadCheckMessage : ''}`;
 
             return `
               <div class="chrome-session-card">
@@ -585,6 +603,7 @@
                   <div class="chrome-card-top">
                     <span class="chrome-card-slot">Cửa sổ ${session.slot}</span>
                     <span class="chrome-card-version">v${session.version}</span>
+                    <span style="font-size:11px;margin-left:4px;" title="${deviceLabel}">${deviceIcon}</span>
                   </div>
                   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                     <div class="chrome-card-ip" title="IP Exit: ${session.exitIp}">
@@ -688,6 +707,25 @@
     });
     refreshAutoRefillState();
     setInterval(refreshAutoRefillState, 2000);
+
+    // ─── Device profiles ────────────────────────────────────────────────────
+    (async () => {
+      const data = await fetch('/device-profiles').then(r => r.json()).catch(() => ({ selected: ['windows'] }));
+      const cbs = document.querySelectorAll('#device-profile-checkboxes input[type=checkbox]');
+      cbs.forEach(cb => { cb.checked = data.selected.includes(cb.value); });
+
+      async function saveDeviceProfiles() {
+        const selected = [...document.querySelectorAll('#device-profile-checkboxes input:checked')].map(c => c.value);
+        if (selected.length === 0) { this.checked = true; return; } // ít nhất 1
+        await fetch('/device-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profiles: selected }),
+        });
+      }
+      cbs.forEach(cb => cb.addEventListener('change', saveDeviceProfiles));
+    })();
+    // ────────────────────────────────────────────────────────────────────────
 
     // ─── Agent panel ────────────────────────────────────────────────────────
     function renderAgents(agents, pendingTasks) {

@@ -28,6 +28,39 @@ const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
 let chromeBuildRotationCounter = 0;
 /** @type {Map<object, Array<{time:string,type:string,[key:string]:any}>>} */
+const DEVICE_PROFILES = {
+  windows: {
+    label: 'Windows Desktop',
+    ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
+    viewport: null, isMobile: false, hasTouch: false,
+  },
+  macos: {
+    label: 'macOS Desktop',
+    ua: (v) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
+    viewport: null, isMobile: false, hasTouch: false,
+  },
+  linux: {
+    label: 'Linux Desktop',
+    ua: (v) => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
+    viewport: null, isMobile: false, hasTouch: false,
+  },
+  android: {
+    label: 'Android (Chrome)',
+    ua: (v) => `Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Mobile Safari/537.36`,
+    viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true,
+  },
+  ipad: {
+    label: 'iPad',
+    ua: () => 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true,
+  },
+  ios: {
+    label: 'iPhone (Safari)',
+    ua: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+  },
+};
+
 const autoRefill = {
   enabled: true,
   settings: null,
@@ -35,6 +68,7 @@ const autoRefill = {
   queued: false,
   message: 'Tự bù đang bật; mở profile để bắt đầu.',
   sequential: false, // Chế độ tuần tự: 1 tab, delay 5s giữa các phiên
+  deviceProfiles: ['windows'], // Danh sách profile thiết bị đang được dùng
 };
 let proxyHistoryWriteQueue = Promise.resolve();
 
@@ -1212,6 +1246,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           intervalSeconds: Number(body.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
           maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
         };
+        const profiles = autoRefill.deviceProfiles?.length > 0 ? autoRefill.deviceProfiles : ['windows'];
         const openedBrowser = await openBrowserWithInstalledChrome({
           build: installedChrome,
           proxy: proxy,
@@ -1224,6 +1259,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           autofillRecords: autofillRecords,
           autoSubmit: body.autoSubmitForm !== false,
           leadConfig,
+          deviceProfile: profiles[workerIndex % profiles.length],
         });
         activeSession = openedBrowser.session;
         usageHistory.proxies[proxyKey] = {
@@ -1422,6 +1458,7 @@ function getAutoRefillStatus() {
       .map((session) => ({
         slot: session.tileIndex + 1,
         version: session.chromeVersion,
+        deviceProfile: session.deviceProfile ?? 'windows',
         exitIp: session.exitIp,
         proxy: session.proxyServer ?? session.proxyKey ?? null,
         assignedEmail: session.assignedEmail ?? null,
@@ -2174,7 +2211,7 @@ async function startLeadVerification(session, leadConfig) {
  * @since 2026-10-15
  */
 async function openBrowserWithInstalledChrome({
-  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {},
+  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows',
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
@@ -2192,21 +2229,22 @@ async function openBrowserWithInstalledChrome({
   const relay = proxy.server.startsWith('socks5://') && proxy.username
     ? await startAuthenticatedSocksRelay(proxy)
     : null;
+  const dp = DEVICE_PROFILES[deviceProfile] ?? DEVICE_PROFILES.windows;
   let context;
   try {
-    // viewport: null để cửa sổ thật quyết định khung nhìn.
     context = await chromium.launchPersistentContext(userDataDirectory, {
       executablePath: build.executablePath,
       ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking', '--disable-component-update'],
       headless: false,
-      viewport: null,
-      userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 `
-        + `(KHTML, like Gecko) Chrome/${build.version} Safari/537.36`,
+      viewport: dp.viewport,
+      userAgent: dp.ua(build.version),
+      isMobile: dp.isMobile,
+      hasTouch: dp.hasTouch,
       proxy: relay?.proxy ?? toPlaywrightProxy(proxy),
       ...(timezoneId && { timezoneId }),
       args: [
         `--window-position=${tile.left},${tile.top}`,
-        `--window-size=${tile.width},${tile.height}`,
+        `--window-size=${dp.viewport ? `${dp.viewport.width},${dp.viewport.height}` : `${tile.width},${tile.height}`}`,
         '--no-first-run',
         '--no-default-browser-check',
       ],
@@ -2219,6 +2257,7 @@ async function openBrowserWithInstalledChrome({
     browser: context,
     tileIndex,
     chromeVersion: build.version,
+    deviceProfile,
     suppressAutoRefill: false,
     proxyKey,
     proxyServer: proxy.server,
@@ -2233,6 +2272,36 @@ async function openBrowserWithInstalledChrome({
     session.assignedEmail = assignedEmail;
   }
   attachBrowserLogger(context, session);
+
+  // Inject navigator spoof cho mobile/non-Windows profiles
+  if (deviceProfile !== 'windows') {
+    const spoofMap = {
+      macos:   { platform: 'MacIntel',   maxTouchPoints: 0, vendor: 'Google Inc.', languages: ['en-US', 'en'] },
+      linux:   { platform: 'Linux x86_64', maxTouchPoints: 0, vendor: 'Google Inc.', languages: ['en-US', 'en'] },
+      android: { platform: 'Linux armv8l', maxTouchPoints: 5, vendor: 'Google Inc.', languages: ['en-US', 'en'] },
+      ipad:    { platform: 'iPad',        maxTouchPoints: 5, vendor: 'Apple Computer, Inc.', languages: ['en-US', 'en'] },
+      ios:     { platform: 'iPhone',      maxTouchPoints: 5, vendor: 'Apple Computer, Inc.', languages: ['en-US', 'en'] },
+    };
+    const spoof = spoofMap[deviceProfile];
+    if (spoof) {
+      await context.addInitScript(({ platform, maxTouchPoints, vendor, languages, isMobileProfile }) => {
+        try {
+          Object.defineProperty(navigator, 'platform',       { get: () => platform });
+          Object.defineProperty(navigator, 'maxTouchPoints', { get: () => maxTouchPoints });
+          Object.defineProperty(navigator, 'vendor',         { get: () => vendor });
+          Object.defineProperty(navigator, 'languages',      { get: () => languages });
+          Object.defineProperty(navigator, 'language',       { get: () => languages[0] });
+          if (isMobileProfile) {
+            // Đảm bảo touch events tồn tại
+            if (!('ontouchstart' in window)) {
+              window.ontouchstart = null;
+            }
+          }
+        } catch {}
+      }, { ...spoof, isMobileProfile: dp.isMobile });
+    }
+  }
+
   // Lấy từ queue available (đã kiểm tra ở launchRequestedBrowsers)
   const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
   attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
@@ -3082,6 +3151,24 @@ async function startLocalInterface() {
       }
       return;
     }
+
+    // ─── Device profiles ─────────────────────────────────────────────────────
+    if (request.method === 'GET' && request.url === '/device-profiles') {
+      respondWithJson(response, 200, {
+        available: Object.entries(DEVICE_PROFILES).map(([id, p]) => ({ id, label: p.label })),
+        selected: autoRefill.deviceProfiles,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/device-profiles') {
+      const body = JSON.parse(await readRequestBody(request));
+      const valid = (body.profiles ?? []).filter((id) => DEVICE_PROFILES[id]);
+      autoRefill.deviceProfiles = valid.length > 0 ? valid : ['windows'];
+      respondWithJson(response, 200, { selected: autoRefill.deviceProfiles });
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // ─── Agent endpoints ──────────────────────────────────────────────────────
     if (request.method === 'GET' && request.url === '/agents') {
