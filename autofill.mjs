@@ -430,16 +430,16 @@ const semanticCategories = [
     patterns: [/ssn/, /socialsecurity/, /^social$/],
     resolve: (r) => r.ssn || r.socialsecurity,
   },
-  // 9. Địa chỉ
-  {
-    type: 'address',
-    patterns: [/address/, /^street/, /^diachi$/, /^addr/, /addressline1/, /streetline1/, /streetaddress/],
-    resolve: (r) => getAddressString(r),
-  },
+  // 9. Địa chỉ (address2 kiểm tra trước address để tránh address khớp nhầm ô address2)
   {
     type: 'address2',
-    patterns: [/address2/, /^apt/, /^suite/, /^unit/],
+    patterns: [/address2/, /^apt/, /^suite/, /^unit/, /addressline2/, /streetline2/, /street2/],
     resolve: (r) => r.address2 || r.apt || r.suite || '',
+  },
+  {
+    type: 'address',
+    patterns: [/address/, /^street/, /^diachi$/, /^addr/, /address1/, /addressline1/, /streetline1/, /streetaddress/, /street1/],
+    resolve: (r) => getAddressString(r),
   },
   {
     type: 'city',
@@ -638,6 +638,7 @@ export function isConsentCheckbox(metadata) {
  */
 export async function findSubmitButton(frame) {
   const candidateSelectors = [
+    'button[data-vector-submit="true"], [data-vector-submit="true"], [data-vector-submit], button[data-tf-element-role="submit"], button#btn-submit',
     'button[type="submit"]',
     'input[type="submit"]',
     'button.continue-btn, button.submit-btn, a.continue-btn, a.submit-btn, button.btn-submit, a.btn-submit',
@@ -885,10 +886,33 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 if (t) labels.push(t);
               }
             }
-            const container = element.closest('.form-group, .field, .input-container, .form-row, .consent-box, .consent-row, label, tr, td, p, div');
-            const containerText = container ? (container.innerText || container.textContent || '').trim() : '';
+            if (element.id && labels.length === 0) {
+              try {
+                const directLabel = document.querySelector(`label[for="${element.id}"]`);
+                if (directLabel) {
+                  const t = (directLabel.innerText || directLabel.textContent || '').trim();
+                  if (t) labels.push(t);
+                }
+              } catch {}
+            }
+
+            const container = element.closest('.form-group, .input-group, .field, .input-container, .form-row, .field-group, .form-field, .consent-box, .consent-row, label, tr, td, p, div');
+            let containerText = '';
+            if (container) {
+              try {
+                const clone = container.cloneNode(true);
+                clone.querySelectorAll('select, script, style').forEach((s) => s.remove());
+                containerText = (clone.innerText || clone.textContent || '').trim();
+              } catch {
+                containerText = (container.innerText || container.textContent || '').trim();
+              }
+            }
+
             const prev = element.previousElementSibling;
             const prevText = prev ? (prev.innerText || prev.textContent || '').trim() : '';
+
+            const next = element.nextElementSibling;
+            const nextText = next ? (next.innerText || next.textContent || '').trim() : '';
 
             const dataAttributes = {};
             if (element.attributes) {
@@ -896,6 +920,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 if (attr.name.startsWith('data-')) dataAttributes[attr.name] = attr.value;
               }
             }
+
+            const vectorField = element.getAttribute('data-vector-field') || '';
 
             return {
               id: element.id || '',
@@ -906,6 +932,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               checked: Boolean(element.checked),
               names: [
                 element.getAttribute('aria-label'),
+                vectorField,
                 element.getAttribute('placeholder'),
                 element.getAttribute('name'),
                 element.id,
@@ -916,8 +943,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 element.getAttribute('data-qa'),
                 element.getAttribute('data-tf-element-role'),
                 element.getAttribute('data-leadid-type'),
+                ...Object.values(dataAttributes),
                 element.getAttribute('title'),
                 ...labels,
+                nextText.slice(0, 100),
                 prevText.slice(0, 50),
                 containerText.slice(0, 400),
               ].filter(Boolean),
@@ -1026,17 +1055,17 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             let selected = false;
             for (const val of candidates) {
               try {
-                await field.selectOption({ label: val }, { timeout: 800 });
+                await field.selectOption({ label: val }, { force: true, timeout: 800 });
                 selected = true;
                 break;
               } catch {}
               try {
-                await field.selectOption(val, { timeout: 800 });
+                await field.selectOption(val, { force: true, timeout: 800 });
                 selected = true;
                 break;
               } catch {}
               try {
-                await field.selectOption({ value: val }, { timeout: 800 });
+                await field.selectOption({ value: val }, { force: true, timeout: 800 });
                 selected = true;
                 break;
               } catch {}
@@ -1062,13 +1091,20 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             }
 
             if (!selected) {
-              await field.selectOption({ index: 1 }, { timeout: 1000 }).catch(() => {});
+              await field.selectOption({ index: 1 }, { force: true, timeout: 1000 }).catch(() => {});
             }
+
+            // Kích hoạt đầy đủ các sự kiện input, change, blur cho dropdown để các validator và script theo dõi nhận diện ngay
+            await field.evaluate((el) => {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+            }).catch(() => {});
           } else {
-            await field.click({ timeout: 2000 }).catch(() => {});
+            await field.click({ force: true, timeout: 1500 }).catch(() => {});
             await field.focus().catch(() => {});
             try {
-              await field.fill(String(valueToFill), { timeout: 3000 });
+              await field.fill(String(valueToFill), { force: true, timeout: 3000 });
             } catch {
               await field.evaluate((el, val) => {
                 const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
@@ -1086,10 +1122,17 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             // Đối với các ô có input mask (như ngày sinh MM/DD/YYYY) làm mất dữ liệu sau fill, tự động gõ tuần tự
             const filledVal = await field.inputValue().catch(() => '');
             if (!filledVal || (String(valueToFill).length >= 8 && filledVal.length < 5)) {
-              await field.click({ timeout: 1000 }).catch(() => {});
+              await field.click({ force: true, timeout: 1000 }).catch(() => {});
               await field.pressSequentially(String(valueToFill), { delay: 25 }).catch(() => {});
             }
 
+            // Đảm bảo kích hoạt đầy đủ các sự kiện input, change, keyup, blur để cập nhật floating labels và trình xác thực
+            await field.evaluate((el) => {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter' }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+            }).catch(() => {});
             await field.dispatchEvent('input').catch(() => {});
             await field.dispatchEvent('change').catch(() => {});
             await field.dispatchEvent('blur').catch(() => {});
@@ -1132,7 +1175,11 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           const submitBtn = await findSubmitButton(frame);
           if (submitBtn) {
             const shouldClick = await submitBtn.evaluate((btn) => {
-              if (btn.dataset.autoleadSubmitted === '1') return false;
+              const now = Date.now();
+              const lastClick = Number(btn.dataset.autoleadLastSubmitTime || 0);
+              // Nếu vừa click trong vòng 2.5s thì không click lại để tránh duplicate submit
+              if (now - lastClick < 2500) return false;
+              btn.dataset.autoleadLastSubmitTime = String(now);
               btn.dataset.autoleadSubmitted = '1';
               return true;
             }).catch(() => false);
@@ -1140,7 +1187,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             if (shouldClick) {
               await new Promise((resolve) => { setTimeout(resolve, 800); });
               try {
-                await submitBtn.click({ timeout: 2500 });
+                await submitBtn.click({ force: true, timeout: 2500 });
               } catch {
                 await submitBtn.evaluate((btn) => btn.click()).catch(() => {});
               }

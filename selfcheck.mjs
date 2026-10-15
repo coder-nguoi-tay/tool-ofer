@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import assert from 'node:assert/strict';
-import { parseAutofillRecords, matchFieldValue, isConsentCheckbox, handleRadioAndSurveyOptions } from './autofill.mjs';
+import { parseAutofillRecords, matchFieldValue, isConsentCheckbox, handleRadioAndSurveyOptions, findSubmitButton } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
 import {
   buildProxyCheckReport,
@@ -360,6 +360,33 @@ assert.equal(matchFieldValue(['v3-dob_month'], jeremy), '08');
 assert.equal(matchFieldValue(['v3-dob_day'], jeremy), '04');
 assert.equal(matchFieldValue(['v3-dob_year'], jeremy), '1984');
 assert.equal(matchFieldValue(['v3-gender'], jeremy), 'Male');
+
+// Kiểm tra đối sánh form Vector landing page (data-vector-field="address1", "city", "state", .input-group, nextElementSibling label):
+assert.equal(matchFieldValue(['address1', 'Street Address *', 'input-field'], jeremy), '723 e 6th st');
+assert.equal(matchFieldValue(['city', 'City *', 'input-field'], jeremy), 'Dewey');
+assert.equal(matchFieldValue(['state', 'State *', 'Select state…'], jeremy, { kind: 'select' }), 'OK');
+
+// Đảm bảo trường địa chỉ phụ (address2, apt, suite) không bị tranh chấp bởi address chính:
+const recordWithApt = { ...jeremy, address2: 'Apt 4B', apt: 'Apt 4B' };
+assert.equal(matchFieldValue(['address2'], recordWithApt), 'Apt 4B');
+assert.equal(matchFieldValue(['apt'], recordWithApt), 'Apt 4B');
+assert.equal(matchFieldValue(['address1'], recordWithApt), '723 e 6th st');
+assert.equal(matchFieldValue(['street_address'], recordWithApt), '723 e 6th st');
+
+// Test findSubmitButton nhận diện nút data-vector-submit="true" và data-tf-element-role="submit"
+const mockVectorSubmitBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  innerText: async () => 'CONTINUE',
+};
+const mockVectorFrame = {
+  locator: (sel) => ({
+    all: async () => (sel.includes('data-vector-submit') ? [mockVectorSubmitBtn] : []),
+  }),
+};
+const foundVectorSubmit = await findSubmitButton(mockVectorFrame);
+assert.equal(foundVectorSubmit, mockVectorSubmitBtn);
+
 assert.equal(typeof handleRadioAndSurveyOptions, 'function');
 
 // Test handleRadioAndSurveyOptions tự động chọn ngẫu nhiên radio button Yes / No
