@@ -2407,16 +2407,26 @@ export async function hasTrafficBlocked(page) {
 export function watchTrafficBlockedPage(session) {
   let checking = false;
   let blocked = false;
+  const redirectTracker = new WeakMap();
+
   const timer = setInterval(() => {
     if (checking || blocked) return;
     checking = true;
     void (async () => {
       try {
+        if (!session.browser || (typeof session.browser.isClosed === 'function' && session.browser.isClosed())) {
+          clearInterval(timer);
+          return;
+        }
+
         const pages = typeof session.browser?.pages === 'function'
           ? await session.browser.pages()
           : [];
+
         for (const page of pages) {
           if (typeof page?.isClosed === 'function' && page.isClosed()) continue;
+
+          // 1. Kiểm tra trang có bị lỗi mạng hoặc thông báo blocked không
           const deadReason = await getDeadOrBlockedReason(page);
           if (deadReason) {
             blocked = true;
@@ -2475,7 +2485,114 @@ export function watchTrafficBlockedPage(session) {
             await page.close().catch(() => {});
             await session.browser?.close?.().catch(() => {});
             queueAutomaticRefill();
-            break;
+            return;
+          }
+
+          // 2. Kiểm tra nếu web đứng ở adtrapper mãi không nhảy tab
+          const currentUrl = typeof page.url === 'function' ? page.url() : '';
+          const isAdtrapper = /adtrapper|adswapper/i.test(currentUrl);
+
+          if (isAdtrapper) {
+            // Kiểm tra xem đã có tab khác nhảy sang trang offer đích chưa
+            const hasOtherOfferTab = pages.some((p) => {
+              if (p === page || (typeof p.isClosed === 'function' && p.isClosed())) return false;
+              const otherUrl = typeof p.url === 'function' ? p.url() : '';
+              return otherUrl && !otherUrl.startsWith('about:') && !/adtrapper|adswapper|toffers\.top/i.test(otherUrl);
+            });
+
+            if (!hasOtherOfferTab) {
+              let tracker = redirectTracker.get(page);
+              if (!tracker) {
+                tracker = { firstSeenAt: Date.now(), reloadCount: 0, lastReloadAt: 0, reloading: false };
+                redirectTracker.set(page, tracker);
+              }
+
+              if (!tracker.reloading) {
+                const timeWaiting = Date.now() - (tracker.lastReloadAt || tracker.firstSeenAt);
+                // Nếu đứng im ở adtrapper quá 8 giây
+                if (timeWaiting >= 8000) {
+                  const label = session.chromeVersion
+                    ? `Chrome ${session.chromeVersion}`
+                    : (session.profileId ? `Profile ${session.profileId}` : `Slot ${(session.tileIndex ?? 0) + 1}`);
+
+                  if (tracker.reloadCount < 2) {
+                    tracker.reloadCount += 1;
+                    tracker.reloading = true;
+                    tracker.lastReloadAt = Date.now();
+
+                    console.log(`[Adtrapper] ${label}: Đứng ở adtrapper quá 8s chưa nhảy tab. Đang tải lại trang (lần ${tracker.reloadCount}/2)...`);
+
+                    const logs = browserSessionLogs.get(session);
+                    if (logs) {
+                      logs.push({
+                        time: new Date().toISOString(),
+                        type: 'adtrapper_reload',
+                        detail: `Đứng ở adtrapper quá 8s chưa nhảy tab. Đang tải lại trang (lần ${tracker.reloadCount}/2)...`,
+                      });
+                    }
+
+                    page.evaluate((cnt) => {
+                      const b = document.getElementById('__autolead_ip_badge');
+                      if (b) b.innerHTML = `⏳ <strong>Đứng ở adtrapper:</strong> Đang tải lại lần ${cnt}/2…`;
+                    }, tracker.reloadCount).catch(() => {});
+
+                    try {
+                      await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
+                    } catch {
+                    } finally {
+                      tracker.reloading = false;
+                      tracker.lastReloadAt = Date.now();
+                    }
+                  } else {
+                    // Đã tải lại 2 lần mà vẫn đứng im ở adtrapper sau 8s → đóng trình duyệt và mở cái mới
+                    blocked = true;
+                    clearInterval(timer);
+                    session.closingDueToTrafficBlocked = true;
+                    session.suppressAutoRefill = false;
+                    autoRefill.enabled = true;
+
+                    const reason = 'Kẹt tại adtrapper không chuyển hướng sau 2 lần tải lại';
+                    console.log(`[Adtrapper] ${label}: ${reason}. Đang đóng cửa sổ và mở sock khác.`);
+
+                    try {
+                      if (session.proxyKey) {
+                        const history = await readProxyUsageHistory();
+                        if (history?.proxies?.[session.proxyKey]) {
+                          history.proxies[session.proxyKey] = {
+                            ...history.proxies[session.proxyKey],
+                            status: 'failed',
+                            reason,
+                            completedAt: new Date().toISOString(),
+                          };
+                          await persistProxyUsageHistory(history);
+                        }
+                      }
+                    } catch {}
+
+                    autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) bị kẹt tại adtrapper; `
+                      + 'đã đóng cửa sổ và đang tự động mở sock khác thay thế…';
+
+                    const logs = browserSessionLogs.get(session);
+                    if (logs) {
+                      logs.push({
+                        time: new Date().toISOString(),
+                        type: 'adtrapper_stuck_close',
+                        detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị kẹt tại adtrapper không nhảy tab sau 2 lần tải lại. Đóng cửa sổ và đổi sock khác.`,
+                      });
+                    }
+
+                    chromeBuildRotationCounter += 1;
+                    await page.close().catch(() => {});
+                    await session.browser?.close?.().catch(() => {});
+                    queueAutomaticRefill();
+                    return;
+                  }
+                }
+              }
+            }
+          } else {
+            // Không còn ở adtrapper, xóa tracker
+            redirectTracker.delete(page);
           }
         }
       } catch {

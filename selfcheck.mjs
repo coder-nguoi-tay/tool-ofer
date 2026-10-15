@@ -21,6 +21,7 @@ import {
   isManagedChromeProfilePath,
   createProxyUsageKey,
   hasTrafficBlocked,
+  watchTrafficBlockedPage,
   getDeadOrBlockedReason,
   mapWithLimit,
   normalizeUrl,
@@ -918,5 +919,32 @@ await new Promise((r) => setTimeout(r, 20));
 mockSessionStuck.triggerAutofillScan?.();
 await new Promise((r) => setTimeout(r, 20));
 assert.equal(stuckTriggered, true, 'Sau 3 vòng scan không có tiến triển phải kích hoạt callback onStuck');
+
+// 5. Test watchTrafficBlockedPage: Xử lý kẹt tại adtrapper (tải lại 1-2 lần, nếu không được thì đóng trình duyệt)
+assert.equal(typeof watchTrafficBlockedPage, 'function');
+let mockAdtrapperReloadCount = 0;
+let mockAdtrapperBrowserClosed = false;
+const mockAdtrapperPage = {
+  isClosed: () => false,
+  url: () => 'https://trk2.adtrapper.com/?pid=582',
+  evaluate: async () => null,
+  reload: async () => { mockAdtrapperReloadCount += 1; },
+  close: async () => {},
+};
+const mockAdtrapperSession = {
+  browser: {
+    isClosed: () => mockAdtrapperBrowserClosed,
+    pages: async () => [mockAdtrapperPage],
+    close: async () => { mockAdtrapperBrowserClosed = true; },
+    on: () => {},
+  },
+  chromeVersion: '150.0.7871.187',
+  tileIndex: 0,
+  suppressAutoRefill: false,
+};
+watchTrafficBlockedPage(mockAdtrapperSession);
+// Đảm bảo watchTrafficBlockedPage khởi tạo thành công không ném ngoại lệ
+assert.equal(mockAdtrapperBrowserClosed, false);
+
 
 
