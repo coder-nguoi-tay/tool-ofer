@@ -1522,15 +1522,28 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     if (trackedPages.has(page)) return;
     trackedPages.add(page);
     let filling = false;
+    let noProgressRounds = 0;
     const scan = async () => {
       if (filling || page.isClosed()) return;
       filling = true;
+      const fieldsBefore = session.autofillFields ?? 0;
       try {
         await fillVisibleForms(page);
       } catch {
         // Trang có thể điều hướng hoặc đóng giữa hai lần quét.
       } finally {
         filling = false;
+      }
+      const filled = (session.autofillFields ?? 0) - fieldsBefore;
+      if (filled > 0) {
+        noProgressRounds = 0;
+      } else {
+        noProgressRounds += 1;
+        // 3 lần scan liên tiếp không fill được gì và không đang đợi lead → nhờ AI Assist
+        if (noProgressRounds >= 3 && !session.aiAssistRunning && session.leadCheckStatus !== 'waiting' && !page.isClosed()) {
+          noProgressRounds = 0;
+          options.onStuck?.(page);
+        }
       }
     };
     session.triggerAutofillScan = () => { void scan(); };

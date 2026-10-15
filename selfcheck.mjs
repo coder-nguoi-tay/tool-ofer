@@ -10,8 +10,10 @@ import {
   calculateAge,
   matchAgeRange,
   handleOfferwallCards,
+  attachAutofill,
 } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
+import { parseActions, pageHasWork, executeAction } from './ai-assist.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
@@ -736,3 +738,114 @@ assert.equal(typeof clearAllLogsAndHtml, 'function');
 const htmlCount = await countSavedHtmlFiles();
 assert.equal(typeof htmlCount, 'number');
 assert.ok(htmlCount >= 0);
+
+// ── Test AI Assist (ai-assist.mjs) ──────────────────────────────────────────
+// 1. Test parseActions với các định dạng output khác nhau
+const sampleJsonActions = JSON.stringify([
+  { action: 'fill', selector: '#first_name', value: 'Jeremy' },
+  { action: 'select', selector: '#state', value: 'OK' },
+  { action: 'check', selector: '#agree' },
+  { action: 'click', selector: 'button.submit-btn' },
+]);
+assert.deepEqual(parseActions(sampleJsonActions), [
+  { action: 'fill', selector: '#first_name', value: 'Jeremy' },
+  { action: 'select', selector: '#state', value: 'OK' },
+  { action: 'check', selector: '#agree' },
+  { action: 'click', selector: 'button.submit-btn' },
+]);
+
+// Hỗ trợ markdown code block ```json ... ```
+const markdownOutput = `Dưới đây là các action cần làm:
+\`\`\`json
+[
+  {"action":"fill","selector":"#city","value":"Dewey"},
+  {"action":"click","selector":"#continue"}
+]
+\`\`\`
+Đã phân tích xong!`;
+assert.deepEqual(parseActions(markdownOutput), [
+  { action: 'fill', selector: '#city', value: 'Dewey' },
+  { action: 'click', selector: '#continue' },
+]);
+
+// Mảng rỗng báo không còn gì làm
+assert.deepEqual(parseActions('[]'), []);
+assert.deepEqual(parseActions('```json\n[]\n```'), []);
+// Xử lý text rác không có JSON
+assert.deepEqual(parseActions('Không tìm thấy form nào cả.'), []);
+assert.deepEqual(parseActions(''), []);
+assert.deepEqual(parseActions(null), []);
+
+// 2. Test executeAction
+let executedActionLog = [];
+const mockAiPage = {
+  locator: (sel) => ({
+    first: () => ({
+      isVisible: async () => true,
+      click: async () => { executedActionLog.push(`click:${sel}`); },
+      fill: async (val) => { executedActionLog.push(`fill:${sel}:${val}`); },
+      selectOption: async (val) => { executedActionLog.push(`select:${sel}:${val}`); },
+      check: async () => { executedActionLog.push(`check:${sel}`); },
+      evaluate: async (fn) => fn({ dispatchEvent: () => {}, setAttribute: () => {} }),
+    }),
+  }),
+};
+
+const mockSession = { autofillFields: 0 };
+await executeAction(mockAiPage, { action: 'fill', selector: '#first_name', value: 'Jeremy' }, mockSession);
+assert.equal(mockSession.autofillFields, 1);
+assert.ok(executedActionLog.some((e) => e.startsWith('fill:#first_name:Jeremy')));
+
+await executeAction(mockAiPage, { action: 'select', selector: '#state', value: 'OK' }, mockSession);
+assert.equal(mockSession.autofillFields, 2);
+assert.ok(executedActionLog.some((e) => e.startsWith('select:#state:OK')));
+
+await executeAction(mockAiPage, { action: 'check', selector: '#agree' }, mockSession);
+assert.equal(mockSession.autofillFields, 3);
+assert.ok(executedActionLog.some((e) => e === 'check:#agree'));
+
+await executeAction(mockAiPage, { action: 'click', selector: '#submit' }, mockSession);
+assert.equal(mockSession.autofillFields, 4);
+assert.ok(executedActionLog.some((e) => e === 'click:#submit'));
+
+// 3. Test pageHasWork
+const mockWorkPage = {
+  isClosed: () => false,
+  evaluate: async (fn) => fn(),
+};
+// Trang đã đóng → trả về false
+assert.equal(await pageHasWork({ isClosed: () => true }), false);
+assert.equal(await pageHasWork(null), false);
+
+// 4. Test attachAutofill: Trigger onStuck khi noProgressRounds >= 3
+let stuckTriggered = false;
+const mockStuckPageEvents = {};
+const mockStuckPage = {
+  isClosed: () => false,
+  url: () => 'https://example.com/form',
+  on: (evt, handler) => { mockStuckPageEvents[evt] = handler; },
+  frames: () => [{
+    locator: () => ({ all: async () => [] }),
+    evaluateAll: async () => ({}),
+    evaluate: async () => [],
+  }],
+};
+const mockStuckContext = {
+  on: (evt, handler) => { mockStuckPageEvents[evt] = handler; },
+  pages: () => [mockStuckPage],
+};
+const mockSessionStuck = { autofillFields: 0, leadCheckStatus: null };
+attachAutofill(mockStuckContext, [{ firstname: 'Jeremy' }], 'https://example.com', mockSessionStuck, {
+  onStuck: () => { stuckTriggered = true; },
+});
+assert.equal(stuckTriggered, false);
+// Kích hoạt 3 lần scan không có trường nào điền thêm
+mockSessionStuck.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 20));
+mockSessionStuck.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 20));
+mockSessionStuck.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 20));
+assert.equal(stuckTriggered, true, 'Sau 3 vòng scan không có tiến triển phải kích hoạt callback onStuck');
+
+

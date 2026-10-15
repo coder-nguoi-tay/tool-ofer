@@ -15,6 +15,7 @@ import {
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
+import { runAiAssist, pageHasWork } from './ai-assist.mjs';
 import {
   DEFAULT_LEAD_CONFIG,
   fetchLeadDatas,
@@ -1191,16 +1192,17 @@ async function launchUserRequestedBrowsers(requestBody) {
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-10
  */
-function queueAutomaticRefill() {
+function queueAutomaticRefill(delayMs = 0) {
   if (!autoRefill.enabled || !autoRefill.settings || autoRefill.queued) return;
   autoRefill.queued = true;
   void enqueueExclusively(async () => {
     autoRefill.queued = false;
     if (!autoRefill.enabled || !autoRefill.settings) return;
 
-    if (autoRefill.sequential && activeBrowsers.size === 0) {
-      autoRefill.message = 'Chế độ tuần tự: chờ 5s trước khi mở phiên tiếp theo…';
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+    const waitMs = autoRefill.sequential && activeBrowsers.size === 0 ? delayMs : 0;
+    if (waitMs > 0) {
+      autoRefill.message = `Chế độ tuần tự: chờ ${waitMs / 1000}s trước khi mở phiên tiếp theo…`;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
       if (!autoRefill.enabled || !autoRefill.settings) return;
     }
 
@@ -2072,6 +2074,22 @@ async function openBrowserWithInstalledChrome({
     onFirstScreenCompleted: () => {
       void startLeadVerification(session, leadConfig);
     },
+    onStuck: (page) => {
+      const currentRecord = recordPool[session.recordIndex] ?? recordPool[0];
+      void runAiAssist(page, currentRecord, session).then(async () => {
+        // AI xong → kích autofill quét lại một lần
+        session.triggerAutofillScan?.();
+        // Chờ 3s để trang ổn định, nếu không còn form/submit → đóng browser → phiên mới
+        await new Promise((r) => setTimeout(r, 3000));
+        if (page.isClosed()) return;
+        const stillHasWork = await pageHasWork(page);
+        if (!stillHasWork) {
+          console.log(`[AI-Assist] Slot ${tileIndex + 1}: hoàn tất, đóng trình duyệt và mở phiên mới.`);
+          session.suppressAutoRefill = false;
+          await session.browser?.close?.().catch(() => {});
+        }
+      });
+    },
   });
   activeBrowsers.add(session);
 
@@ -2084,7 +2102,8 @@ async function openBrowserWithInstalledChrome({
       if (!session.closingDueToTrafficBlocked) {
         autoRefill.message = `Slot ${tileIndex + 1} trống; đang tìm proxy thay thế.`;
       }
-      queueAutomaticRefill();
+      // 5s delay chỉ khi không có lead; các trường hợp khác (IP lỗi, bị chặn) mở ngay
+      queueAutomaticRefill(session.closingDueToNoLead ? 5000 : 0);
     }
   });
   try {
@@ -2172,8 +2191,11 @@ function closeChromeWhenLastTabCloses(session) {
     for (const page of session.browser.pages()) {
       if (!page.isClosed()) return;
     }
-    session.suppressAutoRefill = true;
-    autoRefill.targetCount = Math.max(0, Math.min(autoRefill.targetCount, activeBrowsers.size - 1));
+    if (!autoRefill.sequential) {
+      // Chế độ thường: user tự đóng tab → giảm target, không mở lại
+      session.suppressAutoRefill = true;
+      autoRefill.targetCount = Math.max(0, Math.min(autoRefill.targetCount, activeBrowsers.size - 1));
+    }
     autoRefill.message = `Đã đóng Chrome ${session.chromeVersion} sau khi tab cuối cùng được đóng.`;
     void session.browser.close().catch(() => {});
   }
