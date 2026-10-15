@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import assert from 'node:assert/strict';
-import { parseAutofillRecords, matchFieldValue, isConsentCheckbox } from './autofill.mjs';
+import { parseAutofillRecords, matchFieldValue, isConsentCheckbox, handleRadioAndSurveyOptions } from './autofill.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
@@ -347,6 +347,49 @@ assert.equal(matchFieldValue(['dob'], jeremy, { type: 'date' }), '1984-08-04');
 assert.equal(matchFieldValue(['month', 'dob_month'], jeremy), '08');
 assert.equal(matchFieldValue(['day', 'dob_day'], jeremy), '04');
 assert.equal(matchFieldValue(['year', 'dob_year'], jeremy), '1984');
+
+// Kiểm tra đối sánh chính xác các trường ID của LocoTomato v3 (locotomato.com):
+assert.equal(matchFieldValue(['v3-first_name'], jeremy), 'Jeremy');
+assert.equal(matchFieldValue(['v3-last_name'], jeremy), 'Adam McNeice');
+assert.equal(matchFieldValue(['v3-address1'], jeremy), '723 e 6th st');
+assert.equal(matchFieldValue(['v3-city'], jeremy), 'Dewey');
+assert.equal(matchFieldValue(['v3-zip_code'], jeremy), '74029');
+assert.equal(matchFieldValue(['v3-state'], jeremy), 'OK');
+assert.equal(matchFieldValue(['v3-dob_month'], jeremy), '08');
+assert.equal(matchFieldValue(['v3-dob_day'], jeremy), '04');
+assert.equal(matchFieldValue(['v3-dob_year'], jeremy), '1984');
+assert.equal(matchFieldValue(['v3-gender'], jeremy), 'Male');
+assert.equal(typeof handleRadioAndSurveyOptions, 'function');
+
+// Test handleRadioAndSurveyOptions tự động chọn ngẫu nhiên radio button Yes / No
+let clickedRadioSelector = null;
+const dispatchedRadioEvents = [];
+const mockRadios = [
+  { id: 'own_home_yes', name: 'own_home', value: 'yes', disabled: false, checked: false },
+  { id: 'own_home_no', name: 'own_home', value: 'no', disabled: false, checked: false },
+];
+const mockRadioFrame = {
+  locator: (sel) => ({
+    all: async () => [],
+    count: async () => (mockRadios.some((r) => sel.includes(r.id)) ? 1 : 0),
+    first: () => ({
+      count: async () => 1,
+      click: async () => { clickedRadioSelector = sel; },
+      evaluate: async (fn) => fn({ checked: false, dispatchEvent: () => {} }),
+      dispatchEvent: async (evt) => { dispatchedRadioEvents.push(evt); },
+    }),
+    nth: () => ({}),
+    evaluateAll: async (fn) => fn(mockRadios),
+  }),
+  evaluate: async () => [],
+};
+const answeredRadioCount = await handleRadioAndSurveyOptions(mockRadioFrame);
+assert.equal(answeredRadioCount, 1);
+assert.ok(
+  clickedRadioSelector === 'input[type="radio"]#own_home_yes' ||
+  clickedRadioSelector === 'input[type="radio"]#own_home_no'
+);
+assert.ok(dispatchedRadioEvents.includes('input') && dispatchedRadioEvents.includes('change'));
 
 // Tên binary: stable và bản lưu theo version phải thử cả bản Chrome for Testing.
 assert.deepEqual(chromeExecutableNames('stable'), ['Google Chrome', 'Google Chrome for Testing']);

@@ -18,6 +18,8 @@ import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
+/** @type {Map<object, Array<{time:string,type:string,[key:string]:any}>>} */
+const browserSessionLogs = new Map();
 const autoRefill = {
   enabled: true,
   settings: null,
@@ -1649,6 +1651,7 @@ async function openBrowserWithInstalledChrome({
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
   };
+  attachBrowserLogger(context, session);
   attachAutofill(context, autofillRecords, new URL(websiteUrl).origin, session, { autoSubmit });
   activeBrowsers.add(session);
   context.on('close', () => {
@@ -1769,6 +1772,60 @@ function closeChromeWhenLastTabCloses(session) {
 
   session.browser.on('page', watchTab);
   for (const page of session.browser.pages()) watchTab(page);
+}
+
+/**
+ * Gắn logger hành động vào context Chrome: ghi nhận mọi điều hướng và click.
+ * Log được giữ tối đa 500 mục, tự dọn 60 giây sau khi phiên đóng.
+ *
+ * @param {object} context Playwright BrowserContext.
+ * @param {object} session Phiên Chrome hiện tại.
+ */
+function attachBrowserLogger(context, session) {
+  const logs = [];
+  browserSessionLogs.set(session, logs);
+
+  function addLog(entry) {
+    logs.push({ time: new Date().toISOString(), ...entry });
+    // ponytail: giữ 500 mục gần nhất; nâng lên nếu cần nhiều hơn
+    if (logs.length > 500) logs.splice(0, logs.length - 500);
+  }
+
+  // Tiêm listener click vào mọi trang (kể cả trang mở sau)
+  context.exposeFunction('__alpc_log', addLog).catch(() => {});
+  context.addInitScript(() => {
+    document.addEventListener('click', (e) => {
+      const el = e.target;
+      window.__alpc_log({
+        type: 'click',
+        tag: el.tagName,
+        id: el.id || null,
+        text: (el.innerText || el.value || '').trim().slice(0, 120),
+        href: el.href || el.closest?.('a')?.href || null,
+      });
+    }, { capture: true });
+  }).catch(() => {});
+
+  // Ghi nhận điều hướng + chụp HTML (tối đa 64 KB)
+  function hookPage(page) {
+    page.on('framenavigated', async (frame) => {
+      if (frame !== page.mainFrame()) return;
+      const url = frame.url();
+      if (!url || url === 'about:blank') return;
+      let html = '';
+      let title = '';
+      try { html = (await page.content()).slice(0, 65536); } catch {}
+      try { title = await page.title(); } catch {}
+      addLog({ type: 'navigate', url, title, html });
+    });
+  }
+
+  context.on('page', hookPage);
+  for (const page of context.pages()) hookPage(page);
+
+  context.on('close', () => {
+    setTimeout(() => browserSessionLogs.delete(session), 60_000);
+  });
 }
 
 /**
@@ -1926,6 +1983,20 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && request.url === '/state') {
       respondWithJson(response, 200, getAutoRefillStatus());
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/browser-logs') {
+      const result = [];
+      for (const [s, logs] of browserSessionLogs) {
+        result.push({
+          slot: s.tileIndex + 1,
+          ip: s.exitIp ?? '?',
+          version: s.chromeVersion,
+          logs,
+        });
+      }
+      respondWithJson(response, 200, result);
       return;
     }
 

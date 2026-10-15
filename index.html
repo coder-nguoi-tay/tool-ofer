@@ -15,7 +15,7 @@
     .eyebrow { display: inline-block; margin: 0 0 5px; color: #245bc3; font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
     h1 { margin: 0 0 4px; font-size: 21px; letter-spacing: -.025em; }
     p { margin: 0; color: #5e6a7e; line-height: 1.45; }
-    .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 16px 0 18px; padding: 4px; border: 1px solid #e7ebf2; border-radius: 11px; background: #f5f7fb; }
+    .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 16px 0 18px; padding: 4px; border: 1px solid #e7ebf2; border-radius: 11px; background: #f5f7fb; }
     .tab { min-height: 34px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; color: #66748a; font: inherit; font-weight: 650; cursor: pointer; }
     .tab:hover { background: #e9eef7; color: #25334b; }
     .tab[aria-selected="true"] { background: #fff; color: #245bc3; box-shadow: 0 1px 4px #172b4d20; }
@@ -69,6 +69,16 @@
     .chrome-hover-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border-width: 5px; border-style: solid; border-color: #1a2639 transparent transparent transparent; }
     .chrome-icon-badge:hover .chrome-hover-tooltip { visibility: visible; opacity: 1; }
     .notice { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #f1f6ff; color: #4c5e7c; font-size: 11px; }
+    #log-table-wrap { max-height: 340px; overflow: auto; margin-top: 10px; }
+    #log-table { width: 100%; border-collapse: collapse; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #log-table th { position: sticky; top: 0; background: #f7f9fc; color: #768197; font-weight: 600; padding: 5px 7px; border-bottom: 1px solid #e7ebf2; text-align: left; white-space: nowrap; }
+    #log-table td { padding: 4px 7px; border-bottom: 1px solid #f0f2f7; vertical-align: top; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #log-table tr.navigate td { color: #1c5cb4; }
+    #log-table tr.click td { color: #25334b; }
+    #log-html-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 9999; align-items: center; justify-content: center; }
+    #log-html-modal.open { display: flex; }
+    #log-html-box { background: #fff; border-radius: 10px; padding: 16px; width: min(90vw,700px); max-height: 80vh; display: flex; flex-direction: column; gap: 8px; }
+    #log-html-box pre { flex: 1; overflow: auto; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; background: #f7f9fc; padding: 10px; border-radius: 7px; max-height: 60vh; }
     @media (max-width: 560px) { body { padding: 8px; } main { min-height: 0; padding: 16px; border-radius: 12px; } .row { gap: 8px; } .tab { padding-inline: 4px; font-size: 12px; } }
   </style>
 </head>
@@ -101,6 +111,7 @@
       <button class="tab" id="tab-setup" type="button" role="tab" aria-selected="false" aria-controls="panel-setup" data-tab="setup" tabindex="-1">Thiết lập</button>
       <button class="tab" id="tab-proxies" type="button" role="tab" aria-selected="false" aria-controls="panel-proxies" data-tab="proxies" tabindex="-1">Proxy</button>
       <button class="tab" id="tab-browsers" type="button" role="tab" aria-selected="true" aria-controls="panel-browsers" data-tab="browsers">Trình duyệt</button>
+      <button class="tab" id="tab-logs" type="button" role="tab" aria-selected="false" aria-controls="panel-logs" data-tab="logs" tabindex="-1">Log</button>
     </nav>
     <form id="launcher-form" novalidate>
       <section class="tab-panel" id="panel-setup" role="tabpanel" aria-labelledby="tab-setup" data-panel="setup" hidden>
@@ -187,6 +198,48 @@
         </details>
       </section>
     </form>
+    <section class="tab-panel" id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" data-panel="logs" hidden>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <h2 class="section-title" style="margin:0;">Log hành động trình duyệt</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <label style="display:flex;align-items:center;gap:5px;margin:0;font-size:11px;font-weight:600;cursor:pointer;">
+            <input type="checkbox" id="log-auto-refresh" checked style="width:14px;height:14px;"> Tự làm mới
+          </label>
+          <button class="secondary" id="log-clear-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xoá bộ lọc</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <select id="log-filter-slot" style="flex:1;height:32px;font-size:11px;">
+          <option value="">Tất cả slot</option>
+        </select>
+        <select id="log-filter-type" style="flex:1;height:32px;font-size:11px;">
+          <option value="">Tất cả loại</option>
+          <option value="navigate">Điều hướng</option>
+          <option value="click">Click</option>
+        </select>
+      </div>
+      <div id="log-table-wrap">
+        <table id="log-table">
+          <thead><tr>
+            <th>Giờ</th>
+            <th>Slot</th>
+            <th>Loại</th>
+            <th>Chi tiết</th>
+          </tr></thead>
+          <tbody id="log-tbody"></tbody>
+        </table>
+        <p id="log-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:20px 0;margin:0;" hidden>Chưa có log. Mở cửa sổ Chrome để bắt đầu ghi.</p>
+      </div>
+    </section>
+    <div id="log-html-modal" role="dialog" aria-modal="true" aria-label="HTML của trang">
+      <div id="log-html-box">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong id="log-html-title" style="font-size:12px;"></strong>
+          <button class="secondary" id="log-html-close" type="button" style="padding:4px 10px;min-height:0;font-size:11px;">Đóng</button>
+        </div>
+        <pre id="log-html-pre"></pre>
+      </div>
+    </div>
     <p id="warnings"></p>
     <p id="status" role="status" aria-live="polite"></p>
     <p class="notice">Tối đa 6 trình duyệt chạy song song. Nếu máy chậm, giảm số cửa sổ trong tab Thiết lập.</p>
@@ -565,6 +618,108 @@
     closeButton.addEventListener('click', () => {
       send('/close', 'Đang đóng trình duyệt…');
     });
+
+    // ── Log hành động trình duyệt ──────────────────────────────────────────
+    const logTbody = document.querySelector('#log-tbody');
+    const logEmpty = document.querySelector('#log-empty');
+    const logFilterSlot = document.querySelector('#log-filter-slot');
+    const logFilterType = document.querySelector('#log-filter-type');
+    const logAutoRefresh = document.querySelector('#log-auto-refresh');
+    const logClearBtn = document.querySelector('#log-clear-btn');
+    const logHtmlModal = document.querySelector('#log-html-modal');
+    const logHtmlPre = document.querySelector('#log-html-pre');
+    const logHtmlTitle = document.querySelector('#log-html-title');
+    let logData = [];
+    let logRefreshTimer = null;
+
+    function fmtTime(iso) {
+      const d = new Date(iso);
+      return d.toLocaleTimeString('vi-VN', { hour12: false });
+    }
+
+    function renderLogs() {
+      const slotFilter = logFilterSlot.value;
+      const typeFilter = logFilterType.value;
+      const slots = new Set(logData.map((s) => String(s.slot)));
+
+      // Cập nhật danh sách slot
+      const curSlot = logFilterSlot.value;
+      logFilterSlot.innerHTML = '<option value="">Tất cả slot</option>'
+        + [...slots].sort().map((s) => `<option value="${s}"${s === curSlot ? ' selected' : ''}>Slot ${s}</option>`).join('');
+
+      const rows = [];
+      for (const session of logData) {
+        if (slotFilter && String(session.slot) !== slotFilter) continue;
+        for (const entry of [...session.logs].reverse()) {
+          if (typeFilter && entry.type !== typeFilter) continue;
+          rows.push({ session, entry });
+        }
+      }
+
+      logEmpty.hidden = rows.length > 0;
+      logTbody.innerHTML = rows.map(({ session, entry }) => {
+        const detail = entry.type === 'navigate'
+          ? escHtml(entry.url)
+          : `${escHtml(entry.tag ?? '')} ${escHtml(entry.text ?? '')}`.trim();
+        const hasHtml = entry.type === 'navigate' && entry.html;
+        return `<tr class="${escHtml(entry.type)}">`
+          + `<td>${fmtTime(entry.time)}</td>`
+          + `<td>Slot ${session.slot} · ${escHtml(session.ip)}</td>`
+          + `<td>${entry.type === 'navigate' ? '🔗 điều hướng' : '🖱 click'}</td>`
+          + `<td style="cursor:${hasHtml ? 'pointer' : 'default'}" `
+          + `${hasHtml ? `data-html="${escHtml(entry.html)}" data-title="${escHtml(entry.url)}"` : ''}>`
+          + detail + (hasHtml ? ' <span style="color:#9aabb8;font-size:10px;">[xem HTML]</span>' : '')
+          + `</td></tr>`;
+      }).join('');
+    }
+
+    function escHtml(str) {
+      return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    async function fetchLogs() {
+      try {
+        const data = await fetch('/browser-logs').then((r) => r.json());
+        logData = data;
+        renderLogs();
+      } catch {}
+    }
+
+    function startLogRefresh() {
+      stopLogRefresh();
+      fetchLogs();
+      logRefreshTimer = setInterval(() => { if (logAutoRefresh.checked) fetchLogs(); }, 2000);
+    }
+
+    function stopLogRefresh() {
+      if (logRefreshTimer) { clearInterval(logRefreshTimer); logRefreshTimer = null; }
+    }
+
+    // Kích hoạt/tắt refresh khi chuyển tab Log
+    document.querySelectorAll('[role="tab"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.tab === 'logs') startLogRefresh(); else stopLogRefresh();
+      });
+    });
+
+    logFilterSlot.addEventListener('change', renderLogs);
+    logFilterType.addEventListener('change', renderLogs);
+    logClearBtn.addEventListener('click', () => {
+      logFilterSlot.value = '';
+      logFilterType.value = '';
+      renderLogs();
+    });
+
+    // Mở modal HTML khi click ô có [xem HTML]
+    logTbody.addEventListener('click', (e) => {
+      const td = e.target.closest('td[data-html]');
+      if (!td) return;
+      logHtmlTitle.textContent = td.dataset.title ?? '';
+      logHtmlPre.textContent = td.dataset.html ?? '';
+      logHtmlModal.classList.add('open');
+    });
+    document.querySelector('#log-html-close').addEventListener('click', () => logHtmlModal.classList.remove('open'));
+    logHtmlModal.addEventListener('click', (e) => { if (e.target === logHtmlModal) logHtmlModal.classList.remove('open'); });
 
   </script>
 </body>

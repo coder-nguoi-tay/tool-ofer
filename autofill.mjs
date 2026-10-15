@@ -272,7 +272,7 @@ const semanticCategories = [
   // 1. Chia tách Date of Birth (kiểm tra trước DOB gộp)
   {
     type: 'dob_month',
-    patterns: [/^(dob|birth)?month$/, /^mm$/, /^dobm$/, /^thangsinh$/, /^thang$/, /^monthofbirth$/],
+    patterns: [/month/, /^mm$/, /dobm/, /thangsinh/, /thang/, /monthofbirth/],
     resolve: (r, metadata = {}) => {
       const parsed = parseDobComponents(getDobString(r));
       if (!parsed) return null;
@@ -284,7 +284,7 @@ const semanticCategories = [
   },
   {
     type: 'dob_day',
-    patterns: [/^(dobday|day|dd|dobd|ngay|dayofbirth)$/],
+    patterns: [/dobday/, /dayofbirth/, /dob.*day/, /^day$/, /^dd$/, /dobd/],
     resolve: (r, metadata = {}) => {
       const parsed = parseDobComponents(getDobString(r));
       if (!parsed) return null;
@@ -296,7 +296,7 @@ const semanticCategories = [
   },
   {
     type: 'dob_year',
-    patterns: [/^(dobyear|year|yyyy|yy|doby|nam|yearofbirth|birthyear)$/],
+    patterns: [/year/, /^yyyy$/, /^yy$/, /doby/, /^nam$/, /namsinh/, /birthyear/],
     resolve: (r, metadata = {}) => {
       const parsed = parseDobComponents(getDobString(r));
       if (!parsed) return null;
@@ -443,18 +443,31 @@ const semanticCategories = [
   },
   {
     type: 'city',
-    patterns: [/^city$/, /^town$/, /thanhpho/],
+    patterns: [/city/, /town/, /thanhpho/],
     resolve: (r) => r.city || r.town || r.thanhpho,
   },
   {
     type: 'state',
-    patterns: [/^state$/, /^province$/, /^region$/, /^bang$/, /^tinh$/],
+    patterns: [/state/, /province/, /region/, /bang/, /tinh/],
     resolve: (r) => r.state || r.province,
   },
   {
     type: 'zip',
     patterns: [/zip/, /postal/, /postcode/],
     resolve: (r) => r.zipcode || r.zip || r.postalcode || r.postal,
+  },
+  {
+    type: 'gender',
+    patterns: [/gender/, /^sex$/, /gioitinh/],
+    resolve: (r) => {
+      const g = r.gender || r.sex || r.gioitinh || '';
+      if (g) {
+        if (/^m(ale)?$|^nam$/i.test(g)) return 'Male';
+        if (/^f(emale)?$|^nu$/i.test(g)) return 'Female';
+        return g;
+      }
+      return 'Male';
+    },
   },
   // 10. Ngân hàng & tài khoản
   {
@@ -627,9 +640,9 @@ export async function findSubmitButton(frame) {
   const candidateSelectors = [
     'button[type="submit"]',
     'input[type="submit"]',
-    'button.continue-btn, button.submit-btn, a.continue-btn, a.submit-btn',
-    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote")',
-    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next")',
+    'button.continue-btn, button.submit-btn, a.continue-btn, a.submit-btn, button.btn-submit, a.btn-submit',
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("AGREE & CONTINUE"), button:has-text("Tiếp theo"), button:has-text("Xác nhận")',
+    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree")',
   ];
 
   for (const selector of candidateSelectors) {
@@ -638,13 +651,171 @@ export async function findSubmitButton(frame) {
       for (const btn of candidates) {
         if ((await btn.isVisible()) && (await btn.isEnabled())) {
           const text = (await btn.innerText().catch(() => '')).trim().toLowerCase();
-          if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập/i.test(text)) continue;
+          if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập|skip|bỏ qua/i.test(text)) continue;
           return btn;
         }
       }
     } catch {}
   }
   return null;
+}
+
+/**
+ * Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên các nút radio hoặc nút lựa chọn Yes/No.
+ *
+ * @param {object} frame Frame Playwright đang quét.
+ * @param {object} [record={}] Bản ghi dữ liệu hiện tại để ưu tiên nếu có cấu hình.
+ * @return {Promise<number>} Số câu hỏi đã được chọn/trả lời.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+export async function handleRadioAndSurveyOptions(frame, record = {}) {
+  let answeredCount = 0;
+
+  // 1. Xử lý các nhóm radio buttons tiêu chuẩn (<input type="radio">)
+  try {
+    const radioGroups = await frame.locator('input[type="radio"]').evaluateAll((radios) => {
+      const groups = {};
+      radios.forEach((r, idx) => {
+        if (r.disabled) return;
+        const groupKey = r.name || r.closest('fieldset, .form-group, .question, .form-row, div')?.getAttribute('id') || `unnamed_group_${idx}`;
+        if (!groups[groupKey]) {
+          groups[groupKey] = {
+            hasChecked: false,
+            items: [],
+          };
+        }
+        if (r.checked) groups[groupKey].hasChecked = true;
+
+        const label = typeof r.closest === 'function' ? r.closest('label') : null;
+        const doc = typeof document !== 'undefined' ? document : null;
+        const labelFor = doc && r.id ? doc.querySelector(`label[for="${r.id}"]`) : null;
+        const targetLabel = label || labelFor;
+        const labelText = (targetLabel?.innerText || targetLabel?.textContent || '').trim();
+        groups[groupKey].items.push({
+          id: r.id || '',
+          name: r.name || '',
+          value: r.value || '',
+          label: labelText,
+          index: idx,
+        });
+      });
+      return groups;
+    }).catch(() => ({}));
+
+    for (const [groupKey, group] of Object.entries(radioGroups)) {
+      if (group.hasChecked || !group.items.length) continue;
+
+      // Ưu tiên nếu trong record có trường khớp
+      let chosen = null;
+      const normalizedKey = normalizeFieldName(groupKey);
+      if (record && record[normalizedKey]) {
+        const targetVal = String(record[normalizedKey]).toLowerCase();
+        chosen = group.items.find((item) =>
+          item.value.toLowerCase() === targetVal ||
+          item.label.toLowerCase() === targetVal ||
+          (targetVal === 'yes' && /yes|co|true/i.test(`${item.value} ${item.label}`)) ||
+          (targetVal === 'no' && /no|khong|false/i.test(`${item.value} ${item.label}`))
+        );
+      }
+
+      // Nếu không khớp trong record, chọn ngẫu nhiên một lựa chọn bất kỳ
+      if (!chosen) {
+        chosen = group.items[Math.floor(Math.random() * group.items.length)];
+      }
+
+      try {
+        let radioLocator = null;
+        if (chosen.id) {
+          radioLocator = frame.locator(`input[type="radio"]#${chosen.id}`).first();
+        } else if (chosen.name && chosen.value) {
+          radioLocator = frame.locator(`input[type="radio"][name="${chosen.name}"][value="${chosen.value}"]`).first();
+        } else {
+          radioLocator = frame.locator('input[type="radio"]').nth(chosen.index);
+        }
+
+        if (radioLocator && (await radioLocator.count() > 0)) {
+          await radioLocator.click({ timeout: 1200 }).catch(async () => {
+            await radioLocator.evaluate((el) => {
+              const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+              if (label) label.click();
+            }).catch(() => {});
+          });
+
+          await radioLocator.evaluate((el) => {
+            if (!el.checked) {
+              el.checked = true;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }).catch(() => {});
+
+          await radioLocator.dispatchEvent('input').catch(() => {});
+          await radioLocator.dispatchEvent('change').catch(() => {});
+          answeredCount += 1;
+        }
+      } catch {}
+    }
+  } catch {}
+
+  // 2. Xử lý các câu hỏi Yes/No hoặc nhóm nút lựa chọn (không dùng thẻ input radio)
+  try {
+    const questionChoiceGroups = await frame.evaluate(() => {
+      const results = [];
+      const containers = Array.from(document.querySelectorAll('.question, .survey-step, .quiz-step, fieldset, .card-options, .choice-container, .options-grid, div[role="radiogroup"], .choices'));
+      containers.forEach((container) => {
+        if (container.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])')) return;
+
+        const buttons = Array.from(container.querySelectorAll('button:not([type="submit"]):not(.btn-submit):not(.faq-trigger), [role="radio"], [role="button"]:not(.btn-submit), .option-btn, .choice-btn, .quiz-btn, .answer-btn, label.btn'));
+        const alreadyActive = buttons.some((b) => b.classList.contains('active') || b.classList.contains('selected') || b.getAttribute('aria-checked') === 'true');
+        if (!alreadyActive && buttons.length >= 2 && buttons.length <= 6) {
+          results.push(buttons.map((b, i) => ({
+            id: b.id || '',
+            text: (b.innerText || b.textContent || '').trim(),
+            className: b.className || '',
+            index: i,
+          })));
+        }
+      });
+
+      if (!results.length) {
+        const allButtons = Array.from(document.querySelectorAll('button:not([type="submit"]):not(.btn-submit):not(.faq-trigger), [role="button"]:not(.btn-submit)'));
+        const yesBtn = allButtons.find((b) => /^(yes|có|true|agree)$/i.test((b.innerText || b.textContent || '').trim()));
+        const noBtn = allButtons.find((b) => /^(no|không|false|disagree)$/i.test((b.innerText || b.textContent || '').trim()));
+        if (yesBtn && noBtn) {
+          const isYesActive = yesBtn.classList.contains('active') || yesBtn.classList.contains('selected');
+          const isNoActive = noBtn.classList.contains('active') || noBtn.classList.contains('selected');
+          if (!isYesActive && !isNoActive) {
+            results.push([
+              { id: yesBtn.id || '', text: (yesBtn.innerText || yesBtn.textContent || '').trim() },
+              { id: noBtn.id || '', text: (noBtn.innerText || noBtn.textContent || '').trim() },
+            ]);
+          }
+        }
+      }
+
+      return results;
+    }).catch(() => []);
+
+    for (const group of questionChoiceGroups) {
+      if (!group.length) continue;
+      const pick = group[Math.floor(Math.random() * group.length)];
+      try {
+        let locator = null;
+        if (pick.id) {
+          locator = frame.locator(`#${pick.id}`).first();
+        } else if (pick.text) {
+          locator = frame.locator(`button:has-text("${pick.text}"), [role="button"]:has-text("${pick.text}")`).first();
+        }
+        if (locator && (await locator.isVisible({ timeout: 1000 }).catch(() => false))) {
+          await locator.click({ timeout: 1500 }).catch(() => {});
+          answeredCount += 1;
+        }
+      } catch {}
+    }
+  } catch {}
+
+  return answeredCount;
 }
 
 /**
@@ -783,9 +954,33 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
           if (metadata.readOnly || ['hidden', 'radio', 'file', 'submit', 'button', 'reset', 'image'].includes(metadata.type)) continue;
 
-          visibleFieldCount += 1;
           const valueToFill = matchFieldValue(metadata.names, record, metadata);
           if (!valueToFill) {
+            // Nếu là thẻ select câu hỏi (như Yes/No, câu hỏi khảo sát) mà không khớp trường trong record:
+            // Tự động chọn ngẫu nhiên một option hợp lệ (ngoại trừ option placeholder đầu tiên)!
+            if (metadata.kind === 'select' && (!metadata.value || metadata.value === '')) {
+              const picked = await field.evaluate((sel) => {
+                const validOptions = Array.from(sel.options).filter((opt, idx) => {
+                  if (idx === 0 && (!opt.value || /select|choose|chọn|vui lòng/i.test(opt.text))) return false;
+                  return Boolean(opt.value);
+                });
+                if (validOptions.length > 0) {
+                  const chosen = validOptions[Math.floor(Math.random() * validOptions.length)];
+                  sel.value = chosen.value;
+                  sel.dispatchEvent(new Event('input', { bubbles: true }));
+                  sel.dispatchEvent(new Event('change', { bubbles: true }));
+                  return true;
+                }
+                return false;
+              }).catch(() => false);
+              if (picked) {
+                await field.evaluate((el) => { el.dataset.autoleadFilled = '1'; }).catch(() => {});
+                session.autofillFields = (session.autofillFields ?? 0) + 1;
+                filledInThisPass += 1;
+                continue;
+              }
+            }
+
             const displayName = metadata.names[0] ?? '';
             if (displayName) unmatchedFieldNames.add(displayName.slice(0, 40));
             continue;
@@ -915,6 +1110,16 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           // Trường có thể không tương tác được lúc này
         }
       }
+
+      // Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên radio buttons hoặc lựa chọn Yes/No
+      try {
+        const answeredSurvey = await handleRadioAndSurveyOptions(frame, record);
+        if (answeredSurvey > 0) {
+          filledInThisPass += answeredSurvey;
+          session.autofillFields = (session.autofillFields ?? 0) + answeredSurvey;
+          session.autofillError = null;
+        }
+      } catch {}
 
       // Tự động bấm nút gửi / tiếp tục nếu có tùy chọn autoSubmit và vừa điền hoặc tích xong các trường
       if (options.autoSubmit !== false && (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0)) {
