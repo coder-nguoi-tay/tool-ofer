@@ -155,46 +155,148 @@ export const usStateCodes = Object.fromEntries(
 );
 
 /**
+ * Tách và chuẩn hóa các thành phần của ngày sinh (ngày, tháng, năm).
+ * Hỗ trợ các định dạng: M/D/YYYY (8/18/1967), MM/DD/YYYY, YYYY-MM-DD, DD/MM/YYYY.
+ *
+ * @param {string} dobStr Chuỗi ngày sinh từ dữ liệu người dùng.
+ * @return {object|null} Đối tượng chứa các định dạng ngày/tháng/năm hoặc null.
+ */
+export function parseDobComponents(dobStr) {
+  const str = String(dobStr ?? '').trim();
+  if (!str) return null;
+
+  let month = null;
+  let day = null;
+  let year = null;
+
+  // 1. ISO YYYY-MM-DD hoặc YYYY/MM/DD
+  let match = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  if (match) {
+    year = match[1];
+    month = match[2];
+    day = match[3];
+  } else {
+    // 2. M/D/YYYY hoặc MM/DD/YYYY hoặc D/M/YYYY (e.g. 8/18/1967)
+    match = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+    if (match) {
+      const p1 = Number(match[1]);
+      const p2 = Number(match[2]);
+      year = match[3];
+      // Nếu p1 > 12 thì p1 chắc chắn là ngày (DD/MM/YYYY)
+      if (p1 > 12 && p2 <= 12) {
+        day = String(p1);
+        month = String(p2);
+      } else {
+        // Mặc định chuẩn US MM/DD/YYYY (8/18/1967 -> tháng 8, ngày 18)
+        month = String(p1);
+        day = String(p2);
+      }
+    } else {
+      // 3. Chỉ có năm 4 chữ số
+      match = str.match(/(\d{4})/);
+      if (match) {
+        year = match[1];
+      }
+    }
+  }
+
+  if (!year && !month && !day) return null;
+
+  const monthNum = month ? Number(month) : null;
+  const dayNum = day ? Number(day) : null;
+
+  const monthNames = [
+    '', 'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+  const shortMonthNames = [
+    '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  const monthStr = monthNum ? String(monthNum) : '';
+  const monthPad = monthNum ? String(monthNum).padStart(2, '0') : '';
+  const monthName = monthNum && monthNames[monthNum] ? monthNames[monthNum] : '';
+  const shortMonth = monthNum && shortMonthNames[monthNum] ? shortMonthNames[monthNum] : '';
+
+  const dayStr = dayNum ? String(dayNum) : '';
+  const dayPad = dayNum ? String(dayNum).padStart(2, '0') : '';
+
+  const fullYear = year ? String(year) : '';
+  const shortYear = year && year.length === 4 ? year.slice(-2) : '';
+
+  // Định dạng US đầy đủ: MM/DD/YYYY (ví dụ: 08/18/1967)
+  const usDob = (monthPad && dayPad && fullYear) ? `${monthPad}/${dayPad}/${fullYear}` : str;
+  // Định dạng ISO: YYYY-MM-DD (dành riêng cho HTML5 <input type="date">)
+  const isoDob = (fullYear && monthPad && dayPad) ? `${fullYear}-${monthPad}-${dayPad}` : '';
+
+  return {
+    year: fullYear,
+    shortYear,
+    month: monthStr,
+    monthPad,
+    monthName,
+    shortMonth,
+    day: dayStr,
+    dayPad,
+    usDob,
+    isoDob,
+  };
+}
+
+/**
+ * Trích xuất chuỗi ngày sinh từ bất kỳ tên cột nào trong record.
+ */
+export function getDobString(r) {
+  if (!r || typeof r !== 'object') return '';
+  return r.namsinh || r.ngaysinh || r.ngaythangnamsinh || r.dob || r.birthdate || r.dateofbirth || r.birthday || r.bday || r.birth || '';
+}
+
+/**
+ * Trích xuất chuỗi địa chỉ từ bất kỳ tên cột nào trong record.
+ */
+export function getAddressString(r) {
+  if (!r || typeof r !== 'object') return '';
+  return r.address || r.streetaddress || r.street || r.diachi || r.addr || r.address1 || r.addressline1 || r.street1 || r.homeaddress || r.fulladdress || '';
+}
+
+/**
  * Danh sách mẫu nhận diện các trường thông dụng (đa ngôn ngữ Anh - Việt, hỗ trợ cả form gộp và form chia tách).
  */
 const semanticCategories = [
   // 1. Chia tách Date of Birth (kiểm tra trước DOB gộp)
   {
     type: 'dob_month',
-    patterns: [/^(dob|birth)?month$/, /^mm$/, /^dobm$/, /^thangsinh$/, /^thang$/],
-    resolve: (r) => {
-      const dob = r.namsinh || r.ngaysinh || r.dob || r.birthdate || '';
-      if (!dob) return null;
-      const iso = dob.match(/^\d{4}[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
-      if (iso) return iso[1];
-      const us = dob.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-      if (us) return us[1];
-      const simple = dob.match(/^(\d{1,2})[\/\-\.]/);
-      return simple ? simple[1] : null;
+    patterns: [/^(dob|birth)?month$/, /^mm$/, /^dobm$/, /^thangsinh$/, /^thang$/, /^monthofbirth$/],
+    resolve: (r, metadata = {}) => {
+      const parsed = parseDobComponents(getDobString(r));
+      if (!parsed) return null;
+      if (metadata.maxLength === 2 || metadata.kind === 'select') {
+        return parsed.monthPad || parsed.month;
+      }
+      return parsed.monthPad || parsed.month;
     },
   },
   {
     type: 'dob_day',
-    patterns: [/^(dobday|day|dd|dobd|ngaysinh|ngay)$/],
-    resolve: (r) => {
-      const dob = r.namsinh || r.ngaysinh || r.dob || r.birthdate || '';
-      if (!dob) return null;
-      const iso = dob.match(/^\d{4}[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
-      if (iso) return iso[2];
-      const us = dob.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-      if (us) return us[2];
-      const simple = dob.match(/[\/\-\.](\d{1,2})[\/\-\.]/);
-      return simple ? simple[1] : null;
+    patterns: [/^(dobday|day|dd|dobd|ngay|dayofbirth)$/],
+    resolve: (r, metadata = {}) => {
+      const parsed = parseDobComponents(getDobString(r));
+      if (!parsed) return null;
+      if (metadata.maxLength === 2 || metadata.kind === 'select') {
+        return parsed.dayPad || parsed.day;
+      }
+      return parsed.dayPad || parsed.day;
     },
   },
   {
     type: 'dob_year',
-    patterns: [/^(dobyear|year|yyyy|yy|doby|namsinh|nam)$/],
-    resolve: (r) => {
-      const dob = r.namsinh || r.ngaysinh || r.dob || r.birthdate || '';
-      if (!dob) return null;
-      const match = dob.match(/(\d{4})/);
-      return match ? match[1] : null;
+    patterns: [/^(dobyear|year|yyyy|yy|doby|nam|yearofbirth|birthyear)$/],
+    resolve: (r, metadata = {}) => {
+      const parsed = parseDobComponents(getDobString(r));
+      if (!parsed) return null;
+      if (metadata.maxLength === 2) return parsed.shortYear;
+      return parsed.year;
     },
   },
   // 2. Chia tách Phone (kiểm tra trước Phone gộp)
@@ -278,8 +380,22 @@ const semanticCategories = [
   // 5. Date of Birth gộp
   {
     type: 'dob',
-    patterns: [/^(dob|birthdate|dateofbirth|birthday|bday|namsinh|ngaysinh|birth)$/],
-    resolve: (r) => r.namsinh || r.ngaysinh || r.dob || r.birthdate || r.dateofbirth,
+    patterns: [
+      /^(dob|birthdate|dateofbirth|birthday|bday|namsinh|ngaysinh|ngaythangnamsinh|birth|mmddyyyy|mmddyy|ddmmyyyy|birthdt)$/,
+      /date.*birth/,
+      /birth.*date/,
+    ],
+    resolve: (r, metadata = {}) => {
+      const raw = getDobString(r);
+      if (!raw) return null;
+      const parsed = parseDobComponents(raw);
+      if (!parsed) return raw;
+      if (metadata.type === 'date') return parsed.isoDob || raw;
+      if (metadata.maxLength === 4 || (metadata.kind === 'select' && !metadata.names?.some((n) => /month|day/i.test(n)))) {
+        return parsed.year;
+      }
+      return parsed.usDob || raw;
+    },
   },
   // 6. Số điện thoại gộp
   {
@@ -312,8 +428,8 @@ const semanticCategories = [
   // 9. Địa chỉ
   {
     type: 'address',
-    patterns: [/address/, /^street/, /^diachi$/],
-    resolve: (r) => r.address || r.street || r.streetaddress || r.diachi,
+    patterns: [/address/, /^street/, /^diachi$/, /^addr/, /addressline1/, /streetline1/, /streetaddress/],
+    resolve: (r) => getAddressString(r),
   },
   {
     type: 'address2',
@@ -397,6 +513,16 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
   // 1. Kiểm tra khớp chính xác với bất kỳ key nào trong record
   for (const candidate of normalizedCandidates) {
     if (Object.hasOwn(record, candidate) && record[candidate] !== '') {
+      if (/^(namsinh|ngaysinh|ngaythangnamsinh|dob|birthdate|dateofbirth|birthday|bday)$/.test(candidate)) {
+        const parsed = parseDobComponents(record[candidate]);
+        if (parsed) {
+          if (metadata.type === 'date') return parsed.isoDob;
+          if (metadata.maxLength === 4 || (metadata.kind === 'select' && !metadata.names?.some((n) => /month|day/i.test(n)))) {
+            return parsed.year;
+          }
+          return formatMatchedValue(parsed.usDob, metadata);
+        }
+      }
       return formatMatchedValue(record[candidate], metadata);
     }
   }
@@ -405,10 +531,21 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
   for (const candidate of normalizedCandidates) {
     for (const cat of semanticCategories) {
       if (cat.patterns.some((pattern) => pattern.test(candidate))) {
-        const val = cat.resolve(record);
+        const val = cat.resolve(record, metadata);
         if (val !== undefined && val !== null && String(val).trim() !== '') {
           return formatMatchedValue(String(val), metadata);
         }
+      }
+    }
+  }
+
+  // Bổ sung: nếu candidate có chứa dob (ví dụ applicant_dob, customer_dob)
+  for (const candidate of normalizedCandidates) {
+    if (candidate.includes('dob') && !candidate.includes('month') && !candidate.includes('day') && !candidate.includes('year')) {
+      const parsed = parseDobComponents(getDobString(record));
+      if (parsed) {
+        if (metadata.type === 'date') return parsed.isoDob;
+        return formatMatchedValue(parsed.usDob, metadata);
       }
     }
   }
@@ -663,24 +800,62 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             const lower = valueToFill.toLowerCase();
             if (usStateCodes[lower]) candidates.push(usStateCodes[lower]);
 
+            // Mở rộng ứng viên cho Month dropdown
+            const numVal = parseInt(valueToFill, 10);
+            if (!Number.isNaN(numVal) && numVal >= 1 && numVal <= 12) {
+              const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+              const padMonth = String(numVal).padStart(2, '0');
+              const name = monthNames[numVal];
+              candidates.push(String(numVal), padMonth, name, name.slice(0, 3));
+              candidates.push(`${padMonth} - ${name}`, `${numVal} - ${name}`, `${padMonth}/${name}`, `${name} (${padMonth})`);
+            }
+            // Mở rộng ứng viên cho Day dropdown
+            if (!Number.isNaN(numVal) && numVal >= 1 && numVal <= 31) {
+              candidates.push(String(numVal), String(numVal).padStart(2, '0'));
+            }
+            // Mở rộng ứng viên cho Year dropdown
+            if (!Number.isNaN(numVal) && numVal >= 1900 && numVal <= 2100) {
+              candidates.push(String(numVal), String(numVal).slice(-2));
+            }
+
             let selected = false;
             for (const val of candidates) {
               try {
-                await field.selectOption({ label: val }, { timeout: 1000 });
+                await field.selectOption({ label: val }, { timeout: 800 });
                 selected = true;
                 break;
               } catch {}
               try {
-                await field.selectOption(val, { timeout: 1000 });
+                await field.selectOption(val, { timeout: 800 });
                 selected = true;
                 break;
               } catch {}
               try {
-                await field.selectOption({ value: val }, { timeout: 1000 });
+                await field.selectOption({ value: val }, { timeout: 800 });
                 selected = true;
                 break;
               } catch {}
             }
+
+            // Quét trực tiếp danh sách <option> trong DOM nếu Playwright chưa khớp
+            if (!selected) {
+              selected = await field.evaluate((select, searchVals) => {
+                const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                const searchNorms = searchVals.map(norm).filter(Boolean);
+                for (const option of select.options) {
+                  const valNorm = norm(option.value);
+                  const labelNorm = norm(option.text || option.label);
+                  if (searchNorms.some((sn) => valNorm === sn || labelNorm === sn || labelNorm.startsWith(sn))) {
+                    select.value = option.value;
+                    select.dispatchEvent(new Event('input', { bubbles: true }));
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                  }
+                }
+                return false;
+              }, candidates).catch(() => false);
+            }
+
             if (!selected) {
               await field.selectOption({ index: 1 }, { timeout: 1000 }).catch(() => {});
             }
@@ -702,9 +877,29 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 el.dispatchEvent(new Event('change', { bubbles: true }));
               }, String(valueToFill));
             }
+
+            // Đối với các ô có input mask (như ngày sinh MM/DD/YYYY) làm mất dữ liệu sau fill, tự động gõ tuần tự
+            const filledVal = await field.inputValue().catch(() => '');
+            if (!filledVal || (String(valueToFill).length >= 8 && filledVal.length < 5)) {
+              await field.click({ timeout: 1000 }).catch(() => {});
+              await field.pressSequentially(String(valueToFill), { delay: 25 }).catch(() => {});
+            }
+
             await field.dispatchEvent('input').catch(() => {});
             await field.dispatchEvent('change').catch(() => {});
             await field.dispatchEvent('blur').catch(() => {});
+
+            // Với ô địa chỉ, nếu xuất hiện dropdown gợi ý autocomplete (như Google Places), tự bấm gợi ý đầu
+            const isAddressField = metadata.names.some((n) => /address|street|diachi/i.test(n));
+            if (isAddressField) {
+              try {
+                await page.waitForTimeout(300);
+                const pacItem = page.locator('.pac-container .pac-item, .address-autocomplete-item, .ui-autocomplete .ui-menu-item').first();
+                if (await pacItem.isVisible({ timeout: 400 }).catch(() => false)) {
+                  await pacItem.click().catch(() => {});
+                }
+              } catch {}
+            }
           }
 
           await field.evaluate((element) => { element.dataset.autoleadFilled = '1'; }).catch(() => {});

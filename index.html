@@ -123,8 +123,8 @@
         <input id="target-url" name="websiteUrl" type="text" placeholder="https://example.com">
         <p class="hint">Có thể nhập example.com; app tự thêm https://.</p>
         <label for="autofill-data">Dữ liệu tự điền (CSV hoặc JSON)</label>
-        <textarea id="autofill-data" name="autofillData" spellcheck="false" placeholder="Họ tên,Địa chỉ,Số điện thoại&#10;Nguyễn An,12 Đường Mẫu,0900000001&#10;Trần Bình,34 Đường Mẫu,0900000002"></textarea>
-        <p class="hint">Dòng đầu CSV là tên cột; hoặc dán mảng JSON gồm các object cùng cột. Hỗ trợ mọi trường (Họ tên, Địa chỉ, SĐT, Ngày sinh, SSN, Email, Banking). Khi form xuất hiện, app tự động điền bản ghi phù hợp.</p>
+        <textarea id="autofill-data" name="autofillData" spellcheck="false" placeholder="Họ tên,Address,năm sinh,Số điện thoại,Email&#10;Juan Suarez,2609 NW 162nd st,8/18/1967,4059335582,juan@example.com&#10;John Doe,742 Evergreen Terrace,11/24/1982,5558675309,johndoe@gmail.com"></textarea>
+        <p class="hint">Dòng đầu CSV là tên cột; hoặc dán mảng JSON gồm các object cùng cột. Hỗ trợ mọi trường: Họ tên, Address / Địa chỉ, Năm sinh / Ngày sinh (8/18/1967 hoặc MM/DD/YYYY), SĐT, Zipcode, City, State, SSN, Email, Banking. App tự động phân tách ngày/tháng/năm hoặc chuyển đổi định dạng date picker phù hợp với mọi form.</p>
         <div style="margin-top: 10px; margin-bottom: 6px;">
           <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; user-select: none;">
             <input type="checkbox" id="auto-submit-form" name="autoSubmitForm" checked style="width: 16px; height: 16px; margin: 0; cursor: pointer;">

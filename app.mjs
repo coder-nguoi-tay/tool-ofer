@@ -30,6 +30,7 @@ const userInterfacePath = new URL('./index.html', import.meta.url);
 const userAgentListPath = new URL('./useragents.txt', import.meta.url);
 const interactionLogDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'logs');
 const chromeProfileDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-profiles');
+const chromeProfileCacheDirectory = join(homedir(), 'Library', 'Caches', 'AutoLeadPC', 'chrome-profiles');
 const installedChromeAppPath = process.env.AUTOLEADPC_CHROME_APP || '/Applications/Google Chrome.app';
 const chromeChannelDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-channels');
 const chromeRegularBuildDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-regular-builds');
@@ -1424,6 +1425,51 @@ async function seedChromeProfileFromTemplate(userDataDirectory, build) {
 }
 
 /**
+ * Chỉ cho phép xoá thư mục nằm trong kho profile do app quản lý.
+ *
+ * Chặn cửa trước cho một lệnh `rm -r`: chỉ nhận đường dẫn trong kho profile hoặc trong cây
+ * cache song song của nó ở `~/Library/Caches/AutoLeadPC/chrome-profiles`; có `..` là từ chối,
+ * nên một giá trị sai không thể xoá thứ khác trên máy.
+ *
+ * @param {string} candidate Đường dẫn cần kiểm tra.
+ * @return {boolean} True khi đường dẫn nằm trong kho profile của app.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-15
+ */
+export function isManagedChromeProfilePath(candidate) {
+  if (typeof candidate !== 'string' || candidate.includes('..')) return false;
+  return [chromeProfileDirectory, chromeProfileCacheDirectory].some((root) => {
+    const storeRoot = root.endsWith('/') ? root : root + '/';
+    return candidate.startsWith(storeRoot) && candidate.length > storeRoot.length;
+  });
+}
+
+/**
+ * Xoá thư mục profile của một phiên sau khi cửa sổ Chrome đã đóng.
+ *
+ * Mỗi profile là một bản chép đầy đủ của profile mẫu (~179 MB) nên để lại là đĩa phình
+ * thêm bấy nhiêu cho mỗi proxy từng thử. Chờ một nhịp cho Chrome ghi xong rồi mới xoá, và
+ * thử lại một lần vì Chrome có thể tạo lại file ngay sau lần xoá đầu.
+ *
+ * @param {string} userDataDirectory Thư mục profile cần xoá.
+ * @return {Promise<void>} Hoàn tất khi đã xoá hoặc bỏ qua.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-15
+ */
+async function removeChromeSessionProfile(userDataDirectory) {
+  // Chrome giữ cache ở cây song song trong ~/Library/Caches, xoá profile mà bỏ cache thì
+  // cache vẫn tích lại từng lượt.
+  const targets = [userDataDirectory, userDataDirectory.replace(chromeProfileDirectory, chromeProfileCacheDirectory)]
+    .filter((target) => isManagedChromeProfilePath(target));
+  for (const delayMs of [1500, 2500]) {
+    await new Promise((resolve) => { setTimeout(resolve, delayMs); });
+    await Promise.all(targets.map((target) => rm(target, { recursive: true, force: true }).catch(() => {})));
+    const remaining = await Promise.all(targets.map((target) => access(target).then(() => true, () => false)));
+    if (!remaining.includes(true)) return;
+  }
+}
+
+/**
  * Đọc tên các extension đã cài trong profile mặc định của một thư mục Chrome.
  *
  * Tên lấy từ manifest; tên dạng __MSG_key__ được tra trong _locales theo ngôn ngữ mặc định.
@@ -1608,6 +1654,8 @@ async function openBrowserWithInstalledChrome({
   context.on('close', () => {
     activeBrowsers.delete(session);
     void relay?.close();
+    // Profile dùng xong là xoá cả profile và cache: không giữ lại ~179 MB mỗi proxy đã thử.
+    void removeChromeSessionProfile(userDataDirectory);
     if (!session.suppressAutoRefill) {
       if (!session.closingDueToTrafficBlocked) {
         autoRefill.message = `Slot ${tileIndex + 1} trống; đang tìm proxy thay thế.`;

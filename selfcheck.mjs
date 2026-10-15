@@ -266,11 +266,31 @@ assert.equal(matchFieldValue(['ssn3'], leadRecord), '6710');
 assert.equal(matchFieldValue(['routing_number', 'aba'], leadRecord), '63107393');
 assert.equal(matchFieldValue(['bank_name', 'bank'], leadRecord), 'Bank of America');
 assert.equal(matchFieldValue(['account_number', 'account_no'], leadRecord), '511485418662');
-assert.equal(matchFieldValue(['dob', 'birth_date'], leadRecord), '8/18/1967');
-assert.equal(matchFieldValue(['birthday'], leadRecord), '8/18/1967');
-assert.equal(matchFieldValue(['month', 'dob_month'], leadRecord), '8');
+assert.equal(matchFieldValue(['dob', 'birth_date'], leadRecord), '08/18/1967');
+assert.equal(matchFieldValue(['birthday'], leadRecord), '08/18/1967');
+assert.equal(matchFieldValue(['dob'], leadRecord, { type: 'date' }), '1967-08-18');
+assert.equal(matchFieldValue(['month', 'dob_month'], leadRecord), '08');
 assert.equal(matchFieldValue(['day', 'dob_day'], leadRecord), '18');
 assert.equal(matchFieldValue(['year', 'dob_year'], leadRecord), '1967');
+
+// Kiểm tra đối sánh với định dạng người dùng cung cấp: "năm sinh 8/18/1967, Address 2609 NW 162nd st"
+const userSample = {
+  namsinh: '8/18/1967',
+  address: '2609 NW 162nd st',
+};
+assert.equal(matchFieldValue(['address'], userSample), '2609 NW 162nd st');
+assert.equal(matchFieldValue(['street_address'], userSample), '2609 NW 162nd st');
+assert.equal(matchFieldValue(['street'], userSample), '2609 NW 162nd st');
+assert.equal(matchFieldValue(['address1'], userSample), '2609 NW 162nd st');
+assert.equal(matchFieldValue(['diachi'], userSample), '2609 NW 162nd st');
+assert.equal(matchFieldValue(['dob'], userSample), '08/18/1967');
+assert.equal(matchFieldValue(['birth_date'], userSample), '08/18/1967');
+assert.equal(matchFieldValue(['birthday'], userSample), '08/18/1967');
+assert.equal(matchFieldValue(['date_of_birth'], userSample), '08/18/1967');
+assert.equal(matchFieldValue(['dob'], userSample, { type: 'date' }), '1967-08-18');
+assert.equal(matchFieldValue(['month'], userSample), '08');
+assert.equal(matchFieldValue(['day'], userSample), '18');
+assert.equal(matchFieldValue(['year'], userSample), '1967');
 assert.equal(matchFieldValue(['middle_name', 'initial'], leadRecord), 'Pablo');
 assert.equal(matchFieldValue(['email', 'email_address'], leadRecord), 'juan@example.com');
 assert.equal(matchFieldValue(['email'], { fullname: 'John Doe', phonenumber: '1234567890' }), 'john.doe7890@gmail.com');
@@ -307,4 +327,9 @@ assert.equal(isManagedChromeProfilePath(profileStore), false);
 assert.equal(isManagedChromeProfilePath(join(profileStore, '..', 'chrome-builds')), false);
 assert.equal(isManagedChromeProfilePath(homedir()), false);
 assert.equal(isManagedChromeProfilePath('/'), false);
+// Cây cache song song cũng phải được chấp nhận, vì profile và cache phải xoá cùng nhau.
+const cacheStore = join(homedir(), 'Library', 'Caches', 'AutoLeadPC', 'chrome-profiles');
+assert.equal(isManagedChromeProfilePath(join(cacheStore, 'stable', '155.0.1.1', 'abc:1')), true);
+assert.equal(isManagedChromeProfilePath(cacheStore), false);
+assert.equal(isManagedChromeProfilePath(join(homedir(), 'Library', 'Caches', 'AutoLeadPC')), false);
 assert.equal(isManagedChromeProfilePath(undefined), false);
