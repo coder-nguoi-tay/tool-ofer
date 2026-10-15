@@ -1178,6 +1178,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     const timer = setInterval(() => { void scan(); }, 1500);
     timer.unref?.();
     page.on('domcontentloaded', scan);
+    page.on('load', scan);
+    page.on('framenavigated', scan);
+    page.on('frameattached', scan);
+    page.on('popup', (popup) => watchPage(popup));
     page.on('close', () => clearInterval(timer));
     void scan();
   }
@@ -1185,3 +1189,4 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
   context.on('page', watchPage);
   for (const page of context.pages()) watchPage(page);
 }
+
