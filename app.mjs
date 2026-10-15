@@ -99,7 +99,15 @@ const maxAliveBrowsers = Math.max(1, Math.min(6, Math.floor(Number(process.env.A
 const navigationTimeout = 30_000;
 
 const checkUrl = 'https://ipinfo.io/json';
-const browserIpUrl = 'https://api.ipify.org?format=json';
+/**
+ * Các dịch vụ xác minh IP thoát, thử lần lượt cho tới khi có kết quả.
+ * Dùng nhiều dịch vụ vì api.ipify.org dễ bị giới hạn tần suất khi mở nhiều cửa sổ cùng lúc.
+ */
+const browserIpCheckUrls = [
+  'https://api.ipify.org?format=json',
+  'https://api64.ipify.org?format=json',
+  'https://ipinfo.io/json',
+];
 
 /** Các trang tự soi fingerprint, lấy từ Config/Browser/bookmarks.txt của bản PC. */
 const bookmarks = ['https://iphey.com/', 'https://www.browserscan.net/', 'https://ipinfo.io/json'];
@@ -435,29 +443,37 @@ async function openBrowserThroughProxy({
 async function verifyBrowserExitIp(browser, usedExitIps, onExitIp) {
   const ipPage = await browser.newPage();
   let exitIp;
+  const failures = [];
   try {
-    const response = await ipPage.goto(browserIpUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: navigationTimeout,
-    });
-    if (!response || response.status() < 200 || response.status() >= 300) {
+    for (const checkUrl of browserIpCheckUrls) {
+      try {
+        const response = await ipPage.goto(checkUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: navigationTimeout,
+        });
+        if (!response || response.status() < 200 || response.status() >= 300) {
+          throw new IpVerificationError(
+            `trả HTTP ${response?.status() ?? 'không có phản hồi'}`,
+          );
+        }
+        const ipResponse = JSON.parse(await ipPage.evaluate(() => document.body.innerText));
+        if (typeof ipResponse.ip !== 'string' || !ipResponse.ip.trim()) {
+          throw new IpVerificationError('không trả địa chỉ IP');
+        }
+        exitIp = ipResponse.ip.trim();
+        break;
+      } catch (error) {
+        const reason = error instanceof IpVerificationError
+          ? error.message
+          : 'không kết nối được';
+        failures.push(`${new URL(checkUrl).host}: ${reason}`);
+      }
+    }
+    if (!exitIp) {
       throw new IpVerificationError(
-        `Dịch vụ xác minh IP trả HTTP ${response?.status() ?? 'không có phản hồi'}.`,
+        `Tất cả dịch vụ xác minh IP đều lỗi (${failures.join(' | ')}).`,
       );
     }
-    let ipResponse;
-    try {
-      ipResponse = JSON.parse(await ipPage.evaluate(() => document.body.innerText));
-    } catch (error) {
-      throw new IpVerificationError('Dịch vụ xác minh IP không trả JSON hợp lệ.', error);
-    }
-    if (typeof ipResponse.ip !== 'string' || !ipResponse.ip.trim()) {
-      throw new IpVerificationError('Dịch vụ xác minh IP không trả địa chỉ IP.');
-    }
-    exitIp = ipResponse.ip.trim();
-  } catch (error) {
-    if (error instanceof IpVerificationError) throw error;
-    throw new IpVerificationError('Không thể kết nối tới dịch vụ xác minh IP.', error);
   } finally {
     await ipPage.close().catch(() => {});
   }
@@ -1249,11 +1265,24 @@ async function downloadRealChromeVersions(requestBody) {
  * @since 2026-10-14
  */
 async function readInstalledChromeChannel(appPath, channel) {
-  const executableName = channel === 'stable' || /^\d+(?:\.\d+){0,3}$/.test(channel)
-    ? 'Google Chrome'
-    : `Google Chrome ${channel[0].toUpperCase()}${channel.slice(1)}`;
-  const executablePath = join(appPath, 'Contents', 'MacOS', executableName);
-  await access(executablePath);
+  // Bản tải từ Chrome for Testing dùng tên binary riêng, nên thử cả hai tên.
+  const executableNames = channel === 'stable' || /^\d+(?:\.\d+){0,3}$/.test(channel)
+    ? ['Google Chrome', 'Google Chrome for Testing']
+    : [`Google Chrome ${channel[0].toUpperCase()}${channel.slice(1)}`];
+  let executablePath;
+  for (const executableName of executableNames) {
+    const candidatePath = join(appPath, 'Contents', 'MacOS', executableName);
+    try {
+      await access(candidatePath);
+      executablePath = candidatePath;
+      break;
+    } catch {
+      // Tên còn lại sẽ được thử; không tìm thấy tên nào thì báo lỗi bên dưới.
+    }
+  }
+  if (!executablePath) {
+    throw new Error(`Không tìm thấy binary Chrome trong ${appPath}.`);
+  }
   const infoPath = join(appPath, 'Contents', 'Info.plist');
   const { stdout } = await executeFile('/usr/libexec/PlistBuddy', [
     '-c', 'Print :CFBundleShortVersionString', infoPath,
@@ -1273,7 +1302,7 @@ async function readInstalledChromeChannel(appPath, channel) {
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-14
  */
-async function listInstalledChromeChannels() {
+export async function listInstalledChromeChannels() {
   const stableApp = installedChromeAppPath;
   const archivedAppNames = await readdir(chromeRegularBuildDirectory).catch((error) => {
     if (error.code === 'ENOENT') return [];
@@ -1292,13 +1321,20 @@ async function listInstalledChromeChannels() {
     ['beta', join(chromeChannelDirectory, 'Google Chrome Beta.app')],
     ['dev', join(chromeChannelDirectory, 'Google Chrome Dev.app')],
     ['canary', join(chromeChannelDirectory, 'Google Chrome Canary.app')],
+    // Kho Chrome for Testing xếp cuối: chỉ dùng khi cần thêm major, và không áp sàn 150
+    // vì đây là nguồn duy nhất còn các bản cũ hơn.
+    ...(await listInstalledChromeVersions()).map((build) => [
+      build.version,
+      join(build.executablePath, '..', '..', '..'),
+      1,
+    ]),
   ];
   const builds = [];
   const seenMajors = new Set();
-  for (const [channel, appPath] of channelApps) {
+  for (const [channel, appPath, minimumMajor = 150] of channelApps) {
     try {
       const build = await readInstalledChromeChannel(appPath, channel);
-      if (build.major >= 150 && !seenMajors.has(build.major)) {
+      if (build.major >= minimumMajor && !seenMajors.has(build.major)) {
         builds.push(build);
         seenMajors.add(build.major);
       }
