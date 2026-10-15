@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// - Author: ductv <ductv@getflycrm.com>
     /// - Since: 2026-10-10
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMainMenu()
         if let iconURL = Bundle.main.url(forResource: "AutoLeadPC", withExtension: "icns"),
            let applicationIcon = NSImage(contentsOf: iconURL) {
             NSApplication.shared.applicationIconImage = applicationIcon
@@ -265,6 +266,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             }
             showError("Không kết nối được máy chủ giao diện ở cổng 3210.")
         }
+    }
+
+    /// Sets up standard macOS application menus so shortcuts like Cmd+A, Cmd+C, Cmd+V, Cmd+X, Cmd+Z, Cmd+Q work.
+    /// - Author: coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+    /// - Since: 2026-10-15
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        // 1. Application menu
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Về AutoLeadPC Mac", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Ẩn AutoLeadPC Mac", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthersItem = NSMenuItem(title: "Ẩn các ứng dụng khác", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+        appMenu.addItem(withTitle: "Hiện tất cả", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Thoát AutoLeadPC Mac", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        // 2. Edit menu (Bắt buộc để bàn phím gõ được Cmd+A, Cmd+C, Cmd+V, Cmd+X, Cmd+Z trong WKWebView)
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Chỉnh sửa")
+        editMenu.addItem(withTitle: "Hoàn tác", action: #selector(UndoManager.undo), keyEquivalent: "z")
+        let redoItem = NSMenuItem(title: "Làm lại", action: #selector(UndoManager.redo), keyEquivalent: "Z")
+        editMenu.addItem(redoItem)
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Cắt", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Sao chép", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Dán", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Chọn tất cả", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
+        // 3. Window menu
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Cửa sổ")
+        windowMenu.addItem(withTitle: "Thu nhỏ", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Thu phóng", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(withTitle: "Đóng cửa sổ", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+
+        NSApplication.shared.mainMenu = mainMenu
     }
 
     /// Shows a native macOS alert for startup failures.
