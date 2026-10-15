@@ -834,7 +834,6 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
   const results = [];
   let nextProxyIndex = 0;
   let successfulBrowsers = 0;
-  let ipVerificationUnavailable = false;
 
   /**
    * Thử proxy tiếp theo cho một slot đến khi mở thành công một cửa sổ Chrome.
@@ -846,8 +845,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
    * @since 2026-10-15
    */
   const attemptProxy = async (workerIndex) => {
-    while (!ipVerificationUnavailable
-      && successfulBrowsers < targetSuccessCount
+    while (successfulBrowsers < targetSuccessCount
       && nextProxyIndex < availableProxies.length) {
       const proxy = availableProxies[nextProxyIndex];
       nextProxyIndex += 1;
@@ -942,11 +940,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
         };
         await persistProxyUsageHistory(usageHistory);
         if (verificationFailure) {
-          ipVerificationUnavailable = true;
-          autoRefill.enabled = false;
-          autoRefill.message = 'Tự bù đã tạm dừng vì dịch vụ xác minh IP không hoạt động.';
-          results.push('Proxy ' + proxy.server + ': chưa xác minh được IP; đã giữ proxy để thử lại sau ('
-            + failureReason + '). Dừng thử các proxy tiếp theo trong lượt này.');
+          results.push('Proxy ' + proxy.server + ': lỗi kết nối khi xác minh IP ('
+            + failureReason + '); sẽ thử proxy khác.');
           continue;
         }
         results.push('Proxy ' + proxy.server + ': loại bỏ IP ' + (exitIp ?? 'chưa xác định')
@@ -960,10 +955,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
     (_, workerIndex) => attemptProxy(workerIndex),
   ));
 
-  if (ipVerificationUnavailable) {
-    warnings.push('Dịch vụ xác minh IP trả lỗi hoặc dữ liệu không hợp lệ. Proxy bị ảnh hưởng chưa bị '
-      + 'đánh dấu hỏng; lượt đã dừng và tự bù đã tạm dừng để tránh tiêu thụ thêm proxy.');
-  } else if (successfulBrowsers < targetSuccessCount) {
+  if (successfulBrowsers < targetSuccessCount) {
     warnings.push('Chỉ mở được ' + successfulBrowsers + '/' + targetSuccessCount
       + ' trình duyệt; các proxy còn lại đã hết hoặc không tải đúng trang đích.');
   }
@@ -1907,8 +1899,9 @@ async function openBrowserWithInstalledChrome({
     if (!response || response.status() >= 400) {
       throw new Error(`website trả HTTP ${response?.status() ?? 'không có phản hồi'}`);
     }
-    if (await hasTrafficBlocked(page)) {
-      throw new Error('trang đích hiển thị Traffic Blocked!');
+    const deadReason = await getDeadOrBlockedReason(page);
+    if (deadReason) {
+      throw new Error(`trang đích hiển thị ${deadReason}`);
     }
     await page.bringToFront().catch(() => {});
 
@@ -2068,24 +2061,59 @@ function attachBrowserLogger(context, session) {
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-export async function hasTrafficBlocked(page) {
+export async function getDeadOrBlockedReason(page) {
   try {
-    if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return false;
+    if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return null;
+    const currentUrl = typeof page.url === 'function' ? page.url() : (page.url || '');
+    if (typeof currentUrl === 'string' && (currentUrl.startsWith('chrome-error://') || currentUrl.startsWith('about:neterror'))) {
+      return 'Lỗi mạng trình duyệt (chrome-error)';
+    }
+
     const evaluatePromise = page.evaluate(() => {
       const title = document.title || '';
       const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
       const docText = document.documentElement ? (document.documentElement.innerText || document.documentElement.textContent || '') : '';
       const fullText = `${title} ${bodyText} ${docText}`;
-      return /traffic\s+blocked/i.test(fullText);
+
+      if (/traffic\s+blocked/i.test(fullText)) {
+        return 'Traffic Blocked!';
+      }
+
+      const netErrorMatch = fullText.match(/\b(ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_PROXY_CONNECTION_FAILED|ERR_SOCKS_CONNECTION_FAILED|ERR_TUNNEL_CONNECTION_FAILED|ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_REFUSED|ERR_EMPTY_RESPONSE|ERR_NAME_NOT_RESOLVED|DNS_PROBE_FINISHED_NXDOMAIN|ERR_INTERNET_DISCONNECTED|ERR_ADDRESS_UNREACHABLE|ERR_SSL_PROTOCOL_ERROR|ERR_NETWORK_CHANGED)\b/i);
+      if (netErrorMatch) {
+        return netErrorMatch[1].toUpperCase();
+      }
+
+      if (/this site can[’']t be reached|không thể truy cập trang web này/i.test(fullText)) {
+        return 'This site can’t be reached';
+      }
+      if (/unexpectedly closed the connection|đã bất ngờ đóng kết nối/i.test(fullText)) {
+        return 'ERR_CONNECTION_CLOSED';
+      }
+      if (/checking the proxy and the firewall|kiểm tra proxy và tường lửa/i.test(fullText)) {
+        return 'Lỗi kết nối proxy';
+      }
+
+      return null;
     });
+
     const timeoutPromise = new Promise((resolve) => {
-      const timeoutId = setTimeout(() => resolve(false), 2000);
+      const timeoutId = setTimeout(() => resolve(null), 2000);
       timeoutId.unref?.();
     });
-    return Boolean(await Promise.race([evaluatePromise, timeoutPromise]));
+
+    const result = await Promise.race([evaluatePromise, timeoutPromise]);
+    if (typeof result === 'string' && result.trim()) return result.trim();
+    if (result === true) return 'Traffic Blocked!';
+    return null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function hasTrafficBlocked(page) {
+  const reason = await getDeadOrBlockedReason(page);
+  return Boolean(reason);
 }
 
 /**
@@ -2109,7 +2137,8 @@ export function watchTrafficBlockedPage(session) {
           : [];
         for (const page of pages) {
           if (typeof page?.isClosed === 'function' && page.isClosed()) continue;
-          if (await hasTrafficBlocked(page)) {
+          const deadReason = await getDeadOrBlockedReason(page);
+          if (deadReason) {
             blocked = true;
             clearInterval(timer);
             session.closingDueToTrafficBlocked = true;
@@ -2123,7 +2152,7 @@ export function watchTrafficBlockedPage(session) {
                   history.proxies[session.proxyKey] = {
                     ...history.proxies[session.proxyKey],
                     status: 'failed',
-                    reason: 'Traffic Blocked!',
+                    reason: deadReason,
                     completedAt: new Date().toISOString(),
                   };
                   await persistProxyUsageHistory(history);
@@ -2137,9 +2166,23 @@ export function watchTrafficBlockedPage(session) {
               ? `Chrome ${session.chromeVersion}`
               : (session.profileId ? `Profile ${session.profileId}` : `Slot ${(session.tileIndex ?? 0) + 1}`);
 
-            autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) hiển thị Traffic Blocked!; `
-              + 'đã đóng cửa sổ và đang tự động mở IP khác thay thế…';
+            autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) bị ${deadReason}; `
+              + 'đã đóng cửa sổ và đang tự động mở sock khác thay thế…';
 
+            try {
+              if (session.browser?.pages) {
+                for (const p of session.browser.pages()) {
+                  if (!p.isClosed()) {
+                    p.evaluate((reason) => {
+                      const b = document.getElementById('__autolead_ip_badge');
+                      if (b) b.innerHTML = `⚠️ <strong>${reason}</strong> Đang đổi sock…`;
+                    }, deadReason).catch(() => {});
+                  }
+                }
+              }
+            } catch {}
+
+            chromeBuildRotationCounter += 1;
             await page.close().catch(() => {});
             await session.browser?.close?.().catch(() => {});
             queueAutomaticRefill();

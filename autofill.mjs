@@ -262,7 +262,7 @@ export function getDobString(r) {
  */
 export function getAddressString(r) {
   if (!r || typeof r !== 'object') return '';
-  return r.address || r.streetaddress || r.street || r.diachi || r.addr || r.address1 || r.addressline1 || r.street1 || r.homeaddress || r.fulladdress || '';
+  return r.address || r.streetaddress || r.street || r.street_address || r.streetaddr || r.diachi || r.addr || r.address1 || r.address_1 || r.addressline1 || r.streetline1 || r.street1 || r.homeaddress || r.fulladdress || '';
 }
 
 /**
@@ -438,7 +438,7 @@ const semanticCategories = [
   },
   {
     type: 'address',
-    patterns: [/address/, /^street/, /^diachi$/, /^addr/, /address1/, /addressline1/, /streetline1/, /streetaddress/, /street1/],
+    patterns: [/address/, /street/, /^diachi$/, /^addr/, /address1/, /addressline1/, /streetline1/, /streetaddress/, /street1/],
     resolve: (r) => getAddressString(r),
   },
   {

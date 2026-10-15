@@ -10,6 +10,7 @@ import {
   isManagedChromeProfilePath,
   createProxyUsageKey,
   hasTrafficBlocked,
+  getDeadOrBlockedReason,
   mapWithLimit,
   normalizeUrl,
   parseProxyLine,
@@ -217,6 +218,54 @@ for (const text of normalTexts) {
   assert.ok(!/traffic\s+blocked/i.test(text), `không được nhận nhầm "${text}"`);
 }
 
+// Test phát hiện lỗi mạng / mất kết nối / ERR_CONNECTION_CLOSED / chrome-error://
+const connectionErrorSample = `
+This site can’t be reached
+ipinfo.io unexpectedly closed the connection.
+Try:
+
+Checking the connection
+Checking the proxy and the firewall
+ERR_CONNECTION_CLOSED
+`;
+assert.equal(
+  await hasTrafficBlocked({
+    isClosed: () => false,
+    url: () => 'https://ipinfo.io',
+    evaluate: async () => 'ERR_CONNECTION_CLOSED',
+  }),
+  true,
+);
+assert.equal(
+  await getDeadOrBlockedReason({
+    isClosed: () => false,
+    url: () => 'chrome-error://chromewebdata/',
+    evaluate: async () => null,
+  }),
+  'Lỗi mạng trình duyệt (chrome-error)',
+);
+assert.equal(
+  await hasTrafficBlocked({
+    isClosed: () => false,
+    url: () => 'chrome-error://chromewebdata/',
+    evaluate: async () => null,
+  }),
+  true,
+);
+assert.equal(
+  await getDeadOrBlockedReason({
+    isClosed: () => false,
+    url: () => 'https://ipinfo.io',
+    evaluate: () => {
+      const fullText = connectionErrorSample;
+      const netErrorMatch = fullText.match(/\b(ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_PROXY_CONNECTION_FAILED|ERR_SOCKS_CONNECTION_FAILED)\b/i);
+      if (netErrorMatch) return netErrorMatch[1].toUpperCase();
+      return null;
+    },
+  }),
+  'ERR_CONNECTION_CLOSED',
+);
+
 // Test parseAutofillRecords: hỗ trợ đầy đủ các trường SSN, Email, Banking và tự phục hồi JSON cắt cụt
 const sampleLeadJson = `[
   {
@@ -363,6 +412,8 @@ assert.equal(matchFieldValue(['v3-gender'], jeremy), 'Male');
 
 // Kiểm tra đối sánh form Vector landing page (data-vector-field="address1", "city", "state", .input-group, nextElementSibling label):
 assert.equal(matchFieldValue(['address1', 'Street Address *', 'input-field'], jeremy), '723 e 6th st');
+assert.equal(matchFieldValue(['Street Address *'], jeremy), '723 e 6th st');
+assert.equal(matchFieldValue(['Street Address'], jeremy), '723 e 6th st');
 assert.equal(matchFieldValue(['city', 'City *', 'input-field'], jeremy), 'Dewey');
 assert.equal(matchFieldValue(['state', 'State *', 'Select state…'], jeremy, { kind: 'select' }), 'OK');
 
