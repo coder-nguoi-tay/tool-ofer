@@ -142,10 +142,64 @@
             <span>Tự động tích ô điều khoản (consent checkbox) và bấm Gửi/Tiếp tục (Submit / Continue)</span>
           </label>
         </div>
+        <div style="margin-top: 10px; margin-bottom: 12px; border: 1px solid #d8dfeb; border-radius: 8px; padding: 10px 12px; background: #ffffff;">
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;">
+            <input type="checkbox" id="enable-lead-check" name="enableLeadCheck" checked style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+            <span>Kiểm tra lead sau màn 1 (chờ 2 lần x 30s, đúng IP mới fill tiếp, không có thì đóng đổi sock)</span>
+          </label>
+          <p class="hint" style="margin-top: 5px; margin-bottom: 6px;">
+            Khi điền xong màn 1, autofill sẽ dừng chờ và gọi API toffers.top mỗi 30s (tối đa 2 lần). Nếu IP sock xuất hiện trong lead, app tiếp tục điền các màn sau; nếu không có lead, app sẽ đóng Chrome để mở sock tiếp theo cho đến khi hết sock.
+          </p>
+          <details id="lead-check-advanced" style="margin-top: 6px; font-size: 11px;">
+            <summary style="cursor: pointer; color: #2866e8; font-weight: 500;">Tùy chỉnh API kiểm tra lead (URL, Cookie, datas, chu kỳ)</summary>
+            <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+              <div>
+                <label for="lead-check-api-url" style="font-size: 11px; margin-bottom: 2px;">URL API kiểm tra lead</label>
+                <input id="lead-check-api-url" name="leadCheckApiUrl" type="text" value="https://toffers.top/partner/chat_leading/get_lead_datas" style="font-size: 11px; padding: 6px;">
+              </div>
+              <div>
+                <label for="lead-check-cookie" style="font-size: 11px; margin-bottom: 2px;">Cookie xác thực</label>
+                <input id="lead-check-cookie" name="leadCheckCookie" type="text" value="qcodes_=7p0d1pg081d433i45giksp7k5fvm386o; qcodes_sound=1" style="font-size: 11px; padding: 6px;">
+              </div>
+              <div class="row">
+                <div>
+                  <label for="lead-check-datas" style="font-size: 11px; margin-bottom: 2px;">Tham số datas (POST)</label>
+                  <input id="lead-check-datas" name="leadCheckDatas" type="text" value="1504" style="font-size: 11px; padding: 6px;">
+                </div>
+                <div>
+                  <label for="lead-check-interval" style="font-size: 11px; margin-bottom: 2px;">Chu kỳ gọi (giây)</label>
+                  <input id="lead-check-interval" name="leadCheckInterval" type="number" min="5" max="300" value="30" style="font-size: 11px; padding: 6px;">
+                </div>
+                <div>
+                  <label for="lead-check-max-attempts" style="font-size: 11px; margin-bottom: 2px;">Số lần thử tối đa</label>
+                  <input id="lead-check-max-attempts" name="leadCheckMaxAttempts" type="number" min="1" max="10" value="2" style="font-size: 11px; padding: 6px;">
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
         <div class="actions">
           <button id="save-button" class="secondary" type="button">Lưu cấu hình</button>
         </div>
+
         <p id="save-status" role="status" aria-live="polite">Chưa tải cấu hình đã lưu.</p>
+        <hr class="panel-divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h2 class="section-title" style="margin:0;">Thông tin đã dùng (<span id="used-records-count">0</span>)</h2>
+          <div style="display:flex;gap:8px;">
+            <button id="used-records-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xem</button>
+            <button id="used-records-clear-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xóa hết</button>
+          </div>
+        </div>
+        <div id="used-records-box" hidden>
+          <div style="max-height:200px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;">
+            <table id="used-records-table" style="width:100%;border-collapse:collapse;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;">
+              <thead><tr id="used-records-head"></tr></thead>
+              <tbody id="used-records-body"></tbody>
+            </table>
+            <p id="used-records-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:14px 0;margin:0;">Chưa có thông tin nào đã dùng.</p>
+          </div>
+        </div>
       </section>
 
       <section class="tab-panel" id="panel-proxies" role="tabpanel" aria-labelledby="tab-proxies" data-panel="proxies" hidden>
@@ -269,7 +323,10 @@
     const preferencesBridge = window.webkit?.messageHandlers?.autoleadPreferences;
     let autoRefillEnabled = true;
     let isRefreshingAutoRefillState = false;
-    const savedFieldNames = ['proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'autofillData', 'autoSubmitForm'];
+    const savedFieldNames = [
+      'proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'autofillData', 'autoSubmitForm',
+      'enableLeadCheck', 'leadCheckApiUrl', 'leadCheckCookie', 'leadCheckDatas', 'leadCheckInterval', 'leadCheckMaxAttempts',
+    ];
     const tabButtons = [...document.querySelectorAll('[role="tab"]')];
     const tabPanels = [...document.querySelectorAll('[role="tabpanel"]')];
 
@@ -390,13 +447,23 @@
         </div>
         <div class="chrome-sessions-grid">
           ${state.chromeSessions.map((session) => {
+            let leadTag = '';
+            if (session.leadCheckStatus === 'waiting') {
+              leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#92400e;">⏳ Đang chờ lead (30s)...</span>';
+            } else if (session.leadCheckStatus === 'confirmed') {
+              leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;">✅ Có lead về</span>';
+            } else if (session.leadCheckStatus === 'failed') {
+              leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fee2e2;color:#991b1b;">❌ Không lead (đang đổi)</span>';
+            }
+
             const extra = [
               session.autofillRecord ? `Lead #${session.autofillRecord} (${session.autofillFields} trường)` : '',
               session.autofillError ? `Lỗi: ${session.autofillError}` : '',
+              session.leadCheckMessage ? session.leadCheckMessage : '',
               session.extensions && !session.extensions.startsWith('không có') ? `Ext: ${session.extensions}` : '',
             ].filter(Boolean).join(' · ');
 
-            const tooltipText = `IP Exit: ${session.exitIp}\nCửa sổ ${session.slot} (Chrome ${session.version})\nProxy: ${session.proxy || 'Trực tiếp'}`;
+            const tooltipText = `IP Exit: ${session.exitIp}\nCửa sổ ${session.slot} (Chrome ${session.version})\nProxy: ${session.proxy || 'Trực tiếp'}${session.leadCheckMessage ? '\n' + session.leadCheckMessage : ''}`;
 
             return `
               <div class="chrome-session-card">
@@ -406,6 +473,7 @@
                     <strong style="color: #70DFFF;">IP: ${session.exitIp}</strong><br>
                     <span>Cửa sổ ${session.slot} · Chrome ${session.version}</span><br>
                     <span style="color: #94a3b8; font-size: 10px;">${session.proxy || 'Trực tiếp'}</span>
+                    ${session.leadCheckMessage ? `<br><span style="color:#fbbf24;font-size:10px;">${session.leadCheckMessage}</span>` : ''}
                   </div>
                 </div>
                 <div class="chrome-card-details">
@@ -413,8 +481,11 @@
                     <span class="chrome-card-slot">Cửa sổ ${session.slot}</span>
                     <span class="chrome-card-version">v${session.version}</span>
                   </div>
-                  <div class="chrome-card-ip" title="IP Exit: ${session.exitIp}">
-                    <span>🌐</span> ${session.exitIp}
+                  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <div class="chrome-card-ip" title="IP Exit: ${session.exitIp}">
+                      <span>🌐</span> ${session.exitIp}
+                    </div>
+                    ${leadTag}
                   </div>
                   ${extra ? `<div class="chrome-card-extra" title="${extra}">${extra}</div>` : ''}
                 </div>
@@ -496,9 +567,11 @@
       warnings.textContent = '';
       try {
         const autoSubmitEl = form.elements.namedItem('autoSubmitForm');
+        const enableLeadCheckEl = form.elements.namedItem('enableLeadCheck');
         const payload = {
           ...Object.fromEntries(new FormData(form)),
           autoSubmitForm: autoSubmitEl ? autoSubmitEl.checked : true,
+          enableLeadCheck: enableLeadCheckEl ? enableLeadCheckEl.checked : true,
           ...overrides,
         };
         const response = await fetch(endpoint, {
@@ -720,6 +793,48 @@
     });
     document.querySelector('#log-html-close').addEventListener('click', () => logHtmlModal.classList.remove('open'));
     logHtmlModal.addEventListener('click', (e) => { if (e.target === logHtmlModal) logHtmlModal.classList.remove('open'); });
+
+    // ── Thông tin autofill đã dùng ─────────────────────────────────────────
+    const usedRecordsCount = document.querySelector('#used-records-count');
+    const usedRecordsBox = document.querySelector('#used-records-box');
+    const usedRecordsHead = document.querySelector('#used-records-head');
+    const usedRecordsBody = document.querySelector('#used-records-body');
+    const usedRecordsEmpty = document.querySelector('#used-records-empty');
+
+    async function loadUsedRecords() {
+      try {
+        const { count, records } = await fetch('/autofill-used').then((r) => r.json());
+        usedRecordsCount.textContent = count;
+        if (records.length === 0) {
+          usedRecordsHead.innerHTML = '';
+          usedRecordsBody.innerHTML = '';
+          usedRecordsEmpty.hidden = false;
+          return;
+        }
+        usedRecordsEmpty.hidden = true;
+        const cols = [...new Set(records.flatMap(Object.keys))];
+        usedRecordsHead.innerHTML = cols.map((c) => `<th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;white-space:nowrap;">${escHtml(c)}</th>`).join('');
+        usedRecordsBody.innerHTML = records.map((r) =>
+          `<tr>${cols.map((c) => `<td style="padding:4px 7px;border-bottom:1px solid #f0f2f7;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;">${escHtml(r[c] ?? '')}</td>`).join('')}</tr>`
+        ).join('');
+      } catch {}
+    }
+
+    document.querySelector('#used-records-btn').addEventListener('click', async () => {
+      const isHidden = usedRecordsBox.hidden;
+      usedRecordsBox.hidden = !isHidden;
+      if (isHidden) await loadUsedRecords();
+    });
+
+    document.querySelector('#used-records-clear-btn').addEventListener('click', async () => {
+      await fetch('/autofill-used/clear', { method: 'POST' });
+      await loadUsedRecords();
+      usedRecordsBox.hidden = false;
+    });
+
+    // Cập nhật số đếm khi vào tab Thiết lập
+    document.querySelector('#tab-setup').addEventListener('click', loadUsedRecords);
+    loadUsedRecords();
 
   </script>
 </body>

@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import assert from 'node:assert/strict';
 import { parseAutofillRecords, matchFieldValue, isConsentCheckbox, handleRadioAndSurveyOptions } from './autofill.mjs';
+import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress } from './lead-check.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
@@ -429,3 +430,45 @@ assert.equal(isManagedChromeProfilePath(join(cacheStore, 'stable', '155.0.1.1', 
 assert.equal(isManagedChromeProfilePath(cacheStore), false);
 assert.equal(isManagedChromeProfilePath(join(homedir(), 'Library', 'Caches', 'AutoLeadPC')), false);
 assert.equal(isManagedChromeProfilePath(undefined), false);
+
+// Test kiểm tra lead từ API toffers.top (isLeadPresent, normalizeIpAddress, DEFAULT_LEAD_CONFIG)
+assert.equal(normalizeIpAddress('99.145.85.141'), '99.145.85.141');
+assert.equal(normalizeIpAddress(' 99.145.85.141:8080 '), '99.145.85.141');
+assert.equal(normalizeIpAddress('socks5://1.2.3.4:1080'), '1.2.3.4');
+assert.equal(normalizeIpAddress('http://5.6.7.8:8080'), '5.6.7.8');
+assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 30);
+assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 2);
+
+const sampleApiResponse = {
+  results: [
+    {
+      id: '29721',
+      typeoffer: '1',
+      clickid: 'S9Mnj5lf4UbkJ5dFUB',
+      offerid: '2134',
+      point: '0.5',
+      ip: '99.145.85.141',
+      geo: 'US',
+      nameoff: 'Cash Assistance',
+    },
+    {
+      id: '29720',
+      ip: '174.164.217.22',
+      nameoff: 'Cash Assistance',
+    },
+  ],
+  check: '29721',
+};
+
+// Khớp chính xác IP
+assert.equal(isLeadPresent(sampleApiResponse, '99.145.85.141'), true);
+assert.equal(isLeadPresent(sampleApiResponse, '174.164.217.22'), true);
+assert.equal(isLeadPresent(sampleApiResponse, '99.145.85.141:4000'), true);
+assert.equal(isLeadPresent(sampleApiResponse, ['1.1.1.1', '99.145.85.141']), true);
+// Không khớp IP khác
+assert.equal(isLeadPresent(sampleApiResponse, '1.2.3.4'), false);
+assert.equal(isLeadPresent(sampleApiResponse, null), false);
+assert.equal(isLeadPresent(null, '99.145.85.141'), false);
+// Hỗ trợ dạng JSON string
+assert.equal(isLeadPresent(JSON.stringify(sampleApiResponse), '99.145.85.141'), true);
+assert.equal(isLeadPresent(JSON.stringify(sampleApiResponse), '1.2.3.4'), false);

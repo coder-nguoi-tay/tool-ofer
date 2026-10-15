@@ -15,6 +15,12 @@ import {
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
+import {
+  DEFAULT_LEAD_CONFIG,
+  fetchLeadDatas,
+  isLeadPresent,
+  normalizeIpAddress,
+} from './lead-check.mjs';
 
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
@@ -47,6 +53,9 @@ const chromeTemplateSkippedNames = new Set([
 ]);
 let templateProfileContext = null;
 const proxyUsageHistoryPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'proxy-usage.json');
+const autofillUsedPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'autofill-used.json');
+/** @type {Set<string>} fingerprint = JSON của record đã dùng */
+let autofillUsedKeys = new Set();
 const port = Number(process.env.AUTOLEADPC_PORT) || 3210;
 
 /**
@@ -651,6 +660,25 @@ export function buildProxyUsageHistoryCsv(history) {
   ].join('\n');
 }
 
+/** Fingerprint ổn định cho một bản ghi autofill (không phụ thuộc thứ tự key). */
+function autofillRecordKey(record) {
+  return JSON.stringify(Object.fromEntries(Object.entries(record).sort()));
+}
+
+/** Nạp danh sách bản ghi đã dùng từ file. */
+async function loadAutofillUsed() {
+  try {
+    const data = JSON.parse(await readFile(autofillUsedPath, 'utf8'));
+    autofillUsedKeys = new Set(Array.isArray(data.keys) ? data.keys : []);
+  } catch { /* file chưa tồn tại */ }
+}
+
+/** Ghi thêm một bản ghi vào danh sách đã dùng. */
+async function markAutofillRecordUsed(record) {
+  autofillUsedKeys.add(autofillRecordKey(record));
+  await writeFile(autofillUsedPath, JSON.stringify({ keys: [...autofillUsedKeys] })).catch(() => {});
+}
+
 /**
  * Chạy handler trên từng phần tử nhưng không vượt quá mức đồng thời cho trước.
  *
@@ -787,6 +815,13 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
       proxyType: proxyType,
       websiteUrl: body.websiteUrl,
       autofillData: body.autofillData,
+      autoSubmitForm: body.autoSubmitForm !== false,
+      enableLeadCheck: body.enableLeadCheck !== false,
+      leadCheckApiUrl: body.leadCheckApiUrl,
+      leadCheckCookie: body.leadCheckCookie,
+      leadCheckDatas: body.leadCheckDatas,
+      leadCheckInterval: body.leadCheckInterval,
+      leadCheckMaxAttempts: body.leadCheckMaxAttempts,
     };
     if (autoRefill.targetCount < 1) autoRefill.targetCount = targetSuccessCount;
   }
@@ -842,6 +877,14 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           };
           await persistProxyUsageHistory(usageHistory);
         };
+        const leadConfig = {
+          enabled: body.enableLeadCheck !== false,
+          apiUrl: body.leadCheckApiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
+          cookie: body.leadCheckCookie || DEFAULT_LEAD_CONFIG.cookie,
+          datas: body.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
+          intervalSeconds: Number(body.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
+          maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
+        };
         const openedBrowser = await openBrowserWithInstalledChrome({
           build: installedChrome,
           proxy: proxy,
@@ -853,6 +896,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           tileIndex: tileIndex,
           autofillRecords: autofillRecords,
           autoSubmit: body.autoSubmitForm !== false,
+          leadConfig,
         });
         activeSession = openedBrowser.session;
         usageHistory.proxies[proxyKey] = {
@@ -943,6 +987,13 @@ async function launchUserRequestedBrowsers(requestBody) {
       proxyType: body.proxyType ?? 'socks5',
       websiteUrl: body.websiteUrl,
       autofillData: body.autofillData,
+      autoSubmitForm: body.autoSubmitForm !== false,
+      enableLeadCheck: body.enableLeadCheck !== false,
+      leadCheckApiUrl: body.leadCheckApiUrl,
+      leadCheckCookie: body.leadCheckCookie,
+      leadCheckDatas: body.leadCheckDatas,
+      leadCheckInterval: body.leadCheckInterval,
+      leadCheckMaxAttempts: body.leadCheckMaxAttempts,
     };
     autoRefill.targetCount = Math.min(
       maxAliveBrowsers,
@@ -1030,6 +1081,8 @@ function getAutoRefillStatus() {
         autofillRecord: session.autofillRecord ?? null,
         autofillFields: session.autofillFields ?? 0,
         autofillError: session.autofillError ?? null,
+        leadCheckStatus: session.leadCheckStatus ?? null,
+        leadCheckMessage: session.leadCheckMessage ?? null,
         extensions: session.extensions ?? null,
       }))
       .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
@@ -1587,6 +1640,136 @@ async function openTemplateProfile() {
 }
 
 /**
+ * Bắt đầu quy trình kiểm tra lead sau khi autofill hoàn thành màn đầu tiên.
+ * Chờ mỗi 30s gọi API toffers.top kiểm tra IP sock, tối đa 2 lần.
+ * Nếu IP xuất hiện: cho phép autofill tiếp tục các màn sau.
+ * Nếu không xuất hiện sau 2 lần: đóng Chrome và chuyển proxy tiếp theo cho đến khi hết sock.
+ *
+ * @param {object} session Phiên Chrome đang chạy.
+ * @param {object} leadConfig Cấu hình API và thời gian chờ.
+ * @return {Promise<void>} Hoàn tất quy trình kiểm tra lead.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+async function startLeadVerification(session, leadConfig) {
+  if (session.leadCheckRunning || leadConfig.enabled === false) return;
+  session.leadCheckRunning = true;
+  session.leadCheckStatus = 'waiting';
+
+  const exitIp = session.exitIp;
+  const proxyHost = session.proxyServer ? normalizeIpAddress(session.proxyServer) : null;
+  const targetIps = [exitIp, proxyHost].filter(Boolean);
+  const slotNum = (session.tileIndex ?? 0) + 1;
+  const label = `Slot ${slotNum} [IP: ${exitIp}]`;
+
+  console.log(`[LeadCheck] ${label}: Đã xong màn 1. Bắt đầu dừng chờ kiểm tra lead từ toffers.top...`);
+
+  const updateBadge = (text) => {
+    try {
+      if (session.browser?.pages) {
+        for (const p of session.browser.pages()) {
+          if (!p.isClosed()) {
+            p.evaluate((t) => {
+              const b = document.getElementById('__autolead_ip_badge');
+              if (b) b.innerHTML = t;
+            }, text).catch(() => {});
+          }
+        }
+      }
+    } catch {}
+  };
+
+  const intervalSeconds = leadConfig.intervalSeconds || DEFAULT_LEAD_CONFIG.intervalSeconds;
+  const maxAttempts = leadConfig.maxAttempts || DEFAULT_LEAD_CONFIG.maxAttempts;
+  const intervalMs = intervalSeconds * 1000;
+
+  session.leadCheckMessage = `Đã xong màn 1; đang dừng chờ ${intervalSeconds}s để kiểm tra lead lần 1...`;
+  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang chờ lead (lần 1/${maxAttempts})...</span>`);
+
+  let leadFound = false;
+  let attempt = 0;
+
+  while (attempt < maxAttempts) {
+    attempt += 1;
+    // Chờ 30 giây (hoặc intervalMs)
+    await new Promise((resolve) => { setTimeout(resolve, intervalMs); });
+
+    if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
+      return; // Phiên đã bị đóng bởi người dùng
+    }
+
+    try {
+      console.log(`[LeadCheck] ${label}: Gọi API kiểm tra lead lần ${attempt}/${maxAttempts}...`);
+      session.leadCheckMessage = `Đang gọi API kiểm tra lead lần ${attempt}/${maxAttempts} (IP: ${exitIp})...`;
+
+      const leadData = await fetchLeadDatas(leadConfig);
+      const isPresent = isLeadPresent(leadData, targetIps);
+
+      if (isPresent) {
+        leadFound = true;
+        console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead cho IP ${exitIp} ở lần ${attempt}! Tiếp tục fill màn sau.`);
+        break;
+      } else {
+        console.log(`[LeadCheck] ${label}: ⚠️ Chưa thấy IP ${exitIp} trong dữ liệu lead (lần ${attempt}/${maxAttempts}).`);
+        if (attempt < maxAttempts) {
+          session.leadCheckMessage = `Chưa có lead lần ${attempt}; chờ tiếp ${intervalSeconds}s để kiểm tra lần ${attempt + 1}...`;
+          updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang chờ lead (lần ${attempt + 1}/${maxAttempts})...</span>`);
+        }
+      }
+    } catch (err) {
+      console.error(`[LeadCheck] ${label}: Lỗi khi gọi API kiểm tra lead: ${err.message}`);
+      session.leadCheckMessage = `Lỗi gọi API: ${err.message.split('\n')[0]}; đang thử lại...`;
+    }
+  }
+
+  if (leadFound) {
+    session.leadCheckStatus = 'confirmed';
+    session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp}! Đang tiếp tục tự điền các màn sau.`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead về!</span>`);
+
+    const logs = browserSessionLogs.get(session);
+    if (logs) {
+      logs.push({
+        time: new Date().toISOString(),
+        type: 'lead_confirmed',
+        ip: exitIp,
+        detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt}.`,
+      });
+    }
+
+    // Kích hoạt ngay lượt quét autofill tiếp theo để điền màn 2 tức thì
+    try {
+      session.triggerAutofillScan?.();
+    } catch {}
+  } else {
+    session.leadCheckStatus = 'failed';
+    session.leadCheckMessage = `❌ Không có lead về cho IP ${exitIp} sau ${maxAttempts} lần kiểm tra (${maxAttempts * intervalSeconds}s). Đang đổi sock...`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead, đang đổi sock...</span>`);
+
+    console.log(`[LeadCheck] ${label}: ❌ Không có lead sau ${maxAttempts} lần kiểm tra. Đóng Chrome này để mở sock tiếp theo.`);
+
+    try {
+      if (session.proxyKey) {
+        const history = await readProxyUsageHistory();
+        if (history?.proxies?.[session.proxyKey]) {
+          history.proxies[session.proxyKey] = {
+            ...history.proxies[session.proxyKey],
+            status: 'failed',
+            reason: `Không có lead về sau ${maxAttempts} lần kiểm tra (IP ${exitIp})`,
+            completedAt: new Date().toISOString(),
+          };
+          await persistProxyUsageHistory(history);
+        }
+      }
+    } catch {}
+
+    autoRefill.message = `Slot ${slotNum} (IP ${exitIp}) không có lead về; đã đóng và đang mở sock tiếp theo…`;
+    session.suppressAutoRefill = false;
+    await session.browser?.close?.().catch(() => {});
+  }
+}
+
+/**
  * Mở một cửa sổ Google Chrome thường, xác minh IP và trang đích trong sổ proxy chung.
  *
  * Múi giờ lấy từ ipinfo qua proxy; IP dùng cho lịch sử được xác minh trong trình duyệt.
@@ -1599,7 +1782,7 @@ async function openTemplateProfile() {
  * @since 2026-10-15
  */
 async function openBrowserWithInstalledChrome({
-  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true,
+  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {},
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
@@ -1647,13 +1830,26 @@ async function openBrowserWithInstalledChrome({
     suppressAutoRefill: false,
     proxyKey,
     proxyServer: proxy.server,
+    leadCheckStatus: null,
+    leadCheckMessage: null,
     extensions: extensionNames.length > 0
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
   };
   attachBrowserLogger(context, session);
-  attachAutofill(context, autofillRecords, new URL(websiteUrl).origin, session, { autoSubmit });
+  // Lọc các bản ghi chưa dùng; nếu hết thì dùng lại toàn bộ (reset tự động)
+  const unusedRecords = autofillRecords.filter((r) => !autofillUsedKeys.has(autofillRecordKey(r)));
+  const recordPool = unusedRecords.length > 0 ? unusedRecords : autofillRecords;
+  attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
+    autoSubmit,
+    enableLeadCheck: leadConfig.enabled !== false,
+    onRecordPicked: (record) => { void markAutofillRecordUsed(record); },
+    onFirstScreenCompleted: () => {
+      void startLeadVerification(session, leadConfig);
+    },
+  });
   activeBrowsers.add(session);
+
   context.on('close', () => {
     activeBrowsers.delete(session);
     void relay?.close();
@@ -1962,6 +2158,7 @@ function exitWhenParentExits() {
  * @since 2026-10-15
  */
 async function startLocalInterface() {
+  await loadAutofillUsed();
   const interfaceHtml = await readFile(userInterfacePath, 'utf8');
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
@@ -1983,6 +2180,21 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && request.url === '/state') {
       respondWithJson(response, 200, getAutoRefillStatus());
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/autofill-used') {
+      const list = [...autofillUsedKeys].map((key) => {
+        try { return JSON.parse(key); } catch { return {}; }
+      });
+      respondWithJson(response, 200, { count: list.length, records: list });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/autofill-used/clear') {
+      autofillUsedKeys.clear();
+      await writeFile(autofillUsedPath, JSON.stringify({ keys: [] })).catch(() => {});
+      respondWithJson(response, 200, { message: 'Đã xóa toàn bộ thông tin đã dùng.' });
       return;
     }
 

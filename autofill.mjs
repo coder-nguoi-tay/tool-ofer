@@ -841,6 +841,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
   }
   const record = records[session.recordIndex];
   session.autofillRecord = session.recordIndex + 1;
+  options.onRecordPicked?.(record);
 
   /**
    * Điền các trường còn trống trên form đang hiển thị của một trang và các frame con.
@@ -850,8 +851,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
    */
   async function fillVisibleForms(page) {
     if (page.isClosed()) return;
+    if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
     const currentUrl = page.url();
     if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:')) return;
+
 
     const frames = typeof page.frames === 'function' ? page.frames() : [page];
     const unmatchedFieldNames = new Set();
@@ -1139,6 +1142,15 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               } catch {
                 await submitBtn.evaluate((btn) => btn.click()).catch(() => {});
               }
+
+              // Màn đầu tiên vừa được submit: kích hoạt kiểm tra lead từ API nếu được cấu hình
+              if (options.enableLeadCheck !== false && !session.screen1Completed) {
+                session.screen1Completed = true;
+                session.leadCheckStatus = 'waiting';
+                if (typeof options.onFirstScreenCompleted === 'function') {
+                  options.onFirstScreenCompleted(session, page);
+                }
+              }
             }
           }
         } catch {}
@@ -1175,11 +1187,23 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         filling = false;
       }
     };
+    session.triggerAutofillScan = () => { void scan(); };
     const timer = setInterval(() => { void scan(); }, 1500);
     timer.unref?.();
     page.on('domcontentloaded', scan);
     page.on('load', scan);
-    page.on('framenavigated', scan);
+    page.on('framenavigated', (frame) => {
+      if (options.enableLeadCheck !== false && !session.screen1Completed && (session.autofillFields ?? 0) > 0) {
+        if (typeof page.mainFrame === 'function' && frame === page.mainFrame()) {
+          session.screen1Completed = true;
+          session.leadCheckStatus = 'waiting';
+          if (typeof options.onFirstScreenCompleted === 'function') {
+            options.onFirstScreenCompleted(session, page);
+          }
+        }
+      }
+      void scan();
+    });
     page.on('frameattached', scan);
     page.on('popup', (popup) => watchPage(popup));
     page.on('close', () => clearInterval(timer));
@@ -1189,4 +1213,5 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
   context.on('page', watchPage);
   for (const page of context.pages()) watchPage(page);
 }
+
 
