@@ -452,6 +452,8 @@
               leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#92400e;">⏳ Đang chờ lead (30s)...</span>';
             } else if (session.leadCheckStatus === 'confirmed') {
               leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;">✅ Có lead về</span>';
+            } else if (session.leadCheckStatus === 'api_error') {
+              leadTag = `<span style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fee2e2;color:#991b1b;" title="${session.leadCheckMessage || 'Lỗi API lead'}">⚠️ Lỗi API lead <button type="button" class="resume-lead-btn" data-slot="${session.slot}" style="background:#dc2626;color:#fff;border:none;border-radius:3px;padding:1px 5px;font-size:9px;cursor:pointer;">Tiếp tục fill</button></span>`;
             } else if (session.leadCheckStatus === 'failed') {
               leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fee2e2;color:#991b1b;">❌ Không lead (đang đổi)</span>';
             }
@@ -606,6 +608,26 @@
     }
 
     form.addEventListener('submit', handleLauncherSubmit);
+
+    document.addEventListener('click', async (event) => {
+      const btn = event.target.closest('.resume-lead-btn');
+      if (!btn) return;
+      const slot = btn.dataset.slot;
+      try {
+        btn.disabled = true;
+        btn.textContent = '...';
+        await fetch('/lead-check/resume', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ slot }),
+        });
+        await refreshAutoRefillState();
+      } catch (err) {
+        alert('Lỗi: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Tiếp tục fill';
+      }
+    });
     /**
      * Hiện bảng các IP exit đã dùng để biết IP nào sẽ bị từ chối ở lượt sau.
      * @return {Promise<void>} Hoàn tất khi bảng đã được vẽ.

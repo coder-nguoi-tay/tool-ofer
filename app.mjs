@@ -20,6 +20,7 @@ import {
   fetchLeadDatas,
   isLeadPresent,
   normalizeIpAddress,
+  LeadApiError,
 } from './lead-check.mjs';
 
 const executeFile = promisify(execFile);
@@ -1693,6 +1694,8 @@ async function startLeadVerification(session, leadConfig) {
 
   let leadFound = false;
   let attempt = 0;
+  let hasApiError = false;
+  let lastApiErrorMessage = '';
 
   while (attempt < maxAttempts) {
     attempt += 1;
@@ -1712,9 +1715,11 @@ async function startLeadVerification(session, leadConfig) {
 
       if (isPresent) {
         leadFound = true;
+        hasApiError = false;
         console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead cho IP ${exitIp} ở lần ${attempt}! Tiếp tục fill màn sau.`);
         break;
       } else {
+        hasApiError = false;
         console.log(`[LeadCheck] ${label}: ⚠️ Chưa thấy IP ${exitIp} trong dữ liệu lead (lần ${attempt}/${maxAttempts}).`);
         if (attempt < maxAttempts) {
           session.leadCheckMessage = `Chưa có lead lần ${attempt}; chờ tiếp ${intervalSeconds}s để kiểm tra lần ${attempt + 1}...`;
@@ -1722,8 +1727,11 @@ async function startLeadVerification(session, leadConfig) {
         }
       }
     } catch (err) {
-      console.error(`[LeadCheck] ${label}: Lỗi khi gọi API kiểm tra lead: ${err.message}`);
-      session.leadCheckMessage = `Lỗi gọi API: ${err.message.split('\n')[0]}; đang thử lại...`;
+      hasApiError = true;
+      lastApiErrorMessage = err.message.split('\n')[0];
+      console.error(`[LeadCheck] ${label}: ⚠️ Lỗi khi gọi API kiểm tra lead: ${lastApiErrorMessage}`);
+      session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}`;
+      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#dc2626;">⚠️ Lỗi API (${err.code || 'ERR'})</span>`);
     }
   }
 
@@ -1746,7 +1754,27 @@ async function startLeadVerification(session, leadConfig) {
     try {
       session.triggerAutofillScan?.();
     } catch {}
+  } else if (hasApiError) {
+    // API BỊ LỖI (Cookie hết hạn, link chết, Cloudflare chặn hoặc mất mạng):
+    // TUYỆT ĐỐI KHÔNG TẮT TRÌNH DUYỆT ĐỂ TRÁNH MẤT LEAD HOẶC PHÍ PROXY!
+    session.leadCheckStatus = 'api_error';
+    session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}. Đã giữ nguyên trình duyệt để bạn kiểm tra hoặc cập nhật Cookie!`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">⚠️ Giữ browser: Lỗi API</span>`);
+
+    console.warn(`[LeadCheck] ${label}: ⚠️ Gặp lỗi API (${lastApiErrorMessage}). GIỮ NGUYÊN TRÌNH DUYỆT để người dùng kiểm tra hoặc đổi Cookie.`);
+
+    const logs = browserSessionLogs.get(session);
+    if (logs) {
+      logs.push({
+        time: new Date().toISOString(),
+        type: 'lead_api_error',
+        ip: exitIp,
+        detail: `Lỗi gọi API toffers.top: ${lastApiErrorMessage}. Trình duyệt được giữ nguyên.`,
+      });
+    }
   } else {
+    // API hoạt động bình thường 100%, trả dữ liệu lead đầy đủ, nhưng thực sự IP sock không có lead:
+    // Đóng Chrome và chuyển sang phiên bản mới với sock tiếp theo
     session.leadCheckStatus = 'failed';
     session.closingDueToNoLead = true;
     session.leadCheckMessage = `❌ Không có lead về cho IP ${exitIp} sau ${maxAttempts} lần kiểm tra (${maxAttempts * intervalSeconds}s). Đang đổi sock và mở phiên bản mới...`;
@@ -1775,6 +1803,7 @@ async function startLeadVerification(session, leadConfig) {
     await session.browser?.close?.().catch(() => {});
   }
 }
+
 
 /**
  * Mở một cửa sổ Google Chrome thường, xác minh IP và trang đích trong sổ proxy chung.
@@ -2202,6 +2231,29 @@ async function startLocalInterface() {
       autofillUsedKeys.clear();
       await writeFile(autofillUsedPath, JSON.stringify({ keys: [] })).catch(() => {});
       respondWithJson(response, 200, { message: 'Đã xóa toàn bộ thông tin đã dùng.' });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/lead-check/resume') {
+      let bodyText = '';
+      for await (const chunk of request) bodyText += chunk;
+      const parsed = bodyText ? JSON.parse(bodyText) : {};
+      const targetSlot = Number(parsed.slot);
+      let foundSession = null;
+      for (const s of activeBrowsers) {
+        if ((s.tileIndex + 1) === targetSlot) {
+          foundSession = s;
+          break;
+        }
+      }
+      if (!foundSession) {
+        respondWithJson(response, 404, { error: `Không tìm thấy trình duyệt ở slot ${targetSlot}` });
+        return;
+      }
+      foundSession.leadCheckStatus = 'confirmed';
+      foundSession.leadCheckMessage = 'Đã mở khóa thủ công. Tiếp tục tự điền form.';
+      try { foundSession.triggerAutofillScan?.(); } catch {}
+      respondWithJson(response, 200, { message: `Slot ${targetSlot} đã được mở khóa để tiếp tục điền form.` });
       return;
     }
 

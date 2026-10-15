@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import assert from 'node:assert/strict';
 import { parseAutofillRecords, matchFieldValue, isConsentCheckbox, handleRadioAndSurveyOptions } from './autofill.mjs';
-import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress } from './lead-check.mjs';
+import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
@@ -472,3 +472,8 @@ assert.equal(isLeadPresent(null, '99.145.85.141'), false);
 // Hỗ trợ dạng JSON string
 assert.equal(isLeadPresent(JSON.stringify(sampleApiResponse), '99.145.85.141'), true);
 assert.equal(isLeadPresent(JSON.stringify(sampleApiResponse), '1.2.3.4'), false);
+
+const testAuthErr = new LeadApiError('Hết hạn', 'AUTH_EXPIRED', { status: 302 });
+assert.equal(testAuthErr.code, 'AUTH_EXPIRED');
+assert.equal(testAuthErr.name, 'LeadApiError');
+assert.equal(testAuthErr.details.status, 302);
