@@ -2061,6 +2061,9 @@ async function openBrowserWithInstalledChrome({
   attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
     autoSubmit,
     enableLeadCheck: leadConfig.enabled !== false,
+    onLog: (entry) => {
+      session.addBrowserLog?.(entry);
+    },
     onRecordPicked: (record) => {
       // Dequeue ngay khi chọn
       const idx = autofillQueue.available.findIndex((r) => autofillRecordKey(r) === autofillRecordKey(record));
@@ -2262,6 +2265,7 @@ function attachBrowserLogger(context, session) {
     if (sessionItem.logs.length > 500) sessionItem.logs.shift();
     queueSaveBrowserLogs();
   }
+  session.addBrowserLog = addLog;
 
   // Tiêm listener click vào mọi trang (kể cả trang mở sau)
   context.exposeFunction('__alpc_log', addLog).catch(() => {});

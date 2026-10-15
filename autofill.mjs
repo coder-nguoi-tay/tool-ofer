@@ -744,33 +744,86 @@ export function isConsentCheckbox(metadata) {
  */
 export async function findSubmitButton(frame) {
   const candidateSelectors = [
-    'button[data-vector-submit="true"], [data-vector-submit="true"], [data-vector-submit], button[data-tf-element-role="submit"], button#btn-submit',
+    // 1. Nút Submit / Continue theo data- attributes chuẩn của Vector & Lead forms (chỉ chọn thẻ tương tác, không chọn generic container)
+    'button[data-vector-submit="true"], button[data-vector-submit], a[data-vector-submit="true"], a[data-vector-submit], input[data-vector-submit="true"], [role="button"][data-vector-submit="true"]',
+    'button[data-tf-element-role="submit"], a[data-tf-element-role="submit"], [role="button"][data-tf-element-role="submit"]',
+    'button#btn-submit, button#submit-btn, button#submit, button#continue, a#btn-submit, a#continue',
+
+    // 2. Thẻ submit tiêu chuẩn của HTML
     'button[type="submit"]',
     'input[type="submit"]',
-    'button.continue-btn, button.submit-btn, a.continue-btn, a.submit-btn, button.btn-submit, a.btn-submit',
-    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("AGREE & CONTINUE"), button:has-text("Tiếp theo"), button:has-text("Xác nhận")',
-    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree")',
+    'input[type="button"][value*="Continue" i], input[type="button"][value*="Submit" i], input[type="button"][value*="Next" i]',
+
+    // 3. Nút bấm theo class phổ biến
+    'button.continue-btn, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.btn-primary',
+    'a.continue-btn, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary',
+
+    // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt)
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("AGREE & CONTINUE"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Hoàn thành")',
+    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("AGREE & CONTINUE"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed")',
+    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results")',
   ];
 
   for (const selector of candidateSelectors) {
     try {
       const candidates = await frame.locator(selector).all();
       for (const btn of candidates) {
-        if ((await btn.isVisible()) && (await btn.isEnabled())) {
-          // Bỏ qua các nút thuộc Offerwall Cards để nhường quyền xử lý cho handleOfferwallCards mở tất cả
-          const isOfferwallBtn = typeof btn.evaluate === 'function' ? await btn.evaluate((el) => {
-            return Boolean(
-              el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap') ||
-              el.classList.contains('offerwall-btn') ||
-              el.getAttribute('data-tf-element-role') === 'offer-btn'
-            );
-          }).catch(() => false) : false;
-          if (isOfferwallBtn) continue;
+        if (!(await btn.isVisible().catch(() => false))) continue;
 
-          const text = (await btn.innerText().catch(() => '')).trim().toLowerCase();
-          if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập|skip|bỏ qua/i.test(text)) continue;
-          return btn;
+        // Xác thực phần tử nút bấm: loại trừ tuyệt đối IFRAME, FORM hoặc container DIV lớn
+        const validation = typeof btn.evaluate === 'function' ? await btn.evaluate((el) => {
+          const tag = (el.tagName || 'BUTTON').toUpperCase();
+          if (['IFRAME', 'FRAME', 'FORM', 'BODY', 'HTML', 'MAIN', 'SECTION', 'ARTICLE'].includes(tag)) {
+            return { valid: false, reason: 'container_tag' };
+          }
+
+          // Kiểm tra kích thước hình học nếu có: nút bấm không thể quá nhỏ hoặc quá khổng lồ
+          if (typeof el.getBoundingClientRect === 'function') {
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 4 || rect.height <= 4) return { valid: false, reason: 'zero_size' };
+            if (rect.height > 180 || rect.width > 900) return { valid: false, reason: 'too_large' };
+          }
+
+          // Bỏ qua các nút thuộc Offerwall Cards để nhường quyền xử lý cho handleOfferwallCards
+          if (
+            (typeof el.closest === 'function' && el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) ||
+            (el.classList && typeof el.classList.contains === 'function' && el.classList.contains('offerwall-btn')) ||
+            (typeof el.getAttribute === 'function' && el.getAttribute('data-tf-element-role') === 'offer-btn')
+          ) {
+            return { valid: false, reason: 'offerwall' };
+          }
+
+          const text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
+          if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập|skip|bỏ qua/i.test(text)) {
+            return { valid: false, reason: 'cancel_text' };
+          }
+
+          if (tag === 'BUTTON') return { valid: true };
+          if (tag === 'INPUT' && ['submit', 'button', 'image'].includes((el.type || '').toLowerCase())) return { valid: true };
+          if (tag === 'A' || (typeof el.getAttribute === 'function' && el.getAttribute('role') === 'button')) return { valid: true };
+
+          if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+            const style = window.getComputedStyle(el);
+            if (style && style.cursor === 'pointer' && text.length > 0 && text.length < 60) return { valid: true };
+          }
+
+          return { valid: true };
+        }).catch(() => ({ valid: true })) : { valid: true };
+
+        if (!validation.valid) continue;
+
+        // Nếu nút bị disabled, thử gỡ disabled nếu ô đã hoàn tất điền
+        const isEnabled = await btn.isEnabled().catch(() => false);
+        if (!isEnabled) {
+          await btn.evaluate((el) => {
+            el.removeAttribute('disabled');
+            el.disabled = false;
+            el.classList.remove('disabled');
+            el.setAttribute('aria-disabled', 'false');
+          }).catch(() => {});
         }
+
+        return btn;
       }
     } catch {}
   }
@@ -1360,9 +1413,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   await field.evaluate((el) => {
                     if (!el.checked) {
                       el.checked = true;
-                      el.dispatchEvent(new Event('input', { bubbles: true }));
-                      el.dispatchEvent(new Event('change', { bubbles: true }));
                     }
+                    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
                     const label = el.closest('label') || document.querySelector(`label[for="${el.id}"]`);
                     if (label && !el.checked) label.click();
                   }).catch(() => {});
@@ -1372,6 +1426,16 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   session.autofillFields = (session.autofillFields ?? 0) + 1;
                   session.autofillError = null;
                   filledInThisPass += 1;
+
+                  const consentName = metadata.names?.[0] || metadata.id || metadata.name || 'consent';
+                  options.onLog?.({
+                    type: 'checkbox_checked',
+                    tag: 'INPUT',
+                    id: metadata.id || null,
+                    name: metadata.name || null,
+                    text: consentName.slice(0, 100),
+                    detail: `Đã tự động tích ô điều khoản: ${metadata.id || metadata.name || 'checkbox'}`,
+                  });
                 } catch {}
               }
             }
@@ -1546,9 +1610,23 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           session.autofillFields = (session.autofillFields ?? 0) + 1;
           session.autofillError = null;
           filledInThisPass += 1;
+
+          options.onLog?.({
+            type: 'field_filled',
+            tag: (metadata.kind || 'input').toUpperCase(),
+            id: metadata.id || metadata.name || null,
+            name: metadata.name || null,
+            text: String(valueToFill).slice(0, 50),
+            detail: `Đã điền [${metadata.names?.[0] || metadata.id || 'ô'}]: ${String(valueToFill).slice(0, 30)}`,
+          });
         } catch {
           // Trường có thể không tương tác được lúc này
         }
+      }
+
+      // Nếu có trường vừa được điền hoặc tick trong pass này, chờ 350ms để DOM cập nhật trạng thái
+      if (filledInThisPass > 0) {
+        await new Promise((resolve) => { setTimeout(resolve, 350); });
       }
 
       // Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên radio buttons hoặc lựa chọn Yes/No/Tuổi/Thu nhập
@@ -1558,6 +1636,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           filledInThisPass += answeredSurvey;
           session.autofillFields = (session.autofillFields ?? 0) + answeredSurvey;
           session.autofillError = null;
+          options.onLog?.({
+            type: 'survey_answered',
+            detail: `Đã tự động chọn câu trả lời khảo sát/lựa chọn (${answeredSurvey} câu).`,
+          });
         }
       } catch {}
 
@@ -1568,31 +1650,89 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           filledInThisPass += openedOffers;
           session.autofillFields = (session.autofillFields ?? 0) + openedOffers;
           session.autofillError = null;
+          options.onLog?.({
+            type: 'offerwall_opened',
+            detail: `Đã tự động mở ${openedOffers} thẻ ưu đãi (Offerwall).`,
+          });
         }
       } catch {}
 
       // Tự động bấm nút gửi / tiếp tục nếu có tùy chọn autoSubmit và vừa điền hoặc tích xong các trường
       if (options.autoSubmit !== false && (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0)) {
         try {
-          const submitBtn = await findSubmitButton(frame);
+          // 1. Thử tìm nút submit trong frame hiện tại
+          let submitBtn = await findSubmitButton(frame);
+
+          // 2. Fallback: Nếu không thấy trong frame này, tìm trên các frame khác hoặc page chính
+          if (!submitBtn && typeof page.frames === 'function') {
+            for (const otherFrame of page.frames()) {
+              if (otherFrame === frame) continue;
+              submitBtn = await findSubmitButton(otherFrame);
+              if (submitBtn) break;
+            }
+          }
+          if (!submitBtn && frame !== page) {
+            submitBtn = await findSubmitButton(page);
+          }
+
           if (submitBtn) {
-            const shouldClick = await submitBtn.evaluate((btn) => {
+            const btnInfo = await submitBtn.evaluate((btn) => {
+              const text = (btn.innerText || btn.value || btn.textContent || '').trim().slice(0, 80);
+              const tag = (btn.tagName || '').toUpperCase();
+              const id = btn.id || null;
               const now = Date.now();
               const lastClick = Number(btn.dataset.autoleadLastSubmitTime || 0);
               // Nếu vừa click trong vòng 2.5s thì không click lại để tránh duplicate submit
-              if (now - lastClick < 2500) return false;
+              if (now - lastClick < 2500) return { shouldClick: false, text, tag, id };
               btn.dataset.autoleadLastSubmitTime = String(now);
               btn.dataset.autoleadSubmitted = '1';
-              return true;
-            }).catch(() => false);
+              return { shouldClick: true, text, tag, id };
+            }).catch(() => null);
 
-            if (shouldClick) {
-              await new Promise((resolve) => { setTimeout(resolve, 800); });
+            if (btnInfo?.shouldClick) {
+              const submitLabel = btnInfo.text || btnInfo.id || 'Submit';
+              console.log(`[Autofill] Bấm nút submit: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id}"`);
+
+              // Ghi log submit rõ ràng vào session logs
+              options.onLog?.({
+                type: 'submit_clicked',
+                tag: btnInfo.tag,
+                id: btnInfo.id,
+                text: submitLabel,
+                detail: `Đã bấm nút submit/tiếp tục: <${btnInfo.tag}> "${submitLabel}"`,
+              });
+
+              await new Promise((resolve) => { setTimeout(resolve, 500); });
+
+              // Cuộn phần tử vào tầm nhìn nếu cần
+              await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+
+              // Đảm bảo gỡ bỏ hoàn toàn disabled và pointer-events bị khóa
+              await submitBtn.evaluate((b) => {
+                b.disabled = false;
+                b.removeAttribute('disabled');
+                b.classList.remove('disabled');
+                b.setAttribute('aria-disabled', 'false');
+                b.style.pointerEvents = 'auto';
+              }).catch(() => {});
+
+              // Thao tác click Playwright
               try {
                 await submitBtn.click({ force: true, timeout: 2500 });
-              } catch {
-                await submitBtn.evaluate((btn) => btn.click()).catch(() => {});
+              } catch (clickErr) {
+                console.warn('[Autofill] Playwright click lỗi, dùng fallback evaluate click:', clickErr.message);
               }
+
+              // Luôn kích hoạt native click và form.requestSubmit() để đảm bảo ăn chắc 100%
+              await submitBtn.evaluate((btn) => {
+                try { btn.click(); } catch {}
+                const form = btn.closest('form');
+                if (form && typeof form.requestSubmit === 'function') {
+                  try { form.requestSubmit(btn); } catch {
+                    try { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); } catch {}
+                  }
+                }
+              }).catch(() => {});
 
               // Màn đầu tiên vừa được submit: kích hoạt kiểm tra lead từ API nếu được cấu hình
               if (options.enableLeadCheck !== false && !session.screen1Completed) {
@@ -1604,8 +1744,12 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 return;
               }
             }
+          } else if (filledInThisPass > 0) {
+            console.log(`[Autofill] Đã điền ${filledInThisPass} trường nhưng chưa tìm thấy nút Submit phù hợp trên trang.`);
           }
-        } catch {}
+        } catch (submitErr) {
+          console.error('[Autofill] Lỗi trong quá trình xử lý submit:', submitErr.message);
+        }
       }
     }
 

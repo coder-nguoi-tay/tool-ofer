@@ -946,5 +946,59 @@ watchTrafficBlockedPage(mockAdtrapperSession);
 // Đảm bảo watchTrafficBlockedPage khởi tạo thành công không ném ngoại lệ
 assert.equal(mockAdtrapperBrowserClosed, false);
 
+// 6. Test findSubmitButton: Từ chối thẻ IFRAME và container DIV lớn, nhận diện đúng nút Submit/Continue thực tế
+const mockIframeBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  innerText: async () => '',
+  evaluate: async (fn) => fn({
+    tagName: 'IFRAME',
+    getBoundingClientRect: () => ({ width: 400, height: 600 }),
+  }),
+};
+const mockValidButton = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  innerText: async () => 'Continue',
+  evaluate: async (fn) => fn({
+    tagName: 'BUTTON',
+    getBoundingClientRect: () => ({ width: 120, height: 40 }),
+    closest: () => null,
+  }),
+};
+const mockFrameWithIframeAndButton = {
+  locator: () => ({
+    all: async () => [mockIframeBtn, mockValidButton],
+  }),
+};
+const foundValidBtn = await findSubmitButton(mockFrameWithIframeAndButton);
+assert.equal(foundValidBtn, mockValidButton, 'findSubmitButton phải loại trừ thẻ IFRAME và chọn nút BUTTON hợp lệ');
+
+// Test findSubmitButton: Gỡ disabled trên nút submit nếu nút bị disabled tạm thời
+let disabledRemoved = false;
+const mockDisabledSubmitBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => false,
+  innerText: async () => 'Submit',
+  evaluate: async (fn) => {
+    const el = {
+      tagName: 'BUTTON',
+      disabled: true,
+      removeAttribute: () => { disabledRemoved = true; },
+      classList: { remove: () => {} },
+      setAttribute: () => {},
+    };
+    return fn(el);
+  },
+};
+const mockFrameWithDisabledBtn = {
+  locator: (sel) => ({
+    all: async () => (sel.includes('button[type="submit"]') ? [mockDisabledSubmitBtn] : []),
+  }),
+};
+const foundDisabledBtn = await findSubmitButton(mockFrameWithDisabledBtn);
+assert.equal(foundDisabledBtn, mockDisabledSubmitBtn, 'findSubmitButton phải nhận diện và gỡ disabled trên nút submit');
+assert.equal(disabledRemoved, true, 'Thuộc tính disabled phải được gỡ bỏ khỏi nút submit');
+
 
 
