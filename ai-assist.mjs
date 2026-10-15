@@ -1,5 +1,5 @@
 /**
- * AI fallback khi autofill bị kẹt: gọi `agt` CLI, đọc HTML trang, thực thi actions cho đến khi không còn form.
+ * AI fallback khi autofill bị kẹt: gọi `agy` CLI, đọc HTML trang, thực thi actions cho đến khi không còn form.
  *
  * @module ai-assist
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
@@ -14,11 +14,11 @@ const MAX_ROUNDS = 20;
 const AGT_TIMEOUT_MS = 60_000;
 
 /**
- * Đường dẫn hoặc tên binary của agt CLI.
+ * Đường dẫn hoặc tên binary của agy CLI.
  * Tự động mở rộng PATH để nhận diện ~/.local/bin, /opt/homebrew/bin, /usr/local/bin.
  */
 function getAgtSpawnConfig() {
-  const agtBin = process.env.AGT_BIN || 'agt';
+  const agyBin = process.env.AGY_BIN || 'agy';
   const augmentedPath = [
     join(homedir(), '.local', 'bin'),
     join(homedir(), '.gemini', 'antigravity-cli', 'bin'),
@@ -28,16 +28,16 @@ function getAgtSpawnConfig() {
   ].filter(Boolean).join(':');
 
   return {
-    bin: agtBin,
+    bin: agyBin,
     env: { ...process.env, PATH: augmentedPath },
   };
 }
 
 /**
- * Gọi `agt` CLI với prompt, trả về text output.
+ * Gọi `agy` CLI với prompt, trả về text output.
  *
- * @param {string} prompt Nội dung truyền vào stdin của agt.
- * @return {Promise<string>} Output từ agt.
+ * @param {string} prompt Nội dung truyền vào stdin của agy.
+ * @return {Promise<string>} Output từ agy.
  */
 export function callAgt(prompt) {
   return new Promise((resolve, reject) => {
@@ -51,7 +51,7 @@ export function callAgt(prompt) {
     let err = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error('agt timeout (quá 60s)'));
+      reject(new Error('agy timeout (quá 60s)'));
     }, AGT_TIMEOUT_MS);
 
     child.stdout.on('data', (d) => { out += d.toString(); });
@@ -60,7 +60,7 @@ export function callAgt(prompt) {
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0 && !out.trim()) {
-        reject(new Error(`agt exited ${code}: ${err.slice(0, 200)}`));
+        reject(new Error(`agy exited ${code}: ${err.slice(0, 200)}`));
       } else {
         resolve(out);
       }
@@ -69,7 +69,7 @@ export function callAgt(prompt) {
     child.on('error', (e) => {
       clearTimeout(timer);
       if (e.code === 'ENOENT') {
-        reject(new Error('agt CLI không có trong PATH. Bỏ qua tầng AI.'));
+        reject(new Error('agy CLI không có trong PATH. Bỏ qua tầng AI.'));
       } else {
         reject(e);
       }
@@ -86,9 +86,9 @@ export function callAgt(prompt) {
 }
 
 /**
- * Parse JSON actions từ output của agt, chịu được markdown code block và text thừa xung quanh.
+ * Parse JSON actions từ output của agy, chịu được markdown code block và text thừa xung quanh.
  *
- * @param {string} raw Raw output từ agt.
+ * @param {string} raw Raw output từ agy.
  * @return {Array<{action:string,selector?:string,value?:string}>} Mảng actions.
  */
 export function parseActions(raw) {
@@ -171,7 +171,7 @@ export async function pageHasWork(page) {
 }
 
 /**
- * Thực thi một action trả về từ agt lên trang Playwright.
+ * Thực thi một action trả về từ agy lên trang Playwright.
  *
  * @param {object} page Playwright page.
  * @param {{action:string,selector?:string,value?:string}} act Action cần thực thi.
@@ -187,9 +187,13 @@ export async function executeAction(page, act, session = null) {
   if (!visible) return;
 
   if (action === 'fill' || action === 'type') {
+    let fillValue = String(value ?? '');
+    if (session?.assignedEmail && (/email|mail/i.test(selector) || /@/.test(fillValue))) {
+      fillValue = session.assignedEmail;
+    }
     await locator.click({ force: true, timeout: 1500 }).catch(() => {});
-    await locator.fill(String(value ?? ''), { force: true, timeout: 3000 }).catch(async () => {
-      await locator.pressSequentially(String(value ?? ''), { delay: 25 }).catch(() => {});
+    await locator.fill(fillValue, { force: true, timeout: 3000 }).catch(async () => {
+      await locator.pressSequentially(fillValue, { delay: 25 }).catch(() => {});
     });
     await locator.evaluate((el) => {
       el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -232,7 +236,7 @@ export async function executeAction(page, act, session = null) {
 }
 
 /**
- * Chạy vòng lặp AI assist: gọi agt, thực thi actions, lặp đến khi không còn form.
+ * Chạy vòng lặp AI assist: gọi agy, thực thi actions, lặp đến khi không còn form.
  *
  * @param {object} page Playwright page đang kẹt.
  * @param {object} record Bản ghi autofill đang dùng cho phiên này.
@@ -284,15 +288,15 @@ ${trimmedHtml}`;
       try {
         const raw = await callAgt(prompt);
         actions = parseActions(raw);
-        console.log(`[AI-Assist] Slot ${slotNum} round ${round}: agt trả ${actions.length} action(s)`);
+        console.log(`[AI-Assist] Slot ${slotNum} round ${round}: agy trả ${actions.length} action(s)`);
       } catch (err) {
-        console.warn(`[AI-Assist] Slot ${slotNum} round ${round}: cảnh báo agt — ${err.message}`);
-        // Nếu agt không có trong PATH hoặc lỗi → bỏ qua, không crash
+        console.warn(`[AI-Assist] Slot ${slotNum} round ${round}: cảnh báo agy — ${err.message}`);
+        // Nếu agy không có trong PATH hoặc lỗi → bỏ qua, không crash
         break;
       }
 
       if (actions.length === 0) {
-        console.log(`[AI-Assist] Slot ${slotNum}: agt báo xong ([] trả về).`);
+        console.log(`[AI-Assist] Slot ${slotNum}: agy báo xong ([] trả về).`);
         break;
       }
 

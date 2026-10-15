@@ -540,7 +540,9 @@ const semanticCategories = [
   {
     type: 'email',
     patterns: [/email/, /^mail$/],
-    resolve: (r) => {
+    resolve: (r, metadata = {}) => {
+      const assigned = metadata?.assignedEmail || r.assignedEmail;
+      if (assigned) return assigned;
       const em = r.email || r.emailaddress || r.mail || r.userid;
       if (em) return em.includes('@') ? em : `${em}@gmail.com`;
       return generateFallbackEmail(r);
@@ -645,6 +647,22 @@ function formatMatchedValue(value, metadata = {}) {
 }
 
 /**
+ * Kiểm tra xem tên candidate có phải là trường email hay không.
+ * Phân biệt chính xác giữa email và mailing address / postal address.
+ *
+ * @param {string} candidate Tên trường hoặc id/label.
+ * @return {boolean}
+ */
+export function isEmailFieldName(candidate) {
+  const norm = normalizeFieldName(candidate);
+  if (!norm) return false;
+  if (/email/i.test(norm)) return true;
+  if (/^(mail|thudientu|usermail|customermail)$/i.test(norm)) return true;
+  if (/mail/i.test(norm) && !/address|street|diachi|box|list/i.test(norm)) return true;
+  return false;
+}
+
+/**
  * Tìm giá trị phù hợp trong record cho danh sách tên/nhãn của ô input.
  *
  * @param {string[]} candidateNames Danh sách tên, id, nhãn, placeholder, autocomplete của ô.
@@ -668,6 +686,13 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
   }
 
   if (!normalizedCandidates.length) return null;
+
+  // Ưu tiên cao nhất: nếu là ô email và đã có email mẫu được gán (assignedEmail) từ danh sách email mẫu
+  const isEmailField = metadata.type === 'email' || normalizedCandidates.some(isEmailFieldName);
+  const assignedEmail = metadata.assignedEmail || record.assignedEmail;
+  if (isEmailField && assignedEmail) {
+    return formatMatchedValue(assignedEmail, metadata);
+  }
 
   // 1. Kiểm tra khớp chính xác với bất kỳ key nào trong record
   for (const candidate of normalizedCandidates) {
@@ -719,9 +744,9 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
   }
 
   // 4. Fallback đặc biệt cho Email: nếu form có ô email mà record thiếu hoặc chưa khớp
-  if (metadata.type === 'email' || normalizedCandidates.some((c) => c === 'email' || c === 'mail')) {
-    const em = record.email || record.emailaddress || record.mail || record.userid;
-    if (em) return formatMatchedValue(em, metadata);
+  if (isEmailField) {
+    const em = assignedEmail || record.email || record.emailaddress || record.mail || record.userid;
+    if (em) return formatMatchedValue(em.includes('@') ? em : `${em}@gmail.com`, metadata);
     return generateFallbackEmail(record);
   }
 
@@ -1351,6 +1376,12 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     session.recordIndex = randomInt(records.length);
   }
   const record = records[session.recordIndex];
+  if (session.assignedEmail && record) {
+    record.email = session.assignedEmail;
+    record.emailaddress = session.assignedEmail;
+    record.mail = session.assignedEmail;
+    record.assignedEmail = session.assignedEmail;
+  }
   session.autofillRecord = session.recordIndex + 1;
   options.onRecordPicked?.(record);
 
@@ -1509,7 +1540,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
           if (metadata.readOnly || ['hidden', 'radio', 'file', 'submit', 'button', 'reset', 'image'].includes(metadata.type)) continue;
 
-          const valueToFill = matchFieldValue(metadata.names, record, metadata);
+          const valueToFill = matchFieldValue(metadata.names, record, {
+            ...metadata,
+            assignedEmail: session.assignedEmail || record.assignedEmail,
+          });
           if (!valueToFill) {
             // Nếu là thẻ select câu hỏi (như Yes/No, câu hỏi khảo sát) mà không khớp trường trong record:
             // Tự động chọn ngẫu nhiên một option hợp lệ (ngoại trừ option placeholder đầu tiên)!

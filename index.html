@@ -203,6 +203,38 @@
           </table>
           <p id="aq-used-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:14px 0;margin:0;">Chưa có thông tin nào đã dùng.</p>
         </div>
+        <hr class="panel-divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h2 class="section-title" style="margin:0;">
+            Hàng đợi Email mẫu —
+            <span id="eq-available-count" style="color:#1c7c45;">Còn: 0</span>
+            &nbsp;|&nbsp;
+            <span id="eq-used-count" style="color:#a4401f;">Đã dùng: 0</span>
+          </h2>
+          <div style="display:flex;gap:8px;">
+            <button id="eq-import-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Nhập danh sách</button>
+            <button id="eq-toggle-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xem đã dùng</button>
+            <button id="eq-reset-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Đặt lại</button>
+          </div>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label for="eq-input-list" style="font-size:11px;color:#556987;display:block;margin-bottom:4px;">
+            Danh sách email mẫu (mỗi dòng một email, tự động lấy khi điền form thay vì email random):
+          </label>
+          <textarea id="eq-input-list" name="emailList" rows="4" placeholder="daj.gomezramirez@gmail.com&#10;designcourses001@gmail.com&#10;..." style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;width:100%;box-sizing:border-box;"></textarea>
+        </div>
+        <div id="eq-used-box" style="max-height:180px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;display:none;">
+          <table style="width:100%;border-collapse:collapse;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;">
+            <thead>
+              <tr>
+                <th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;width:40px;">STT</th>
+                <th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;text-align:left;">Email đã dùng</th>
+              </tr>
+            </thead>
+            <tbody id="eq-used-tbody"></tbody>
+          </table>
+          <p id="eq-used-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:14px 0;margin:0;">Chưa có email nào đã dùng.</p>
+        </div>
       </section>
 
       <section class="tab-panel" id="panel-proxies" role="tabpanel" aria-labelledby="tab-proxies" data-panel="proxies" hidden>
@@ -370,7 +402,7 @@
     let autoRefillEnabled = true;
     let isRefreshingAutoRefillState = false;
     const savedFieldNames = [
-      'proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'autofillData', 'autoSubmitForm',
+      'proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'autofillData', 'emailList', 'autoSubmitForm',
       'enableLeadCheck', 'leadCheckApiUrl', 'leadCheckCookie', 'leadCheckDatas', 'leadCheckInterval', 'leadCheckMaxAttempts',
     ];
     const tabButtons = [...document.querySelectorAll('[role="tab"]')];
@@ -510,12 +542,13 @@
 
             const extra = [
               session.autofillRecord ? `Lead #${session.autofillRecord} (${session.autofillFields} trường)` : '',
+              session.assignedEmail ? `📧 ${session.assignedEmail}` : '',
               session.autofillError ? `Lỗi: ${session.autofillError}` : '',
               session.leadCheckMessage ? session.leadCheckMessage : '',
               session.extensions && !session.extensions.startsWith('không có') ? `Ext: ${session.extensions}` : '',
             ].filter(Boolean).join(' · ');
 
-            const tooltipText = `IP Exit: ${session.exitIp}\nCửa sổ ${session.slot} (Chrome ${session.version})\nProxy: ${session.proxy || 'Trực tiếp'}${session.leadCheckMessage ? '\n' + session.leadCheckMessage : ''}`;
+            const tooltipText = `IP Exit: ${session.exitIp}\nCửa sổ ${session.slot} (Chrome ${session.version})\nProxy: ${session.proxy || 'Trực tiếp'}${session.assignedEmail ? '\nEmail: ' + session.assignedEmail : ''}${session.leadCheckMessage ? '\n' + session.leadCheckMessage : ''}`;
 
             return `
               <div class="chrome-session-card">
@@ -1038,6 +1071,60 @@
     // Cập nhật khi vào tab Thiết lập
     document.querySelector('#tab-setup').addEventListener('click', refreshAutofillQueue);
     refreshAutofillQueue();
+
+    // ── Hàng đợi email mẫu ────────────────────────────────────────────────
+    const eqAvailableCount = document.querySelector('#eq-available-count');
+    const eqUsedCount = document.querySelector('#eq-used-count');
+    const eqUsedBox = document.querySelector('#eq-used-box');
+    const eqUsedTbody = document.querySelector('#eq-used-tbody');
+    const eqUsedEmpty = document.querySelector('#eq-used-empty');
+    const eqToggleBtn = document.querySelector('#eq-toggle-btn');
+    const eqInputList = document.querySelector('#eq-input-list');
+
+    async function refreshEmailQueue() {
+      try {
+        const data = await fetch('/email-queue').then((r) => r.json());
+        eqAvailableCount.textContent = `Còn: ${data.available}`;
+        eqUsedCount.textContent = `Đã dùng: ${data.used}`;
+        if (data.used === 0) {
+          eqUsedEmpty.hidden = false;
+          eqUsedTbody.innerHTML = '';
+        } else {
+          eqUsedEmpty.hidden = true;
+          eqUsedTbody.innerHTML = data.usedList.map((em, i) =>
+            `<tr><td style="padding:3px 7px;border-bottom:1px solid #f0f2f7;color:#768197;">${i + 1}</td>`
+            + `<td style="padding:3px 7px;border-bottom:1px solid #f0f2f7;font-family:ui-monospace,monospace;">${escHtml(em)}</td></tr>`
+          ).join('');
+        }
+      } catch {}
+    }
+
+    document.querySelector('#eq-import-btn').addEventListener('click', async () => {
+      const emailList = eqInputList?.value.trim() ?? '';
+      if (!emailList) { status.textContent = 'Hãy nhập danh sách email trước.'; return; }
+      const res = await fetch('/email-queue/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ emailList }),
+      }).then((r) => r.json());
+      status.textContent = res.message ?? 'Đã nhập.';
+      await refreshEmailQueue();
+    });
+
+    document.querySelector('#eq-reset-btn').addEventListener('click', async () => {
+      const res = await fetch('/email-queue/reset', { method: 'POST' }).then((r) => r.json());
+      status.textContent = res.message ?? 'Đã đặt lại.';
+      await refreshEmailQueue();
+    });
+
+    eqToggleBtn.addEventListener('click', () => {
+      const isVisible = eqUsedBox.style.display !== 'none';
+      eqUsedBox.style.display = isVisible ? 'none' : 'block';
+      eqToggleBtn.textContent = isVisible ? 'Xem đã dùng' : 'Ẩn đã dùng';
+    });
+
+    document.querySelector('#tab-setup').addEventListener('click', refreshEmailQueue);
+    refreshEmailQueue();
 
     // ── Hàng đợi proxy ────────────────────────────────────────────────────
     const pqAvailableCount = document.querySelector('#pq-available-count');

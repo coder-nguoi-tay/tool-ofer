@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   parseAutofillRecords,
   matchFieldValue,
+  isEmailFieldName,
   isConsentCheckbox,
   handleRadioAndSurveyOptions,
   findSubmitButton,
@@ -33,6 +34,12 @@ import {
   clearAllLogsAndHtml,
   interactionHtmlDirectory,
   interactionLogFilePath,
+  emailQueue,
+  loadEmailQueue,
+  saveEmailQueue,
+  parseEmailLine,
+  importEmailLines,
+  dequeueNextEmail,
 } from './app.mjs';
 
 const parse = (line, type = 'socks5') => parseProxyLine(line, 1, type);
@@ -1030,6 +1037,86 @@ const rawMissingZip = {
 };
 const fallbackZip = matchFieldValue(['zipcode'], rawMissingZip);
 assert.equal(fallbackZip, '99654', 'Record thiếu zip code phải tự động lấy mã zip hợp lệ của bang AK');
+
+// 9. Test Hàng đợi Email mẫu và ưu tiên email mẫu khi tự điền form
+// 9.1 isEmailFieldName
+assert.equal(isEmailFieldName('email'), true);
+assert.equal(isEmailFieldName('email_address'), true);
+assert.equal(isEmailFieldName('Email Address'), true);
+assert.equal(isEmailFieldName('confirm_email'), true);
+assert.equal(isEmailFieldName('user_email'), true);
+assert.equal(isEmailFieldName('mail'), true);
+assert.equal(isEmailFieldName('thudientu'), true);
+assert.equal(isEmailFieldName('mailing_address'), false);
+assert.equal(isEmailFieldName('mail_address'), false);
+assert.equal(isEmailFieldName('mailbox'), false);
+assert.equal(isEmailFieldName('username'), false);
+assert.equal(isEmailFieldName('zipcode'), false);
+
+// 9.2 parseEmailLine
+assert.equal(parseEmailLine('daj.gomezramirez@gmail.com'), 'daj.gomezramirez@gmail.com');
+assert.equal(parseEmailLine('daj.gomezramirez@gmail.com|||Gmail.txt|Live'), 'daj.gomezramirez@gmail.com');
+assert.equal(parseEmailLine('User.123+promo@Sub.Domain.COM:pass123'), 'user.123+promo@sub.domain.com');
+assert.equal(parseEmailLine('# ghi chu'), null);
+assert.equal(parseEmailLine(''), null);
+assert.equal(parseEmailLine('khong_co_email_o_day'), null);
+
+// 9.3 importEmailLines & dequeueNextEmail
+emailQueue.available = [];
+emailQueue.used = [];
+const importedCount = importEmailLines([
+  'first.lead@gmail.com',
+  'second.lead@gmail.com',
+  'first.lead@gmail.com', // trùng
+  '# comment',
+  'third.lead@gmail.com|||Live',
+]);
+assert.equal(importedCount, 3);
+assert.equal(emailQueue.available.length, 3);
+assert.equal(emailQueue.used.length, 0);
+
+const firstDequeued = dequeueNextEmail();
+assert.equal(firstDequeued, 'first.lead@gmail.com');
+assert.equal(emailQueue.available.length, 2);
+assert.equal(emailQueue.used.length, 1);
+
+const secondDequeued = dequeueNextEmail();
+assert.equal(secondDequeued, 'second.lead@gmail.com');
+const thirdDequeued = dequeueNextEmail();
+assert.equal(thirdDequeued, 'third.lead@gmail.com');
+
+// Khi hết available nhưng có used -> tự động quay vòng danh sách
+const recycledEmail = dequeueNextEmail();
+assert.equal(recycledEmail, 'first.lead@gmail.com');
+assert.equal(emailQueue.used.length, 1);
+
+// 9.4 matchFieldValue ưu tiên tuyệt đối assignedEmail khi điền ô email
+const sampleUserEmail = 'daj.gomezramirez@gmail.com';
+const kendraWithAssignedEmail = {
+  ...rawKendra,
+  assignedEmail: sampleUserEmail,
+};
+const filledEmailWithAssigned = matchFieldValue(['email'], kendraWithAssignedEmail, { type: 'email' });
+assert.equal(filledEmailWithAssigned, sampleUserEmail, 'matchFieldValue phải ưu tiên assignedEmail thay vì email/username trong record');
+
+const filledConfirmEmail = matchFieldValue(['confirm_email'], rawKendra, { assignedEmail: sampleUserEmail });
+assert.equal(filledConfirmEmail, sampleUserEmail, 'Ô confirm_email phải nhận đúng assignedEmail truyền qua metadata');
+
+// 9.5 attachAutofill gán assignedEmail vào record của session
+const mockSampleContext = {
+  on: () => {},
+  pages: () => [],
+};
+const mockSampleSession = {
+  assignedEmail: 'assigned.tester@gmail.com',
+};
+let pickedRecordResult = null;
+attachAutofill(mockSampleContext, [{ firstname: 'John', email: 'john_raw@example.com' }], 'https://example.com', mockSampleSession, {
+  onRecordPicked: (rec) => { pickedRecordResult = rec; },
+});
+assert.equal(pickedRecordResult?.email, 'assigned.tester@gmail.com', 'attachAutofill phải cập nhật record.email thành session.assignedEmail');
+assert.equal(pickedRecordResult?.assignedEmail, 'assigned.tester@gmail.com');
+
 
 
 

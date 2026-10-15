@@ -136,6 +136,9 @@ const autofillQueue = { available: /** @type {object[]} */ ([]), used: /** @type
 const proxyQueuePath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'proxy-queue.json');
 /** Hàng đợi proxy: available = chưa dùng, used = đã dùng (raw lines gốc). */
 const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
+export const emailQueuePath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'email-queue.json');
+/** Hàng đợi email mẫu: available = chưa dùng, used = đã dùng. */
+export const emailQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
 const port = Number(process.env.AUTOLEADPC_PORT) || 3210;
 
 /**
@@ -831,6 +834,94 @@ function importProxyLines(rawLines, proxyType) {
   return added;
 }
 
+/** Nạp hàng đợi email mẫu từ file. */
+export async function loadEmailQueue() {
+  try {
+    const data = JSON.parse(await readFile(emailQueuePath, 'utf8'));
+    emailQueue.available = Array.isArray(data.available) ? data.available : [];
+    emailQueue.used = Array.isArray(data.used) ? data.used : [];
+  } catch { /* file chưa tồn tại */ }
+}
+
+/** Lưu hàng đợi email mẫu xuống file. */
+export async function saveEmailQueue() {
+  await writeFile(emailQueuePath, JSON.stringify(emailQueue)).catch(() => {});
+}
+
+/**
+ * Trích xuất email hợp lệ từ một dòng văn bản.
+ * Hỗ trợ định dạng email đơn thuần hoặc email đi kèm mật khẩu, pipe (|), dấu phẩy.
+ *
+ * @param {string} line Dòng dữ liệu thô.
+ * @return {string|null} Địa chỉ email viết thường hoặc null nếu không hợp lệ.
+ */
+export function parseEmailLine(line) {
+  const trimmed = String(line || '').trim();
+  if (!trimmed || trimmed.startsWith('#')) return null;
+  const match = trimmed.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  return match ? match[0].toLowerCase() : null;
+}
+
+/**
+ * Thêm các dòng email mới vào available, bỏ qua email đã có trong available hoặc used.
+ * @param {string[]} rawLines Các dòng email thô.
+ * @return {number} Số email mới được thêm vào.
+ */
+export function importEmailLines(rawLines) {
+  const existingAll = new Set([...emailQueue.available, ...emailQueue.used]);
+  let added = 0;
+  for (const line of rawLines) {
+    const email = parseEmailLine(line);
+    if (email && !existingAll.has(email)) {
+      emailQueue.available.push(email);
+      existingAll.add(email);
+      added++;
+    }
+  }
+  return added;
+}
+
+/**
+ * Lấy ra email mẫu tiếp theo từ hàng đợi.
+ * Nếu hết available nhưng còn used, tự động quay vòng danh sách đã dùng để phiên không bị gián đoạn.
+ * @return {string|null} Email được gán cho phiên hoặc null nếu rỗng.
+ */
+export function dequeueNextEmail() {
+  if (emailQueue.available.length === 0 && emailQueue.used.length > 0) {
+    console.log('[EmailQueue] Hàng đợi email mẫu đã hết, tự động quay vòng danh sách đã dùng.');
+    emailQueue.available.push(...emailQueue.used.splice(0));
+    void saveEmailQueue();
+  }
+  if (emailQueue.available.length === 0) return null;
+  const email = emailQueue.available.shift();
+  emailQueue.used.push(email);
+  void saveEmailQueue();
+  return email;
+}
+
+/** Khởi tạo email queue: nếu trống, tự động nạp từ các file mẫu có sẵn trên máy. */
+export async function initializeEmailQueue() {
+  await loadEmailQueue();
+  if (emailQueue.available.length === 0 && emailQueue.used.length === 0) {
+    const defaultCandidates = [
+      join(homedir(), 'Downloads', '1kpart2.txt'),
+      join(homedir(), 'Downloads', 'AutoLeadPC', 'Text', 'Gmail.txt'),
+    ];
+    for (const cand of defaultCandidates) {
+      try {
+        const text = await readFile(cand, 'utf8');
+        const lines = text.split(/\r?\n/);
+        const added = importEmailLines(lines);
+        if (added > 0) {
+          console.log(`[EmailQueue] Đã tự động nạp ${added} email từ ${cand}`);
+          await saveEmailQueue();
+          break;
+        }
+      } catch {}
+    }
+  }
+}
+
 /**
  * Chạy handler trên từng phần tử nhưng không vượt quá mức đồng thời cho trước.
  *
@@ -923,6 +1014,11 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
     const added = importProxyLines((body.proxyList ?? '').split(/\r?\n/), proxyType);
     if (added > 0) await saveProxyQueue();
   }
+  // Nạp email mẫu mới từ textarea vào queue nếu có
+  if (body.emailList) {
+    const added = importEmailLines((body.emailList ?? '').split(/\r?\n/));
+    if (added > 0) await saveEmailQueue();
+  }
   const usageHistory = await readProxyUsageHistory();
   const usedExitIps = new Set(Object.values(usageHistory.proxies).map((entry) => entry.exitIp).filter(Boolean));
   // Queue là nguồn chính — parse available thành proxy objects, dedup theo server
@@ -995,6 +1091,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
       proxyType: proxyType,
       websiteUrl: body.websiteUrl,
       autofillData: body.autofillData,
+      emailList: body.emailList,
       autoSubmitForm: body.autoSubmitForm !== false,
       enableLeadCheck: body.enableLeadCheck !== false,
       leadCheckApiUrl: body.leadCheckApiUrl,
@@ -1267,6 +1364,7 @@ function getAutoRefillStatus() {
         version: session.chromeVersion,
         exitIp: session.exitIp,
         proxy: session.proxyServer ?? session.proxyKey ?? null,
+        assignedEmail: session.assignedEmail ?? null,
         autofillRecord: session.autofillRecord ?? null,
         autofillFields: session.autofillFields ?? 0,
         autofillError: session.autofillError ?? null,
@@ -2070,6 +2168,10 @@ async function openBrowserWithInstalledChrome({
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
   };
+  const assignedEmail = dequeueNextEmail();
+  if (assignedEmail) {
+    session.assignedEmail = assignedEmail;
+  }
   attachBrowserLogger(context, session);
   // Lấy từ queue available (đã kiểm tra ở launchRequestedBrowsers)
   const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
@@ -2080,9 +2182,15 @@ async function openBrowserWithInstalledChrome({
       session.addBrowserLog?.(entry);
     },
     onRecordPicked: (record) => {
+      if (session.assignedEmail && record) {
+        record.email = session.assignedEmail;
+        record.emailaddress = session.assignedEmail;
+        record.mail = session.assignedEmail;
+        record.assignedEmail = session.assignedEmail;
+      }
       session.currentRecord = record; // lưu để AI assist dùng khi cần
       // Dequeue ngay khi chọn
-      const idx = autofillQueue.available.findIndex((r) => autofillRecordKey(r) === autofillRecordKey(record));
+      const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordKey(r) === autofillRecordKey(record));
       if (idx !== -1) {
         autofillQueue.available.splice(idx, 1);
         autofillQueue.used.push(record);
@@ -2094,7 +2202,13 @@ async function openBrowserWithInstalledChrome({
       void startLeadVerification(session, leadConfig);
     },
     onStuck: (page) => {
-      const currentRecord = recordPool[session.recordIndex] ?? recordPool[0];
+      const currentRecord = session.currentRecord || (recordPool[session.recordIndex] ?? recordPool[0]);
+      if (session.assignedEmail && currentRecord) {
+        currentRecord.email = session.assignedEmail;
+        currentRecord.emailaddress = session.assignedEmail;
+        currentRecord.mail = session.assignedEmail;
+        currentRecord.assignedEmail = session.assignedEmail;
+      }
       void runAiAssist(page, currentRecord, session).then(async () => {
         // AI xong → kích autofill quét lại một lần
         session.triggerAutofillScan?.();
@@ -2666,6 +2780,7 @@ async function startLocalInterface() {
   await loadAutofillUsed();
   await loadAutofillQueue();
   await loadProxyQueue();
+  await initializeEmailQueue();
   await loadPersistedBrowserLogs();
   const interfaceHtml = await readFile(userInterfacePath, 'utf8');
   const handlers = {
@@ -2779,6 +2894,41 @@ async function startLocalInterface() {
         available: autofillQueue.available.length,
         used: 0,
         message: `Đã đặt lại: ${autofillQueue.available.length} bản ghi thông tin sẵn sàng dùng lại.`,
+      });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/email-queue') {
+      respondWithJson(response, 200, {
+        available: emailQueue.available.length,
+        used: emailQueue.used.length,
+        usedList: emailQueue.used,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/email-queue/import') {
+      const body = JSON.parse(await readRequestBody(request));
+      const rawLines = (body.emailList ?? '').split(/\r?\n/)
+        .map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      const added = importEmailLines(rawLines);
+      if (added > 0) await saveEmailQueue();
+      respondWithJson(response, 200, {
+        added,
+        available: emailQueue.available.length,
+        used: emailQueue.used.length,
+        message: `Đã nạp ${added} email mới (tổng sẵn sàng: ${emailQueue.available.length}).`,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/email-queue/reset') {
+      emailQueue.available.push(...emailQueue.used.splice(0));
+      await saveEmailQueue();
+      respondWithJson(response, 200, {
+        available: emailQueue.available.length,
+        used: 0,
+        message: `Đã đặt lại: ${emailQueue.available.length} email mẫu sẵn sàng dùng lại.`,
       });
       return;
     }
