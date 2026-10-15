@@ -18,29 +18,35 @@ export function parseAutofillRecords(source) {
   if (content.includes('\t')) throw new Error('Hãy dùng CSV hoặc JSON; bảng phân tách bằng tab chưa được hỗ trợ.');
 
   let records;
-  if (content.startsWith('[') || content.startsWith('{')) {
+  const trimmedJson = content.replace(/,\s*$/, '').trim();
+  if (trimmedJson.startsWith('[') || trimmedJson.startsWith('{')) {
+    const tryCleanJson = (str) => {
+      const cleaned = str
+        .replace(/,\s*([}\]])/g, '$1')
+        .replace(/,\s*$/, '');
+      return JSON.parse(cleaned);
+    };
+
     try {
-      const parsed = JSON.parse(content);
+      const parsed = tryCleanJson(trimmedJson);
       records = Array.isArray(parsed) ? parsed : [parsed];
     } catch {
-      // 1. Thử dọn trailing commas
+      // 1. Thử bọc trong mảng [ ... ] nếu người dùng dán một hoặc nhiều object không có ngoặc vuông ngoài cùng
       try {
-        const cleaned = content.replace(/,\s*([}\]])/g, '$1');
-        const parsed = JSON.parse(cleaned);
+        const wrapped = `[\n${trimmedJson.replace(/,\s*$/, '')}\n]`;
+        const parsed = tryCleanJson(wrapped);
         records = Array.isArray(parsed) ? parsed : [parsed];
       } catch {
-        // 2. Tự phục hồi mảng JSON bị cắt cụt đuôi: cắt về dấu '}' hoàn chỉnh cuối cùng
-        if (content.startsWith('[')) {
-          const lastBraceIndex = content.lastIndexOf('}');
-          if (lastBraceIndex !== -1) {
-            try {
-              const truncated = content.slice(0, lastBraceIndex + 1).replace(/,\s*$/, '') + '\n]';
-              const parsed = JSON.parse(truncated);
-              records = Array.isArray(parsed) ? parsed : [parsed];
-            } catch {
-              throw new Error('Dữ liệu JSON không hợp lệ.');
-            }
-          } else {
+        // 2. Tự phục hồi mảng hoặc chuỗi JSON bị cắt cụt đuôi: cắt về dấu '}' hoàn chỉnh cuối cùng
+        const lastBraceIndex = trimmedJson.lastIndexOf('}');
+        if (lastBraceIndex !== -1) {
+          try {
+            const firstBraceIndex = trimmedJson.indexOf('{');
+            const subStr = trimmedJson.slice(firstBraceIndex !== -1 ? firstBraceIndex : 0, lastBraceIndex + 1).replace(/,\s*$/, '');
+            const candidate = subStr.startsWith('[') ? `${subStr}\n]` : `[\n${subStr}\n]`;
+            const parsed = tryCleanJson(candidate);
+            records = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
             throw new Error('Dữ liệu JSON không hợp lệ.');
           }
         } else {

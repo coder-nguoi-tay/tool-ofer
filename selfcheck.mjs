@@ -295,6 +295,44 @@ assert.equal(matchFieldValue(['middle_name', 'initial'], leadRecord), 'Pablo');
 assert.equal(matchFieldValue(['email', 'email_address'], leadRecord), 'juan@example.com');
 assert.equal(matchFieldValue(['email'], { fullname: 'John Doe', phonenumber: '1234567890' }), 'john.doe7890@gmail.com');
 
+// Kiểm tra dữ liệu mẫu người dùng cung cấp kèm dấu phẩy kết thúc:
+const jeremySampleJson = `{
+    "Full Name": "Jeremy Adam McNeice",
+    "Address": "723 e 6th st",
+    "City": "Dewey",
+    "State": "OK",
+    "Zipcode": "74029",
+    "Phonenumber": "918-397-5329",
+    "Date of Birth": "8/4/1984"
+  },`;
+const jeremyParsed = parseAutofillRecords(jeremySampleJson);
+assert.equal(jeremyParsed.length, 1);
+const jeremy = jeremyParsed[0];
+assert.equal(jeremy.fullname, 'Jeremy Adam McNeice');
+assert.equal(jeremy.address, '723 e 6th st');
+assert.equal(jeremy.city, 'Dewey');
+assert.equal(jeremy.state, 'OK');
+assert.equal(jeremy.zipcode, '74029');
+assert.equal(jeremy.phonenumber, '918-397-5329');
+assert.equal(jeremy.dateofbirth, '8/4/1984');
+
+assert.equal(matchFieldValue(['full_name', 'name'], jeremy), 'Jeremy Adam McNeice');
+assert.equal(matchFieldValue(['first_name'], jeremy), 'Jeremy');
+assert.equal(matchFieldValue(['middle_name'], jeremy), 'Adam');
+assert.equal(matchFieldValue(['street_address', 'address'], jeremy), '723 e 6th st');
+assert.equal(matchFieldValue(['city'], jeremy), 'Dewey');
+assert.equal(matchFieldValue(['state'], jeremy), 'OK');
+assert.equal(matchFieldValue(['zip', 'zipcode'], jeremy), '74029');
+assert.equal(matchFieldValue(['phone', 'tel'], jeremy), '918-397-5329');
+assert.equal(matchFieldValue(['areacode'], jeremy), '918');
+assert.equal(matchFieldValue(['prefix'], jeremy), '397');
+assert.equal(matchFieldValue(['linenumber'], jeremy), '5329');
+assert.equal(matchFieldValue(['dob', 'date_of_birth'], jeremy), '08/04/1984');
+assert.equal(matchFieldValue(['dob'], jeremy, { type: 'date' }), '1984-08-04');
+assert.equal(matchFieldValue(['month', 'dob_month'], jeremy), '08');
+assert.equal(matchFieldValue(['day', 'dob_day'], jeremy), '04');
+assert.equal(matchFieldValue(['year', 'dob_year'], jeremy), '1984');
+
 // Tên binary: stable và bản lưu theo version phải thử cả bản Chrome for Testing.
 assert.deepEqual(chromeExecutableNames('stable'), ['Google Chrome', 'Google Chrome for Testing']);
 assert.deepEqual(chromeExecutableNames('145.0.7632.117'), ['Google Chrome', 'Google Chrome for Testing']);
