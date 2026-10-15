@@ -861,6 +861,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     let visibleFieldCount = 0;
 
     for (const frame of frames) {
+      if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
       let fields = [];
       try {
         fields = await frame.locator('input, textarea, select').all();
@@ -871,6 +872,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       let filledInThisPass = 0;
 
       for (const field of fields) {
+        if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
         try {
           if (!(await field.isVisible()) || !(await field.isEnabled())) continue;
           if (await field.getAttribute('data-autolead-filled') === '1') continue;
@@ -1150,6 +1152,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 if (typeof options.onFirstScreenCompleted === 'function') {
                   options.onFirstScreenCompleted(session, page);
                 }
+                return;
               }
             }
           }

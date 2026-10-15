@@ -24,6 +24,7 @@ import {
 
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
+let chromeBuildRotationCounter = 0;
 /** @type {Map<object, Array<{time:string,type:string,[key:string]:any}>>} */
 const browserSessionLogs = new Map();
 const autoRefill = {
@@ -801,6 +802,10 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
     .map((session) => Number(session.chromeVersion?.split('.')[0])).filter(Boolean));
   const availableChromeBuilds = (await listInstalledChromeChannels())
     .filter((build) => !occupiedChromeMajors.has(build.major));
+  if (availableChromeBuilds.length > 1) {
+    const offset = chromeBuildRotationCounter % availableChromeBuilds.length;
+    availableChromeBuilds.push(...availableChromeBuilds.splice(0, offset));
+  }
   if (availableChromeBuilds.length < targetSuccessCount) {
     throw new Error('Cần ' + targetSuccessCount + ' phiên bản Google Chrome thường khác nhau, '
       + 'nhưng hiện chỉ còn ' + availableChromeBuilds.length + ' phiên bản chưa mở. '
@@ -1743,10 +1748,11 @@ async function startLeadVerification(session, leadConfig) {
     } catch {}
   } else {
     session.leadCheckStatus = 'failed';
-    session.leadCheckMessage = `❌ Không có lead về cho IP ${exitIp} sau ${maxAttempts} lần kiểm tra (${maxAttempts * intervalSeconds}s). Đang đổi sock...`;
-    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead, đang đổi sock...</span>`);
+    session.closingDueToNoLead = true;
+    session.leadCheckMessage = `❌ Không có lead về cho IP ${exitIp} sau ${maxAttempts} lần kiểm tra (${maxAttempts * intervalSeconds}s). Đang đổi sock và mở phiên bản mới...`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead, đang đổi phiên bản mới...</span>`);
 
-    console.log(`[LeadCheck] ${label}: ❌ Không có lead sau ${maxAttempts} lần kiểm tra. Đóng Chrome này để mở sock tiếp theo.`);
+    console.log(`[LeadCheck] ${label}: ❌ Không có lead sau ${maxAttempts} lần kiểm tra. Đóng Chrome này để mở phiên bản mới.`);
 
     try {
       if (session.proxyKey) {
@@ -1763,7 +1769,8 @@ async function startLeadVerification(session, leadConfig) {
       }
     } catch {}
 
-    autoRefill.message = `Slot ${slotNum} (IP ${exitIp}) không có lead về; đã đóng và đang mở sock tiếp theo…`;
+    chromeBuildRotationCounter += 1;
+    autoRefill.message = `Slot ${slotNum} (IP ${exitIp}) không có lead về; đã đóng và đang mở phiên bản mới với sock tiếp theo…`;
     session.suppressAutoRefill = false;
     await session.browser?.close?.().catch(() => {});
   }
@@ -1942,7 +1949,7 @@ function closeChromeWhenLastTabCloses(session) {
    * @since 2026-10-15
    */
   function closeEmptyChromeSession() {
-    if (session.suppressAutoRefill || session.closingDueToTrafficBlocked) return;
+    if (session.suppressAutoRefill || session.closingDueToTrafficBlocked || session.closingDueToNoLead || session.leadCheckStatus === 'failed') return;
     for (const page of session.browser.pages()) {
       if (!page.isClosed()) return;
     }
