@@ -14,7 +14,6 @@ import { randomInt } from 'node:crypto';
 export function parseAutofillRecords(source) {
   const content = String(source ?? '').trim();
   if (!content) return [];
-  if (content.length > 200_000) throw new Error('Dữ liệu tự điền tối đa 200 KB.');
   if (content.includes('\t')) throw new Error('Hãy dùng CSV hoặc JSON; bảng phân tách bằng tab chưa được hỗ trợ.');
 
   let records;
@@ -92,8 +91,8 @@ export function parseAutofillRecords(source) {
     });
   }
 
-  if (!Array.isArray(records) || !records.length || records.length > 1_000) {
-    throw new Error('Dữ liệu tự điền cần từ 1 đến 1.000 bản ghi.');
+  if (!Array.isArray(records) || !records.length) {
+    throw new Error('Dữ liệu tự điền cần ít nhất một bản ghi.');
   }
 
   const allHeaders = new Set();
@@ -105,8 +104,8 @@ export function parseAutofillRecords(source) {
     }
   }
   const headers = [...allHeaders];
-  if (!headers.length || headers.length > 60) {
-    throw new Error('Dữ liệu tự điền cần từ 1 đến 60 tên cột hợp lệ.');
+  if (!headers.length) {
+    throw new Error('Dữ liệu tự điền cần ít nhất một tên cột hợp lệ.');
   }
   const normalizedHeaders = headers.map(normalizeFieldName);
   if (new Set(normalizedHeaders).size !== headers.length || normalizedHeaders.includes('')) {

@@ -246,6 +246,21 @@ const recoveredLeads = parseAutofillRecords(truncatedLeadJson);
 assert.equal(recoveredLeads.length, 1);
 assert.equal(recoveredLeads[0].fullname, 'Juan Pablo Suarez');
 
+// Kiểm tra không còn bị giới hạn 200 KB (thử nghiệm với payload > 300 KB)
+const largeRecords = Array.from({ length: 1500 }, (_, i) => ({
+  'Full Name': `User Number ${i}`,
+  Address: `${i} Main Street, Suite ${i}`,
+  City: 'Dewey',
+  State: 'OK',
+  Zipcode: '74029',
+  Phonenumber: '918-397-5329',
+  'Date of Birth': '8/4/1984',
+}));
+const largeJson = JSON.stringify(largeRecords);
+assert.ok(largeJson.length > 200_000, `Payload phải lớn hơn 200 KB (thực tế: ${largeJson.length} bytes)`);
+const parsedLarge = parseAutofillRecords(largeJson);
+assert.equal(parsedLarge.length, 1500);
+
 // Test matchFieldValue: đối sánh thông minh tên trường form Anh - Việt
 const leadRecord = parsedLeads[0];
 assert.equal(matchFieldValue(['first_name', 'fname'], leadRecord), 'Juan');

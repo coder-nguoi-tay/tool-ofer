@@ -367,8 +367,8 @@ function readRequestBody(request) {
     request.setEncoding('utf8');
     request.on('data', (chunk) => {
       requestBody += chunk;
-      if (requestBody.length > 1_000_000) {
-        reject(new Error('Danh sách proxy vượt quá giới hạn 1 MB.'));
+      if (requestBody.length > 50_000_000) {
+        reject(new Error('Dữ liệu yêu cầu vượt quá giới hạn 50 MB.'));
         request.destroy();
       }
     });
