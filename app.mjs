@@ -27,47 +27,49 @@ import {
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
 let chromeBuildRotationCounter = 0;
+let deviceProfileRotationCounter = 0;
+
 /** @type {Map<object, Array<{time:string,type:string,[key:string]:any}>>} */
-const DEVICE_PROFILES = {
+export const DEVICE_PROFILES = {
   windows: {
     label: 'Windows Desktop',
     ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
-    spoof: { platform: 'Win32', maxTouchPoints: 0, mobile: false, uaPlatform: 'Windows', dpr: 1 },
+    spoof: { platform: 'Win32', maxTouchPoints: 0, mobile: false, uaPlatform: 'Windows', dpr: 1, vendor: 'Google Inc.' },
   },
   macos: {
     label: 'macOS Desktop',
     ua: (v) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 2,
-    spoof: { platform: 'MacIntel', maxTouchPoints: 0, mobile: false, uaPlatform: 'macOS', dpr: 2 },
+    spoof: { platform: 'MacIntel', maxTouchPoints: 0, mobile: false, uaPlatform: 'macOS', dpr: 2, vendor: 'Google Inc.' },
   },
   linux: {
     label: 'Linux Desktop',
     ua: (v) => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
-    spoof: { platform: 'Linux x86_64', maxTouchPoints: 0, mobile: false, uaPlatform: 'Linux', dpr: 1 },
+    spoof: { platform: 'Linux x86_64', maxTouchPoints: 0, mobile: false, uaPlatform: 'Linux', dpr: 1, vendor: 'Google Inc.' },
   },
   android: {
     label: 'Android (Chrome)',
     ua: (v) => `Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Mobile Safari/537.36`,
     viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2.625,
-    spoof: { platform: 'Linux armv8l', maxTouchPoints: 5, mobile: true, uaPlatform: 'Android', dpr: 2.625 },
+    spoof: { platform: 'Linux armv8l', maxTouchPoints: 5, mobile: true, uaPlatform: 'Android', dpr: 2.625, vendor: 'Google Inc.' },
   },
   ipad: {
     label: 'iPad',
     ua: () => 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
-    spoof: { platform: 'iPad', maxTouchPoints: 5, mobile: false, uaPlatform: 'iOS', dpr: 2 },
+    spoof: { platform: 'iPad', maxTouchPoints: 5, mobile: false, uaPlatform: 'iOS', dpr: 2, vendor: 'Apple Computer, Inc.' },
   },
   ios: {
     label: 'iPhone (Safari)',
     ua: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
-    spoof: { platform: 'iPhone', maxTouchPoints: 5, mobile: true, uaPlatform: 'iOS', dpr: 3 },
+    spoof: { platform: 'iPhone', maxTouchPoints: 5, mobile: true, uaPlatform: 'iOS', dpr: 3, vendor: 'Apple Computer, Inc.' },
   },
 };
 
-const autoRefill = {
+export const autoRefill = {
   enabled: true,
   settings: null,
   targetCount: 0,
@@ -76,6 +78,19 @@ const autoRefill = {
   sequential: false, // Chế độ tuần tự: 1 tab, delay 5s giữa các phiên
   deviceProfiles: ['windows'], // Danh sách profile thiết bị đang được dùng
 };
+
+/** Lấy profile thiết bị tiếp theo theo vòng tròn xoay vòng toàn cục. */
+export function getNextDeviceProfile() {
+  const profiles = autoRefill.deviceProfiles?.length > 0 ? autoRefill.deviceProfiles : ['windows'];
+  const profile = profiles[deviceProfileRotationCounter % profiles.length];
+  deviceProfileRotationCounter += 1;
+  return profile;
+}
+
+/** Đặt lại bộ đếm xoay vòng thiết bị về 0 (phục vụ test). */
+export function resetDeviceProfileRotation() {
+  deviceProfileRotationCounter = 0;
+}
 let proxyHistoryWriteQueue = Promise.resolve();
 
 // ─── Remote Agent Registry ────────────────────────────────────────────────────
@@ -185,6 +200,34 @@ const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {s
 export const emailQueuePath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'email-queue.json');
 /** Hàng đợi email mẫu: available = chưa dùng, used = đã dùng. */
 export const emailQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
+export const deviceProfilesPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'device-profiles.json');
+
+/** Đọc cấu hình các profile thiết bị đã chọn từ đĩa. */
+export async function loadSavedDeviceProfiles() {
+  try {
+    const raw = await readFile(deviceProfilesPath, 'utf8');
+    const saved = JSON.parse(raw);
+    if (Array.isArray(saved) && saved.length > 0) {
+      const valid = saved.filter((id) => DEVICE_PROFILES[id]);
+      if (valid.length > 0) {
+        autoRefill.deviceProfiles = valid;
+        return valid;
+      }
+    }
+  } catch {}
+  return autoRefill.deviceProfiles;
+}
+
+/** Lưu cấu hình các profile thiết bị đã chọn vào đĩa. */
+export async function saveSavedDeviceProfiles() {
+  try {
+    await mkdir(dirname(deviceProfilesPath), { recursive: true });
+    await writeFile(deviceProfilesPath, JSON.stringify(autoRefill.deviceProfiles, null, 2), 'utf8');
+  } catch (error) {
+    console.error(`[DeviceProfiles] Không thể lưu cấu hình thiết bị: ${error.message}`);
+  }
+}
+
 const port = Number(process.env.AUTOLEADPC_PORT) || 3210;
 
 /**
@@ -881,6 +924,7 @@ function dispatchOneTaskToAgent(agent, settings) {
     autofillQueue.used.push(record);
     void saveAutofillQueue();
   }
+  const chosenProfile = getNextDeviceProfile();
   pendingAgentTasks.push({
     taskId: randomUUID(),
     proxy: proxyLine,
@@ -888,6 +932,7 @@ function dispatchOneTaskToAgent(agent, settings) {
     record,
     websiteUrl: settings.websiteUrl,
     autoSubmitForm: settings.autoSubmitForm ?? true,
+    deviceProfile: chosenProfile,
     leadConfig: {
       enabled: settings.enableLeadCheck !== false,
       apiUrl: settings.leadCheckApiUrl,
@@ -1252,7 +1297,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           intervalSeconds: Number(body.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
           maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
         };
-        const profiles = autoRefill.deviceProfiles?.length > 0 ? autoRefill.deviceProfiles : ['windows'];
+        const chosenDeviceProfile = getNextDeviceProfile();
         const openedBrowser = await openBrowserWithInstalledChrome({
           build: installedChrome,
           proxy: proxy,
@@ -1265,7 +1310,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           autofillRecords: autofillRecords,
           autoSubmit: body.autoSubmitForm !== false,
           leadConfig,
-          deviceProfile: profiles[workerIndex % profiles.length],
+          deviceProfile: chosenDeviceProfile,
         });
         activeSession = openedBrowser.session;
         usageHistory.proxies[proxyKey] = {
@@ -2251,9 +2296,10 @@ async function openBrowserWithInstalledChrome({
       ...(timezoneId && { timezoneId }),
       args: [
         `--window-position=${tile.left},${tile.top}`,
-        `--window-size=${dp.viewport ? `${dp.viewport.width},${dp.viewport.height}` : `${tile.width},${tile.height}`}`,
+        `--window-size=${dp.viewport ? `${dp.viewport.width},${dp.viewport.height + 100}` : `${tile.width},${tile.height}`}`,
         '--no-first-run',
         '--no-default-browser-check',
+        '--disable-blink-features=AutomationControlled',
       ],
     });
   } catch (error) {
@@ -2280,8 +2326,8 @@ async function openBrowserWithInstalledChrome({
   }
   attachBrowserLogger(context, session);
 
-  // Inject device spoof toàn diện: prototype override + Client Hints + devicePixelRatio
-  await context.addInitScript(({ platform, maxTouchPoints, mobile, uaPlatform, dpr }) => {
+  // Inject device spoof toàn diện: prototype override + Client Hints + devicePixelRatio + webdriver cleanup
+  await context.addInitScript(({ platform, maxTouchPoints, mobile, uaPlatform, dpr, vendor }) => {
     const def = (obj, prop, value) => {
       try {
         Object.defineProperty(obj, prop, { get: () => value, configurable: true });
@@ -2289,18 +2335,34 @@ async function openBrowserWithInstalledChrome({
     };
     // Override trên prototype để không bị detect qua hasOwnProperty
     const navProto = Object.getPrototypeOf(navigator);
-    def(navProto, 'platform',       platform);
+    def(navProto, 'platform', platform);
     def(navProto, 'maxTouchPoints', maxTouchPoints);
-    def(window,   'devicePixelRatio', dpr);
+    if (vendor) {
+      def(navProto, 'vendor', vendor);
+    }
+    def(window, 'devicePixelRatio', dpr);
 
-    // navigator.userAgentData — Client Hints (Chrome 89+, quan trọng nhất)
-    if (navigator.userAgentData) {
+    // Chặn phát hiện tự động hóa
+    def(navProto, 'webdriver', false);
+
+    // Xử lý Client Hints (navigator.userAgentData)
+    if (uaPlatform === 'iOS') {
+      // Safari trên iOS / iPadOS không hỗ trợ userAgentData và không có window.chrome
+      try {
+        delete navProto.userAgentData;
+        delete navigator.userAgentData;
+      } catch {}
+      def(navProto, 'userAgentData', undefined);
+      try {
+        delete window.chrome;
+      } catch {}
+    } else if (navigator.userAgentData) {
       const orig = navigator.userAgentData;
       const spoofed = {
-        brands:   orig.brands,
+        brands: orig.brands,
         mobile,
         platform: uaPlatform,
-        toJSON:   () => ({ brands: orig.brands, mobile, platform: uaPlatform }),
+        toJSON: () => ({ brands: orig.brands, mobile, platform: uaPlatform }),
         getHighEntropyValues: async (hints) => {
           const real = await orig.getHighEntropyValues(hints).catch(() => ({}));
           return { ...real, mobile, platform: uaPlatform };
@@ -2409,9 +2471,11 @@ async function openBrowserWithInstalledChrome({
     }
     await page.bringToFront().catch(() => {});
 
-    // Đặt tiền tố IP vào tiêu đề trang và gắn badge để khi hover vào icon Chrome trên Dock/tab/web đều thấy IP
-    await page.evaluate((ip) => {
-      const prefix = `[IP: ${ip}] `;
+    // Đặt tiền tố IP và thiết bị vào tiêu đề trang và gắn badge để khi xem đều thấy rõ IP và loại thiết bị
+    await page.evaluate(({ ip, deviceLabel, deviceProfile }) => {
+      const deviceIcons = { windows: '🪟', macos: '🍎', linux: '🐧', android: '🤖', ipad: '📟', ios: '📱' };
+      const icon = deviceIcons[deviceProfile] || '🖥';
+      const prefix = `[${icon} IP: ${ip}] `;
       if (document.title && !document.title.startsWith(prefix)) {
         document.title = prefix + document.title;
       } else if (!document.title) {
@@ -2421,8 +2485,8 @@ async function openBrowserWithInstalledChrome({
         if (!document.getElementById('__autolead_ip_badge')) {
           const badge = document.createElement('div');
           badge.id = '__autolead_ip_badge';
-          badge.innerHTML = `🌐 <strong>IP:</strong> ${ip}`;
-          badge.title = `Chrome Session IP: ${ip}\nAutoLeadPC`;
+          badge.innerHTML = `🌐 <strong>IP:</strong> ${ip} · ${icon} ${deviceLabel}`;
+          badge.title = `Chrome Session IP: ${ip}\nThiết bị: ${deviceLabel}\nAutoLeadPC`;
           badge.style.cssText = 'position:fixed;top:8px;right:12px;z-index:2147483647;'
             + 'background:rgba(26,38,57,0.92);color:#fff;padding:4px 10px;border-radius:14px;'
             + 'font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;line-height:1.4;'
@@ -2434,16 +2498,18 @@ async function openBrowserWithInstalledChrome({
           document.documentElement.appendChild(badge);
         }
       } catch {}
-    }, exitIp).catch(() => {});
+    }, { ip: exitIp, deviceLabel: dp.label, deviceProfile }).catch(() => {});
 
     context.on('page', (newPage) => {
       newPage.on('domcontentloaded', () => {
-        newPage.evaluate((ip) => {
-          const prefix = `[IP: ${ip}] `;
+        newPage.evaluate(({ ip, deviceProfile }) => {
+          const deviceIcons = { windows: '🪟', macos: '🍎', linux: '🐧', android: '🤖', ipad: '📟', ios: '📱' };
+          const icon = deviceIcons[deviceProfile] || '🖥';
+          const prefix = `[${icon} IP: ${ip}] `;
           if (document.title && !document.title.startsWith(prefix)) {
             document.title = prefix + document.title;
           }
-        }, exitIp).catch(() => {});
+        }, { ip: exitIp, deviceProfile }).catch(() => {});
       });
     });
 
@@ -3001,6 +3067,7 @@ async function startLocalInterface() {
   await loadAutofillQueue();
   await loadProxyQueue();
   await initializeEmailQueue();
+  await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
   const interfaceHtml = await readFile(userInterfacePath, 'utf8');
   const handlers = {
@@ -3256,6 +3323,7 @@ async function startLocalInterface() {
       const body = JSON.parse(await readRequestBody(request));
       const valid = (body.profiles ?? []).filter((id) => DEVICE_PROFILES[id]);
       autoRefill.deviceProfiles = valid.length > 0 ? valid : ['windows'];
+      void saveSavedDeviceProfiles();
       respondWithJson(response, 200, { selected: autoRefill.deviceProfiles });
       return;
     }
@@ -3361,7 +3429,7 @@ async function startLocalInterface() {
 }
 
 async function runAgentTask(task) {
-  const { proxy: proxyLine, proxyType = 'socks5', record, websiteUrl, autoSubmitForm, leadConfig } = task;
+  const { proxy: proxyLine, proxyType = 'socks5', record, websiteUrl, autoSubmitForm, leadConfig, deviceProfile } = task;
   const proxy = parseProxyLine(proxyLine.trim(), 1, proxyType);
   const proxyKey = createProxyUsageKey(proxy, 0);
   const builds = await listInstalledChromeChannels();
@@ -3377,6 +3445,7 @@ async function runAgentTask(task) {
     autofillRecords: record && Object.keys(record).length > 0 ? [record] : [],
     autoSubmit: autoSubmitForm !== false,
     leadConfig: leadConfig ?? {},
+    deviceProfile: deviceProfile ?? getNextDeviceProfile(),
   });
 }
 

@@ -41,6 +41,13 @@ import {
   parseEmailLine,
   importEmailLines,
   dequeueNextEmail,
+  DEVICE_PROFILES,
+  autoRefill,
+  getNextDeviceProfile,
+  resetDeviceProfileRotation,
+  deviceProfilesPath,
+  loadSavedDeviceProfiles,
+  saveSavedDeviceProfiles,
 } from './app.mjs';
 
 const parse = (line, type = 'socks5') => parseProxyLine(line, 1, type);
@@ -1172,6 +1179,66 @@ attachAutofill(mockSampleContext, [{ firstname: 'John', email: 'john_raw@example
 });
 assert.equal(pickedRecordResult?.email, 'assigned.tester@gmail.com', 'attachAutofill phải cập nhật record.email thành session.assignedEmail');
 assert.equal(pickedRecordResult?.assignedEmail, 'assigned.tester@gmail.com');
+
+// ─── 10. KIỂM TRA CHẾ ĐỘ NHIỀU THIẾT BỊ GIẢ ĐỊNH (DEVICE PROFILES) ──────────────
+// 10.1 Cấu trúc đầy đủ của 6 thiết bị giả định
+const expectedProfiles = ['windows', 'macos', 'linux', 'android', 'ipad', 'ios'];
+for (const pid of expectedProfiles) {
+  assert.ok(DEVICE_PROFILES[pid], `Thiếu cấu hình thiết bị: ${pid}`);
+  const dp = DEVICE_PROFILES[pid];
+  assert.ok(typeof dp.label === 'string' && dp.label.length > 0, `Thiếu label cho ${pid}`);
+  assert.ok(typeof dp.ua === 'function', `Thiếu hàm sinh userAgent cho ${pid}`);
+  assert.ok(typeof dp.isMobile === 'boolean', `Thiếu isMobile cho ${pid}`);
+  assert.ok(typeof dp.hasTouch === 'boolean', `Thiếu hasTouch cho ${pid}`);
+  assert.ok(typeof dp.deviceScaleFactor === 'number' && dp.deviceScaleFactor > 0, `Thiếu deviceScaleFactor cho ${pid}`);
+  assert.ok(dp.spoof, `Thiếu spoof cho ${pid}`);
+  assert.ok(typeof dp.spoof.platform === 'string', `Thiếu spoof.platform cho ${pid}`);
+  assert.ok(typeof dp.spoof.uaPlatform === 'string', `Thiếu spoof.uaPlatform cho ${pid}`);
+  assert.ok(typeof dp.spoof.vendor === 'string', `Thiếu spoof.vendor cho ${pid}`);
+}
+
+// 10.2 Tính nhất quán chống phát hiện bot
+// iOS và iPad (Safari) phải có vendor Apple, platform iOS và không được để lộ vendor Google
+assert.equal(DEVICE_PROFILES.ios.spoof.vendor, 'Apple Computer, Inc.');
+assert.equal(DEVICE_PROFILES.ipad.spoof.vendor, 'Apple Computer, Inc.');
+assert.equal(DEVICE_PROFILES.ios.spoof.uaPlatform, 'iOS');
+assert.equal(DEVICE_PROFILES.ipad.spoof.uaPlatform, 'iOS');
+
+// Android, Windows, macOS, Linux phải có vendor Google Inc.
+assert.equal(DEVICE_PROFILES.android.spoof.vendor, 'Google Inc.');
+assert.equal(DEVICE_PROFILES.windows.spoof.vendor, 'Google Inc.');
+assert.equal(DEVICE_PROFILES.macos.spoof.vendor, 'Google Inc.');
+assert.equal(DEVICE_PROFILES.linux.spoof.vendor, 'Google Inc.');
+
+// Mobile devices phải có viewport kích thước chuẩn điện thoại/tablet
+assert.ok(DEVICE_PROFILES.android.viewport.width === 412 && DEVICE_PROFILES.android.viewport.height === 915);
+assert.ok(DEVICE_PROFILES.ios.viewport.width === 390 && DEVICE_PROFILES.ios.viewport.height === 844);
+assert.ok(DEVICE_PROFILES.ipad.viewport.width === 820 && DEVICE_PROFILES.ipad.viewport.height === 1180);
+
+// Desktop devices viewport là null để khớp cửa sổ
+assert.equal(DEVICE_PROFILES.windows.viewport, null);
+assert.equal(DEVICE_PROFILES.macos.viewport, null);
+assert.equal(DEVICE_PROFILES.linux.viewport, null);
+
+// 10.3 Kiểm tra cơ chế xoay vòng thiết bị getNextDeviceProfile()
+resetDeviceProfileRotation();
+autoRefill.deviceProfiles = ['windows', 'macos', 'android'];
+
+assert.equal(getNextDeviceProfile(), 'windows', 'Lần 1 phải lấy windows');
+assert.equal(getNextDeviceProfile(), 'macos', 'Lần 2 phải lấy macos');
+assert.equal(getNextDeviceProfile(), 'android', 'Lần 3 phải lấy android');
+assert.equal(getNextDeviceProfile(), 'windows', 'Lần 4 phải quay vòng lại windows');
+assert.equal(getNextDeviceProfile(), 'macos', 'Lần 5 phải quay vòng lại macos');
+
+// Khi chỉ chọn 1 thiết bị: mọi lần gọi đều trả về thiết bị đó
+resetDeviceProfileRotation();
+autoRefill.deviceProfiles = ['ios'];
+assert.equal(getNextDeviceProfile(), 'ios');
+assert.equal(getNextDeviceProfile(), 'ios');
+
+// Phục hồi lại mặc định
+resetDeviceProfileRotation();
+autoRefill.deviceProfiles = ['windows'];
 
 
 
