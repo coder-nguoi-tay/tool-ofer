@@ -1981,6 +1981,21 @@ async function startLeadVerification(session, leadConfig) {
     } catch {}
 
     chromeBuildRotationCounter += 1;
+    autoRefill.message = `Slot ${slotNum} (IP ${exitIp}) không có lead về; đang thử AI trước khi đổi phiên bản mới…`;
+
+    // Thử AI assist trước khi đóng — form có thể fill sai, AI có thể cứu
+    if (!session.aiAssistRunning) {
+      try {
+        const pages = await session.browser?.pages?.().catch(() => []) ?? [];
+        const activePage = pages.find((p) => !p.isClosed?.());
+        if (activePage) {
+          const record = session.currentRecord ?? {};
+          console.log(`[LeadCheck] ${label}: thử AI assist trước khi đóng.`);
+          await runAiAssist(activePage, record, session);
+        }
+      } catch {}
+    }
+
     autoRefill.message = `Slot ${slotNum} (IP ${exitIp}) không có lead về; đã đóng và đang mở phiên bản mới với sock tiếp theo…`;
     session.suppressAutoRefill = false;
     await session.browser?.close?.().catch(() => {});
@@ -2065,6 +2080,7 @@ async function openBrowserWithInstalledChrome({
       session.addBrowserLog?.(entry);
     },
     onRecordPicked: (record) => {
+      session.currentRecord = record; // lưu để AI assist dùng khi cần
       // Dequeue ngay khi chọn
       const idx = autofillQueue.available.findIndex((r) => autofillRecordKey(r) === autofillRecordKey(record));
       if (idx !== -1) {

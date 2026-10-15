@@ -1000,5 +1000,36 @@ const foundDisabledBtn = await findSubmitButton(mockFrameWithDisabledBtn);
 assert.equal(foundDisabledBtn, mockDisabledSubmitBtn, 'findSubmitButton phải nhận diện và gỡ disabled trên nút submit');
 assert.equal(disabledRemoved, true, 'Thuộc tính disabled phải được gỡ bỏ khỏi nút submit');
 
+// 7. Test tự động chuẩn hóa email thiếu @ và sinh email hợp lệ khi khuyết
+const rawKendra = {
+  firstname: 'Kendra',
+  lastname: 'Wardlaw',
+  email: 'KendraWardlaw5138274',
+  phone: '3077420430',
+  ziporpostcode: '99654',
+  stateorprovince: 'AK',
+};
+const matchedKendraEmail = matchFieldValue(['email'], rawKendra, { type: 'email' });
+assert.equal(matchedKendraEmail, 'KendraWardlaw5138274@gmail.com', 'Email thiếu @ phải được tự động bổ sung @gmail.com');
+
+const rawNoEmailRecord = {
+  firstname: 'Kendra',
+  lastname: 'Wardlaw',
+  phone: '3077420430',
+  state: 'AK',
+};
+const generatedEmail = matchFieldValue(['email'], rawNoEmailRecord, { type: 'email' });
+assert.equal(generatedEmail, 'kendra.wardlaw0430@gmail.com', 'Record thiếu email phải tự động sinh email hợp lệ');
+
+// 8. Test nhận diện Zip Code từ cột ziporpostcode và fallback mã zip theo state
+const matchedKendraZip = matchFieldValue(['zipcode', 'zip'], rawKendra);
+assert.equal(matchedKendraZip, '99654', 'Phải đọc được zip code từ trường ziporpostcode');
+
+const rawMissingZip = {
+  state: 'AK',
+};
+const fallbackZip = matchFieldValue(['zipcode'], rawMissingZip);
+assert.equal(fallbackZip, '99654', 'Record thiếu zip code phải tự động lấy mã zip hợp lệ của bang AK');
+
 
 

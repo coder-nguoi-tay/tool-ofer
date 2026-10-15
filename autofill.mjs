@@ -142,6 +142,17 @@ export function parseAutofillRecords(source) {
     // 2. Email: tự động bổ sung @gmail.com nếu thiếu ký tự @ (tránh lỗi HTML5 email validation)
     if (normalized.email && !normalized.email.includes('@')) {
       normalized.email = `${normalized.email}@gmail.com`;
+    } else if (!normalized.email) {
+      normalized.email = generateFallbackEmail(normalized);
+    }
+
+    // 2.5. Mã bưu điện (Zip / Postal Code): map đầy đủ mọi biến thể tên cột
+    const resolvedZip = normalized.zipcode || normalized.zip || normalized.ziporpostcode || normalized.ziporpostalcode || normalized.postalcode || normalized.postcode || normalized.postal || normalized.mabuudien;
+    if (resolvedZip) {
+      normalized.zipcode = resolvedZip;
+      normalized.zip = resolvedZip;
+      normalized.postalcode = resolvedZip;
+      normalized.ziporpostcode = resolvedZip;
     }
 
     // 3. Bang / Tỉnh (State Or Province)
@@ -194,6 +205,27 @@ export function parseAutofillRecords(source) {
 export function normalizeFieldName(name) {
   return String(name ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Tự động tạo địa chỉ email hợp lệ từ họ tên và số điện thoại khi record thiếu trường email.
+ *
+ * @param {object} r Bản ghi dữ liệu người dùng.
+ * @return {string} Địa chỉ email định dạng name.nameDigits@gmail.com.
+ */
+export function generateFallbackEmail(r = {}) {
+  const rawName = r.fullname || `${r.firstname || ''} ${r.lastname || ''}`.trim() || r.userid || '';
+  let namePart = 'user.lead';
+  if (rawName) {
+    const parts = rawName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/);
+    if (parts.length >= 2) {
+      namePart = `${parts[0]}.${parts.slice(1).join('')}`;
+    } else if (parts.length === 1 && parts[0]) {
+      namePart = parts[0];
+    }
+  }
+  const digits = (r.phonenumber || r.phone || r.cellphone || r.zipcode || r.zip || '77').replace(/\D/g, '').slice(-4) || '77';
+  return `${namePart}${digits}@gmail.com`;
 }
 
 /**
@@ -509,16 +541,9 @@ const semanticCategories = [
     type: 'email',
     patterns: [/email/, /^mail$/],
     resolve: (r) => {
-      const em = r.email || r.emailaddress || r.mail;
+      const em = r.email || r.emailaddress || r.mail || r.userid;
       if (em) return em.includes('@') ? em : `${em}@gmail.com`;
-      if (r.fullname) {
-        const parts = r.fullname.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/);
-        const first = parts[0] || 'user';
-        const last = parts.slice(1).join('') || 'lead';
-        const digits = (r.phonenumber || r.zipcode || '77').replace(/\D/g, '').slice(-4);
-        return `${first}.${last}${digits}@gmail.com`;
-      }
-      return null;
+      return generateFallbackEmail(r);
     },
   },
   // 8. SSN gộp
@@ -551,7 +576,7 @@ const semanticCategories = [
   {
     type: 'zip',
     patterns: [/zip/, /postal/, /postcode/],
-    resolve: (r) => r.zipcode || r.zip || r.postalcode || r.postal,
+    resolve: (r) => r.zipcode || r.zip || r.ziporpostcode || r.ziporpostalcode || r.postalcode || r.postcode || r.postal || r.mabuudien,
   },
   {
     type: 'gender',
@@ -609,6 +634,13 @@ function formatMatchedValue(value, metadata = {}) {
       val = digitsOnly;
     }
   }
+
+  // Tự động bảo đảm Email luôn có domain hợp lệ (@gmail.com) nếu thiếu ký tự @
+  const isEmailField = metadata.type === 'email' || metadata.names?.some((n) => /email|mail/i.test(n));
+  if (isEmailField && val && !val.includes('@')) {
+    val = `${val}@gmail.com`;
+  }
+
   return val;
 }
 
@@ -630,6 +662,9 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
   }
   if (metadata.type === 'tel' && !normalizedCandidates.some((c) => c.includes('phone') || c.includes('tel'))) {
     normalizedCandidates.unshift('phone');
+  }
+  if (normalizedCandidates.some((c) => /zip|postal|postcode/i.test(c)) && !normalizedCandidates.includes('zipcode')) {
+    normalizedCandidates.unshift('zipcode', 'zip');
   }
 
   if (!normalizedCandidates.length) return null;
@@ -680,6 +715,36 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
     for (const candidate of normalizedCandidates) {
       if (key.length >= 4 && candidate.includes(key)) return formatMatchedValue(value, metadata);
       if (candidate.length >= 4 && key.includes(candidate)) return formatMatchedValue(value, metadata);
+    }
+  }
+
+  // 4. Fallback đặc biệt cho Email: nếu form có ô email mà record thiếu hoặc chưa khớp
+  if (metadata.type === 'email' || normalizedCandidates.some((c) => c === 'email' || c === 'mail')) {
+    const em = record.email || record.emailaddress || record.mail || record.userid;
+    if (em) return formatMatchedValue(em, metadata);
+    return generateFallbackEmail(record);
+  }
+
+  // 5. Fallback đặc biệt cho Zip Code: nếu form có ô mã bưu chính
+  if (normalizedCandidates.some((c) => /zip|postal|postcode/.test(c))) {
+    const zipVal = record.zipcode || record.zip || record.ziporpostcode || record.ziporpostalcode || record.postalcode || record.postcode || record.postal;
+    if (zipVal) return formatMatchedValue(zipVal, metadata);
+
+    // Tra cứu mã zip theo bang (State) của người dùng
+    const st = String(record.state || record.stateorprovince || record.province || '').toUpperCase().trim();
+    const defaultStateZipCodes = {
+      AL: '35203', AK: '99654', AZ: '85001', AR: '72201', CA: '90001', CO: '80201',
+      CT: '06101', DE: '19801', FL: '33101', GA: '30301', HI: '96801', ID: '83701',
+      IL: '60601', IN: '46201', IA: '50301', KS: '66601', KY: '40201', LA: '70112',
+      ME: '04101', MD: '21201', MA: '02101', MI: '48201', MN: '55401', MS: '39201',
+      MO: '63101', MT: '59601', NE: '68101', NV: '89101', NH: '03301', NJ: '07101',
+      NM: '87101', NY: '10001', NC: '27601', ND: '58501', OH: '43201', OK: '73101',
+      OR: '97201', PA: '19101', RI: '02901', SC: '29201', SD: '57101', TN: '37201',
+      TX: '75001', UT: '84101', VT: '05601', VA: '23219', WA: '98101', WV: '25301',
+      WI: '53201', WY: '82001', DC: '20001',
+    };
+    if (st && defaultStateZipCodes[st]) {
+      return defaultStateZipCodes[st];
     }
   }
 
@@ -1476,11 +1541,13 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             continue;
           }
 
-          // Bỏ qua nếu ô đã có giá trị thật (ngoại trừ mask rỗng như (___) ___-____, +1, mm/dd/yyyy)
+          // Bỏ qua nếu ô đã có giá trị thật (ngoại trừ mask rỗng như (___) ___-____, +1, mm/dd/yyyy hoặc email/zip chưa hợp lệ)
           if (metadata.kind !== 'select' && metadata.value) {
             const currentVal = metadata.value.trim();
             const isPlaceholderMask = /^(\+1|\+1\s*|\(___\)\s*___-____|___-__-____|[_\-\(\)\s\.\/]+|mm\/dd\/yyyy)$/i.test(currentVal);
-            if (currentVal !== '' && !isPlaceholderMask) continue;
+            const isInvalidEmail = (metadata.type === 'email' || metadata.names?.some((n) => /email|mail/i.test(n))) && !currentVal.includes('@');
+            const isInvalidZip = metadata.names?.some((n) => /zip|postal|postcode/i.test(n)) && currentVal.replace(/\D/g, '').length < 5;
+            if (currentVal !== '' && !isPlaceholderMask && !isInvalidEmail && !isInvalidZip) continue;
           }
 
           if (metadata.kind === 'select') {
@@ -1559,6 +1626,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           } else {
             await field.click({ force: true, timeout: 1500 }).catch(() => {});
             await field.focus().catch(() => {});
+            // Xóa sạch giá trị cũ nếu đang có để tránh bị nối đuôi khi điền đè lại email/zip
+            await field.evaluate((el) => { el.value = ''; }).catch(() => {});
             try {
               await field.fill(String(valueToFill), { force: true, timeout: 3000 });
             } catch {
