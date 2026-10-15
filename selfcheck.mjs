@@ -518,6 +518,18 @@ assert.equal(matchFieldValue(['card_exp_year'], kendra), '2018');
 assert.equal(matchFieldValue(['card_cvv'], kendra), '000');
 assert.equal(matchAgeRange('35-49', Number(kendra.age)), true);
 
+// Test matchFieldValue với cấu trúc address1 / street-address của form Insurance Help Guru
+assert.equal(
+  matchFieldValue(['address1', 'street-address', 'Street Address*'], kendra),
+  '4125 N Inspiration Loop',
+  'matchFieldValue phải khớp chính xác ô address1 và street-address với trường Address Line 1 trong record'
+);
+assert.equal(
+  matchFieldValue(['address1', 'street-address', 'Street Address*'], {}),
+  '100 Main St',
+  'Khi record thiếu địa chỉ, phải có fallback địa chỉ mặc định hợp lệ để không bị chặn form'
+);
+
 // Test findSubmitButton nhận diện nút data-vector-submit="true" và data-tf-element-role="submit"
 const mockVectorSubmitBtn = {
   isVisible: async () => true,

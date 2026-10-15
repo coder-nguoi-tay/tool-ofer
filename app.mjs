@@ -3,7 +3,7 @@ import { get as requestHttps } from 'node:https';
 import { access, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
+import { homedir, hostname as getHostname, cpus } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright';
@@ -37,6 +37,12 @@ const autoRefill = {
   sequential: false, // Chế độ tuần tự: 1 tab, delay 5s giữa các phiên
 };
 let proxyHistoryWriteQueue = Promise.resolve();
+
+// ─── Remote Agent Registry ────────────────────────────────────────────────────
+// agentId → { platform, hostname, maxSlots, freeSlots, activeTasks, lastSeen, enabled }
+const remoteAgents = new Map();
+// Tasks dequeued from proxy/autofill queue, waiting for a remote agent to pick up
+const pendingAgentTasks = [];
 const userInterfacePath = new URL('./index.html', import.meta.url);
 const userAgentListPath = new URL('./useragents.txt', import.meta.url);
 export const interactionLogDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'logs');
@@ -818,6 +824,45 @@ async function saveProxyQueue() {
  * @param {string} proxyType Scheme mặc định.
  * @return {number} Số dòng mới được thêm vào.
  */
+function pruneStaleAgents() {
+  const cutoff = Date.now() - 60_000;
+  for (const [id, a] of remoteAgents) {
+    if (a.lastSeen < cutoff) remoteAgents.delete(id);
+  }
+}
+
+function dispatchOneTaskToAgent(agent, settings) {
+  if (proxyQueue.available.length === 0) return false;
+  const proxyLine = proxyQueue.available.shift();
+  proxyQueue.used.push(proxyLine);
+  void saveProxyQueue();
+  const record = autofillQueue.available.shift() ?? {};
+  if (record && Object.keys(record).length > 0) {
+    autofillQueue.used.push(record);
+    void saveAutofillQueue();
+  }
+  pendingAgentTasks.push({
+    taskId: randomUUID(),
+    proxy: proxyLine,
+    proxyType: settings.proxyType ?? 'socks5',
+    record,
+    websiteUrl: settings.websiteUrl,
+    autoSubmitForm: settings.autoSubmitForm ?? true,
+    leadConfig: {
+      enabled: settings.enableLeadCheck !== false,
+      apiUrl: settings.leadCheckApiUrl,
+      cookie: settings.leadCheckCookie,
+      datas: settings.leadCheckDatas,
+      intervalSeconds: settings.leadCheckInterval,
+      maxAttempts: settings.leadCheckMaxAttempts,
+    },
+    createdAt: Date.now(),
+  });
+  agent.freeSlots = Math.max(0, agent.freeSlots - 1);
+  agent.activeTasks++;
+  return true;
+}
+
 function importProxyLines(rawLines, proxyType) {
   const existingAll = new Set([...proxyQueue.available, ...proxyQueue.used]);
   let added = 0;
@@ -1310,9 +1355,24 @@ function queueAutomaticRefill(delayMs = 0) {
     autoRefill.message = autoRefill.sequential
       ? 'Chế độ tuần tự: đang mở phiên tiếp theo…'
       : `Đang tìm proxy mới để bù ${neededSlots} slot trống…`;
+
+    // Dispatch đến remote agents có enabled + còn slot + còn sống
+    let remoteDispatched = 0;
+    pruneStaleAgents();
+    for (const [, agent] of remoteAgents) {
+      if (remoteDispatched >= neededSlots) break;
+      if (!agent.enabled || agent.freeSlots <= 0) continue;
+      if (dispatchOneTaskToAgent(agent, activeSettings)) remoteDispatched++;
+    }
+    const localNeeded = neededSlots - remoteDispatched;
+    if (localNeeded <= 0) {
+      autoRefill.message = `Đã phân phát ${remoteDispatched} task cho agent từ xa.`;
+      return;
+    }
+
     const result = await launchRequestedBrowsers(JSON.stringify({
       ...activeSettings,
-      requestedCount: neededSlots,
+      requestedCount: localNeeded,
     }), { layoutTarget: autoRefill.targetCount });
     autoRefill.message = activeBrowsers.size >= autoRefill.targetCount
       ? `Đã bù đủ ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`
@@ -3023,6 +3083,76 @@ async function startLocalInterface() {
       return;
     }
 
+    // ─── Agent endpoints ──────────────────────────────────────────────────────
+    if (request.method === 'GET' && request.url === '/agents') {
+      pruneStaleAgents();
+      respondWithJson(response, 200, {
+        agents: [...remoteAgents.entries()].map(([id, a]) => ({
+          agentId: id, platform: a.platform, hostname: a.hostname,
+          maxSlots: a.maxSlots, freeSlots: a.freeSlots, activeTasks: a.activeTasks,
+          enabled: a.enabled, online: Date.now() - a.lastSeen < 30_000,
+        })),
+        pendingTasks: pendingAgentTasks.length,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/agent/register') {
+      const body = JSON.parse(await readRequestBody(request));
+      const agentId = body.agentId || randomUUID();
+      const existing = remoteAgents.get(agentId);
+      remoteAgents.set(agentId, {
+        platform: body.platform ?? 'unknown',
+        hostname: body.hostname ?? agentId,
+        maxSlots: body.maxSlots ?? 5,
+        freeSlots: existing?.freeSlots ?? (body.maxSlots ?? 5),
+        activeTasks: existing?.activeTasks ?? 0,
+        lastSeen: Date.now(),
+        enabled: existing?.enabled ?? true,
+      });
+      respondWithJson(response, 200, { agentId, ok: true });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/agent/heartbeat') {
+      const body = JSON.parse(await readRequestBody(request));
+      const agent = remoteAgents.get(body.agentId);
+      if (agent) { agent.lastSeen = Date.now(); agent.freeSlots = body.freeSlots ?? agent.freeSlots; }
+      respondWithJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url.startsWith('/agent/task')) {
+      const agentId = new URL(request.url, 'http://x').searchParams.get('agentId');
+      const agent = agentId ? remoteAgents.get(agentId) : null;
+      if (agent) agent.lastSeen = Date.now();
+      respondWithJson(response, 200, { task: pendingAgentTasks.shift() ?? null });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/agent/result') {
+      const body = JSON.parse(await readRequestBody(request));
+      const agent = body.agentId ? remoteAgents.get(body.agentId) : null;
+      if (agent) {
+        agent.activeTasks = Math.max(0, agent.activeTasks - 1);
+        agent.freeSlots = Math.min(agent.maxSlots, agent.freeSlots + 1);
+        agent.lastSeen = Date.now();
+      }
+      if (autoRefill.enabled) queueAutomaticRefill();
+      respondWithJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/agents/config') {
+      const body = JSON.parse(await readRequestBody(request));
+      const agent = body.agentId ? remoteAgents.get(body.agentId) : null;
+      if (!agent) { respondWithJson(response, 404, { error: 'Agent not found' }); return; }
+      agent.enabled = typeof body.enabled === 'boolean' ? body.enabled : !agent.enabled;
+      respondWithJson(response, 200, { agentId: body.agentId, enabled: agent.enabled });
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     response.writeHead(404);
     response.end('Not found');
   });
@@ -3037,9 +3167,11 @@ async function startLocalInterface() {
     throw error;
   });
 
-  server.listen(port, '127.0.0.1', async () => {
+  const listenHost = process.argv.includes('--public') ? '0.0.0.0' : '127.0.0.1';
+  server.listen(port, listenHost, async () => {
     const interfaceUrl = `http://127.0.0.1:${port}`;
     console.log(`AutoLeadPC Mac đang chạy tại ${interfaceUrl}`);
+    if (listenHost === '0.0.0.0') console.log(`[Hub] Lắng nghe trên tất cả giao diện mạng — agent có thể kết nối qua IP LAN:${port}`);
     exitWhenParentExits();
     if (process.env.AUTOLEADPC_NO_OPEN === '1') return;
     try {
@@ -3050,9 +3182,66 @@ async function startLocalInterface() {
   });
 }
 
-if (import.meta.main) {
-  startLocalInterface().catch((error) => {
-    console.error(error.message);
-    process.exitCode = 1;
+async function runAgentTask(task) {
+  const { proxy: proxyLine, proxyType = 'socks5', record, websiteUrl, autoSubmitForm, leadConfig } = task;
+  const proxy = parseProxyLine(proxyLine.trim(), 1, proxyType);
+  const proxyKey = createProxyUsageKey(proxy, 0);
+  const builds = await listInstalledChromeChannels();
+  if (builds.length === 0) throw new Error('Không có Chrome for Testing trên máy này');
+  const build = builds[chromeBuildRotationCounter % builds.length];
+  chromeBuildRotationCounter++;
+  const screen = await readScreenSize();
+  const tileIndex = activeBrowsers.size;
+  const tile = tileAt(tileIndex, 1, screen);
+  return openBrowserWithInstalledChrome({
+    build, proxy, proxyKey, websiteUrl: normalizeUrl(websiteUrl),
+    usedExitIps: new Set(), onExitIp: () => {}, tile, tileIndex,
+    autofillRecords: record && Object.keys(record).length > 0 ? [record] : [],
+    autoSubmit: autoSubmitForm !== false,
+    leadConfig: leadConfig ?? {},
   });
+}
+
+async function startAgentMode(hubUrl) {
+  const myHostname = getHostname();
+  const agentId = `${myHostname}-${process.pid}`;
+  const maxSlots = Math.max(3, Math.min(10, Math.floor(cpus().length / 2)));
+
+  const post = (path, body) => fetch(`${hubUrl}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).catch(() => {});
+
+  await post('/agent/register', { agentId, platform: process.platform, hostname: myHostname, maxSlots });
+  console.log(`[Agent] Hub: ${hubUrl} | ID: ${agentId} | Slots: ${maxSlots}`);
+
+  // Heartbeat mỗi 10s
+  setInterval(() => {
+    void post('/agent/heartbeat', { agentId, freeSlots: maxSlots - activeBrowsers.size });
+  }, 10_000);
+
+  // Poll loop
+  for (;;) {
+    try {
+      const res = await fetch(`${hubUrl}/agent/task?agentId=${encodeURIComponent(agentId)}`);
+      const { task } = await res.json();
+      if (task) {
+        console.log(`[Agent] Task ${task.taskId} nhận được, bắt đầu…`);
+        void runAgentTask(task)
+          .catch((e) => console.error(`[Agent] Task ${task.taskId} lỗi: ${e.message}`))
+          .finally(() => post('/agent/result', { taskId: task.taskId, agentId, status: 'done' }));
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+if (import.meta.main) {
+  const hubArg = process.argv.find((a) => a.startsWith('--hub='));
+  if (hubArg) {
+    startAgentMode(hubArg.slice(6)).catch((e) => { console.error(e.message); process.exitCode = 1; });
+  } else {
+    startLocalInterface().catch((error) => { console.error(error.message); process.exitCode = 1; });
+  }
 }

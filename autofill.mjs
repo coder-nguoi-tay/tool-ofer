@@ -160,9 +160,14 @@ export function parseAutofillRecords(source) {
       normalized.state = normalized.stateorprovince;
     }
 
-    // 4. Địa chỉ (Address Line 1)
-    if (!normalized.address && normalized.addressline1) {
-      normalized.address = normalized.addressline1;
+    // 4. Địa chỉ (Address Line 1 / Street / Street Address)
+    const resolvedAddress = normalized.address || normalized.addressline1 || normalized.address1 || normalized.streetaddress || normalized.street || normalized.addressline || normalized.addr || normalized.homeaddress || normalized.streetaddr || '';
+    if (resolvedAddress) {
+      normalized.address = resolvedAddress;
+      normalized.addressline1 = resolvedAddress;
+      normalized.address1 = resolvedAddress;
+      normalized.streetaddress = resolvedAddress;
+      normalized.street = resolvedAddress;
     }
 
     // 5. Số điện thoại (Phone, Home Phone, Cell Phone)
@@ -771,6 +776,13 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
     if (st && defaultStateZipCodes[st]) {
       return defaultStateZipCodes[st];
     }
+  }
+
+  // 6. Fallback đặc biệt cho Địa chỉ: nếu form có ô địa chỉ (address, street, streetaddress, address1)
+  if (normalizedCandidates.some((c) => /address|street|diachi|^addr/i.test(c)) && !normalizedCandidates.some((c) => /address2|apt|suite|unit/i.test(c))) {
+    const addr = getAddressString(record) || record.address || record.address1 || record.addressline1 || record.streetaddress || record.street;
+    if (addr) return formatMatchedValue(addr, metadata);
+    return '100 Main St';
   }
 
   return null;
@@ -1417,7 +1429,22 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
         try {
           if (!(await field.isVisible()) || !(await field.isEnabled())) continue;
-          if (await field.getAttribute('data-autolead-filled') === '1') continue;
+          const isMarkedFilled = (await field.getAttribute('data-autolead-filled')) === '1';
+          if (isMarkedFilled) {
+            const currentVal = await field.inputValue().catch(() => null);
+            const hasError = await field.evaluate((el) => {
+              if (el.classList.contains('error') || el.getAttribute('aria-invalid') === 'true') return true;
+              const parent = el.closest('.input-group, .form-group, .field, .loco-group');
+              return parent ? parent.querySelector('.error, .visible, .helper-text.visible') !== null : false;
+            }).catch(() => false);
+
+            // Nếu đã fill nhưng giá trị hiện tại bị rỗng hoặc đang bị báo lỗi -> xóa mark để điền lại
+            if ((currentVal !== null && currentVal.trim() === '') || hasError) {
+              await field.evaluate((el) => el.removeAttribute('data-autolead-filled')).catch(() => {});
+            } else {
+              continue;
+            }
+          }
 
           const metadata = await field.evaluate((element) => {
             const labels = [];
@@ -1685,31 +1712,78 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               await field.pressSequentially(String(valueToFill), { delay: 25 }).catch(() => {});
             }
 
-            // Đảm bảo kích hoạt đầy đủ các sự kiện input, change, keyup, blur để cập nhật floating labels và trình xác thực
+            // Với ô địa chỉ, nếu xuất hiện dropdown gợi ý autocomplete (như Google Places, Loqate/Loco, PCA), tự bấm gợi ý đầu
+            const isAddressField = metadata.names.some((n) => /address|street|diachi/i.test(n));
+            if (isAddressField) {
+              try {
+                await page.waitForTimeout(300);
+                const suggestionSelector = '.loco-dropdown .loco-item, .loco-item, [class*="loco-"] [class*="suggestion"], [class*="loco-dropdown"] > div, .pac-container .pac-item, .pca .pcaitem, .address-autocomplete-item, .ui-autocomplete .ui-menu-item, [role="listbox"] [role="option"]';
+                const suggestionItem = page.locator(suggestionSelector).first();
+                if (await suggestionItem.isVisible({ timeout: 500 }).catch(() => false)) {
+                  await suggestionItem.click({ force: true, timeout: 1000 }).catch(() => {});
+                } else {
+                  await field.press('ArrowDown').catch(() => {});
+                  await page.waitForTimeout(100);
+                  await field.press('Enter').catch(() => {});
+                }
+              } catch {}
+
+              // Đảm bảo sau khi xử lý autocomplete, ô địa chỉ không bị widget xóa trắng
+              const postAddressVal = await field.inputValue().catch(() => '');
+              if (!postAddressVal || postAddressVal.trim() === '') {
+                await field.evaluate((el, val) => {
+                  const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+                  const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                  if (desc?.set) desc.set.call(el, val);
+                  else el.value = val;
+                  el.classList.remove('error');
+                  el.classList.add('has-value');
+                  const parent = el.closest('.input-group, .loco-group, .form-group');
+                  if (parent) {
+                    parent.classList.remove('error');
+                    const helper = parent.querySelector('.helper-text, .error');
+                    if (helper) helper.classList.remove('visible');
+                  }
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                }, String(valueToFill)).catch(() => {});
+              }
+            }
+
+            // Đảm bảo kích hoạt đầy đủ các sự kiện input, change, blur để cập nhật floating labels và trình xác thực (không gửi keyup Enter)
             await field.evaluate((el) => {
               el.dispatchEvent(new Event('input', { bubbles: true }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
-              el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter' }));
               el.dispatchEvent(new Event('blur', { bubbles: true }));
             }).catch(() => {});
             await field.dispatchEvent('input').catch(() => {});
             await field.dispatchEvent('change').catch(() => {});
             await field.dispatchEvent('blur').catch(() => {});
-
-            // Với ô địa chỉ, nếu xuất hiện dropdown gợi ý autocomplete (như Google Places), tự bấm gợi ý đầu
-            const isAddressField = metadata.names.some((n) => /address|street|diachi/i.test(n));
-            if (isAddressField) {
-              try {
-                await page.waitForTimeout(300);
-                const pacItem = page.locator('.pac-container .pac-item, .address-autocomplete-item, .ui-autocomplete .ui-menu-item').first();
-                if (await pacItem.isVisible({ timeout: 400 }).catch(() => false)) {
-                  await pacItem.click().catch(() => {});
-                }
-              } catch {}
-            }
           }
 
-          await field.evaluate((element) => { element.dataset.autoleadFilled = '1'; }).catch(() => {});
+          // Kiểm tra chắc chắn trường đã có giá trị thực tế trước khi đánh dấu thành công
+          let finalVal = '';
+          if (metadata.kind === 'select') {
+            finalVal = await field.evaluate((el) => el.value || '').catch(() => '');
+          } else {
+            finalVal = await field.inputValue().catch(() => '');
+          }
+          if (!finalVal || finalVal.trim() === '') {
+            // Trường vẫn rỗng, không đánh dấu và không tính là đã điền
+            continue;
+          }
+
+          await field.evaluate((element) => {
+            element.dataset.autoleadFilled = '1';
+            element.classList.remove('error');
+            element.classList.add('has-value');
+            const parent = element.closest('.input-group, .loco-group, .form-group');
+            if (parent) {
+              parent.classList.remove('error');
+              const helper = parent.querySelector('.helper-text, .error');
+              if (helper) helper.classList.remove('visible');
+            }
+          }).catch(() => {});
           session.autofillFields = (session.autofillFields ?? 0) + 1;
           session.autofillError = null;
           filledInThisPass += 1;
@@ -1761,7 +1835,49 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       } catch {}
 
       // Tự động bấm nút gửi / tiếp tục nếu có tùy chọn autoSubmit và vừa điền hoặc tích xong các trường
-      if (options.autoSubmit !== false && (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0)) {
+      // Kiểm tra an toàn trước khi submit: Nếu trên form hiện tại vẫn còn trường bắt buộc (required / *) hoặc trường đang bị lỗi chưa có dữ liệu, KHÔNG được bấm submit!
+      const hasUnfilledRequiredOrErrorField = await frame.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea'));
+        for (const input of inputs) {
+          if (input.disabled || input.offsetParent === null) continue;
+          const style = window.getComputedStyle(input);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+
+          const val = (input.value || '').trim();
+          const isChecked = input.type === 'checkbox' || input.type === 'radio' ? input.checked : true;
+
+          const isRequiredAttr = input.required || input.getAttribute('aria-required') === 'true';
+          const hasErrorClass = input.classList.contains('error') || input.getAttribute('aria-invalid') === 'true';
+          const parentGroup = input.closest('.input-group, .form-group, .field, .loco-group, .step-container');
+          const hasParentError = parentGroup ? Boolean(parentGroup.querySelector('.error, .visible, .helper-text.visible')) : false;
+
+          let labelIsRequired = false;
+          if (input.id) {
+            const lbl = document.querySelector(`label[for="${input.id}"]`);
+            if (lbl && (lbl.innerText || lbl.textContent || '').includes('*')) labelIsRequired = true;
+          }
+          if (!labelIsRequired && parentGroup) {
+            const lbl = parentGroup.querySelector('label');
+            if (lbl && (lbl.innerText || lbl.textContent || '').includes('*')) labelIsRequired = true;
+          }
+
+          if ((isRequiredAttr || labelIsRequired || hasErrorClass || hasParentError) && (!val || !isChecked)) {
+            return {
+              unfilled: true,
+              id: input.id || input.name || 'unknown',
+              type: input.type || input.tagName.toLowerCase(),
+            };
+          }
+        }
+        return { unfilled: false };
+      }).catch(() => ({ unfilled: false }));
+
+      if (hasUnfilledRequiredOrErrorField?.unfilled) {
+        options.onLog?.({
+          type: 'submit_deferred',
+          detail: `Chưa thể submit vì trường bắt buộc [${hasUnfilledRequiredOrErrorField.id}] còn trống hoặc đang báo lỗi.`,
+        });
+      } else if (options.autoSubmit !== false && (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0)) {
         try {
           // 1. Thử tìm nút submit trong frame hiện tại
           let submitBtn = await findSubmitButton(frame);

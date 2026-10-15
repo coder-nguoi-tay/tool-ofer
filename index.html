@@ -292,6 +292,26 @@
           <button id="sequential-stop-btn" class="secondary" type="button" style="display:none;">Dừng tuần tự</button>
         </div>
         <p id="auto-refill-status" class="hint" role="status" aria-live="polite">Tự bù sẽ mở profile khác khi một trình duyệt đóng.</p>
+
+        <!-- Agent panel -->
+        <div id="agents-panel" style="margin-top:16px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <strong style="font-size:14px;">🖥 Agents đang kết nối</strong>
+            <span id="agents-count" class="hint" style="font-size:12px;">(0)</span>
+            <span id="agents-pending" class="hint" style="font-size:12px;margin-left:auto;"></span>
+          </div>
+          <div id="agents-list">
+            <p class="hint" style="margin:0;font-size:12px;">Chưa có agent từ xa. Xem lệnh kết nối bên dưới.</p>
+          </div>
+          <details style="margin-top:10px;">
+            <summary class="hint" style="cursor:pointer;font-size:12px;">Lệnh kết nối agent từ máy khác</summary>
+            <div style="margin-top:8px;">
+              <code id="agent-connect-cmd" style="display:block;padding:8px;background:#f8f8f8;border-radius:4px;font-size:11px;word-break:break-all;user-select:all;">node app.mjs --hub=http://IP_MÁY_NÀY:3210</code>
+              <p class="hint" style="margin:4px 0 0;font-size:11px;">Chạy lệnh trên máy Windows/Linux cùng mạng LAN. Hub phải khởi động với <code>--public</code> để nhận kết nối từ ngoài.</p>
+            </div>
+          </details>
+        </div>
+
         <div id="chrome-ip-status" role="status" aria-live="polite">
           <p class="hint" style="margin: 0;">Chưa có cửa sổ Chrome đang mở.</p>
         </div>
@@ -668,6 +688,47 @@
     });
     refreshAutoRefillState();
     setInterval(refreshAutoRefillState, 2000);
+
+    // ─── Agent panel ────────────────────────────────────────────────────────
+    function renderAgents(agents, pendingTasks) {
+      const list = document.querySelector('#agents-list');
+      const count = document.querySelector('#agents-count');
+      const pending = document.querySelector('#agents-pending');
+      const online = agents.filter(a => a.online);
+      count.textContent = `(${online.length} online)`;
+      pending.textContent = pendingTasks > 0 ? `${pendingTasks} task đang chờ` : '';
+      if (agents.length === 0) {
+        list.innerHTML = '<p class="hint" style="margin:0;font-size:12px;">Chưa có agent từ xa. Xem lệnh kết nối bên dưới.</p>';
+        return;
+      }
+      const platformIcon = p => ({ darwin: '🍎', win32: '🪟', linux: '🐧' }[p] ?? '🖥');
+      list.innerHTML = agents.map(a => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">
+          <input type="checkbox" id="agent-cb-${a.agentId}" data-agent-id="${a.agentId}" ${a.enabled ? 'checked' : ''} style="cursor:pointer;" title="Bật/tắt agent này">
+          <span style="width:8px;height:8px;border-radius:50%;background:${a.online ? '#22c55e' : '#94a3b8'};flex-shrink:0;"></span>
+          <span>${platformIcon(a.platform)} <strong>${a.hostname}</strong></span>
+          <span class="hint">${a.platform}</span>
+          <span style="margin-left:auto;" class="hint">Slot: ${a.freeSlots}/${a.maxSlots} | Task: ${a.activeTasks}</span>
+        </div>`).join('');
+      // Gắn sự kiện toggle
+      list.querySelectorAll('input[type=checkbox][data-agent-id]').forEach(cb => {
+        cb.addEventListener('change', async () => {
+          await fetch('/agents/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: cb.dataset.agentId, enabled: cb.checked }),
+          });
+        });
+      });
+    }
+
+    async function refreshAgents() {
+      const data = await fetch('/agents').then(r => r.json()).catch(() => ({ agents: [], pendingTasks: 0 }));
+      renderAgents(data.agents, data.pendingTasks);
+    }
+    refreshAgents();
+    setInterval(refreshAgents, 3000);
+    // ────────────────────────────────────────────────────────────────────────
 
     saveButton.addEventListener('click', () => {
       if (!preferencesBridge) {
