@@ -1006,6 +1006,7 @@ function getAutoRefillStatus() {
         slot: session.tileIndex + 1,
         version: session.chromeVersion,
         exitIp: session.exitIp,
+        proxy: session.proxyServer ?? session.proxyKey ?? null,
         autofillRecord: session.autofillRecord ?? null,
         autofillFields: session.autofillFields ?? 0,
         autofillError: session.autofillError ?? null,
@@ -1524,6 +1525,7 @@ async function openBrowserWithInstalledChrome({
     chromeVersion: build.version,
     suppressAutoRefill: false,
     proxyKey,
+    proxyServer: proxy.server,
     extensions: extensionNames.length > 0
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
@@ -1545,6 +1547,7 @@ async function openBrowserWithInstalledChrome({
     const exitIp = await verifyBrowserExitIp(context, usedExitIps, onExitIp);
     session.exitIp = exitIp;
     const response = await page.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+    const finalUrl = page.url();
     if (!response || response.status() >= 400) {
       throw new Error(`website trả HTTP ${response?.status() ?? 'không có phản hồi'}`);
     }
@@ -1552,6 +1555,45 @@ async function openBrowserWithInstalledChrome({
       throw new Error('trang đích hiển thị Traffic Blocked!');
     }
     await page.bringToFront().catch(() => {});
+
+    // Đặt tiền tố IP vào tiêu đề trang và gắn badge để khi hover vào icon Chrome trên Dock/tab/web đều thấy IP
+    await page.evaluate((ip) => {
+      const prefix = `[IP: ${ip}] `;
+      if (document.title && !document.title.startsWith(prefix)) {
+        document.title = prefix + document.title;
+      } else if (!document.title) {
+        document.title = prefix;
+      }
+      try {
+        if (!document.getElementById('__autolead_ip_badge')) {
+          const badge = document.createElement('div');
+          badge.id = '__autolead_ip_badge';
+          badge.innerHTML = `🌐 <strong>IP:</strong> ${ip}`;
+          badge.title = `Chrome Session IP: ${ip}\nAutoLeadPC`;
+          badge.style.cssText = 'position:fixed;top:8px;right:12px;z-index:2147483647;'
+            + 'background:rgba(26,38,57,0.92);color:#fff;padding:4px 10px;border-radius:14px;'
+            + 'font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;line-height:1.4;'
+            + 'box-shadow:0 2px 8px rgba(0,0,0,0.25);pointer-events:auto;user-select:none;'
+            + 'cursor:pointer;transition:all 0.2s;';
+          badge.onmouseenter = () => { badge.style.opacity = '1'; badge.style.transform = 'scale(1.05)'; };
+          badge.onmouseleave = () => { badge.style.opacity = '0.75'; badge.style.transform = 'scale(1)'; };
+          badge.style.opacity = '0.85';
+          document.documentElement.appendChild(badge);
+        }
+      } catch {}
+    }, exitIp).catch(() => {});
+
+    context.on('page', (newPage) => {
+      newPage.on('domcontentloaded', () => {
+        newPage.evaluate((ip) => {
+          const prefix = `[IP: ${ip}] `;
+          if (document.title && !document.title.startsWith(prefix)) {
+            document.title = prefix + document.title;
+          }
+        }, exitIp).catch(() => {});
+      });
+    });
+
     closeChromeWhenLastTabCloses(session);
     return { exitIp, finalUrl, session };
   } catch (error) {
