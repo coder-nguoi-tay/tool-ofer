@@ -32,32 +32,38 @@ const DEVICE_PROFILES = {
   windows: {
     label: 'Windows Desktop',
     ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
-    viewport: null, isMobile: false, hasTouch: false,
+    viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
+    spoof: { platform: 'Win32', maxTouchPoints: 0, mobile: false, uaPlatform: 'Windows', dpr: 1 },
   },
   macos: {
     label: 'macOS Desktop',
     ua: (v) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
-    viewport: null, isMobile: false, hasTouch: false,
+    viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 2,
+    spoof: { platform: 'MacIntel', maxTouchPoints: 0, mobile: false, uaPlatform: 'macOS', dpr: 2 },
   },
   linux: {
     label: 'Linux Desktop',
     ua: (v) => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
-    viewport: null, isMobile: false, hasTouch: false,
+    viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
+    spoof: { platform: 'Linux x86_64', maxTouchPoints: 0, mobile: false, uaPlatform: 'Linux', dpr: 1 },
   },
   android: {
     label: 'Android (Chrome)',
     ua: (v) => `Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Mobile Safari/537.36`,
-    viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true,
+    viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2.625,
+    spoof: { platform: 'Linux armv8l', maxTouchPoints: 5, mobile: true, uaPlatform: 'Android', dpr: 2.625 },
   },
   ipad: {
     label: 'iPad',
     ua: () => 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true,
+    viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+    spoof: { platform: 'iPad', maxTouchPoints: 5, mobile: false, uaPlatform: 'iOS', dpr: 2 },
   },
   ios: {
     label: 'iPhone (Safari)',
     ua: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
+    spoof: { platform: 'iPhone', maxTouchPoints: 5, mobile: true, uaPlatform: 'iOS', dpr: 3 },
   },
 };
 
@@ -2240,6 +2246,7 @@ async function openBrowserWithInstalledChrome({
       userAgent: dp.ua(build.version),
       isMobile: dp.isMobile,
       hasTouch: dp.hasTouch,
+      deviceScaleFactor: dp.deviceScaleFactor ?? 1,
       proxy: relay?.proxy ?? toPlaywrightProxy(proxy),
       ...(timezoneId && { timezoneId }),
       args: [
@@ -2273,34 +2280,41 @@ async function openBrowserWithInstalledChrome({
   }
   attachBrowserLogger(context, session);
 
-  // Inject navigator spoof cho mobile/non-Windows profiles
-  if (deviceProfile !== 'windows') {
-    const spoofMap = {
-      macos:   { platform: 'MacIntel',   maxTouchPoints: 0, vendor: 'Google Inc.', languages: ['en-US', 'en'] },
-      linux:   { platform: 'Linux x86_64', maxTouchPoints: 0, vendor: 'Google Inc.', languages: ['en-US', 'en'] },
-      android: { platform: 'Linux armv8l', maxTouchPoints: 5, vendor: 'Google Inc.', languages: ['en-US', 'en'] },
-      ipad:    { platform: 'iPad',        maxTouchPoints: 5, vendor: 'Apple Computer, Inc.', languages: ['en-US', 'en'] },
-      ios:     { platform: 'iPhone',      maxTouchPoints: 5, vendor: 'Apple Computer, Inc.', languages: ['en-US', 'en'] },
+  // Inject device spoof toàn diện: prototype override + Client Hints + devicePixelRatio
+  await context.addInitScript(({ platform, maxTouchPoints, mobile, uaPlatform, dpr }) => {
+    const def = (obj, prop, value) => {
+      try {
+        Object.defineProperty(obj, prop, { get: () => value, configurable: true });
+      } catch {}
     };
-    const spoof = spoofMap[deviceProfile];
-    if (spoof) {
-      await context.addInitScript(({ platform, maxTouchPoints, vendor, languages, isMobileProfile }) => {
-        try {
-          Object.defineProperty(navigator, 'platform',       { get: () => platform });
-          Object.defineProperty(navigator, 'maxTouchPoints', { get: () => maxTouchPoints });
-          Object.defineProperty(navigator, 'vendor',         { get: () => vendor });
-          Object.defineProperty(navigator, 'languages',      { get: () => languages });
-          Object.defineProperty(navigator, 'language',       { get: () => languages[0] });
-          if (isMobileProfile) {
-            // Đảm bảo touch events tồn tại
-            if (!('ontouchstart' in window)) {
-              window.ontouchstart = null;
-            }
-          }
-        } catch {}
-      }, { ...spoof, isMobileProfile: dp.isMobile });
+    // Override trên prototype để không bị detect qua hasOwnProperty
+    const navProto = Object.getPrototypeOf(navigator);
+    def(navProto, 'platform',       platform);
+    def(navProto, 'maxTouchPoints', maxTouchPoints);
+    def(window,   'devicePixelRatio', dpr);
+
+    // navigator.userAgentData — Client Hints (Chrome 89+, quan trọng nhất)
+    if (navigator.userAgentData) {
+      const orig = navigator.userAgentData;
+      const spoofed = {
+        brands:   orig.brands,
+        mobile,
+        platform: uaPlatform,
+        toJSON:   () => ({ brands: orig.brands, mobile, platform: uaPlatform }),
+        getHighEntropyValues: async (hints) => {
+          const real = await orig.getHighEntropyValues(hints).catch(() => ({}));
+          return { ...real, mobile, platform: uaPlatform };
+        },
+      };
+      def(navProto, 'userAgentData', spoofed);
     }
-  }
+
+    // Touch events cho mobile
+    if (maxTouchPoints > 0 && !('ontouchstart' in window)) {
+      window.ontouchstart = null;
+      window.TouchEvent = window.TouchEvent || function TouchEvent() {};
+    }
+  }, dp.spoof);
 
   // Lấy từ queue available (đã kiểm tra ở launchRequestedBrowsers)
   const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
@@ -2434,6 +2448,7 @@ async function openBrowserWithInstalledChrome({
     });
 
     closeChromeWhenLastTabCloses(session);
+    watchTrafficBlockedPage(session);
     return { exitIp, finalUrl, session };
   } catch (error) {
     session.suppressAutoRefill = true;
@@ -2608,46 +2623,120 @@ export async function getDeadOrBlockedReason(page) {
       return 'Lỗi mạng trình duyệt (chrome-error)';
     }
 
-    const evaluatePromise = page.evaluate(() => {
-      const title = document.title || '';
-      const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
-      const docText = document.documentElement ? (document.documentElement.innerText || document.documentElement.textContent || '') : '';
-      const fullText = `${title} ${bodyText} ${docText}`;
+    const checkFrame = async (frame) => {
+      try {
+        if (!frame) return null;
+        const frameUrl = typeof frame.url === 'function' ? frame.url() : (frame.url || '');
+        if (typeof frameUrl === 'string' && (frameUrl.startsWith('chrome-error://') || frameUrl.startsWith('about:neterror'))) {
+          let frameErr = '';
+          try {
+            frameErr = typeof frame.evaluate === 'function' ? await frame.evaluate(() => {
+              const el = document.getElementById('sub-frame-error-details') || document.getElementById('main-frame-error-details') || document.getElementById('sub-frame-error') || document.getElementById('main-frame-error');
+              return el ? (el.innerText || el.textContent || '').trim() : '';
+            }) : '';
+          } catch {}
+          return frameErr ? `Lỗi kết nối (${frameErr})` : 'Lỗi mạng trình duyệt (chrome-error)';
+        }
 
-      if (/traffic\s+blocked/i.test(fullText)) {
-        return 'Traffic Blocked!';
+        if (typeof frame.evaluate !== 'function') return null;
+
+        const evaluatePromise = frame.evaluate(() => {
+          // 1. Kiểm tra phần tử sub-frame-error hoặc main-frame-error chuẩn của Chromium
+          const subFrameError = (typeof document !== 'undefined') && (document.getElementById('sub-frame-error') || document.getElementById('main-frame-error') || document.querySelector?.('#sub-frame-error, #main-frame-error, #sub-frame-error-details, #main-frame-error-details'));
+          if (subFrameError) {
+            const details = document.getElementById('sub-frame-error-details') || document.getElementById('main-frame-error-details') || subFrameError;
+            const errText = (details.innerText || details.textContent || '').trim();
+            return errText ? `ERR_CONNECTION_REFUSED: ${errText}` : 'ERR_CONNECTION_REFUSED';
+          }
+
+          const title = (typeof document !== 'undefined' && document.title) || '';
+          const bodyText = (typeof document !== 'undefined' && document.body) ? (document.body.innerText || document.body.textContent || '') : '';
+          const docText = (typeof document !== 'undefined' && document.documentElement) ? (document.documentElement.innerText || document.documentElement.textContent || '') : '';
+          const fullText = `${title} ${bodyText} ${docText}`;
+
+          if (/traffic\s+blocked/i.test(fullText)) {
+            return 'Traffic Blocked!';
+          }
+
+          if (/^\s*disabled\s*$/i.test(title) && /^\s*disabled\s*$/i.test(bodyText.trim())) {
+            return 'Disabled';
+          }
+
+          if (/refused to connect|từ chối kết nối|bị từ chối kết nối/i.test(fullText)) {
+            return 'ERR_CONNECTION_REFUSED';
+          }
+
+          const netErrorMatch = fullText.match(/\b(ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_PROXY_CONNECTION_FAILED|ERR_SOCKS_CONNECTION_FAILED|ERR_TUNNEL_CONNECTION_FAILED|ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_REFUSED|ERR_EMPTY_RESPONSE|ERR_NAME_NOT_RESOLVED|DNS_PROBE_FINISHED_NXDOMAIN|ERR_INTERNET_DISCONNECTED|ERR_ADDRESS_UNREACHABLE|ERR_SSL_PROTOCOL_ERROR|ERR_NETWORK_CHANGED|ERR_BLOCKED_BY_CLIENT|ERR_FAILED)\b/i);
+          if (netErrorMatch) {
+            return netErrorMatch[1].toUpperCase();
+          }
+
+          if (/this site can[’']t be reached|không thể truy cập trang web này/i.test(fullText)) {
+            return 'This site can’t be reached';
+          }
+          if (/unexpectedly closed the connection|đã bất ngờ đóng kết nối/i.test(fullText)) {
+            return 'ERR_CONNECTION_CLOSED';
+          }
+          if (/checking the proxy and the firewall|kiểm tra proxy và tường lửa/i.test(fullText)) {
+            return 'Lỗi kết nối proxy';
+          }
+
+          // Kiểm tra xem có bất kỳ iframe con nào trong DOM có sub-frame-error không
+          try {
+            if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+              const iframes = document.querySelectorAll('iframe');
+              for (const ifr of iframes) {
+                try {
+                  const idoc = ifr.contentDocument || ifr.contentWindow?.document;
+                  if (idoc) {
+                    const sub = idoc.getElementById('sub-frame-error') || idoc.querySelector?.('#sub-frame-error, #sub-frame-error-details');
+                    if (sub) {
+                      const txt = (sub.innerText || sub.textContent || '').trim();
+                      return txt ? `ERR_CONNECTION_REFUSED: ${txt}` : 'ERR_CONNECTION_REFUSED';
+                    }
+                    const ifrText = `${idoc.title || ''} ${idoc.body ? idoc.body.innerText || '' : ''}`;
+                    if (/refused to connect|từ chối kết nối/i.test(ifrText)) {
+                      return 'ERR_CONNECTION_REFUSED';
+                    }
+                  }
+                } catch {}
+              }
+            }
+          } catch {}
+
+          return null;
+        });
+
+        const timeoutPromise = new Promise((resolve) => {
+          const timeoutId = setTimeout(() => resolve(null), 2000);
+          timeoutId.unref?.();
+        });
+
+        const result = await Promise.race([evaluatePromise, timeoutPromise]);
+        if (typeof result === 'string' && result.trim()) return result.trim();
+        if (result === true) return 'Traffic Blocked!';
+        return null;
+      } catch {
+        return null;
       }
+    };
 
-      if (/^\s*disabled\s*$/i.test(title) && /^\s*disabled\s*$/i.test(bodyText.trim())) {
-        return 'Disabled';
-      }
+    // 1. Kiểm tra trang chính
+    let reason = await checkFrame(page);
+    if (reason) return reason;
 
-      const netErrorMatch = fullText.match(/\b(ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_PROXY_CONNECTION_FAILED|ERR_SOCKS_CONNECTION_FAILED|ERR_TUNNEL_CONNECTION_FAILED|ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_REFUSED|ERR_EMPTY_RESPONSE|ERR_NAME_NOT_RESOLVED|DNS_PROBE_FINISHED_NXDOMAIN|ERR_INTERNET_DISCONNECTED|ERR_ADDRESS_UNREACHABLE|ERR_SSL_PROTOCOL_ERROR|ERR_NETWORK_CHANGED)\b/i);
-      if (netErrorMatch) {
-        return netErrorMatch[1].toUpperCase();
-      }
+    // 2. Kiểm tra các frame/iframe con
+    if (typeof page.frames === 'function') {
+      try {
+        const frames = page.frames();
+        for (const frame of frames) {
+          if (frame === page.mainFrame?.()) continue;
+          reason = await checkFrame(frame);
+          if (reason) return reason;
+        }
+      } catch {}
+    }
 
-      if (/this site can[’']t be reached|không thể truy cập trang web này/i.test(fullText)) {
-        return 'This site can’t be reached';
-      }
-      if (/unexpectedly closed the connection|đã bất ngờ đóng kết nối/i.test(fullText)) {
-        return 'ERR_CONNECTION_CLOSED';
-      }
-      if (/checking the proxy and the firewall|kiểm tra proxy và tường lửa/i.test(fullText)) {
-        return 'Lỗi kết nối proxy';
-      }
-
-      return null;
-    });
-
-    const timeoutPromise = new Promise((resolve) => {
-      const timeoutId = setTimeout(() => resolve(null), 2000);
-      timeoutId.unref?.();
-    });
-
-    const result = await Promise.race([evaluatePromise, timeoutPromise]);
-    if (typeof result === 'string' && result.trim()) return result.trim();
-    if (result === true) return 'Traffic Blocked!';
     return null;
   } catch {
     return null;
@@ -2668,6 +2757,8 @@ export async function hasTrafficBlocked(page) {
  * @since 2026-10-15
  */
 export function watchTrafficBlockedPage(session) {
+  if (!session || session.trafficWatcherAttached) return;
+  session.trafficWatcherAttached = true;
   let checking = false;
   let blocked = false;
   const redirectTracker = new WeakMap();
@@ -2864,7 +2955,7 @@ export function watchTrafficBlockedPage(session) {
         checking = false;
       }
     })();
-  }, 1500);
+  }, 1000);
   timer.unref?.();
   if (typeof session.browser?.on === 'function') {
     session.browser.on('close', () => clearInterval(timer));

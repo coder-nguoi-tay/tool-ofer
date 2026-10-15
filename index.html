@@ -359,6 +359,11 @@
           <button class="secondary" id="log-clear-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xoá bộ lọc</button>
           <button class="secondary" id="log-clear-all-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;color:#dc2626;border-color:#fca5a5;" title="Xoá toàn bộ log thao tác và các file HTML đã lưu">🗑️ Xoá toàn bộ log & HTML</button>
         </div>
+        <div id="log-clear-confirm" style="display:none;align-items:center;gap:8px;padding:8px 10px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;font-size:12px;color:#991b1b;">
+          <span>⚠️ Xoá toàn bộ log và file HTML? Không thể hoàn tác.</span>
+          <button id="log-clear-confirm-yes" type="button" style="padding:3px 10px;background:#dc2626;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Xoá</button>
+          <button id="log-clear-confirm-no" type="button" style="padding:3px 10px;background:#e5e7eb;color:#374151;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Huỷ</button>
+        </div>
       </div>
       <div style="font-size:11px;color:#475569;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;background:#f8fafc;padding:6px 10px;border-radius:6px;border:1px solid #cbd5e1;">
         <span id="log-storage-info">📁 Thư mục lưu HTML: <code style="background:#e2e8f0;padding:2px 5px;border-radius:3px;">...</code> (<strong id="log-html-count">0</strong> file)</span>
@@ -1077,11 +1082,20 @@
       status.textContent = res.message || 'Đã mở thư mục trong Finder.';
     });
 
-    document.querySelector('#log-clear-all-btn').addEventListener('click', async () => {
-      if (!confirm('Bạn có chắc chắn muốn xoá toàn bộ log thao tác và tất cả các file HTML đã lưu?')) return;
+    document.querySelector('#log-clear-all-btn').addEventListener('click', () => {
+      const confirmBar = document.querySelector('#log-clear-confirm');
+      confirmBar.style.display = confirmBar.style.display === 'none' ? 'flex' : 'none';
+    });
+
+    document.querySelector('#log-clear-confirm-yes').addEventListener('click', async () => {
+      document.querySelector('#log-clear-confirm').style.display = 'none';
       const res = await fetch('/browser-logs/clear', { method: 'POST' }).then((r) => r.json());
       status.textContent = res.message || 'Đã xoá toàn bộ log và các file HTML.';
       await fetchLogs();
+    });
+
+    document.querySelector('#log-clear-confirm-no').addEventListener('click', () => {
+      document.querySelector('#log-clear-confirm').style.display = 'none';
     });
 
     document.querySelector('#log-copy-dir-btn').addEventListener('click', () => {

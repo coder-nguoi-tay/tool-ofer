@@ -289,6 +289,32 @@ assert.equal(
   'ERR_CONNECTION_CLOSED',
 );
 
+// Test getDeadOrBlockedReason nhận diện lỗi sub-frame-error (locotomato.com refused to connect)
+assert.equal(
+  await getDeadOrBlockedReason({
+    isClosed: () => false,
+    url: () => 'https://insurancehelpguru.com',
+    evaluate: () => 'ERR_CONNECTION_REFUSED: locotomato.com refused to connect.',
+  }),
+  'ERR_CONNECTION_REFUSED: locotomato.com refused to connect.',
+);
+assert.equal(
+  await getDeadOrBlockedReason({
+    isClosed: () => false,
+    url: () => 'https://insurancehelpguru.com',
+    evaluate: () => null,
+    mainFrame: () => ({ url: () => 'https://insurancehelpguru.com' }),
+    frames: () => [
+      { url: () => 'https://insurancehelpguru.com' },
+      {
+        url: () => 'chrome-error://chromewebdata/',
+        evaluate: async () => 'locotomato.com refused to connect.',
+      },
+    ],
+  }),
+  'Lỗi kết nối (locotomato.com refused to connect.)',
+);
+
 // Test parseAutofillRecords: hỗ trợ đầy đủ các trường SSN, Email, Banking và tự phục hồi JSON cắt cụt
 const sampleLeadJson = `[
   {
