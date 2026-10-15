@@ -116,13 +116,70 @@ export function parseAutofillRecords(source) {
     if (!record || Array.isArray(record) || typeof record !== 'object') {
       throw new Error('Mỗi bản ghi phải là một đối tượng dữ liệu.');
     }
-    return Object.fromEntries(headers.map((header) => {
+    const normalized = Object.fromEntries(headers.map((header) => {
       const value = record[header] ?? '';
       if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) {
         throw new Error('Giá trị tự điền phải là chữ, số hoặc true/false.');
       }
-      return [normalizeFieldName(header), String(value ?? '')];
+      return [normalizeFieldName(header), String(value ?? '').trim()];
     }));
+
+    // Tự động làm giàu các trường (Enrichment) để tương thích tối đa với mọi mẫu form:
+    // 1. Ngày sinh gộp (DOB): nếu có birthyear và birthmonth
+    if (normalized.birthyear && normalized.birthmonth) {
+      const mm = String(normalized.birthmonth).padStart(2, '0');
+      const dd = String(normalized.birthday || '1').padStart(2, '0');
+      const yyyy = String(normalized.birthyear);
+      normalized.dob = `${mm}/${dd}/${yyyy}`;
+      normalized.dateofbirth = normalized.dob;
+      normalized.birthdate = normalized.dob;
+      if (!normalized.age) {
+        const yr = parseInt(yyyy, 10);
+        if (!Number.isNaN(yr)) normalized.age = String(new Date().getFullYear() - yr);
+      }
+    }
+
+    // 2. Email: tự động bổ sung @gmail.com nếu thiếu ký tự @ (tránh lỗi HTML5 email validation)
+    if (normalized.email && !normalized.email.includes('@')) {
+      normalized.email = `${normalized.email}@gmail.com`;
+    }
+
+    // 3. Bang / Tỉnh (State Or Province)
+    if (!normalized.state && normalized.stateorprovince) {
+      normalized.state = normalized.stateorprovince;
+    }
+
+    // 4. Địa chỉ (Address Line 1)
+    if (!normalized.address && normalized.addressline1) {
+      normalized.address = normalized.addressline1;
+    }
+
+    // 5. Số điện thoại (Phone, Home Phone, Cell Phone)
+    if (!normalized.phone) {
+      normalized.phone = normalized.cellphone || normalized.homephone || normalized.workphone || '';
+    }
+
+    // 6. Họ tên gộp
+    if (!normalized.fullname && normalized.firstname && normalized.lastname) {
+      normalized.fullname = `${normalized.firstname} ${normalized.lastname}`.trim();
+    }
+
+    // 7. Thẻ thanh toán (Credit / Debit Card)
+    if (normalized.cardexpiresmonth && !normalized.cardexpmonth) {
+      normalized.cardexpmonth = normalized.cardexpiresmonth;
+    }
+    if (normalized.cardexpiresyear && !normalized.cardexpyear) {
+      normalized.cardexpyear = normalized.cardexpiresyear;
+    }
+    if (normalized.cardvalidationcode && !normalized.cvv) {
+      normalized.cvv = normalized.cardvalidationcode;
+      normalized.cvc = normalized.cardvalidationcode;
+    }
+    if (normalized.cardnumber && !normalized.creditcard) {
+      normalized.creditcard = normalized.cardnumber;
+    }
+
+    return normalized;
   });
 }
 
@@ -254,6 +311,11 @@ export function parseDobComponents(dobStr) {
  */
 export function getDobString(r) {
   if (!r || typeof r !== 'object') return '';
+  if (r.birthyear && r.birthmonth) {
+    const mm = String(r.birthmonth).padStart(2, '0');
+    const dd = String(r.birthday || '01').padStart(2, '0');
+    return `${mm}/${dd}/${r.birthyear}`;
+  }
   return r.namsinh || r.ngaysinh || r.ngaythangnamsinh || r.dob || r.birthdate || r.dateofbirth || r.birthday || r.bday || r.birth || '';
 }
 
@@ -269,11 +331,37 @@ export function getAddressString(r) {
  * Danh sách mẫu nhận diện các trường thông dụng (đa ngôn ngữ Anh - Việt, hỗ trợ cả form gộp và form chia tách).
  */
 const semanticCategories = [
-  // 1. Chia tách Date of Birth (kiểm tra trước DOB gộp)
+  // 1. Thẻ ngân hàng & thanh toán (kiểm tra trước DOB và phone để tránh 'card_exp_month' khớp nhầm /month/)
+  {
+    type: 'card_number',
+    patterns: [/cardnumber/, /creditcard/, /ccnumber/, /cardno/, /debitcard/],
+    resolve: (r) => r.cardnumber || r.creditcard,
+  },
+  {
+    type: 'card_exp_month',
+    patterns: [/cardexpiresmonth/, /card.*exp.*month/, /exp.*month/, /ccexpmonth/, /expiration.*month/, /^cardexpmonth$/],
+    resolve: (r) => r.cardexpiresmonth || r.cardexpmonth,
+  },
+  {
+    type: 'card_exp_year',
+    patterns: [/cardexpiresyear/, /card.*exp.*year/, /exp.*year/, /ccexpyear/, /expiration.*year/, /^cardexpyear$/],
+    resolve: (r) => r.cardexpiresyear || r.cardexpyear,
+  },
+  {
+    type: 'card_cvv',
+    patterns: [/cardvalidationcode/, /cvv/, /cvc/, /securitycode/, /cid/],
+    resolve: (r) => r.cardvalidationcode || r.cvv,
+  },
+
+  // 2. Chia tách Date of Birth (kiểm tra trước DOB gộp)
   {
     type: 'dob_month',
-    patterns: [/month/, /^mm$/, /dobm/, /thangsinh/, /thang/, /monthofbirth/],
+    patterns: [/dob.*month/, /month.*dob/, /birth.*month/, /month.*birth/, /^month$/, /^mm$/, /^dobm$/, /^thang(sinh)?$/, /monthofbirth/],
     resolve: (r, metadata = {}) => {
+      if (r.birthmonth) {
+        const m = String(r.birthmonth);
+        return (metadata.maxLength === 2 || metadata.kind === 'select') ? m.padStart(2, '0') : m;
+      }
       const parsed = parseDobComponents(getDobString(r));
       if (!parsed) return null;
       if (metadata.maxLength === 2 || metadata.kind === 'select') {
@@ -286,6 +374,10 @@ const semanticCategories = [
     type: 'dob_day',
     patterns: [/dobday/, /dayofbirth/, /dob.*day/, /^day$/, /^dd$/, /dobd/],
     resolve: (r, metadata = {}) => {
+      if (r.birthday && r.birthyear) {
+        const d = String(r.birthday);
+        return (metadata.maxLength === 2 || metadata.kind === 'select') ? d.padStart(2, '0') : d;
+      }
       const parsed = parseDobComponents(getDobString(r));
       if (!parsed) return null;
       if (metadata.maxLength === 2 || metadata.kind === 'select') {
@@ -296,8 +388,12 @@ const semanticCategories = [
   },
   {
     type: 'dob_year',
-    patterns: [/year/, /^yyyy$/, /^yy$/, /doby/, /^nam$/, /namsinh/, /birthyear/],
+    patterns: [/dob.*year/, /year.*dob/, /birth.*year/, /year.*birth/, /^year$/, /^yyyy$/, /^yy$/, /^doby$/, /^nam$/, /^namsinh$/, /birthyear/],
     resolve: (r, metadata = {}) => {
+      if (r.birthyear) {
+        const y = String(r.birthyear);
+        return metadata.maxLength === 2 ? y.slice(-2) : y;
+      }
       const parsed = parseDobComponents(getDobString(r));
       if (!parsed) return null;
       if (metadata.maxLength === 2) return parsed.shortYear;
@@ -309,7 +405,7 @@ const semanticCategories = [
     type: 'phone_area',
     patterns: [/^(areacode|phone1|tel1|phonearea)$/],
     resolve: (r) => {
-      const phone = (r.phonenumber || r.phone || '').replace(/\D/g, '');
+      const phone = (r.phonenumber || r.phone || r.cellphone || r.homephone || '').replace(/\D/g, '');
       return phone.length >= 10 ? phone.slice(0, 3) : null;
     },
   },
@@ -317,7 +413,7 @@ const semanticCategories = [
     type: 'phone_prefix',
     patterns: [/^(prefix|phone2|tel2|phoneprefix)$/],
     resolve: (r) => {
-      const phone = (r.phonenumber || r.phone || '').replace(/\D/g, '');
+      const phone = (r.phonenumber || r.phone || r.cellphone || r.homephone || '').replace(/\D/g, '');
       return phone.length >= 10 ? phone.slice(3, 6) : null;
     },
   },
@@ -325,7 +421,7 @@ const semanticCategories = [
     type: 'phone_line',
     patterns: [/^(line|linenumber|phone3|tel3|phoneline)$/],
     resolve: (r) => {
-      const phone = (r.phonenumber || r.phone || '').replace(/\D/g, '');
+      const phone = (r.phonenumber || r.phone || r.cellphone || r.homephone || '').replace(/\D/g, '');
       return phone.length >= 10 ? phone.slice(6, 10) : null;
     },
   },
@@ -362,9 +458,9 @@ const semanticCategories = [
   },
   {
     type: 'middle_name',
-    patterns: [/^(middle|mname|mid|initial|minitial)/, /^tendem$/],
+    patterns: [/^(middle|mname|mid|initial|minitial|middleinitial)/, /^tendem$/],
     resolve: (r) => {
-      if (r.middlename || r.mname) return r.middlename || r.mname;
+      if (r.middleinitial || r.middlename || r.mname) return r.middleinitial || r.middlename || r.mname;
       if (r.fullname) {
         const parts = r.fullname.trim().split(/\s+/);
         if (parts.length >= 3) return parts.slice(1, -1).join(' ');
@@ -406,14 +502,15 @@ const semanticCategories = [
   {
     type: 'phone',
     patterns: [/phone/, /^tel(ephone)?$/, /mobile/, /cell/, /^sdt$/, /dienthoai/],
-    resolve: (r) => r.phonenumber || r.phone || r.telephone || r.mobile || r.cell || r.sdt,
+    resolve: (r) => r.phonenumber || r.phone || r.cellphone || r.homephone || r.workphone || r.telephone || r.mobile || r.cell || r.sdt,
   },
   // 7. Email
   {
     type: 'email',
     patterns: [/email/, /^mail$/],
     resolve: (r) => {
-      if (r.email || r.emailaddress || r.mail) return r.email || r.emailaddress || r.mail;
+      const em = r.email || r.emailaddress || r.mail;
+      if (em) return em.includes('@') ? em : `${em}@gmail.com`;
       if (r.fullname) {
         const parts = r.fullname.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/);
         const first = parts[0] || 'user';
@@ -448,8 +545,8 @@ const semanticCategories = [
   },
   {
     type: 'state',
-    patterns: [/state/, /province/, /region/, /bang/, /tinh/],
-    resolve: (r) => r.state || r.province,
+    patterns: [/state/, /province/, /region/, /bang/, /tinh/, /stateorprovince/],
+    resolve: (r) => r.state || r.province || r.stateorprovince,
   },
   {
     type: 'zip',
@@ -469,6 +566,15 @@ const semanticCategories = [
       return 'Male';
     },
   },
+  {
+    type: 'age',
+    patterns: [/^age$/, /^tuoi$/, /your.*age/],
+    resolve: (r) => {
+      if (r.age) return String(r.age);
+      const ageCalc = calculateAge(r);
+      return ageCalc !== null ? String(ageCalc) : null;
+    },
+  },
   // 10. Ngân hàng & tài khoản
   {
     type: 'routing',
@@ -482,8 +588,8 @@ const semanticCategories = [
   },
   {
     type: 'account_number',
-    patterns: [/accountnumber/, /accountno/, /acctnumber/, /acctno/, /cardnumber/, /^number$/, /^account$/],
-    resolve: (r) => r.number || r.accountnumber || r.accountno || r.cardnumber || r.account,
+    patterns: [/accountnumber/, /accountno/, /acctnumber/, /acctno/, /^number$/, /^account$/],
+    resolve: (r) => r.number || r.accountnumber || r.accountno || r.account,
   },
 ];
 

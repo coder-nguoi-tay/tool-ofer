@@ -439,6 +439,77 @@ assert.equal(matchFieldValue(['apt'], recordWithApt), 'Apt 4B');
 assert.equal(matchFieldValue(['address1'], recordWithApt), '723 e 6th st');
 assert.equal(matchFieldValue(['street_address'], recordWithApt), '723 e 6th st');
 
+// Kiểm tra cấu trúc dữ liệu mới: Kendra Wardlaw (State Or Province, Address Line 1, Phone/Cell Phone, Birth Month/Day/Year, Card, Email không có @...)
+const kendraSampleJson = `{
+  "Title": "Mr",
+  "First Name": "Kendra",
+  "Middle Initial": "",
+  "Last Name": "Wardlaw",
+  "Phone": "3077420430",
+  "Home Phone": "3077420430",
+  "Work Phone": "3077420430",
+  "Cell Phone": "3077420430",
+  "Fax Phone": "3077420430",
+  "Email": "KendraWardlaw5138274",
+  "Sex": "Male",
+  "Age": "",
+  "Birth Month": "04",
+  "Birth Day": "7",
+  "Birth Year": "1990",
+  "Address Line 1": "4125 N Inspiration Loop",
+  "City": "Wasilla",
+  "State Or Province": "AK",
+  "County": "United States",
+  "User ID": "KendraWardlaw5138274",
+  "Password": "Kendra5138274",
+  "Password Question": "What is the first name of your oldest niece?",
+  "Password Answer": "Booby Moorer",
+  "Card Number": "3077420430",
+  "Card Type": "",
+  "Card User Name": "Wardlaw",
+  "Card Expires Month": "10",
+  "Card Expires Year": "2018",
+  "Card Validation Code": "000",
+  "IPAddress": "",
+  "Zipcode": "99654"
+}`;
+const kendraParsed = parseAutofillRecords(kendraSampleJson);
+assert.equal(kendraParsed.length, 1);
+const kendra = kendraParsed[0];
+assert.equal(kendra.firstname, 'Kendra');
+assert.equal(kendra.lastname, 'Wardlaw');
+assert.equal(kendra.fullname, 'Kendra Wardlaw');
+assert.equal(kendra.phone, '3077420430');
+assert.equal(kendra.cellphone, '3077420430');
+assert.equal(kendra.email, 'KendraWardlaw5138274@gmail.com');
+assert.equal(kendra.state, 'AK');
+assert.equal(kendra.stateorprovince, 'AK');
+assert.equal(kendra.address, '4125 N Inspiration Loop');
+assert.equal(kendra.addressline1, '4125 N Inspiration Loop');
+assert.equal(kendra.city, 'Wasilla');
+assert.equal(kendra.zipcode, '99654');
+assert.equal(kendra.dob, '04/07/1990');
+assert.equal(kendra.age, String(new Date().getFullYear() - 1990));
+
+assert.equal(matchFieldValue(['first_name'], kendra), 'Kendra');
+assert.equal(matchFieldValue(['last_name'], kendra), 'Wardlaw');
+assert.equal(matchFieldValue(['full_name', 'name'], kendra), 'Kendra Wardlaw');
+assert.equal(matchFieldValue(['email'], kendra), 'KendraWardlaw5138274@gmail.com');
+assert.equal(matchFieldValue(['phone', 'tel'], kendra), '3077420430');
+assert.equal(matchFieldValue(['address', 'address1', 'street_address'], kendra), '4125 N Inspiration Loop');
+assert.equal(matchFieldValue(['city'], kendra), 'Wasilla');
+assert.equal(matchFieldValue(['state'], kendra, { kind: 'select' }), 'AK');
+assert.equal(matchFieldValue(['zipcode', 'zip'], kendra), '99654');
+assert.equal(matchFieldValue(['gender', 'sex'], kendra), 'Male');
+assert.equal(matchFieldValue(['dob_month'], kendra, { maxLength: 2 }), '04');
+assert.equal(matchFieldValue(['dob_day'], kendra, { maxLength: 2 }), '07');
+assert.equal(matchFieldValue(['dob_year'], kendra), '1990');
+assert.equal(matchFieldValue(['card_number'], kendra), '3077420430');
+assert.equal(matchFieldValue(['card_exp_month'], kendra), '10');
+assert.equal(matchFieldValue(['card_exp_year'], kendra), '2018');
+assert.equal(matchFieldValue(['card_cvv'], kendra), '000');
+assert.equal(matchAgeRange('35-49', Number(kendra.age)), true);
+
 // Test findSubmitButton nhận diện nút data-vector-submit="true" và data-tf-element-role="submit"
 const mockVectorSubmitBtn = {
   isVisible: async () => true,
