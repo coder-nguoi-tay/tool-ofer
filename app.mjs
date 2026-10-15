@@ -849,6 +849,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           tile: tileAt(tileIndex, layoutCount, screen),
           tileIndex: tileIndex,
           autofillRecords: autofillRecords,
+          autoSubmit: body.autoSubmitForm !== false,
         });
         activeSession = openedBrowser.session;
         usageHistory.proxies[proxyKey] = {
@@ -1550,7 +1551,7 @@ async function openTemplateProfile() {
  * @since 2026-10-15
  */
 async function openBrowserWithInstalledChrome({
-  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords,
+  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true,
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
@@ -1602,7 +1603,7 @@ async function openBrowserWithInstalledChrome({
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
   };
-  attachAutofill(context, autofillRecords, new URL(websiteUrl).origin, session);
+  attachAutofill(context, autofillRecords, new URL(websiteUrl).origin, session, { autoSubmit });
   activeBrowsers.add(session);
   context.on('close', () => {
     activeBrowsers.delete(session);

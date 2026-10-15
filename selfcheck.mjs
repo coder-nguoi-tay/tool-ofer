@@ -1,9 +1,12 @@
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import assert from 'node:assert/strict';
-import { parseAutofillRecords, matchFieldValue } from './autofill.mjs';
+import { parseAutofillRecords, matchFieldValue, isConsentCheckbox } from './autofill.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
   chromeExecutableNames,
+  isManagedChromeProfilePath,
   createProxyUsageKey,
   hasTrafficBlocked,
   mapWithLimit,
@@ -277,3 +280,31 @@ assert.deepEqual(chromeExecutableNames('stable'), ['Google Chrome', 'Google Chro
 assert.deepEqual(chromeExecutableNames('145.0.7632.117'), ['Google Chrome', 'Google Chrome for Testing']);
 assert.deepEqual(chromeExecutableNames('beta'), ['Google Chrome Beta']);
 assert.deepEqual(chromeExecutableNames('canary'), ['Google Chrome Canary']);
+
+// Test isConsentCheckbox nhận diện chính xác ô digitalConsent / consent-box của form
+const sampleConsentMeta = {
+  id: 'digitalConsent',
+  type: 'checkbox',
+  classes: 'consent-box consent-justify consent-row',
+  dataAttributes: {
+    'data-tf-element-role': 'consent-opt-in',
+    'data-leadid-type': 'disclosure',
+  },
+  names: [
+    'By clicking Continue, I represent that I am 18+ years of age; I understand that this site is privately owned...',
+  ],
+};
+assert.equal(isConsentCheckbox(sampleConsentMeta), true);
+assert.equal(isConsentCheckbox({ type: 'checkbox', id: 'agree_terms' }), true);
+assert.equal(isConsentCheckbox({ type: 'checkbox', required: true }), true);
+assert.equal(isConsentCheckbox({ type: 'checkbox', id: 'homeowner_pool' }), false);
+assert.equal(isConsentCheckbox({ type: 'text', id: 'digitalConsent' }), false);
+
+// Chốt an toàn cho lệnh xoá profile: chỉ đường dẫn trong kho chrome-profiles được chấp nhận.
+const profileStore = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-profiles');
+assert.equal(isManagedChromeProfilePath(join(profileStore, 'stable', '155.0.1.1', 'abc:1')), true);
+assert.equal(isManagedChromeProfilePath(profileStore), false);
+assert.equal(isManagedChromeProfilePath(join(profileStore, '..', 'chrome-builds')), false);
+assert.equal(isManagedChromeProfilePath(homedir()), false);
+assert.equal(isManagedChromeProfilePath('/'), false);
+assert.equal(isManagedChromeProfilePath(undefined), false);

@@ -426,18 +426,99 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
 }
 
 /**
+ * Kiểm tra xem một ô checkbox có phải là ô xác nhận đồng ý điều khoản / consent / disclosure hay không.
+ *
+ * @param {object} metadata Thông tin phần tử checkbox thu thập từ DOM.
+ * @return {boolean} True nếu là checkbox cần tự động tích.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+export function isConsentCheckbox(metadata) {
+  if (!metadata || metadata.type !== 'checkbox') return false;
+
+  const id = String(metadata.id || '').toLowerCase();
+  const name = String(metadata.name || '').toLowerCase();
+  const classes = String(metadata.classes || '').toLowerCase();
+  const names = Array.isArray(metadata.names) ? metadata.names.map((n) => String(n).toLowerCase()) : [];
+  const textContent = names.join(' ');
+  const dataAttributes = metadata.dataAttributes || {};
+
+  // 1. Kiểm tra ID hoặc name
+  if (/digitalconsent|consent|disclosure|agree|terms|tcpa|optin|opt_in|privacy|policy|acknowledge/i.test(`${id} ${name}`)) {
+    return true;
+  }
+
+  // 2. Kiểm tra data- attributes (ví dụ: data-tf-element-role="consent-opt-in", data-leadid-type="disclosure")
+  for (const [key, val] of Object.entries(dataAttributes)) {
+    const keyLower = String(key).toLowerCase();
+    const valLower = String(val).toLowerCase();
+    if (keyLower.includes('consent') || keyLower.includes('disclosure') || valLower.includes('consent') || valLower.includes('disclosure')) {
+      return true;
+    }
+  }
+
+  // 3. Kiểm tra class hoặc container class (ví dụ: .consent-box, .consent-row)
+  if (/consent|disclosure|tcpa|terms-and-conditions|privacy-policy/i.test(classes)) {
+    return true;
+  }
+
+  // 4. Kiểm tra văn bản nhãn / mô tả đi kèm (ví dụ: "By clicking Continue, I represent that I am 18+ years of age...")
+  if (/by clicking|i represent|18\+|i agree|i consent|terms of service|terms and conditions|privacy policy|marketing partners|express written consent|disclosure|tôi đồng ý|điều khoản/i.test(textContent)) {
+    return true;
+  }
+
+  // 5. Checkbox có thuộc tính required
+  if (metadata.required) return true;
+
+  return false;
+}
+
+/**
+ * Tìm nút gửi (Submit / Continue / Next) trên trang hoặc frame.
+ *
+ * @param {object} frame Frame hoặc Page của Playwright.
+ * @return {Promise<object|null>} Locator của nút submit hoặc null nếu không tìm thấy.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+export async function findSubmitButton(frame) {
+  const candidateSelectors = [
+    'button[type="submit"]',
+    'input[type="submit"]',
+    'button.continue-btn, button.submit-btn, a.continue-btn, a.submit-btn',
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote")',
+    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next")',
+  ];
+
+  for (const selector of candidateSelectors) {
+    try {
+      const candidates = await frame.locator(selector).all();
+      for (const btn of candidates) {
+        if ((await btn.isVisible()) && (await btn.isEnabled())) {
+          const text = (await btn.innerText().catch(() => '')).trim().toLowerCase();
+          if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập/i.test(text)) continue;
+          return btn;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+/**
  * Theo dõi form trong một profile Chrome và điền một bản ghi ngẫu nhiên khi form xuất hiện.
- * Hỗ trợ quét sâu vào tất cả iframe trên trang, không giới hạn origin cứng nhắc, và chọn 1 record duy nhất cho cả session.
+ * Hỗ trợ quét sâu vào tất cả iframe trên trang, không giới hạn origin cứng nhắc, tự động tích ô điều khoản và gửi form.
  *
  * @param {object} context Playwright BrowserContext của profile.
  * @param {object[]} records Các bản ghi đã chuẩn hóa.
  * @param {string} allowedOrigin Origin website đích (chỉ để tham khảo, không chặn redirect).
  * @param {object} session Phiên để cập nhật số trường đã điền và đồng bộ record.
+ * @param {object} [options={}] Tùy chọn nâng cao như autoSubmit.
  * @return {void} Đăng ký theo dõi các trang hiện tại và trang mở sau.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-export function attachAutofill(context, records, allowedOrigin, session = {}) {
+export function attachAutofill(context, records, allowedOrigin, session = {}, options = {}) {
   if (!records.length) return;
   const trackedPages = new WeakSet();
 
@@ -471,6 +552,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}) {
         continue;
       }
 
+      let filledInThisPass = 0;
+
       for (const field of fields) {
         try {
           if (!(await field.isVisible()) || !(await field.isEnabled())) continue;
@@ -484,12 +567,25 @@ export function attachAutofill(context, records, allowedOrigin, session = {}) {
                 if (t) labels.push(t);
               }
             }
-            const container = element.closest('.form-group, .field, .input-container, .form-row, label, tr, td, p, div');
+            const container = element.closest('.form-group, .field, .input-container, .form-row, .consent-box, .consent-row, label, tr, td, p, div');
             const containerText = container ? (container.innerText || container.textContent || '').trim() : '';
             const prev = element.previousElementSibling;
             const prevText = prev ? (prev.innerText || prev.textContent || '').trim() : '';
 
+            const dataAttributes = {};
+            if (element.attributes) {
+              for (const attr of element.attributes) {
+                if (attr.name.startsWith('data-')) dataAttributes[attr.name] = attr.value;
+              }
+            }
+
             return {
+              id: element.id || '',
+              name: element.getAttribute('name') || '',
+              classes: `${element.className || ''} ${container ? container.className || '' : ''}`,
+              dataAttributes,
+              required: Boolean(element.required),
+              checked: Boolean(element.checked),
               names: [
                 element.getAttribute('aria-label'),
                 element.getAttribute('placeholder'),
@@ -500,10 +596,12 @@ export function attachAutofill(context, records, allowedOrigin, session = {}) {
                 element.getAttribute('data-field'),
                 element.getAttribute('data-testid'),
                 element.getAttribute('data-qa'),
+                element.getAttribute('data-tf-element-role'),
+                element.getAttribute('data-leadid-type'),
                 element.getAttribute('title'),
                 ...labels,
                 prevText.slice(0, 50),
-                containerText.slice(0, 80),
+                containerText.slice(0, 400),
               ].filter(Boolean),
               kind: element.tagName.toLowerCase(),
               type: element.getAttribute('type')?.toLowerCase(),
@@ -513,7 +611,35 @@ export function attachAutofill(context, records, allowedOrigin, session = {}) {
             };
           });
 
-          if (metadata.readOnly || ['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image'].includes(metadata.type)) continue;
+          // Xử lý ô checkbox: nếu là ô đồng ý điều khoản/consent thì tự động tích
+          if (metadata.type === 'checkbox') {
+            if (isConsentCheckbox(metadata)) {
+              visibleFieldCount += 1;
+              if (!metadata.checked) {
+                try {
+                  await field.click({ timeout: 1500 }).catch(() => {});
+                  await field.evaluate((el) => {
+                    if (!el.checked) {
+                      el.checked = true;
+                      el.dispatchEvent(new Event('input', { bubbles: true }));
+                      el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    const label = el.closest('label') || document.querySelector(`label[for="${el.id}"]`);
+                    if (label && !el.checked) label.click();
+                  }).catch(() => {});
+                  await field.dispatchEvent('input').catch(() => {});
+                  await field.dispatchEvent('change').catch(() => {});
+                  await field.evaluate((el) => { el.dataset.autoleadFilled = '1'; }).catch(() => {});
+                  session.autofillFields = (session.autofillFields ?? 0) + 1;
+                  session.autofillError = null;
+                  filledInThisPass += 1;
+                } catch {}
+              }
+            }
+            continue;
+          }
+
+          if (metadata.readOnly || ['hidden', 'radio', 'file', 'submit', 'button', 'reset', 'image'].includes(metadata.type)) continue;
 
           visibleFieldCount += 1;
           const valueToFill = matchFieldValue(metadata.names, record, metadata);
@@ -584,9 +710,33 @@ export function attachAutofill(context, records, allowedOrigin, session = {}) {
           await field.evaluate((element) => { element.dataset.autoleadFilled = '1'; }).catch(() => {});
           session.autofillFields = (session.autofillFields ?? 0) + 1;
           session.autofillError = null;
+          filledInThisPass += 1;
         } catch {
           // Trường có thể không tương tác được lúc này
         }
+      }
+
+      // Tự động bấm nút gửi / tiếp tục nếu có tùy chọn autoSubmit và vừa điền hoặc tích xong các trường
+      if (options.autoSubmit !== false && (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0)) {
+        try {
+          const submitBtn = await findSubmitButton(frame);
+          if (submitBtn) {
+            const shouldClick = await submitBtn.evaluate((btn) => {
+              if (btn.dataset.autoleadSubmitted === '1') return false;
+              btn.dataset.autoleadSubmitted = '1';
+              return true;
+            }).catch(() => false);
+
+            if (shouldClick) {
+              await new Promise((resolve) => { setTimeout(resolve, 800); });
+              try {
+                await submitBtn.click({ timeout: 2500 });
+              } catch {
+                await submitBtn.evaluate((btn) => btn.click()).catch(() => {});
+              }
+            }
+          }
+        } catch {}
       }
     }
 
