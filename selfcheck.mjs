@@ -3,6 +3,7 @@ import { parseAutofillRecords, matchFieldValue } from './autofill.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
+  chromeExecutableNames,
   createProxyUsageKey,
   hasTrafficBlocked,
   mapWithLimit,
@@ -271,3 +272,8 @@ assert.equal(matchFieldValue(['middle_name', 'initial'], leadRecord), 'Pablo');
 assert.equal(matchFieldValue(['email', 'email_address'], leadRecord), 'juan@example.com');
 assert.equal(matchFieldValue(['email'], { fullname: 'John Doe', phonenumber: '1234567890' }), 'john.doe7890@gmail.com');
 
+// Tên binary: stable và bản lưu theo version phải thử cả bản Chrome for Testing.
+assert.deepEqual(chromeExecutableNames('stable'), ['Google Chrome', 'Google Chrome for Testing']);
+assert.deepEqual(chromeExecutableNames('145.0.7632.117'), ['Google Chrome', 'Google Chrome for Testing']);
+assert.deepEqual(chromeExecutableNames('beta'), ['Google Chrome Beta']);
+assert.deepEqual(chromeExecutableNames('canary'), ['Google Chrome Canary']);

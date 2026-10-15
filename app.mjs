@@ -1255,6 +1255,24 @@ async function downloadRealChromeVersions(requestBody) {
 }
 
 /**
+ * Các tên binary có thể có trong Contents/MacOS của một bản Chrome.
+ *
+ * Kênh Beta/Dev/Canary mang tên kênh trong tên binary; bản stable và bản lưu theo số phiên
+ * bản dùng tên trơn, còn bản tải từ Chrome for Testing dùng tên riêng nên phải thử cả hai.
+ *
+ * @param {string} channel Tên kênh, hoặc số phiên bản với bản lưu theo version.
+ * @return {string[]} Các tên binary cần thử, theo thứ tự ưu tiên.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-15
+ */
+export function chromeExecutableNames(channel) {
+  if (channel === 'stable' || /^\d+(?:\.\d+){0,3}$/.test(channel)) {
+    return ['Google Chrome', 'Google Chrome for Testing'];
+  }
+  return [`Google Chrome ${channel[0].toUpperCase()}${channel.slice(1)}`];
+}
+
+/**
  * Đọc binary và phiên bản của một kênh Google Chrome đã cài trên macOS.
  *
  * @param {string} appPath Đường dẫn ứng dụng của kênh Chrome.
@@ -1265,10 +1283,7 @@ async function downloadRealChromeVersions(requestBody) {
  * @since 2026-10-14
  */
 async function readInstalledChromeChannel(appPath, channel) {
-  // Bản tải từ Chrome for Testing dùng tên binary riêng, nên thử cả hai tên.
-  const executableNames = channel === 'stable' || /^\d+(?:\.\d+){0,3}$/.test(channel)
-    ? ['Google Chrome', 'Google Chrome for Testing']
-    : [`Google Chrome ${channel[0].toUpperCase()}${channel.slice(1)}`];
+  const executableNames = chromeExecutableNames(channel);
   let executablePath;
   for (const executableName of executableNames) {
     const candidatePath = join(appPath, 'Contents', 'MacOS', executableName);
