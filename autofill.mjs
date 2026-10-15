@@ -651,6 +651,16 @@ export async function findSubmitButton(frame) {
       const candidates = await frame.locator(selector).all();
       for (const btn of candidates) {
         if ((await btn.isVisible()) && (await btn.isEnabled())) {
+          // Bỏ qua các nút thuộc Offerwall Cards để nhường quyền xử lý cho handleOfferwallCards mở tất cả
+          const isOfferwallBtn = typeof btn.evaluate === 'function' ? await btn.evaluate((el) => {
+            return Boolean(
+              el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap') ||
+              el.classList.contains('offerwall-btn') ||
+              el.getAttribute('data-tf-element-role') === 'offer-btn'
+            );
+          }).catch(() => false) : false;
+          if (isOfferwallBtn) continue;
+
           const text = (await btn.innerText().catch(() => '')).trim().toLowerCase();
           if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập|skip|bỏ qua/i.test(text)) continue;
           return btn;
@@ -662,7 +672,72 @@ export async function findSubmitButton(frame) {
 }
 
 /**
- * Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên các nút radio hoặc nút lựa chọn Yes/No.
+ * Tính số tuổi ước tính dựa vào ngày sinh trong bản ghi người dùng.
+ *
+ * @param {object} record Bản ghi người dùng.
+ * @return {number|null} Số tuổi hoặc null nếu không xác định được năm sinh.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+export function calculateAge(record) {
+  if (!record || typeof record !== 'object') return null;
+  const dobStr = getDobString(record);
+  const parsed = parseDobComponents(dobStr);
+  if (!parsed || !parsed.year) return null;
+  const birthYear = parseInt(parsed.year, 10);
+  if (Number.isNaN(birthYear) || birthYear < 1900 || birthYear > 2100) return null;
+  const currentYear = new Date().getFullYear();
+  return currentYear - birthYear;
+}
+
+/**
+ * Kiểm tra xem một nhãn lựa chọn dải tuổi có bao gồm độ tuổi chỉ định hay không.
+ * Hỗ trợ các định dạng: "18 - 34", "35-49", "50 - 64", "OVER 65", "65+", "Under 25".
+ *
+ * @param {string} optionText Nhãn văn bản của lựa chọn.
+ * @param {number} age Độ tuổi cần đối sánh.
+ * @return {boolean} True nếu khớp dải tuổi.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+export function matchAgeRange(optionText, age) {
+  if (typeof age !== 'number' || Number.isNaN(age)) return false;
+  const text = String(optionText || '').trim();
+
+  // 1. Khoảng dạng "18 - 34", "35-49", "50 - 64", "18 to 24"
+  const rangeMatch = text.match(/(\d+)\s*(?:[-–to]+|\s+to\s+)\s*(\d+)/i);
+  if (rangeMatch) {
+    const min = parseInt(rangeMatch[1], 10);
+    const max = parseInt(rangeMatch[2], 10);
+    if (!Number.isNaN(min) && !Number.isNaN(max)) {
+      return age >= min && age <= max;
+    }
+  }
+
+  // 2. Dạng "OVER 65", "65+", "> 65", "65 and older", "65 or older"
+  const overMatch = text.match(/(?:over|>|hơn|trên|\+)\s*(\d+)|(\d+)\s*(?:\+|and older|or older)/i);
+  if (overMatch) {
+    const min = parseInt(overMatch[1] || overMatch[2], 10);
+    if (!Number.isNaN(min)) {
+      return age >= min;
+    }
+  }
+
+  // 3. Dạng "UNDER 25", "< 25", "dưới 25"
+  const underMatch = text.match(/(?:under|<|dưới)\s*(\d+)/i);
+  if (underMatch) {
+    const max = parseInt(underMatch[1], 10);
+    if (!Number.isNaN(max)) {
+      return age < max;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên các nút radio, nút lựa chọn Yes/No, câu hỏi thu nhập hoặc khớp tuổi từ ngày sinh.
+ * Hỗ trợ đa dạng các mẫu giao diện (Vector Survey, Creative Debt & Homeowner, Age link choices, Yes/No buttons).
  *
  * @param {object} frame Frame Playwright đang quét.
  * @param {object} [record={}] Bản ghi dữ liệu hiện tại để ưu tiên nếu có cấu hình.
@@ -759,38 +834,133 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
     }
   } catch {}
 
-  // 2. Xử lý các câu hỏi Yes/No hoặc nhóm nút lựa chọn (không dùng thẻ input radio)
+  // 2. Xử lý các câu hỏi khảo sát / lựa chọn dạng button / thẻ <a> (Vector Survey, Creative, Age options, Yes/No)
   try {
     const questionChoiceGroups = await frame.evaluate(() => {
       const results = [];
-      const containers = Array.from(document.querySelectorAll('.question, .survey-step, .quiz-step, fieldset, .card-options, .choice-container, .options-grid, div[role="radiogroup"], .choices'));
-      containers.forEach((container) => {
+      const optionSelector = [
+        'button.btn-option',
+        'button[data-vector-answer="true"]',
+        'button[data-element-type="survey_answer"]',
+        '.creative-survey-answer',
+        'a.primary-btn',
+        'a.offer-click-tracking-no-link',
+        'button:not([type="submit"]):not(.btn-submit):not(.faq-trigger):not(.offerwall-btn)',
+        '[role="radio"]',
+        '[role="button"]:not(.btn-submit):not(.offerwall-btn)',
+        '.option-btn, .choice-btn, .quiz-btn, .answer-btn, label.btn',
+        '.options-container a',
+      ].join(', ');
+
+      const containerSelector = [
+        '.step-container',
+        '.options-container',
+        '.creative',
+        '[data-element-type="survey_question"]',
+        '.question',
+        '.survey-step',
+        '.quiz-step',
+        'fieldset',
+        '.card-options',
+        '.choice-container',
+        '.options-grid',
+        'div[role="radiogroup"]',
+        '.choices',
+        '.survey-question',
+        '.options-list',
+      ].join(', ');
+
+      const containers = Array.from(document.querySelectorAll(containerSelector));
+
+      containers.forEach((container, groupIndex) => {
+        // Bỏ qua nếu bên trong chứa các input thông thường cần điền (tránh nhầm với form điền)
         if (container.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])')) return;
 
-        const buttons = Array.from(container.querySelectorAll('button:not([type="submit"]):not(.btn-submit):not(.faq-trigger), [role="radio"], [role="button"]:not(.btn-submit), .option-btn, .choice-btn, .quiz-btn, .answer-btn, label.btn'));
-        const alreadyActive = buttons.some((b) => b.classList.contains('active') || b.classList.contains('selected') || b.getAttribute('aria-checked') === 'true');
-        if (!alreadyActive && buttons.length >= 2 && buttons.length <= 6) {
-          results.push(buttons.map((b, i) => ({
-            id: b.id || '',
-            text: (b.innerText || b.textContent || '').trim(),
-            className: b.className || '',
-            index: i,
-          })));
+        // Bỏ qua nếu thuộc Offerwall Card
+        if (container.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) return;
+
+        const candidateOptions = Array.from(container.querySelectorAll(optionSelector));
+        if (candidateOptions.length < 2) return;
+
+        // Kiểm tra xem đã có nút nào trong container này được click hoặc đang active
+        const alreadyActive = candidateOptions.some((b) =>
+          b.classList.contains('active') ||
+          b.classList.contains('selected') ||
+          b.getAttribute('aria-checked') === 'true' ||
+          b.getAttribute('data-autolead-clicked') === '1'
+        );
+        if (alreadyActive) return;
+
+        const titleEl = container.querySelector('h1, h2, h3, h4, .main-question, .survey-label, .creative-survey-question, legend, .question-title, p');
+        const questionTitle = (titleEl?.innerText || titleEl?.textContent || '').trim();
+
+        const items = [];
+        candidateOptions.forEach((btn, optIndex) => {
+          const uid = `choice_${groupIndex}_${optIndex}_${Date.now()}`;
+          btn.setAttribute('data-autolead-choice-id', uid);
+          items.push({
+            uid,
+            id: btn.id || '',
+            text: (btn.innerText || btn.textContent || '').trim(),
+            value: btn.getAttribute('data-value') || btn.getAttribute('data-vector-field-value') || btn.getAttribute('value') || btn.getAttribute('data-option-id') || '',
+            field: btn.getAttribute('data-vector-field') || btn.getAttribute('data-field') || '',
+            tagName: btn.tagName.toLowerCase(),
+            href: btn.getAttribute('href') || '',
+          });
+        });
+
+        if (items.length >= 2) {
+          results.push({
+            questionTitle,
+            items,
+          });
         }
       });
 
+      // Fallback: Nếu không tìm thấy trong container, tìm các cụm nút Yes/No hoặc Survey standalone
       if (!results.length) {
-        const allButtons = Array.from(document.querySelectorAll('button:not([type="submit"]):not(.btn-submit):not(.faq-trigger), [role="button"]:not(.btn-submit)'));
+        const standaloneVectorButtons = Array.from(document.querySelectorAll('button[data-vector-answer="true"], button.btn-option'));
+        if (standaloneVectorButtons.length >= 2) {
+          const alreadyActive = standaloneVectorButtons.some((b) => b.getAttribute('data-autolead-clicked') === '1');
+          if (!alreadyActive) {
+            results.push({
+              questionTitle: 'vector_survey',
+              items: standaloneVectorButtons.map((btn, optIndex) => {
+                const uid = `choice_vec_${optIndex}_${Date.now()}`;
+                btn.setAttribute('data-autolead-choice-id', uid);
+                return {
+                  uid,
+                  id: btn.id || '',
+                  text: (btn.innerText || btn.textContent || '').trim(),
+                  value: btn.getAttribute('data-vector-field-value') || '',
+                  field: btn.getAttribute('data-vector-field') || '',
+                  tagName: btn.tagName.toLowerCase(),
+                };
+              }),
+            });
+          }
+        }
+      }
+
+      if (!results.length) {
+        const allButtons = Array.from(document.querySelectorAll('button:not([type="submit"]):not(.btn-submit):not(.faq-trigger):not(.offerwall-btn), [role="button"]:not(.btn-submit):not(.offerwall-btn)'));
         const yesBtn = allButtons.find((b) => /^(yes|có|true|agree)$/i.test((b.innerText || b.textContent || '').trim()));
         const noBtn = allButtons.find((b) => /^(no|không|false|disagree)$/i.test((b.innerText || b.textContent || '').trim()));
         if (yesBtn && noBtn) {
-          const isYesActive = yesBtn.classList.contains('active') || yesBtn.classList.contains('selected');
-          const isNoActive = noBtn.classList.contains('active') || noBtn.classList.contains('selected');
+          const isYesActive = yesBtn.classList.contains('active') || yesBtn.classList.contains('selected') || yesBtn.getAttribute('data-autolead-clicked') === '1';
+          const isNoActive = noBtn.classList.contains('active') || noBtn.classList.contains('selected') || noBtn.getAttribute('data-autolead-clicked') === '1';
           if (!isYesActive && !isNoActive) {
-            results.push([
-              { id: yesBtn.id || '', text: (yesBtn.innerText || yesBtn.textContent || '').trim() },
-              { id: noBtn.id || '', text: (noBtn.innerText || noBtn.textContent || '').trim() },
-            ]);
+            const uidYes = `choice_yes_${Date.now()}`;
+            const uidNo = `choice_no_${Date.now()}`;
+            yesBtn.setAttribute('data-autolead-choice-id', uidYes);
+            noBtn.setAttribute('data-autolead-choice-id', uidNo);
+            results.push({
+              questionTitle: 'yes_no',
+              items: [
+                { uid: uidYes, id: yesBtn.id || '', text: (yesBtn.innerText || yesBtn.textContent || '').trim(), value: 'yes', tagName: yesBtn.tagName.toLowerCase() },
+                { uid: uidNo, id: noBtn.id || '', text: (noBtn.innerText || noBtn.textContent || '').trim(), value: 'no', tagName: noBtn.tagName.toLowerCase() },
+              ],
+            });
           }
         }
       }
@@ -799,24 +969,140 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
     }).catch(() => []);
 
     for (const group of questionChoiceGroups) {
-      if (!group.length) continue;
-      const pick = group[Math.floor(Math.random() * group.length)];
-      try {
-        let locator = null;
-        if (pick.id) {
-          locator = frame.locator(`#${pick.id}`).first();
-        } else if (pick.text) {
-          locator = frame.locator(`button:has-text("${pick.text}"), [role="button"]:has-text("${pick.text}")`).first();
+      if (!group.items || !group.items.length) continue;
+
+      let picked = null;
+      const titleLower = (group.questionTitle || '').toLowerCase();
+
+      // A. Nếu là câu hỏi tuổi: ưu tiên khớp tuổi từ record nếu có
+      const isAgeQuestion = /age|tuổi|how old|năm sinh|year of birth/i.test(titleLower) ||
+        group.items.some((it) => /\d+\s*[-–]\s*\d+|over\s*\d+|\d+\+/i.test(it.text));
+      if (isAgeQuestion) {
+        const userAge = calculateAge(record);
+        if (typeof userAge === 'number') {
+          picked = group.items.find((it) => matchAgeRange(it.text, userAge));
         }
-        if (locator && (await locator.isVisible({ timeout: 1000 }).catch(() => false))) {
-          await locator.click({ timeout: 1500 }).catch(() => {});
-          answeredCount += 1;
+      }
+
+      // B. Nếu là câu hỏi Nhà ở (Rent vs Own): ưu tiên đối chiếu record nếu có
+      if (!picked && (/own or rent|homeowner|nhà ở/i.test(titleLower) || group.items.some((it) => /rent|own/i.test(it.value)))) {
+        const homeVal = String(record?.homeowner || record?.housing || '').toLowerCase();
+        if (homeVal.includes('own')) {
+          picked = group.items.find((it) => /own/i.test(`${it.value} ${it.text}`));
+        } else if (homeVal.includes('rent')) {
+          picked = group.items.find((it) => /rent/i.test(`${it.value} ${it.text}`));
         }
-      } catch {}
+      }
+
+      // C. Nếu không khớp tiêu chí riêng: chọn ngẫu nhiên một lựa chọn trong danh sách
+      if (!picked) {
+        picked = group.items[Math.floor(Math.random() * group.items.length)];
+      }
+
+      if (picked?.uid) {
+        try {
+          const locator = frame.locator(`[data-autolead-choice-id="${picked.uid}"]`).first();
+          if (locator && (await locator.count() > 0)) {
+            await locator.click({ timeout: 1500, force: true }).catch(async () => {
+              await locator.evaluate((el) => {
+                el.click();
+                el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+              }).catch(() => {});
+            });
+
+            await locator.evaluate((el) => {
+              el.setAttribute('data-autolead-clicked', '1');
+              el.classList.add('selected', 'active');
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              if (el.tagName.toLowerCase() === 'a' && el.href && !el.href.startsWith('javascript:')) {
+                try { window.location.href = el.href; } catch {}
+              }
+            }).catch(() => {});
+
+            answeredCount += 1;
+          }
+        } catch {}
+      }
     }
   } catch {}
 
   return answeredCount;
+}
+
+/**
+ * Phát hiện và tự động mở tất cả các view/thẻ trên trang Offerwall cuối cùng.
+ *
+ * @param {object} frame Frame Playwright đang quét.
+ * @param {object} [page=null] Page Playwright hiện tại để fallback mở tab nếu cần.
+ * @return {Promise<number>} Số lượng thẻ offerwall đã được kích hoạt mở.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+export async function handleOfferwallCards(frame, page = null) {
+  let openedCount = 0;
+  try {
+    const cardsToOpen = await frame.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll(
+        '.offerwall-card-wrap, .offerwall-card, form[data-tf-element-role="offer"], .campaign-card'
+      ));
+      const unhandled = [];
+      cards.forEach((card, idx) => {
+        if (card.getAttribute('data-autolead-opened') === '1') return;
+        const form = card.closest('form') || (card.tagName.toLowerCase() === 'form' ? card : null);
+        if (form && form.getAttribute('data-autolead-opened') === '1') return;
+
+        const uid = `offerwall_card_${idx}_${Date.now()}`;
+        card.setAttribute('data-autolead-card-id', uid);
+        card.setAttribute('data-autolead-opened', '1');
+        if (form) form.setAttribute('data-autolead-opened', '1');
+
+        const btn = card.querySelector('.offerwall-btn, button[type="submit"], button#btnSubmit, a.offerwall-btn, [data-tf-element-role="offer-btn"]');
+        const destUrl = card.getAttribute('data-destination-url') || form?.getAttribute('data-destination-url') || card.querySelector('a[href]')?.getAttribute('href') || '';
+
+        unhandled.push({
+          uid,
+          hasBtn: Boolean(btn),
+          destUrl,
+        });
+      });
+      return unhandled;
+    }).catch(() => []);
+
+    if (!cardsToOpen || !cardsToOpen.length) return 0;
+
+    for (const card of cardsToOpen) {
+      try {
+        const cardLoc = frame.locator(`[data-autolead-card-id="${card.uid}"]`).first();
+        if (await cardLoc.count() > 0) {
+          const btn = cardLoc.locator('.offerwall-btn, button[type="submit"], button#btnSubmit, a.offerwall-btn, [data-tf-element-role="offer-btn"]').first();
+          if ((await btn.count() > 0) && (await btn.isVisible().catch(() => false))) {
+            await btn.click({ timeout: 2000, force: true }).catch(async () => {
+              await btn.evaluate((b) => {
+                b.click();
+                const form = b.closest('form');
+                if (form) form.submit();
+              }).catch(() => {});
+            });
+            openedCount += 1;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            continue;
+          }
+        }
+
+        // Fallback mở trực tiếp destination url trong tab mới nếu không tìm thấy nút bấm
+        if (card.destUrl && card.destUrl.startsWith('http') && page?.context) {
+          try {
+            const newPage = await page.context().newPage();
+            await newPage.goto(card.destUrl, { timeout: 15000 }).catch(() => {});
+            openedCount += 1;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          } catch {}
+        }
+      } catch {}
+    }
+  } catch {}
+  return openedCount;
 }
 
 /**
@@ -1159,12 +1445,22 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         }
       }
 
-      // Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên radio buttons hoặc lựa chọn Yes/No
+      // Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên radio buttons hoặc lựa chọn Yes/No/Tuổi/Thu nhập
       try {
         const answeredSurvey = await handleRadioAndSurveyOptions(frame, record);
         if (answeredSurvey > 0) {
           filledInThisPass += answeredSurvey;
           session.autofillFields = (session.autofillFields ?? 0) + answeredSurvey;
+          session.autofillError = null;
+        }
+      } catch {}
+
+      // Tự động phát hiện và mở đồng loạt tất cả các thẻ Offerwall trên trang cuối
+      try {
+        const openedOffers = await handleOfferwallCards(frame, page);
+        if (openedOffers > 0) {
+          filledInThisPass += openedOffers;
+          session.autofillFields = (session.autofillFields ?? 0) + openedOffers;
           session.autofillError = null;
         }
       } catch {}

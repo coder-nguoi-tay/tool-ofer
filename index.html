@@ -185,20 +185,23 @@
         <p id="save-status" role="status" aria-live="polite">Chưa tải cấu hình đã lưu.</p>
         <hr class="panel-divider">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <h2 class="section-title" style="margin:0;">Thông tin đã dùng (<span id="used-records-count">0</span>)</h2>
+          <h2 class="section-title" style="margin:0;">
+            Hàng đợi thông tin —
+            <span id="aq-available-count" style="color:#1c7c45;">Còn: 0</span>
+            &nbsp;|&nbsp;
+            <span id="aq-used-count" style="color:#a4401f;">Đã dùng: 0</span>
+          </h2>
           <div style="display:flex;gap:8px;">
-            <button id="used-records-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xem</button>
-            <button id="used-records-clear-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xóa hết</button>
+            <button id="aq-toggle-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xem đã dùng</button>
+            <button id="aq-reset-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Đặt lại</button>
           </div>
         </div>
-        <div id="used-records-box" hidden>
-          <div style="max-height:200px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;">
-            <table id="used-records-table" style="width:100%;border-collapse:collapse;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;">
-              <thead><tr id="used-records-head"></tr></thead>
-              <tbody id="used-records-body"></tbody>
-            </table>
-            <p id="used-records-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:14px 0;margin:0;">Chưa có thông tin nào đã dùng.</p>
-          </div>
+        <div id="aq-used-box" style="max-height:200px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;display:none;">
+          <table style="width:100%;border-collapse:collapse;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;">
+            <thead><tr id="aq-used-head"></tr></thead>
+            <tbody id="aq-used-body"></tbody>
+          </table>
+          <p id="aq-used-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:14px 0;margin:0;">Chưa có thông tin nào đã dùng.</p>
         </div>
       </section>
 
@@ -217,6 +220,31 @@
         <p class="hint">Kiểm tra sẽ đánh dấu proxy chết, trùng IP exit và dòng trùng. CSV lịch sử gồm các lần thử, IP exit và trạng thái mở trang đã lưu qua nhiều phiên.</p>
         <div id="used-ips" role="region" aria-live="polite"></div>
         <p class="hint">Danh sách IP exit đã tiêu qua các phiên; lượt mở sau sẽ từ chối proxy nào trả về đúng các IP này.</p>
+
+        <hr class="panel-divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h2 class="section-title" style="margin:0;">
+            Hàng đợi proxy —
+            <span id="pq-available-count" style="color:#1c7c45;">Còn: 0</span>
+            &nbsp;|&nbsp;
+            <span id="pq-used-count" style="color:#a4401f;">Đã dùng: 0</span>
+          </h2>
+          <div style="display:flex;gap:8px;">
+            <button id="pq-import-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Nhập từ danh sách</button>
+            <button id="pq-reset-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Đặt lại</button>
+          </div>
+        </div>
+        <div id="pq-used-box" style="max-height:160px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;display:none;">
+          <table style="width:100%;border-collapse:collapse;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;">
+            <thead><tr>
+              <th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;text-align:left;">#</th>
+              <th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;text-align:left;">Proxy đã dùng</th>
+            </tr></thead>
+            <tbody id="pq-used-tbody"></tbody>
+          </table>
+          <p id="pq-used-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:12px 0;margin:0;">Chưa có proxy nào được dùng.</p>
+        </div>
+        <button id="pq-toggle-used-btn" class="secondary" type="button" style="margin-top:8px;padding:5px 10px;font-size:11px;min-height:0;">Xem danh sách đã dùng</button>
       </section>
 
       <section class="tab-panel" id="panel-browsers" role="tabpanel" aria-labelledby="tab-browsers" data-panel="browsers">
@@ -225,7 +253,7 @@
           <button id="launch-button" type="submit">Tạo profile và mở</button>
           <button id="close-button" class="secondary" type="button">Đóng tất cả</button>
         </div>
-        <p class="hint"><strong>Tạo profile và mở</strong> dùng Google Chrome thường từ bản 150 trở lên, tối đa 6 cửa sổ. Mỗi cửa sổ cần một major khác nhau, một profile và một proxy riêng. Nếu máy thiếu phiên bản, app báo lỗi trước khi mở. User-Agent dùng mẫu Windows với đúng phiên bản của Chrome được mở. Dữ liệu tự điền nằm ở tab Thiết lập. Lịch sử proxy chung hiện ở tab Proxy.</p>
+        <p class="hint"><strong>Tạo profile và mở</strong> dùng Google Chrome thường từ bản 150 trở lên, tối đa 10 cửa sổ. Mỗi cửa sổ cần một major khác nhau, một profile và một proxy riêng. Nếu máy thiếu phiên bản, app báo lỗi trước khi mở. User-Agent dùng mẫu Windows với đúng phiên bản của Chrome được mở. Dữ liệu tự điền nằm ở tab Thiết lập. Lịch sử proxy chung hiện ở tab Proxy.</p>
         <div class="actions">
           <button id="auto-refill-button" class="secondary" type="button" aria-pressed="true">Tự bù: Đang bật</button>
         </div>
@@ -296,7 +324,7 @@
     </div>
     <p id="warnings"></p>
     <p id="status" role="status" aria-live="polite"></p>
-    <p class="notice">Tối đa 6 trình duyệt chạy song song. Nếu máy chậm, giảm số cửa sổ trong tab Thiết lập.</p>
+    <p class="notice">Tối đa 10 trình duyệt chạy song song. Nếu máy chậm, giảm số cửa sổ trong tab Thiết lập.</p>
   </main>
   <script>
     const form = document.querySelector('#launcher-form');
@@ -816,47 +844,107 @@
     document.querySelector('#log-html-close').addEventListener('click', () => logHtmlModal.classList.remove('open'));
     logHtmlModal.addEventListener('click', (e) => { if (e.target === logHtmlModal) logHtmlModal.classList.remove('open'); });
 
-    // ── Thông tin autofill đã dùng ─────────────────────────────────────────
-    const usedRecordsCount = document.querySelector('#used-records-count');
-    const usedRecordsBox = document.querySelector('#used-records-box');
-    const usedRecordsHead = document.querySelector('#used-records-head');
-    const usedRecordsBody = document.querySelector('#used-records-body');
-    const usedRecordsEmpty = document.querySelector('#used-records-empty');
+    // ── Hàng đợi thông tin autofill ───────────────────────────────────────
+    const aqAvailableCount = document.querySelector('#aq-available-count');
+    const aqUsedCount = document.querySelector('#aq-used-count');
+    const aqUsedBox = document.querySelector('#aq-used-box');
+    const aqUsedHead = document.querySelector('#aq-used-head');
+    const aqUsedBody = document.querySelector('#aq-used-body');
+    const aqUsedEmpty = document.querySelector('#aq-used-empty');
+    const aqToggleBtn = document.querySelector('#aq-toggle-btn');
 
-    async function loadUsedRecords() {
+    async function refreshAutofillQueue() {
       try {
-        const { count, records } = await fetch('/autofill-used').then((r) => r.json());
-        usedRecordsCount.textContent = count;
-        if (records.length === 0) {
-          usedRecordsHead.innerHTML = '';
-          usedRecordsBody.innerHTML = '';
-          usedRecordsEmpty.hidden = false;
-          return;
+        const { available, used, usedList } = await fetch('/autofill-queue').then((r) => r.json());
+        aqAvailableCount.textContent = `Còn: ${available}`;
+        aqUsedCount.textContent = `Đã dùng: ${used}`;
+        if (usedList.length === 0) {
+          aqUsedEmpty.hidden = false;
+          aqUsedHead.innerHTML = '';
+          aqUsedBody.innerHTML = '';
+        } else {
+          aqUsedEmpty.hidden = true;
+          const cols = [...new Set(usedList.flatMap(Object.keys))];
+          aqUsedHead.innerHTML = cols.map((c) =>
+            `<th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;white-space:nowrap;">${escHtml(c)}</th>`
+          ).join('');
+          aqUsedBody.innerHTML = usedList.map((r) =>
+            `<tr>${cols.map((c) => `<td style="padding:4px 7px;border-bottom:1px solid #f0f2f7;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;">${escHtml(r[c] ?? '')}</td>`).join('')}</tr>`
+          ).join('');
         }
-        usedRecordsEmpty.hidden = true;
-        const cols = [...new Set(records.flatMap(Object.keys))];
-        usedRecordsHead.innerHTML = cols.map((c) => `<th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;white-space:nowrap;">${escHtml(c)}</th>`).join('');
-        usedRecordsBody.innerHTML = records.map((r) =>
-          `<tr>${cols.map((c) => `<td style="padding:4px 7px;border-bottom:1px solid #f0f2f7;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;">${escHtml(r[c] ?? '')}</td>`).join('')}</tr>`
-        ).join('');
       } catch {}
     }
 
-    document.querySelector('#used-records-btn').addEventListener('click', async () => {
-      const isHidden = usedRecordsBox.hidden;
-      usedRecordsBox.hidden = !isHidden;
-      if (isHidden) await loadUsedRecords();
+    aqToggleBtn.addEventListener('click', () => {
+      const visible = aqUsedBox.style.display !== 'none';
+      aqUsedBox.style.display = visible ? 'none' : 'block';
+      aqToggleBtn.textContent = visible ? 'Xem đã dùng' : 'Ẩn đã dùng';
     });
 
-    document.querySelector('#used-records-clear-btn').addEventListener('click', async () => {
-      await fetch('/autofill-used/clear', { method: 'POST' });
-      await loadUsedRecords();
-      usedRecordsBox.hidden = false;
+    document.querySelector('#aq-reset-btn').addEventListener('click', async () => {
+      const res = await fetch('/autofill-queue/reset', { method: 'POST' }).then((r) => r.json());
+      status.textContent = res.message ?? 'Đã đặt lại.';
+      await refreshAutofillQueue();
     });
 
-    // Cập nhật số đếm khi vào tab Thiết lập
-    document.querySelector('#tab-setup').addEventListener('click', loadUsedRecords);
-    loadUsedRecords();
+    // Cập nhật khi vào tab Thiết lập
+    document.querySelector('#tab-setup').addEventListener('click', refreshAutofillQueue);
+    refreshAutofillQueue();
+
+    // ── Hàng đợi proxy ────────────────────────────────────────────────────
+    const pqAvailableCount = document.querySelector('#pq-available-count');
+    const pqUsedCount = document.querySelector('#pq-used-count');
+    const pqUsedBox = document.querySelector('#pq-used-box');
+    const pqUsedTbody = document.querySelector('#pq-used-tbody');
+    const pqUsedEmpty = document.querySelector('#pq-used-empty');
+    const pqToggleBtn = document.querySelector('#pq-toggle-used-btn');
+
+    async function refreshProxyQueue() {
+      try {
+        const data = await fetch('/proxy-queue').then((r) => r.json());
+        pqAvailableCount.textContent = `Còn: ${data.available}`;
+        pqUsedCount.textContent = `Đã dùng: ${data.used}`;
+        if (data.used === 0) {
+          pqUsedEmpty.hidden = false;
+          pqUsedTbody.innerHTML = '';
+        } else {
+          pqUsedEmpty.hidden = true;
+          pqUsedTbody.innerHTML = data.usedList.map((line, i) =>
+            `<tr><td style="padding:3px 7px;border-bottom:1px solid #f0f2f7;color:#768197;">${i + 1}</td>`
+            + `<td style="padding:3px 7px;border-bottom:1px solid #f0f2f7;">${escHtml(line)}</td></tr>`
+          ).join('');
+        }
+      } catch {}
+    }
+
+    document.querySelector('#pq-import-btn').addEventListener('click', async () => {
+      const proxyListEl = document.querySelector('[name="proxyList"]');
+      const proxyTypeEl = document.querySelector('[name="proxyType"]');
+      if (!proxyListEl?.value.trim()) { status.textContent = 'Hãy nhập danh sách proxy trước.'; return; }
+      const res = await fetch('/proxy-queue/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ proxyList: proxyListEl.value, proxyType: proxyTypeEl?.value ?? 'socks5' }),
+      }).then((r) => r.json());
+      status.textContent = res.message ?? 'Đã nhập.';
+      await refreshProxyQueue();
+    });
+
+    document.querySelector('#pq-reset-btn').addEventListener('click', async () => {
+      const res = await fetch('/proxy-queue/reset', { method: 'POST' }).then((r) => r.json());
+      status.textContent = res.message ?? 'Đã đặt lại.';
+      await refreshProxyQueue();
+    });
+
+    pqToggleBtn.addEventListener('click', () => {
+      const isVisible = pqUsedBox.style.display !== 'none';
+      pqUsedBox.style.display = isVisible ? 'none' : 'block';
+      pqToggleBtn.textContent = isVisible ? 'Xem danh sách đã dùng' : 'Ẩn danh sách đã dùng';
+    });
+
+    // Refresh khi vào tab Proxy
+    document.querySelector('#tab-proxies').addEventListener('click', refreshProxyQueue);
+    refreshProxyQueue();
 
   </script>
 </body>

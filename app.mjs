@@ -58,6 +58,12 @@ const proxyUsageHistoryPath = join(homedir(), 'Library', 'Application Support', 
 const autofillUsedPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'autofill-used.json');
 /** @type {Set<string>} fingerprint = JSON của record đã dùng */
 let autofillUsedKeys = new Set();
+const autofillQueuePath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'autofill-queue.json');
+/** Hàng đợi thông tin autofill: available = chưa dùng, used = đã dùng. */
+const autofillQueue = { available: /** @type {object[]} */ ([]), used: /** @type {object[]} */ ([]) };
+const proxyQueuePath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'proxy-queue.json');
+/** Hàng đợi proxy: available = chưa dùng, used = đã dùng (raw lines gốc). */
+const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
 const port = Number(process.env.AUTOLEADPC_PORT) || 3210;
 
 /**
@@ -107,7 +113,7 @@ export function recommendedMaxAlive(cores, totalBytes) {
   return Math.max(1, Math.min(cores, byRam));
 }
 
-const maxAliveBrowsers = Math.max(1, Math.min(6, Math.floor(Number(process.env.AUTOLEADPC_MAX_ALIVE) || 6)));
+const maxAliveBrowsers = Math.max(1, Math.min(10, Math.floor(Number(process.env.AUTOLEADPC_MAX_ALIVE) || 10)));
 
 /** Proxy SOCKS công cộng hay chậm, 10 giây của bản đầu không đủ. */
 const navigationTimeout = 30_000;
@@ -681,6 +687,78 @@ async function markAutofillRecordUsed(record) {
   await writeFile(autofillUsedPath, JSON.stringify({ keys: [...autofillUsedKeys] })).catch(() => {});
 }
 
+/** Nạp hàng đợi autofill từ file. */
+async function loadAutofillQueue() {
+  try {
+    const data = JSON.parse(await readFile(autofillQueuePath, 'utf8'));
+    autofillQueue.available = Array.isArray(data.available) ? data.available : [];
+    autofillQueue.used = Array.isArray(data.used) ? data.used : [];
+  } catch { /* file chưa tồn tại */ }
+}
+
+/** Lưu hàng đợi autofill xuống file. */
+async function saveAutofillQueue() {
+  await writeFile(autofillQueuePath, JSON.stringify(autofillQueue)).catch(() => {});
+}
+
+/**
+ * Thêm các record mới từ danh sách vào available, bỏ qua record đã có.
+ * @param {object[]} records Danh sách record đã parse.
+ * @return {number} Số record mới được thêm.
+ */
+function importAutofillRecords(records) {
+  const existingKeys = new Set([
+    ...autofillQueue.available.map(autofillRecordKey),
+    ...autofillQueue.used.map(autofillRecordKey),
+  ]);
+  let added = 0;
+  for (const record of records) {
+    const key = autofillRecordKey(record);
+    if (!existingKeys.has(key)) {
+      autofillQueue.available.push(record);
+      existingKeys.add(key);
+      added++;
+    }
+  }
+  return added;
+}
+
+/** Nạp hàng đợi proxy từ file. */
+async function loadProxyQueue() {
+  try {
+    const data = JSON.parse(await readFile(proxyQueuePath, 'utf8'));
+    proxyQueue.available = Array.isArray(data.available) ? data.available : [];
+    proxyQueue.used = Array.isArray(data.used) ? data.used : [];
+  } catch { /* file chưa tồn tại */ }
+}
+
+/** Lưu hàng đợi proxy xuống file. */
+async function saveProxyQueue() {
+  await writeFile(proxyQueuePath, JSON.stringify(proxyQueue)).catch(() => {});
+}
+
+/**
+ * Thêm các dòng proxy mới từ textarea vào available, bỏ qua dòng đã có trong available hoặc used.
+ * @param {string[]} rawLines Các dòng proxy thô.
+ * @param {string} proxyType Scheme mặc định.
+ * @return {number} Số dòng mới được thêm vào.
+ */
+function importProxyLines(rawLines, proxyType) {
+  const existingAll = new Set([...proxyQueue.available, ...proxyQueue.used]);
+  let added = 0;
+  for (const line of rawLines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    try { parseProxyLine(trimmed, 1, proxyType); } catch { continue; } // validate
+    if (!existingAll.has(trimmed)) {
+      proxyQueue.available.push(trimmed);
+      existingAll.add(trimmed);
+      added++;
+    }
+  }
+  return added;
+}
+
 /**
  * Chạy handler trên từng phần tử nhưng không vượt quá mức đồng thời cho trước.
  *
@@ -750,17 +828,39 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
     throw new Error('Hãy đóng cửa sổ profile mẫu RoboForm trước khi tạo profile Chrome mới.');
   }
   const autofillRecords = parseAutofillRecords(body.autofillData);
+  // Nạp autofill mới vào queue nếu queue trống
+  if (autofillRecords.length > 0 && autofillQueue.available.length === 0 && autofillQueue.used.length === 0) {
+    importAutofillRecords(autofillRecords);
+    await saveAutofillQueue();
+  } else if (autofillRecords.length > 0) {
+    // Thêm record mới chưa có trong queue (user cập nhật danh sách)
+    const added = importAutofillRecords(autofillRecords);
+    if (added > 0) await saveAutofillQueue();
+  }
+  // Kiểm tra còn đủ record không
+  if (autofillRecords.length > 0 && autofillQueue.available.length === 0) {
+    return {
+      results: [],
+      warnings: ['Tất cả thông tin đã được dùng hết. Hãy bấm "Đặt lại" trong tab Proxy để dùng lại.'],
+    };
+  }
+
   const proxyType = body.proxyType ?? 'socks5';
-  const inputProxies = selectProxies(body.proxyList, proxyType, '');
+  // Nạp proxy mới từ textarea vào queue nếu queue đang trống
+  if (proxyQueue.available.length === 0 && body.proxyList) {
+    const added = importProxyLines((body.proxyList ?? '').split(/\r?\n/), proxyType);
+    if (added > 0) await saveProxyQueue();
+  }
   const usageHistory = await readProxyUsageHistory();
   const usedExitIps = new Set(Object.values(usageHistory.proxies).map((entry) => entry.exitIp).filter(Boolean));
-  const seenProxyKeys = new Set();
-  const availableProxies = inputProxies.filter((proxy) => {
-    const proxyKey = createProxyUsageKey(proxy, 1);
-    const previousAttempt = usageHistory.proxies[proxyKey];
-    const retryable = isRetryableIpVerificationFailure(previousAttempt);
-    if (seenProxyKeys.has(proxyKey) || (previousAttempt && !retryable)) return false;
-    seenProxyKeys.add(proxyKey);
+  // Queue là nguồn chính — parse available thành proxy objects, dedup theo server
+  const seenServers = new Set();
+  const availableProxies = proxyQueue.available.map((line) => {
+    try { return { ...parseProxyLine(line.trim(), 1, proxyType), _queueLine: line }; }
+    catch { return null; }
+  }).filter((proxy) => {
+    if (!proxy || seenServers.has(proxy.server)) return false;
+    seenServers.add(proxy.server);
     return true;
   });
   const requestedCount = body.requestedCount === undefined || body.requestedCount === ''
@@ -776,11 +876,13 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
   if (targetSuccessCount === 0) {
     return {
       results: [],
-      warnings: ['Tất cả proxy trong danh sách đã được thử trước đây hoặc bị trùng; không có proxy mới để mở.'],
+      warnings: [availableProxies.length === 0
+        ? 'Hàng đợi proxy trống. Hãy nhập thêm proxy hoặc bấm "Đặt lại hàng đợi" để dùng lại.'
+        : 'Không đủ proxy để mở; kiểm tra cấu hình.'],
     };
   }
   const warnings = requestedCount > availableProxies.length
-    ? ['Bạn yêu cầu ' + requestedCount + ' trình duyệt nhưng chỉ còn ' + availableProxies.length + ' proxy chưa dùng.']
+    ? ['Bạn yêu cầu ' + requestedCount + ' trình duyệt nhưng hàng đợi chỉ còn ' + availableProxies.length + ' proxy.']
     : [];
   const alreadyAlive = activeBrowsers.size;
   if (alreadyAlive + targetSuccessCount > maxAliveBrowsers) {
@@ -849,6 +951,13 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
       && nextProxyIndex < availableProxies.length) {
       const proxy = availableProxies[nextProxyIndex];
       nextProxyIndex += 1;
+      // Dequeue ngay: dù thành công hay thất bại, proxy này không được dùng lại
+      const queueIdx = proxyQueue.available.indexOf(proxy._queueLine);
+      if (queueIdx !== -1) {
+        proxyQueue.available.splice(queueIdx, 1);
+        proxyQueue.used.push(proxy._queueLine);
+        void saveProxyQueue();
+      }
       const proxyKey = createProxyUsageKey(proxy, 1);
       const installedChrome = availableChromeBuilds[workerIndex];
       const browserProfileId = 'chrome-' + installedChrome.channel + '-' + installedChrome.major;
@@ -1865,13 +1974,21 @@ async function openBrowserWithInstalledChrome({
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
   };
   attachBrowserLogger(context, session);
-  // Lọc các bản ghi chưa dùng; nếu hết thì dùng lại toàn bộ (reset tự động)
-  const unusedRecords = autofillRecords.filter((r) => !autofillUsedKeys.has(autofillRecordKey(r)));
-  const recordPool = unusedRecords.length > 0 ? unusedRecords : autofillRecords;
+  // Lấy từ queue available (đã kiểm tra ở launchRequestedBrowsers)
+  const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
   attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
     autoSubmit,
     enableLeadCheck: leadConfig.enabled !== false,
-    onRecordPicked: (record) => { void markAutofillRecordUsed(record); },
+    onRecordPicked: (record) => {
+      // Dequeue ngay khi chọn
+      const idx = autofillQueue.available.findIndex((r) => autofillRecordKey(r) === autofillRecordKey(record));
+      if (idx !== -1) {
+        autofillQueue.available.splice(idx, 1);
+        autofillQueue.used.push(record);
+        void saveAutofillQueue();
+      }
+      void markAutofillRecordUsed(record);
+    },
     onFirstScreenCompleted: () => {
       void startLeadVerification(session, leadConfig);
     },
@@ -2079,6 +2196,10 @@ export async function getDeadOrBlockedReason(page) {
         return 'Traffic Blocked!';
       }
 
+      if (/^\s*disabled\s*$/i.test(title) && /^\s*disabled\s*$/i.test(bodyText.trim())) {
+        return 'Disabled';
+      }
+
       const netErrorMatch = fullText.match(/\b(ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_PROXY_CONNECTION_FAILED|ERR_SOCKS_CONNECTION_FAILED|ERR_TUNNEL_CONNECTION_FAILED|ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_REFUSED|ERR_EMPTY_RESPONSE|ERR_NAME_NOT_RESOLVED|DNS_PROBE_FINISHED_NXDOMAIN|ERR_INTERNET_DISCONNECTED|ERR_ADDRESS_UNREACHABLE|ERR_SSL_PROTOCOL_ERROR|ERR_NETWORK_CHANGED)\b/i);
       if (netErrorMatch) {
         return netErrorMatch[1].toUpperCase();
@@ -2238,6 +2359,8 @@ function exitWhenParentExits() {
  */
 async function startLocalInterface() {
   await loadAutofillUsed();
+  await loadAutofillQueue();
+  await loadProxyQueue();
   const interfaceHtml = await readFile(userInterfacePath, 'utf8');
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
@@ -2259,6 +2382,61 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && request.url === '/state') {
       respondWithJson(response, 200, getAutoRefillStatus());
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/proxy-queue') {
+      respondWithJson(response, 200, {
+        available: proxyQueue.available.length,
+        used: proxyQueue.used.length,
+        usedList: proxyQueue.used,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/proxy-queue/import') {
+      const body = JSON.parse(await readRequestBody(request));
+      const added = importProxyLines((body.proxyList ?? '').split(/\r?\n/), body.proxyType ?? 'socks5');
+      await saveProxyQueue();
+      respondWithJson(response, 200, {
+        added,
+        available: proxyQueue.available.length,
+        used: proxyQueue.used.length,
+        message: `Đã thêm ${added} proxy mới vào hàng đợi. Còn lại: ${proxyQueue.available.length}.`,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/proxy-queue/reset') {
+      proxyQueue.available.push(...proxyQueue.used.splice(0));
+      await saveProxyQueue();
+      respondWithJson(response, 200, {
+        available: proxyQueue.available.length,
+        used: 0,
+        message: `Đã đặt lại: ${proxyQueue.available.length} proxy sẵn sàng dùng lại.`,
+      });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/autofill-queue') {
+      respondWithJson(response, 200, {
+        available: autofillQueue.available.length,
+        used: autofillQueue.used.length,
+        usedList: autofillQueue.used,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/autofill-queue/reset') {
+      autofillQueue.available.push(...autofillQueue.used.splice(0));
+      autofillUsedKeys.clear();
+      await saveAutofillQueue();
+      await writeFile(autofillUsedPath, JSON.stringify({ keys: [] })).catch(() => {});
+      respondWithJson(response, 200, {
+        available: autofillQueue.available.length,
+        used: 0,
+        message: `Đã đặt lại: ${autofillQueue.available.length} bản ghi thông tin sẵn sàng dùng lại.`,
+      });
       return;
     }
 

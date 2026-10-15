@@ -1,7 +1,16 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import assert from 'node:assert/strict';
-import { parseAutofillRecords, matchFieldValue, isConsentCheckbox, handleRadioAndSurveyOptions, findSubmitButton } from './autofill.mjs';
+import {
+  parseAutofillRecords,
+  matchFieldValue,
+  isConsentCheckbox,
+  handleRadioAndSurveyOptions,
+  findSubmitButton,
+  calculateAge,
+  matchAgeRange,
+  handleOfferwallCards,
+} from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
 import {
   buildProxyCheckReport,
@@ -469,6 +478,165 @@ assert.ok(
   clickedRadioSelector === 'input[type="radio"]#own_home_no'
 );
 assert.ok(dispatchedRadioEvents.includes('input') && dispatchedRadioEvents.includes('change'));
+
+// Test calculateAge và matchAgeRange
+const birth1984Record = { dob: '8/18/1984' };
+const calculatedAge = calculateAge(birth1984Record);
+const expectedAge = new Date().getFullYear() - 1984;
+assert.equal(calculatedAge, expectedAge);
+assert.equal(calculateAge({}), null);
+assert.equal(calculateAge(null), null);
+
+assert.equal(matchAgeRange('18 - 34', 42), false);
+assert.equal(matchAgeRange('35-49', 42), true);
+assert.equal(matchAgeRange('50 - 64', 42), false);
+assert.equal(matchAgeRange('OVER 65', 42), false);
+assert.equal(matchAgeRange('OVER 65', 70), true);
+assert.equal(matchAgeRange('65+', 68), true);
+assert.equal(matchAgeRange('Under 25', 20), true);
+assert.equal(matchAgeRange('Under 25', 30), false);
+
+// Test handleRadioAndSurveyOptions: Vector Survey Income (.btn-option, data-vector-answer="true")
+let clickedVectorChoiceId = null;
+const mockVectorSurveyFrame = {
+  locator: (sel) => ({
+    count: async () => 1,
+    first: () => ({
+      count: async () => 1,
+      click: async () => { clickedVectorChoiceId = sel; },
+      evaluate: async () => {},
+    }),
+    evaluateAll: async () => ({}),
+  }),
+  evaluate: async () => [
+    {
+      questionTitle: 'What is your approximate annual household income?',
+      items: [
+        { uid: 'v1', text: 'Under $25,000', value: '1', tagName: 'button' },
+        { uid: 'v2', text: '$25,000 - $39,999', value: '2', tagName: 'button' },
+        { uid: 'v3', text: '$40,000 - $54,999', value: '3', tagName: 'button' },
+      ],
+    },
+  ],
+};
+const answeredVectorCount = await handleRadioAndSurveyOptions(mockVectorSurveyFrame);
+assert.equal(answeredVectorCount, 1);
+assert.ok(
+  clickedVectorChoiceId === '[data-autolead-choice-id="v1"]' ||
+  clickedVectorChoiceId === '[data-autolead-choice-id="v2"]' ||
+  clickedVectorChoiceId === '[data-autolead-choice-id="v3"]'
+);
+
+// Test handleRadioAndSurveyOptions: Khớp tuổi thông minh với thẻ <a> (Jeremy sinh năm 1984 -> tuổi 42 -> 35-49)
+let clickedAgeChoiceId = null;
+const mockAgeFrame = {
+  locator: (sel) => ({
+    count: async () => 1,
+    first: () => ({
+      count: async () => 1,
+      click: async () => { clickedAgeChoiceId = sel; },
+      evaluate: async () => {},
+    }),
+    evaluateAll: async () => ({}),
+  }),
+  evaluate: async () => [
+    {
+      questionTitle: 'What is your age?',
+      items: [
+        { uid: 'age_1', text: '18 - 34', value: '1', tagName: 'a' },
+        { uid: 'age_2', text: '35-49', value: '2', tagName: 'a' },
+        { uid: 'age_3', text: '50 - 64', value: '3', tagName: 'a' },
+        { uid: 'age_4', text: 'OVER 65', value: '4', tagName: 'a' },
+      ],
+    },
+  ],
+};
+const answeredAgeCount = await handleRadioAndSurveyOptions(mockAgeFrame, birth1984Record);
+assert.equal(answeredAgeCount, 1);
+assert.equal(clickedAgeChoiceId, '[data-autolead-choice-id="age_2"]', 'Phải tự động khớp chính xác dải tuổi 35-49 dựa trên ngày sinh 1984');
+
+// Test handleRadioAndSurveyOptions: Creative Homeowner Survey (Rent vs Own)
+let clickedHomeChoiceId = null;
+const mockHomeFrame = {
+  locator: (sel) => ({
+    count: async () => 1,
+    first: () => ({
+      count: async () => 1,
+      click: async () => { clickedHomeChoiceId = sel; },
+      evaluate: async () => {},
+    }),
+    evaluateAll: async () => ({}),
+  }),
+  evaluate: async () => [
+    {
+      questionTitle: 'Do you own or rent your home?',
+      items: [
+        { uid: 'home_rent', text: 'Rent', value: 'rent', tagName: 'button' },
+        { uid: 'home_own', text: 'Own', value: 'own', tagName: 'button' },
+      ],
+    },
+  ],
+};
+const answeredHomeCount = await handleRadioAndSurveyOptions(mockHomeFrame, { homeowner: 'own' });
+assert.equal(answeredHomeCount, 1);
+assert.equal(clickedHomeChoiceId, '[data-autolead-choice-id="home_own"]');
+
+// Test handleOfferwallCards: Phát hiện và mở đồng thời tất cả các offer cards
+const clickedOfferwallCards = [];
+const mockOfferwallFrame = {
+  locator: (sel) => ({
+    first: () => ({
+      count: async () => 1,
+      locator: () => ({
+        first: () => ({
+          count: async () => 1,
+          isVisible: async () => true,
+          click: async () => { clickedOfferwallCards.push(sel); },
+          evaluate: async () => {},
+        }),
+      }),
+    }),
+  }),
+  evaluate: async () => [
+    { uid: 'card_1', hasBtn: true, destUrl: 'https://offer1.example' },
+    { uid: 'card_2', hasBtn: true, destUrl: 'https://offer2.example' },
+  ],
+};
+const openedOfferCount = await handleOfferwallCards(mockOfferwallFrame);
+assert.equal(openedOfferCount, 2);
+assert.deepEqual(clickedOfferwallCards, [
+  '[data-autolead-card-id="card_1"]',
+  '[data-autolead-card-id="card_2"]',
+]);
+
+// Test findSubmitButton: Phải bỏ qua các nút offerwall
+const mockOfferwallBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  innerText: async () => 'Continue',
+  evaluate: async (fn) => fn({
+    closest: (sel) => sel.includes('offerwall-card'),
+    classList: { contains: () => true },
+    getAttribute: () => 'offer-btn',
+  }),
+};
+const mockRegularSubmitBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  innerText: async () => 'Continue',
+  evaluate: async (fn) => fn({
+    closest: () => null,
+    classList: { contains: () => false },
+    getAttribute: () => null,
+  }),
+};
+const mockOfferwallSubmitFrame = {
+  locator: (sel) => ({
+    all: async () => (sel.includes('button[type="submit"]') ? [mockOfferwallBtn, mockRegularSubmitBtn] : []),
+  }),
+};
+const foundSubmit = await findSubmitButton(mockOfferwallSubmitFrame);
+assert.equal(foundSubmit, mockRegularSubmitBtn, 'findSubmitButton phải bỏ qua nút offerwall và chọn nút submit hợp lệ tiếp theo');
 
 // Tên binary: stable và bản lưu theo version phải thử cả bản Chrome for Testing.
 assert.deepEqual(chromeExecutableNames('stable'), ['Google Chrome', 'Google Chrome for Testing']);
