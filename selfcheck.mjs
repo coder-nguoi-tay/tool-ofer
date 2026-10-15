@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
+import { parseAutofillRecords, matchFieldValue } from './autofill.mjs';
 import {
   buildProxyCheckReport,
-  buildMacChromeUserAgent,
   buildUsedExitIpList,
-  createProxyProfileKey,
+  createProxyUsageKey,
   hasTrafficBlocked,
-  isRetryableGologinServiceFailure,
   mapWithLimit,
   normalizeUrl,
   parseProxyLine,
@@ -113,15 +112,15 @@ assert.throws(() => selectProxies('1.2.3.4:1080', 'socks5', 2));  // thiếu pro
 // Khóa profile: password xoay theo phiên không được đổi khóa, nhưng host/user/thứ tự thì có
 const rotatingProxy = { server: 'socks5://1.2.3.4:1080', username: 'u', password: 'session-1' };
 const sameProxyNewPassword = { ...rotatingProxy, password: 'session-2' };
-assert.equal(createProxyProfileKey(rotatingProxy, 1), createProxyProfileKey(sameProxyNewPassword, 1));
-assert.notEqual(createProxyProfileKey(rotatingProxy, 1), createProxyProfileKey(rotatingProxy, 2));
+assert.equal(createProxyUsageKey(rotatingProxy, 1), createProxyUsageKey(sameProxyNewPassword, 1));
+assert.notEqual(createProxyUsageKey(rotatingProxy, 1), createProxyUsageKey(rotatingProxy, 2));
 assert.notEqual(
-  createProxyProfileKey(rotatingProxy, 1),
-  createProxyProfileKey({ ...rotatingProxy, username: 'v' }, 1),
+  createProxyUsageKey(rotatingProxy, 1),
+  createProxyUsageKey({ ...rotatingProxy, username: 'v' }, 1),
 );
 assert.notEqual(
-  createProxyProfileKey(rotatingProxy, 1),
-  createProxyProfileKey({ ...rotatingProxy, server: 'socks5://1.2.3.4:1081' }, 1),
+  createProxyUsageKey(rotatingProxy, 1),
+  createProxyUsageKey({ ...rotatingProxy, server: 'socks5://1.2.3.4:1081' }, 1),
 );
 
 // mapWithLimit: giữ thứ tự đầu vào và không vượt mức đồng thời
@@ -163,33 +162,6 @@ assert.ok(report.warnings.some((warning) => warning.includes('IP exit bị nhi�
 
 console.log('selfcheck OK');
 
-// Lỗi GoLogin (quota/429) không được đốt proxy: bản ghi cũ và mới đều phải thử lại được.
-assert.equal(isRetryableGologinServiceFailure(undefined), false);
-assert.equal(isRetryableGologinServiceFailure({ status: 'service_error' }), true);
-assert.equal(isRetryableGologinServiceFailure({
-  status: 'failed',
-  exitIp: null,
-  reason: 'Unexpected token \'T\', "Too many requests" is not valid JSON',
-}), true);
-assert.equal(isRetryableGologinServiceFailure({
-  status: 'failed',
-  exitIp: null,
-  reason: 'Unexpected token \'Y\', "You have r"... is not valid JSON',
-}), true);
-// Đã lấy được IP thoát nghĩa là IP đó đã dùng thật, không thử lại.
-assert.equal(isRetryableGologinServiceFailure({
-  status: 'failed',
-  exitIp: '1.2.3.4',
-  reason: 'Too many requests',
-}), false);
-// Lỗi thật của proxy vẫn bị loại vĩnh viễn.
-assert.equal(isRetryableGologinServiceFailure({
-  status: 'failed',
-  exitIp: null,
-  reason: 'Proxy Error. Proxy Error. Socket closed',
-}), false);
-assert.equal(isRetryableGologinServiceFailure({ status: 'success', exitIp: '1.2.3.4' }), false);
-
 // Bảng IP đã dùng: bỏ bản ghi chưa có IP, gộp theo IP, giữ lần mới nhất, mới nhất lên đầu.
 const usedIpSample = buildUsedExitIpList({
   proxies: {
@@ -204,17 +176,6 @@ assert.equal(usedIpSample[0].uses, 2);
 assert.equal(usedIpSample[0].proxy, 'socks5://c:3');
 assert.equal(usedIpSample[1].uses, 1);
 assert.deepEqual(buildUsedExitIpList({}), []);
-
-// UA dựng theo major phải khớp định dạng Chrome macOS hiện hành và chỉ đổi số major.
-assert.equal(
-  buildMacChromeUserAgent(144),
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
-);
-assert.equal(buildMacChromeUserAgent(153).match(/Chrome\/(\d+)\.0\.0\.0/)[1], '153');
-assert.notEqual(buildMacChromeUserAgent(144), buildMacChromeUserAgent(145));
-assert.throws(() => buildMacChromeUserAgent(0));
-assert.throws(() => buildMacChromeUserAgent('144'));
-assert.throws(() => buildMacChromeUserAgent(144.5));
 
 // hasTrafficBlocked phát hiện Traffic Blocked! qua nội dung hoặc tiêu đề trang
 assert.equal(await hasTrafficBlocked(null), false);
@@ -250,3 +211,63 @@ const normalTexts = [
 for (const text of normalTexts) {
   assert.ok(!/traffic\s+blocked/i.test(text), `không được nhận nhầm "${text}"`);
 }
+
+// Test parseAutofillRecords: hỗ trợ đầy đủ các trường SSN, Email, Banking và tự phục hồi JSON cắt cụt
+const sampleLeadJson = `[
+  {
+    "Năm Sinh": "8/18/1967",
+    "Full Name": "Juan Pablo Suarez",
+    "Address": "2609 NW 162nd st",
+    "City": "Edmond",
+    "State": "OK",
+    "Zipcode": "73132",
+    "Phonenumber": "4059335582",
+    "Number": "511485418662",
+    "Routing": "63107393",
+    "Name bank": "Bank of America",
+    "SSN": "653-24-6710",
+    "Email": "juan@example.com"
+  }
+]`;
+const parsedLeads = parseAutofillRecords(sampleLeadJson);
+assert.equal(parsedLeads.length, 1);
+assert.equal(parsedLeads[0].fullname, 'Juan Pablo Suarez');
+assert.equal(parsedLeads[0].ssn, '653-24-6710');
+assert.equal(parsedLeads[0].routing, '63107393');
+assert.equal(parsedLeads[0].email, 'juan@example.com');
+
+// Tự phục hồi JSON bị cắt cụt đuôi
+const truncatedLeadJson = sampleLeadJson.trim().slice(0, -1) + ',\n  {\n    "Full Name": "Incomplete';
+const recoveredLeads = parseAutofillRecords(truncatedLeadJson);
+assert.equal(recoveredLeads.length, 1);
+assert.equal(recoveredLeads[0].fullname, 'Juan Pablo Suarez');
+
+// Test matchFieldValue: đối sánh thông minh tên trường form Anh - Việt
+const leadRecord = parsedLeads[0];
+assert.equal(matchFieldValue(['first_name', 'fname'], leadRecord), 'Juan');
+assert.equal(matchFieldValue(['last_name', 'lname'], leadRecord), 'Pablo Suarez');
+assert.equal(matchFieldValue(['full_name', 'name'], leadRecord), 'Juan Pablo Suarez');
+assert.equal(matchFieldValue(['street_address', 'address1'], leadRecord), '2609 NW 162nd st');
+assert.equal(matchFieldValue(['city'], leadRecord), 'Edmond');
+assert.equal(matchFieldValue(['state'], leadRecord), 'OK');
+assert.equal(matchFieldValue(['zip', 'postal_code'], leadRecord), '73132');
+assert.equal(matchFieldValue(['phone', 'tel'], leadRecord), '4059335582');
+assert.equal(matchFieldValue(['areacode', 'phone1'], leadRecord), '405');
+assert.equal(matchFieldValue(['prefix', 'phone2'], leadRecord), '933');
+assert.equal(matchFieldValue(['linenumber', 'phone3'], leadRecord), '5582');
+assert.equal(matchFieldValue(['ssn', 'social_security'], leadRecord), '653-24-6710');
+assert.equal(matchFieldValue(['ssn1'], leadRecord), '653');
+assert.equal(matchFieldValue(['ssn2'], leadRecord), '24');
+assert.equal(matchFieldValue(['ssn3'], leadRecord), '6710');
+assert.equal(matchFieldValue(['routing_number', 'aba'], leadRecord), '63107393');
+assert.equal(matchFieldValue(['bank_name', 'bank'], leadRecord), 'Bank of America');
+assert.equal(matchFieldValue(['account_number', 'account_no'], leadRecord), '511485418662');
+assert.equal(matchFieldValue(['dob', 'birth_date'], leadRecord), '8/18/1967');
+assert.equal(matchFieldValue(['birthday'], leadRecord), '8/18/1967');
+assert.equal(matchFieldValue(['month', 'dob_month'], leadRecord), '8');
+assert.equal(matchFieldValue(['day', 'dob_day'], leadRecord), '18');
+assert.equal(matchFieldValue(['year', 'dob_year'], leadRecord), '1967');
+assert.equal(matchFieldValue(['middle_name', 'initial'], leadRecord), 'Pablo');
+assert.equal(matchFieldValue(['email', 'email_address'], leadRecord), 'juan@example.com');
+assert.equal(matchFieldValue(['email'], { fullname: 'John Doe', phonenumber: '1234567890' }), 'john.doe7890@gmail.com');
+

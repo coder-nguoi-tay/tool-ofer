@@ -1,9 +1,9 @@
 import { randomInt } from 'node:crypto';
 
-const excludedFieldNamePattern = /ssn|socialsecurity|taxid|routing|bank|account|acct|iban|swift|creditcard|cardnumber|cvv|cvc|^number$|email|electronicmail/;
-
 /**
  * Đọc dữ liệu CSV hoặc JSON để mỗi form có thể chọn một bản ghi.
+ * Hỗ trợ mọi trường dữ liệu (họ tên, địa chỉ, sđt, ngày sinh, email, SSN, bank, routing...).
+ * Tự động phục hồi nếu JSON bị cắt cụt đuôi hoặc chứa trailing comma.
  *
  * @param {string} source Nội dung người dùng dán vào ô dữ liệu.
  * @return {object[]} Các bản ghi có tên cột và giá trị dạng chuỗi.
@@ -18,11 +18,35 @@ export function parseAutofillRecords(source) {
   if (content.includes('\t')) throw new Error('Hãy dùng CSV hoặc JSON; bảng phân tách bằng tab chưa được hỗ trợ.');
 
   let records;
-  if (content.startsWith('[')) {
+  if (content.startsWith('[') || content.startsWith('{')) {
     try {
-      records = JSON.parse(content);
+      const parsed = JSON.parse(content);
+      records = Array.isArray(parsed) ? parsed : [parsed];
     } catch {
-      throw new Error('Dữ liệu JSON không hợp lệ.');
+      // 1. Thử dọn trailing commas
+      try {
+        const cleaned = content.replace(/,\s*([}\]])/g, '$1');
+        const parsed = JSON.parse(cleaned);
+        records = Array.isArray(parsed) ? parsed : [parsed];
+      } catch {
+        // 2. Tự phục hồi mảng JSON bị cắt cụt đuôi: cắt về dấu '}' hoàn chỉnh cuối cùng
+        if (content.startsWith('[')) {
+          const lastBraceIndex = content.lastIndexOf('}');
+          if (lastBraceIndex !== -1) {
+            try {
+              const truncated = content.slice(0, lastBraceIndex + 1).replace(/,\s*$/, '') + '\n]';
+              const parsed = JSON.parse(truncated);
+              records = Array.isArray(parsed) ? parsed : [parsed];
+            } catch {
+              throw new Error('Dữ liệu JSON không hợp lệ.');
+            }
+          } else {
+            throw new Error('Dữ liệu JSON không hợp lệ.');
+          }
+        } else {
+          throw new Error('Dữ liệu JSON không hợp lệ.');
+        }
+      }
     }
   } else {
     const rows = [];
@@ -65,25 +89,30 @@ export function parseAutofillRecords(source) {
   if (!Array.isArray(records) || !records.length || records.length > 1_000) {
     throw new Error('Dữ liệu tự điền cần từ 1 đến 1.000 bản ghi.');
   }
-  const headers = Object.keys(records[0] ?? {});
-  if (!headers.length || headers.length > 50 || headers.some((header) => !header.trim())) {
-    throw new Error('Dữ liệu tự điền cần từ 1 đến 50 tên cột hợp lệ.');
+
+  const allHeaders = new Set();
+  for (const record of records) {
+    if (record && typeof record === 'object' && !Array.isArray(record)) {
+      for (const key of Object.keys(record)) {
+        if (key.trim()) allHeaders.add(key.trim());
+      }
+    }
+  }
+  const headers = [...allHeaders];
+  if (!headers.length || headers.length > 60) {
+    throw new Error('Dữ liệu tự điền cần từ 1 đến 60 tên cột hợp lệ.');
   }
   const normalizedHeaders = headers.map(normalizeFieldName);
   if (new Set(normalizedHeaders).size !== headers.length || normalizedHeaders.includes('')) {
     throw new Error('Tên cột tự điền bị trùng hoặc không hợp lệ.');
   }
-  if (normalizedHeaders.some((header) => excludedFieldNamePattern.test(header))) {
-    throw new Error('Không hỗ trợ tự điền email, SSN hoặc thông tin tài khoản/ngân hàng.');
-  }
+
   return records.map((record) => {
-    if (!record || Array.isArray(record) || typeof record !== 'object'
-      || Object.keys(record).length !== headers.length
-      || headers.some((header) => !(header in record))) {
-      throw new Error('Mỗi bản ghi phải có cùng các cột.');
+    if (!record || Array.isArray(record) || typeof record !== 'object') {
+      throw new Error('Mỗi bản ghi phải là một đối tượng dữ liệu.');
     }
     return Object.fromEntries(headers.map((header) => {
-      const value = record[header];
+      const value = record[header] ?? '';
       if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) {
         throw new Error('Giá trị tự điền phải là chữ, số hoặc true/false.');
       }
@@ -100,110 +129,473 @@ export function parseAutofillRecords(source) {
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-function normalizeFieldName(name) {
+export function normalizeFieldName(name) {
   return String(name ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 /**
+ * Bảng mã viết tắt và tên đầy đủ của 50 bang Hoa Kỳ.
+ */
+export const usStateNames = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
+  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
+  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
+  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
+  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
+  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+  DC: 'District of Columbia',
+};
+export const usStateCodes = Object.fromEntries(
+  Object.entries(usStateNames).map(([code, name]) => [name.toLowerCase(), code]),
+);
+
+/**
+ * Danh sách mẫu nhận diện các trường thông dụng (đa ngôn ngữ Anh - Việt, hỗ trợ cả form gộp và form chia tách).
+ */
+const semanticCategories = [
+  // 1. Chia tách Date of Birth (kiểm tra trước DOB gộp)
+  {
+    type: 'dob_month',
+    patterns: [/^(dob|birth)?month$/, /^mm$/, /^dobm$/, /^thangsinh$/, /^thang$/],
+    resolve: (r) => {
+      const dob = r.namsinh || r.ngaysinh || r.dob || r.birthdate || '';
+      if (!dob) return null;
+      const iso = dob.match(/^\d{4}[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+      if (iso) return iso[1];
+      const us = dob.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+      if (us) return us[1];
+      const simple = dob.match(/^(\d{1,2})[\/\-\.]/);
+      return simple ? simple[1] : null;
+    },
+  },
+  {
+    type: 'dob_day',
+    patterns: [/^(dobday|day|dd|dobd|ngaysinh|ngay)$/],
+    resolve: (r) => {
+      const dob = r.namsinh || r.ngaysinh || r.dob || r.birthdate || '';
+      if (!dob) return null;
+      const iso = dob.match(/^\d{4}[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+      if (iso) return iso[2];
+      const us = dob.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+      if (us) return us[2];
+      const simple = dob.match(/[\/\-\.](\d{1,2})[\/\-\.]/);
+      return simple ? simple[1] : null;
+    },
+  },
+  {
+    type: 'dob_year',
+    patterns: [/^(dobyear|year|yyyy|yy|doby|namsinh|nam)$/],
+    resolve: (r) => {
+      const dob = r.namsinh || r.ngaysinh || r.dob || r.birthdate || '';
+      if (!dob) return null;
+      const match = dob.match(/(\d{4})/);
+      return match ? match[1] : null;
+    },
+  },
+  // 2. Chia tách Phone (kiểm tra trước Phone gộp)
+  {
+    type: 'phone_area',
+    patterns: [/^(areacode|phone1|tel1|phonearea)$/],
+    resolve: (r) => {
+      const phone = (r.phonenumber || r.phone || '').replace(/\D/g, '');
+      return phone.length >= 10 ? phone.slice(0, 3) : null;
+    },
+  },
+  {
+    type: 'phone_prefix',
+    patterns: [/^(prefix|phone2|tel2|phoneprefix)$/],
+    resolve: (r) => {
+      const phone = (r.phonenumber || r.phone || '').replace(/\D/g, '');
+      return phone.length >= 10 ? phone.slice(3, 6) : null;
+    },
+  },
+  {
+    type: 'phone_line',
+    patterns: [/^(line|linenumber|phone3|tel3|phoneline)$/],
+    resolve: (r) => {
+      const phone = (r.phonenumber || r.phone || '').replace(/\D/g, '');
+      return phone.length >= 10 ? phone.slice(6, 10) : null;
+    },
+  },
+  // 3. Chia tách SSN (kiểm tra trước SSN gộp)
+  {
+    type: 'ssn1',
+    patterns: [/^ssn1$/],
+    resolve: (r) => {
+      const ssn = (r.ssn || '').replace(/\D/g, '');
+      return ssn.length >= 9 ? ssn.slice(0, 3) : null;
+    },
+  },
+  {
+    type: 'ssn2',
+    patterns: [/^ssn2$/],
+    resolve: (r) => {
+      const ssn = (r.ssn || '').replace(/\D/g, '');
+      return ssn.length >= 9 ? ssn.slice(3, 5) : null;
+    },
+  },
+  {
+    type: 'ssn3',
+    patterns: [/^ssn3$/],
+    resolve: (r) => {
+      const ssn = (r.ssn || '').replace(/\D/g, '');
+      return ssn.length >= 9 ? ssn.slice(5, 9) : null;
+    },
+  },
+  // 4. Các trường họ tên
+  {
+    type: 'first_name',
+    patterns: [/^(first|fname|given|forename)/, /^ten$/, /firstname/],
+    resolve: (r) => r.firstname || r.fname || (r.fullname ? r.fullname.trim().split(/\s+/)[0] : null),
+  },
+  {
+    type: 'middle_name',
+    patterns: [/^(middle|mname|mid|initial|minitial)/, /^tendem$/],
+    resolve: (r) => {
+      if (r.middlename || r.mname) return r.middlename || r.mname;
+      if (r.fullname) {
+        const parts = r.fullname.trim().split(/\s+/);
+        if (parts.length >= 3) return parts.slice(1, -1).join(' ');
+      }
+      return null;
+    },
+  },
+  {
+    type: 'last_name',
+    patterns: [/^(last|lname|sur|family)/, /^ho$/, /lastname/],
+    resolve: (r) => r.lastname || r.lname || (r.fullname ? r.fullname.trim().split(/\s+/).slice(1).join(' ') || r.fullname : null),
+  },
+  {
+    type: 'full_name',
+    patterns: [/^(full|your)?name$/, /^(hoten|customername)$/],
+    resolve: (r) => r.fullname || (r.firstname && r.lastname ? `${r.firstname} ${r.lastname}` : null),
+  },
+  // 5. Date of Birth gộp
+  {
+    type: 'dob',
+    patterns: [/^(dob|birthdate|dateofbirth|birthday|bday|namsinh|ngaysinh|birth)$/],
+    resolve: (r) => r.namsinh || r.ngaysinh || r.dob || r.birthdate || r.dateofbirth,
+  },
+  // 6. Số điện thoại gộp
+  {
+    type: 'phone',
+    patterns: [/phone/, /^tel(ephone)?$/, /mobile/, /cell/, /^sdt$/, /dienthoai/],
+    resolve: (r) => r.phonenumber || r.phone || r.telephone || r.mobile || r.cell || r.sdt,
+  },
+  // 7. Email
+  {
+    type: 'email',
+    patterns: [/email/, /^mail$/],
+    resolve: (r) => {
+      if (r.email || r.emailaddress || r.mail) return r.email || r.emailaddress || r.mail;
+      if (r.fullname) {
+        const parts = r.fullname.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/);
+        const first = parts[0] || 'user';
+        const last = parts.slice(1).join('') || 'lead';
+        const digits = (r.phonenumber || r.zipcode || '77').replace(/\D/g, '').slice(-4);
+        return `${first}.${last}${digits}@gmail.com`;
+      }
+      return null;
+    },
+  },
+  // 8. SSN gộp
+  {
+    type: 'ssn',
+    patterns: [/ssn/, /socialsecurity/, /^social$/],
+    resolve: (r) => r.ssn || r.socialsecurity,
+  },
+  // 9. Địa chỉ
+  {
+    type: 'address',
+    patterns: [/address/, /^street/, /^diachi$/],
+    resolve: (r) => r.address || r.street || r.streetaddress || r.diachi,
+  },
+  {
+    type: 'address2',
+    patterns: [/address2/, /^apt/, /^suite/, /^unit/],
+    resolve: (r) => r.address2 || r.apt || r.suite || '',
+  },
+  {
+    type: 'city',
+    patterns: [/^city$/, /^town$/, /thanhpho/],
+    resolve: (r) => r.city || r.town || r.thanhpho,
+  },
+  {
+    type: 'state',
+    patterns: [/^state$/, /^province$/, /^region$/, /^bang$/, /^tinh$/],
+    resolve: (r) => r.state || r.province,
+  },
+  {
+    type: 'zip',
+    patterns: [/zip/, /postal/, /postcode/],
+    resolve: (r) => r.zipcode || r.zip || r.postalcode || r.postal,
+  },
+  // 10. Ngân hàng & tài khoản
+  {
+    type: 'routing',
+    patterns: [/routing/, /^aba$/, /transit/],
+    resolve: (r) => r.routing || r.routingnumber || r.aba,
+  },
+  {
+    type: 'bank_name',
+    patterns: [/bankname/, /namebank/, /^bank$/, /nganhang/, /institution/],
+    resolve: (r) => r.namebank || r.bankname || r.bank || r.nganhang,
+  },
+  {
+    type: 'account_number',
+    patterns: [/accountnumber/, /accountno/, /acctnumber/, /acctno/, /cardnumber/, /^number$/, /^account$/],
+    resolve: (r) => r.number || r.accountnumber || r.accountno || r.cardnumber || r.account,
+  },
+];
+
+/**
+ * Chuẩn hóa độ dài của giá trị theo giới hạn maxLength của ô input nếu có.
+ *
+ * @param {string} value Giá trị chuỗi đã tìm được.
+ * @param {object} metadata Thông tin chi tiết của ô input.
+ * @return {string} Giá trị đã điều chỉnh.
+ */
+function formatMatchedValue(value, metadata = {}) {
+  let val = String(value ?? '').trim();
+  const maxLen = Number(metadata.maxLength);
+  if (Number.isInteger(maxLen) && maxLen > 0 && val.length > maxLen) {
+    const digitsOnly = val.replace(/\D/g, '');
+    if (digitsOnly.length <= maxLen) {
+      val = digitsOnly;
+    }
+  }
+  return val;
+}
+
+/**
+ * Tìm giá trị phù hợp trong record cho danh sách tên/nhãn của ô input.
+ *
+ * @param {string[]} candidateNames Danh sách tên, id, nhãn, placeholder, autocomplete của ô.
+ * @param {Record<string, string>} record Bản ghi dữ liệu đã chuẩn hóa tên trường.
+ * @param {object} metadata Thông tin cấu trúc của ô input (type, kind, maxLength).
+ * @return {string|null} Giá trị cần điền hoặc null nếu không khớp.
+ */
+export function matchFieldValue(candidateNames, record, metadata = {}) {
+  const normalizedCandidates = candidateNames
+    .map(normalizeFieldName)
+    .filter((n) => n.length > 0);
+
+  if (metadata.type === 'email' && !normalizedCandidates.includes('email')) {
+    normalizedCandidates.unshift('email');
+  }
+  if (metadata.type === 'tel' && !normalizedCandidates.some((c) => c.includes('phone') || c.includes('tel'))) {
+    normalizedCandidates.unshift('phone');
+  }
+
+  if (!normalizedCandidates.length) return null;
+
+  // 1. Kiểm tra khớp chính xác với bất kỳ key nào trong record
+  for (const candidate of normalizedCandidates) {
+    if (Object.hasOwn(record, candidate) && record[candidate] !== '') {
+      return formatMatchedValue(record[candidate], metadata);
+    }
+  }
+
+  // 2. Tìm kiếm theo từ điển đồng nghĩa (Synonyms / Semantic Categories)
+  for (const candidate of normalizedCandidates) {
+    for (const cat of semanticCategories) {
+      if (cat.patterns.some((pattern) => pattern.test(candidate))) {
+        const val = cat.resolve(record);
+        if (val !== undefined && val !== null && String(val).trim() !== '') {
+          return formatMatchedValue(String(val), metadata);
+        }
+      }
+    }
+  }
+
+  // 3. Khớp mờ: nếu tên trường trong record nằm trong candidate hoặc ngược lại (với độ dài >= 4)
+  for (const [key, value] of Object.entries(record)) {
+    if (!value) continue;
+    for (const candidate of normalizedCandidates) {
+      if (key.length >= 4 && candidate.includes(key)) return formatMatchedValue(value, metadata);
+      if (candidate.length >= 4 && key.includes(candidate)) return formatMatchedValue(value, metadata);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Theo dõi form trong một profile Chrome và điền một bản ghi ngẫu nhiên khi form xuất hiện.
+ * Hỗ trợ quét sâu vào tất cả iframe trên trang, không giới hạn origin cứng nhắc, và chọn 1 record duy nhất cho cả session.
  *
  * @param {object} context Playwright BrowserContext của profile.
  * @param {object[]} records Các bản ghi đã chuẩn hóa.
- * @param {string} allowedOrigin Origin website đích được phép điền.
- * @param {object} session Phiên để cập nhật số trường đã điền mà không ghi giá trị.
+ * @param {string} allowedOrigin Origin website đích (chỉ để tham khảo, không chặn redirect).
+ * @param {object} session Phiên để cập nhật số trường đã điền và đồng bộ record.
  * @return {void} Đăng ký theo dõi các trang hiện tại và trang mở sau.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-export function attachAutofill(context, records, allowedOrigin, session) {
+export function attachAutofill(context, records, allowedOrigin, session = {}) {
   if (!records.length) return;
   const trackedPages = new WeakSet();
 
+  // Chọn 1 bản ghi duy nhất cho toàn bộ phiên này để nhất quán xuyên suốt các trang/bước/frame
+  if (session.recordIndex === undefined || session.recordIndex < 0 || session.recordIndex >= records.length) {
+    session.recordIndex = randomInt(records.length);
+  }
+  const record = records[session.recordIndex];
+  session.autofillRecord = session.recordIndex + 1;
+
   /**
-   * Điền các trường còn trống trên form đang hiển thị của một trang.
+   * Điền các trường còn trống trên form đang hiển thị của một trang và các frame con.
    *
    * @param {object} page Trang Chrome cần xử lý.
    * @return {Promise<void>} Hoàn tất lượt quét form.
-   * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
-   * @since 2026-10-15
    */
   async function fillVisibleForms(page) {
-    if (page.isClosed() || new URL(page.url()).origin !== allowedOrigin) return;
-    const pageForms = page.locator('form, [role="form"]');
-    const forms = await pageForms.count() ? await pageForms.all() : [page.locator('body')];
+    if (page.isClosed()) return;
+    const currentUrl = page.url();
+    if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:')) return;
+
+    const frames = typeof page.frames === 'function' ? page.frames() : [page];
     const unmatchedFieldNames = new Set();
     let visibleFieldCount = 0;
-    for (const form of forms) {
-      if (!(await form.isVisible())) {
-        await form.evaluate((element) => {
-          delete element.dataset.autoleadRecord;
-          delete element.dataset.autoleadComplete;
-          for (const field of element.querySelectorAll('[data-autolead-filled]')) {
-            delete field.dataset.autoleadFilled;
-          }
-        }).catch(() => {});
+
+    for (const frame of frames) {
+      let fields = [];
+      try {
+        fields = await frame.locator('input, textarea, select').all();
+      } catch {
         continue;
       }
-      if (await form.getAttribute('data-autolead-complete') === '1') continue;
-      const savedRecordIndex = await form.getAttribute('data-autolead-record');
-      let recordIndex = Number(savedRecordIndex);
-      if (savedRecordIndex === null || !Number.isInteger(recordIndex)
-        || recordIndex < 0 || recordIndex >= records.length) {
-        recordIndex = randomInt(records.length);
-        await form.evaluate((element, index) => { element.dataset.autoleadRecord = String(index); }, recordIndex);
-      }
-      const record = records[recordIndex];
-      let filledFieldCount = 0;
-      for (const field of await form.locator('input, textarea, select').all()) {
-        if (!(await field.isVisible()) || !(await field.isEnabled())
-          || await field.getAttribute('data-autolead-filled') === '1') continue;
-        const metadata = await field.evaluate((element) => ({
-          names: [element.getAttribute('aria-label'), element.getAttribute('placeholder'),
-            element.getAttribute('name'), element.id, ...Array.from(element.labels ?? [], (label) => label.innerText)],
-          kind: element.tagName.toLowerCase(),
-          type: element.getAttribute('type')?.toLowerCase(),
-          value: element.value,
-          readOnly: element.readOnly,
-        }));
-        if (metadata.readOnly || ['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'email'].includes(metadata.type)) continue;
-        const fieldNames = metadata.names.map(normalizeFieldName);
-        if (fieldNames.some((name) => excludedFieldNamePattern.test(name))) continue;
-        visibleFieldCount += 1;
-        const fieldName = fieldNames.find((name) => Object.hasOwn(record, name));
-        if (!fieldName) {
-          const displayName = metadata.names.map((name) => String(name ?? '').trim()).find(Boolean);
-          if (displayName) unmatchedFieldNames.add(displayName.slice(0, 40));
-          continue;
-        }
-        if (record[fieldName] === '') continue;
-        if (metadata.kind !== 'select' && metadata.value) continue;
+
+      for (const field of fields) {
         try {
-          if (metadata.kind === 'select') {
-            await field.selectOption({ label: record[fieldName] }, { timeout: 3000 })
-              .catch(() => field.selectOption(record[fieldName], { timeout: 3000 }));
-          } else {
-            await field.fill(record[fieldName], { timeout: 3000 });
+          if (!(await field.isVisible()) || !(await field.isEnabled())) continue;
+          if (await field.getAttribute('data-autolead-filled') === '1') continue;
+
+          const metadata = await field.evaluate((element) => {
+            const labels = [];
+            if (element.labels) {
+              for (const l of element.labels) {
+                const t = (l.innerText || l.textContent || '').trim();
+                if (t) labels.push(t);
+              }
+            }
+            const container = element.closest('.form-group, .field, .input-container, .form-row, label, tr, td, p, div');
+            const containerText = container ? (container.innerText || container.textContent || '').trim() : '';
+            const prev = element.previousElementSibling;
+            const prevText = prev ? (prev.innerText || prev.textContent || '').trim() : '';
+
+            return {
+              names: [
+                element.getAttribute('aria-label'),
+                element.getAttribute('placeholder'),
+                element.getAttribute('name'),
+                element.id,
+                element.getAttribute('autocomplete'),
+                element.getAttribute('data-name'),
+                element.getAttribute('data-field'),
+                element.getAttribute('data-testid'),
+                element.getAttribute('data-qa'),
+                element.getAttribute('title'),
+                ...labels,
+                prevText.slice(0, 50),
+                containerText.slice(0, 80),
+              ].filter(Boolean),
+              kind: element.tagName.toLowerCase(),
+              type: element.getAttribute('type')?.toLowerCase(),
+              value: element.value,
+              readOnly: element.readOnly,
+              maxLength: element.maxLength,
+            };
+          });
+
+          if (metadata.readOnly || ['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image'].includes(metadata.type)) continue;
+
+          visibleFieldCount += 1;
+          const valueToFill = matchFieldValue(metadata.names, record, metadata);
+          if (!valueToFill) {
+            const displayName = metadata.names[0] ?? '';
+            if (displayName) unmatchedFieldNames.add(displayName.slice(0, 40));
+            continue;
           }
-          await field.evaluate((element) => { element.dataset.autoleadFilled = '1'; });
-          filledFieldCount += 1;
+
+          // Bỏ qua nếu ô đã có giá trị thật (ngoại trừ mask rỗng như (___) ___-____, +1, mm/dd/yyyy)
+          if (metadata.kind !== 'select' && metadata.value) {
+            const currentVal = metadata.value.trim();
+            const isPlaceholderMask = /^(\+1|\+1\s*|\(___\)\s*___-____|___-__-____|[_\-\(\)\s\.\/]+|mm\/dd\/yyyy)$/i.test(currentVal);
+            if (currentVal !== '' && !isPlaceholderMask) continue;
+          }
+
+          if (metadata.kind === 'select') {
+            const candidates = [valueToFill];
+            const upper = valueToFill.toUpperCase();
+            if (usStateNames[upper]) candidates.push(usStateNames[upper]);
+            const lower = valueToFill.toLowerCase();
+            if (usStateCodes[lower]) candidates.push(usStateCodes[lower]);
+
+            let selected = false;
+            for (const val of candidates) {
+              try {
+                await field.selectOption({ label: val }, { timeout: 1000 });
+                selected = true;
+                break;
+              } catch {}
+              try {
+                await field.selectOption(val, { timeout: 1000 });
+                selected = true;
+                break;
+              } catch {}
+              try {
+                await field.selectOption({ value: val }, { timeout: 1000 });
+                selected = true;
+                break;
+              } catch {}
+            }
+            if (!selected) {
+              await field.selectOption({ index: 1 }, { timeout: 1000 }).catch(() => {});
+            }
+          } else {
+            await field.click({ timeout: 2000 }).catch(() => {});
+            await field.focus().catch(() => {});
+            try {
+              await field.fill(String(valueToFill), { timeout: 3000 });
+            } catch {
+              await field.evaluate((el, val) => {
+                const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+                const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                if (desc?.set) {
+                  desc.set.call(el, val);
+                } else {
+                  el.value = val;
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              }, String(valueToFill));
+            }
+            await field.dispatchEvent('input').catch(() => {});
+            await field.dispatchEvent('change').catch(() => {});
+            await field.dispatchEvent('blur').catch(() => {});
+          }
+
+          await field.evaluate((element) => { element.dataset.autoleadFilled = '1'; }).catch(() => {});
           session.autofillFields = (session.autofillFields ?? 0) + 1;
-          session.autofillRecord = recordIndex + 1;
           session.autofillError = null;
         } catch {
-          session.autofillError = 'Có trường không điền được; kiểm tra tên cột hoặc lựa chọn trong form.';
+          // Trường có thể không tương tác được lúc này
         }
       }
-      if (filledFieldCount) {
-        await form.evaluate((element) => { element.dataset.autoleadComplete = '1'; });
-      }
     }
+
     if (session.autofillFields) return;
     if (unmatchedFieldNames.size) {
       session.autofillError = 'Không ô nào khớp tên cột. Ô trên trang: '
         + [...unmatchedFieldNames].slice(0, 12).join(', ');
-    } else if (!visibleFieldCount && page.frames().length > 1) {
-      session.autofillError = 'Không thấy ô nhập ở trang chính; form có thể nằm trong iframe nên app chưa điền được.';
+    } else if (!visibleFieldCount) {
+      session.autofillError = 'Chưa phát hiện thấy form hoặc ô nhập nào trên trang.';
     }
   }
 
@@ -212,8 +604,6 @@ export function attachAutofill(context, records, allowedOrigin, session) {
    *
    * @param {object} page Tab Chrome cần theo dõi.
    * @return {void} Đăng ký bộ hẹn giờ và dọn khi tab đóng.
-   * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
-   * @since 2026-10-15
    */
   function watchPage(page) {
     if (trackedPages.has(page)) return;

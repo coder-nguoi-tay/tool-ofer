@@ -99,21 +99,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         webView?.evaluateJavaScript("window.receivePreferenceSaveResult(\(saveStatus))")
     }
 
-    /// Loads launcher settings from SQLite, migrating an accessible Keychain item once.
+    /// Loads launcher settings and removes the obsolete GoLogin token from saved preferences.
     /// - Returns: Saved settings, or an empty dictionary when no settings are available.
-    /// - Author: ductv <ductv@getflycrm.com>
-    /// - Since: 2026-10-10
+    /// - Author: coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+    /// - Since: 2026-10-15
     private func loadSavedSettings() -> [String: String] {
         if let settingsData = loadSettingsDataFromDatabase(),
-           let settings = try? JSONDecoder().decode([String: String].self, from: settingsData) {
+           var settings = try? JSONDecoder().decode([String: String].self, from: settingsData) {
+            if settings.removeValue(forKey: "apiToken") != nil,
+               let sanitizedSettings = try? JSONEncoder().encode(settings) {
+                _ = saveSettingsToDatabase(sanitizedSettings)
+            }
             return settings
         }
 
-        guard let settings = readSettingsFromKeychain(),
-              let settingsData = try? JSONEncoder().encode(settings) else {
-            return [:]
-        }
-        _ = saveSettingsToDatabase(settingsData)
+        guard var settings = readSettingsFromKeychain() else { return [:] }
+        settings.removeValue(forKey: "apiToken")
+        guard let sanitizedSettings = try? JSONEncoder().encode(settings) else { return [:] }
+        _ = saveSettingsToDatabase(sanitizedSettings)
         return settings
     }
 

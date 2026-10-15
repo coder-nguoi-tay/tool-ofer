@@ -1,25 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { findAvailableOrbitaMajors, resolveChromeDownloads, selectChromeMajors } from './chrome-versions.mjs';
-
-/**
- * Xác nhận số bản Orbita không hợp lệ bị chặn trước khi gọi mạng.
- *
- * Việc dò major thật cần CDN GoLogin nên không nằm trong test tự động; test này chỉ giữ
- * phần kiểm tra đầu vào.
- *
- * @return {Promise<void>} Hoàn tất khi các số lượng sai đều bị từ chối.
- * @throws {AssertionError} Khi số lượng sai được chấp nhận.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-async function rejectsInvalidOrbitaCounts() {
-  await assert.rejects(() => findAvailableOrbitaMajors(155, 0));
-  await assert.rejects(() => findAvailableOrbitaMajors(155, 13));
-  await assert.rejects(() => findAvailableOrbitaMajors(155, 2.5));
-}
-
-test('invalid Orbita version counts are rejected before any request', rejectsInvalidOrbitaCounts);
+import { resolveChromeDownloads, selectChromeMajors } from './chrome-versions.mjs';
 
 /**
  * Xác nhận dải Chrome major bỏ qua bản Stable mới nhất và lùi đủ số bản yêu cầu.

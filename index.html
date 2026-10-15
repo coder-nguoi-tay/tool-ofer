@@ -80,9 +80,9 @@
         <circle cx="23" cy="57" r="2.8" fill="#70DFFF"/><circle cx="32" cy="57" r="2.8" fill="#70DFFF"/><circle cx="41" cy="57" r="2.8" fill="#70DFFF"/>
       </svg>
       <div class="brand-copy">
-        <span class="eyebrow">GoLogin profile launcher</span>
+        <span class="eyebrow">Chrome proxy launcher</span>
         <h1>AutoLeadPC Mac</h1>
-        <p>Tạo profile GoLogin và chạy từng proxy riêng.</p>
+        <p>Mở Google Chrome riêng cho từng proxy.</p>
       </div>
     </header>
     <nav class="tabs" role="tablist" aria-label="Các tác vụ AutoLeadPC">
@@ -93,8 +93,6 @@
     <form id="launcher-form" novalidate>
       <section class="tab-panel" id="panel-setup" role="tabpanel" aria-labelledby="tab-setup" data-panel="setup" hidden>
         <h2 class="section-title">Kết nối và cấu hình</h2>
-        <label for="api-token">GoLogin API token (chỉ dùng với nút GoLogin)</label>
-        <input id="api-token" name="apiToken" type="password" autocomplete="off" placeholder="Dán API token GoLogin">
         <p class="hint">Cấu hình được lưu trong database cục bộ trên máy khi bạn bấm Lưu cấu hình.</p>
         <div class="row">
           <div>
@@ -154,17 +152,7 @@
         </div>
         <p class="hint">Mở profile mẫu không qua proxy. Cài RoboForm từ Chrome Web Store, đăng nhập, rồi đóng cửa sổ đó. Từ lúc đó, mỗi profile Chrome mới mà app tạo sẽ có sẵn RoboForm. Chỉ dùng profile mẫu cho RoboForm vì cookie và phiên đăng nhập trong đó cũng được chép sang.</p>
         <p class="hint">Profile thay thế đang được tạo có thể hoàn tất sau khi tắt tự bù.</p>
-        <details id="orbita-versions-advanced">
-          <summary>Tải các bản Orbita cho chế độ nhiều phiên bản</summary>
-          <p class="hint">GoLogin chạy Orbita — bản Chromium riêng của họ. App tải sẵn nhiều Orbita major vào <code>~/.gologin/browser</code> rồi mở mỗi slot bằng một binary khác nhau. CDN GoLogin chỉ còn phát hành một dải major nhất định; app dò từ Chrome Stable đi xuống và lấy các bản tải được. Mỗi bản khoảng 140–200 MB tải và 410 MB trên đĩa.</p>
-          <label for="orbita-version-count">Số bản Orbita cần có trên máy</label>
-          <input id="orbita-version-count" name="orbitaVersionCount" type="number" min="1" max="12" value="10">
-          <p class="hint">Phiên bản gắn theo slot cửa sổ, nên profile được tự bù vào slot nào sẽ dùng lại đúng bản của slot đó. Chuỗi User-Agent vẫn do fingerprint của profile GoLogin quyết định: nếu major của UA khác major của engine thì Sec-CH-UA và UA không khớp nhau — đặt UA của profile trong GoLogin cho khớp nếu bạn cần fingerprint nhất quán.</p>
-          <div class="actions">
-            <button id="orbita-versions-download-button" class="secondary" type="button">Tải các bản Orbita thật</button>
-            <button id="gologin-launch-button" class="secondary" type="button">Tạo profile GoLogin và mở</button>
-          </div>
-        </details>
+
         <details id="chrome-versions-advanced">
           <summary>Kho Chrome for Testing đã tải trước (không dùng để mở)</summary>
           <p class="hint">Các bản Chrome for Testing đã tải ở lượt trước nằm riêng trong dữ liệu app. Nút <strong>Tạo profile và mở</strong> chỉ dùng ứng dụng Google Chrome thường đã cài; thao tác tải dưới đây không thêm phiên bản cho nút chính.</p>
@@ -213,9 +201,7 @@
     const closeButton = document.querySelector('#close-button');
     const qaRunButton = document.querySelector('#qa-run-button');
     const demoQaPresetButton = document.querySelector('#demoqa-preset-button');
-    const orbitaVersionsDownloadButton = document.querySelector('#orbita-versions-download-button');
     const chromeVersionsDownloadButton = document.querySelector('#chrome-versions-download-button');
-    const gologinLaunchButton = document.querySelector('#gologin-launch-button');
     const qaPlanField = document.querySelector('#qa-plan');
     const autoRunQaField = document.querySelector('#auto-run-qa');
     const autoRefillButton = document.querySelector('#auto-refill-button');
@@ -225,12 +211,12 @@
     const saveStatus = document.querySelector('#save-status');
     const warnings = document.querySelector('#warnings');
     const templateProfileButton = document.querySelector('#template-profile-button');
-    const buttons = [templateProfileButton, launchButton, qaRunButton, demoQaPresetButton, orbitaVersionsDownloadButton, chromeVersionsDownloadButton, gologinLaunchButton,
+    const buttons = [templateProfileButton, launchButton, qaRunButton, demoQaPresetButton, chromeVersionsDownloadButton,
       checkButton, usedIpsButton, saveButton, closeButton];
     const preferencesBridge = window.webkit?.messageHandlers?.autoleadPreferences;
     let autoRefillEnabled = true;
     let isRefreshingAutoRefillState = false;
-    const savedFieldNames = ['apiToken', 'proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'autofillData'];
+    const savedFieldNames = ['proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'autofillData'];
     const tabButtons = [...document.querySelectorAll('[role="tab"]')];
     const tabPanels = [...document.querySelectorAll('[role="tabpanel"]')];
 
@@ -516,16 +502,6 @@
       '/chrome-versions/download',
       'Đang tải Chrome for Testing từ Google vào kho riêng…',
     ));
-    gologinLaunchButton.addEventListener('click', () => send(
-      '/gologin/launch',
-      'Đang tạo profile GoLogin và mở trình duyệt Orbita…',
-      { autoRunQa: false },
-    ));
-    orbitaVersionsDownloadButton.addEventListener('click', () => send(
-      '/orbita-versions/download',
-      'Đang tải các bản Orbita từ CDN GoLogin; có thể mất vài phút cho lần đầu…',
-    ));
-
     checkButton.addEventListener('click', async () => {
       const result = await send('/check', 'Đang kiểm tra toàn bộ danh sách proxy…', { requestedCount: '' });
       lastCheckCsv = result?.csv ?? '';

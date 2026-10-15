@@ -10,9 +10,6 @@ import { promisify } from 'node:util';
 
 const executeFile = promisify(execFile);
 const chromeForTestingBaseUrl = 'https://googlechromelabs.github.io/chrome-for-testing';
-const maximumOrbitaVersions = 12;
-const orbitaMajorProbeLimit = 40;
-const orbitaBrowserDirectory = join(homedir(), '.gologin', 'browser');
 const chromeForTestingDownloadOrigin = 'https://storage.googleapis.com';
 const chromeForTestingDownloadPrefix = '/chrome-for-testing-public/';
 const chromeVersionPattern = /^\d+\.\d+\.\d+\.\d+$/;
@@ -45,167 +42,6 @@ async function fetchChromeForTestingJson(fileName) {
     throw new Error('Danh mục Chrome for Testing trả về dữ liệu không phải JSON.');
   }
 }
-/**
- * URL tải Orbita theo major cho máy macOS đang chạy.
- *
- * @param {number} major Chrome major của bản Orbita.
- * @return {string} URL tar.gz trên CDN GoLogin.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-function orbitaDownloadUrl(major) {
-  const host = arch() === 'arm64' ? 'orbita-browser-mac-arm' : 'orbita-browser-mac';
-  return 'https://' + host + '.gologin.com/orbita-browser-latest-' + major + '.tar.gz';
-}
-
-/**
- * Liệt kê các bản Orbita đã có trong `~/.gologin/browser`.
- *
- * Đọc đúng thư mục và tên app mà GoLogin dùng, nên bản do GoLogin tự tải trước đây cũng
- * được tính và không bị tải lại.
- *
- * @return {Promise<{name: string, executablePath: string, major: number}[]>} Danh sách bản Orbita theo major tăng dần.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-export async function listInstalledOrbitaVersions() {
-  let entries;
-  try {
-    entries = await readdir(orbitaBrowserDirectory);
-  } catch {
-    return [];
-  }
-
-  const builds = [];
-  for (const entry of entries) {
-    const major = Number(/^orbita-browser-(\d+)$/.exec(entry)?.[1]);
-    if (!Number.isInteger(major)) continue;
-    const executablePath = join(
-      orbitaBrowserDirectory,
-      entry,
-      'Orbita-Browser.app',
-      'Contents',
-      'MacOS',
-      'Orbita',
-    );
-    try {
-      if (!(await stat(executablePath)).isFile()) continue;
-      await access(executablePath, fileConstants.X_OK);
-    } catch {
-      continue;
-    }
-    builds.push({ name: 'Orbita ' + major, executablePath, major });
-  }
-  return builds.sort((left, right) => left.major - right.major);
-}
-
-/**
- * Tìm các Orbita major mà CDN GoLogin còn phát hành, đi từ mới xuống cũ.
- *
- * CDN không có API liệt kê và dải phát hành có lỗ (ví dụ thiếu 136), nên phải thử từng
- * major bằng HEAD request thay vì tính theo công thức.
- *
- * @param {number} startMajor Major bắt đầu thử, tính từ trên xuống.
- * @param {number} versionCount Số major cần tìm.
- * @return {Promise<number[]>} Các major có bản tải, tăng dần.
- * @throws {Error} Khi dò hết giới hạn mà chưa đủ số major.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-export async function findAvailableOrbitaMajors(startMajor, versionCount) {
-  if (!Number.isInteger(versionCount) || versionCount < 1 || versionCount > maximumOrbitaVersions) {
-    throw new Error('Số bản Orbita phải là số nguyên từ 1 đến ' + maximumOrbitaVersions + '.');
-  }
-
-  const majors = [];
-  for (let offset = 0; offset < orbitaMajorProbeLimit && majors.length < versionCount; offset += 1) {
-    const major = startMajor - offset;
-    if (major < 1) break;
-    const response = await fetch(orbitaDownloadUrl(major), { method: 'HEAD', redirect: 'follow' });
-    if (response.ok) majors.push(major);
-  }
-  if (majors.length < versionCount) {
-    throw new Error('CDN GoLogin chỉ còn ' + majors.length + ' bản Orbita trong dải đã dò; '
-      + 'hãy giảm số phiên bản.');
-  }
-  return majors.sort((left, right) => left - right);
-}
-
-/**
- * Tải các bản Orbita còn thiếu để mỗi profile GoLogin chạy một engine major khác nhau.
- *
- * Dải bắt đầu từ Chrome Stable hiện tại đi xuống, nên lấy các bản Orbita mới nhất mà
- * GoLogin còn phát hành; mỗi bản khoảng 140–200 MB tải và 410 MB trên đĩa.
- *
- * @param {{versionCount?: number, onProgress?: Function}} options Số bản cần có và callback báo tiến độ.
- * @return {Promise<{builds: object[], downloadedMajors: number[], warnings: string[]}>} Bản Orbita sau khi tải.
- * @throws {Error} Khi không dò được dải major hoặc giải nén thất bại.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-export async function installOrbitaVersions({ versionCount = 10, onProgress = () => {} } = {}) {
-  const stableVersions = await fetchChromeForTestingJson('last-known-good-versions.json');
-  const stableMajor = Number(String(stableVersions?.channels?.Stable?.version ?? '').split('.')[0]);
-  if (!Number.isInteger(stableMajor)) throw new Error('Không đọc được Chrome major của kênh Stable.');
-
-  onProgress('Đang dò các bản Orbita còn phát hành trên CDN GoLogin.');
-  const majors = await findAvailableOrbitaMajors(stableMajor, versionCount);
-  const installedMajors = new Set((await listInstalledOrbitaVersions()).map((build) => build.major));
-  const missingMajors = majors.filter((major) => !installedMajors.has(major));
-
-  const downloadedMajors = [];
-  for (const major of missingMajors) {
-    onProgress('Đang tải Orbita ' + major + '.');
-    await downloadOrbitaBuild(major);
-    downloadedMajors.push(major);
-  }
-
-  const builds = (await listInstalledOrbitaVersions()).filter((build) => majors.includes(build.major));
-  return {
-    builds,
-    downloadedMajors,
-    warnings: builds.length < versionCount
-      ? ['Chỉ sẵn sàng ' + builds.length + '/' + versionCount + ' bản Orbita; xem log để biết bản nào lỗi.']
-      : [],
-  };
-}
-
-/**
- * Tải và giải nén một bản Orbita vào đúng thư mục GoLogin mong đợi.
- *
- * Giải nén vào `.partial` rồi rename, nên một lần tải bị ngắt không để lại thư mục
- * `orbita-browser-<major>` mà GoLogin tưởng là đã cài xong.
- *
- * @param {number} major Chrome major của bản Orbita.
- * @return {Promise<void>} Hoàn tất khi binary nằm đúng chỗ.
- * @throws {Error} Khi tải, giải nén hoặc binary sau giải nén không chạy được.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-async function downloadOrbitaBuild(major) {
-  const temporaryDirectory = join(orbitaBrowserDirectory, '.autoleadpc-tmp');
-  const archivePath = join(temporaryDirectory, 'orbita-' + major + '.tar.gz');
-  const partialDirectory = join(orbitaBrowserDirectory, 'orbita-browser-' + major + '.partial');
-  await mkdir(temporaryDirectory, { recursive: true, mode: 0o700 });
-  await mkdir(partialDirectory, { recursive: true, mode: 0o700 });
-
-  const response = await fetch(orbitaDownloadUrl(major), { redirect: 'follow' });
-  if (!response.ok || !response.body) {
-    throw new Error('Tải Orbita ' + major + ' thất bại: HTTP ' + response.status + '.');
-  }
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(archivePath));
-
-  // ponytail: bỏ bước mtree hash của GoLogin; tải qua HTTPS từ cùng CDN với file hash nên
-  // thêm bước đó gần như không tăng bảo đảm. Thêm lại nếu cần đối chiếu chữ ký.
-  await executeFile('tar', ['xzf', archivePath, '--directory', partialDirectory]);
-  // Chỉ xoá file tar tạm do chính hàm này vừa tạo.
-  await rm(archivePath, { force: true });
-
-  const executablePath = join(partialDirectory, 'Orbita-Browser.app', 'Contents', 'MacOS', 'Orbita');
-  await access(executablePath, fileConstants.X_OK);
-  await rename(partialDirectory, join(orbitaBrowserDirectory, 'orbita-browser-' + major));
-}
-
 /**
  * Chọn tên nền tảng Chrome for Testing theo CPU của máy đang chạy.
  *
@@ -351,14 +187,13 @@ export async function listInstalledChromeVersions() {
 /**
  * Tải các bản Chrome for Testing còn thiếu.
  *
- * Build chính thức của Google nên engine, UA và Sec-CH-UA của mỗi bản khớp nhau sẵn,
- * không phải đồng bộ UA như đường GoLogin.
+ * Build chính thức của Google giữ engine, UA và Sec-CH-UA cùng phiên bản.
  *
  * @param {{versionCount?: number, skipNewestMajors?: number, onProgress?: Function}} options Số bản cần có và callback tiến độ.
  * @return {Promise<{builds: object[], downloadedVersions: string[], warnings: string[]}>} Build sau khi tải.
  * @throws {Error} Khi không gọi được danh mục Google hoặc giải nén thất bại.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 export async function installChromeVersions({
   versionCount = 10,

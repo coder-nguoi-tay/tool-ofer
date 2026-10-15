@@ -18,7 +18,9 @@ swiftc -O -parse-as-library AutoLeadPCMacApp.swift -o "$MACOS_DIR/AutoLeadPCMac"
 # 2. Copy Info.plist and icons
 cp -p Info.plist "$APP_BUNDLE/Contents/Info.plist"
 if [ -d "AutoLeadPC.iconset" ]; then
-  iconutil -c icns AutoLeadPC.iconset -o "$RESOURCES_DIR/AutoLeadPC.icns"
+  if ! iconutil -c icns AutoLeadPC.iconset -o "$RESOURCES_DIR/AutoLeadPC.icns"; then
+    echo "Iconset không hợp lệ; giữ icon đã có trong app bundle."
+  fi
 fi
 if [ -f "autoleadpc-icon.svg" ]; then
   cp -p autoleadpc-icon.svg "$RESOURCES_DIR/autoleadpc-icon.svg"
@@ -26,10 +28,11 @@ fi
 
 # 3. Sync launcher files
 echo "Syncing launcher files into app bundle..."
-cp -p app.mjs autofill.mjs chrome-versions.mjs chrome-versions.test.mjs index.html package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md demoqa.test.mjs demoqa-live.test.mjs verify-logging.mjs "$LAUNCHER_DIR/"
+cp -p app.mjs autofill.mjs chrome-versions.mjs chrome-versions.test.mjs index.html package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md demoqa.test.mjs demoqa-live.test.mjs "$LAUNCHER_DIR/"
 
 # If root has node_modules, copy or link to launcher
-if [ -d "node_modules" ] && [ ! -d "$LAUNCHER_DIR/node_modules" ]; then
+if [ -d "node_modules" ]; then
+  rm -rf "$LAUNCHER_DIR/node_modules"
   echo "Copying node_modules into launcher..."
   cp -R node_modules "$LAUNCHER_DIR/"
 fi

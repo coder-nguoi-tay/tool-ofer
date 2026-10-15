@@ -1,27 +1,23 @@
 import { createServer } from 'node:http';
 import { get as requestHttps } from 'node:https';
-import { access, appendFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright';
-import { GologinApi } from 'gologin';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import {
   installChromeVersions,
-  installOrbitaVersions,
   listInstalledChromeVersions,
-  listInstalledOrbitaVersions,
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
-const sessionLogPaths = new Set();
 const autoRefill = {
   enabled: true,
   settings: null,
@@ -34,7 +30,6 @@ const userInterfacePath = new URL('./index.html', import.meta.url);
 const userAgentListPath = new URL('./useragents.txt', import.meta.url);
 const interactionLogDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'logs');
 const qaReportDirectory = join(interactionLogDirectory, 'qa-reports');
-const gologinProfileMapPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'profiles.json');
 const chromeProfileDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-profiles');
 const installedChromeAppPath = process.env.AUTOLEADPC_CHROME_APP || '/Applications/Google Chrome.app';
 const chromeChannelDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-channels');
@@ -82,7 +77,7 @@ const maxConcurrentProfiles = Number(process.env.AUTOLEADPC_CONCURRENCY) || 10;
 /**
  * Ước tính số trình duyệt an toàn theo RAM/CPU để tham khảo.
  *
- * Ước tính 1.5 GB cho mỗi Orbita và dành tối đa 50% RAM tổng cho browser để vẫn chừa tài
+ * Ước tính 1.5 GB cho mỗi cửa sổ Chrome và dành tối đa 50% RAM tổng cho browser để vẫn chừa tài
  * nguyên cho macOS và các app khác. Dùng RAM tổng thay vì RAM trống vì số RAM trống dao
  * động theo app đang mở; số profile còn bị giới hạn theo CPU.
  *
@@ -104,21 +99,10 @@ const maxAliveBrowsers = Math.max(1, Math.min(6, Math.floor(Number(process.env.A
 /** Giới hạn số profile cùng chạy một kịch bản QA để tránh tạo tải ngoài ý muốn. */
 const maxQaProfiles = maxAliveBrowsers;
 
-/** Ánh xạ proxy-profile lâu không dùng sẽ bị bỏ để profiles.json không phình vô hạn. */
-const profileMapMaxAgeDays = 90;
 
 /** Proxy SOCKS công cộng hay chậm, 10 giây của bản đầu không đủ. */
 const navigationTimeout = 30_000;
 
-/**
- * Lỗi do GoLogin API chặn tốc độ hoặc hết quota, không phải lỗi của proxy.
- *
- * Package gologin parse JSON trước khi xét status (`src/utils/http.js`), nên body text của
- * 429/quota nổi lên thành lỗi "... is not valid JSON" và mất statusCode; phải nhận diện
- * bằng thông báo.
- */
-const gologinServiceErrorPattern = /too many requests|free api requests limit|is not valid json/i;
-const gologinApiUrl = 'https://api.gologin.com';
 const checkUrl = 'https://ipinfo.io/json';
 const browserIpUrl = 'https://api.ipify.org?format=json';
 const demoQaOrigin = 'https://demoqa.com';
@@ -445,90 +429,15 @@ async function openBrowserThroughProxy({
 }
 
 /**
- * Mở profile GoLogin, xác nhận IP exit rồi kiểm tra website đích có tải đúng hay không.
- *
- * @param {{api: object, profileId: string, proxyKey?: string, websiteUrl: string, usedExitIps: Set<string>, onExitIp: (ip: string) => Promise<void>, logFilePath: string, tile: object, tileIndex: number, orbitaExecutablePath: string|undefined}} options Profile, URL, callback lưu IP, vị trí cửa sổ và binary Orbita riêng.
- * @return {Promise<{exitIp: string, finalUrl: string, session: object}>} IP exit, URL cuối và phiên sau điều hướng.
- * @throws {Error} Khi IP đã dùng, proxy lỗi, website tải sai đích hoặc callback không lưu được IP.
- * @throws {IpVerificationError} Khi dịch vụ tra IP lỗi hoặc trả dữ liệu không hợp lệ.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-async function openGologinProfile({
-  api,
-  profileId,
-  proxyKey,
-  websiteUrl,
-  usedExitIps,
-  onExitIp,
-  logFilePath,
-  tile,
-  tileIndex,
-  orbitaExecutablePath,
-}) {
-  const { browser } = await api.launch({
-    profileId,
-    // Có executablePath thì GoLogin dùng đúng binary này thay vì bản Orbita mặc định.
-    ...(orbitaExecutablePath && { executablePath: orbitaExecutablePath }),
-    extra_params: [
-      `--window-position=${tile.left},${tile.top}`,
-      `--window-size=${tile.width},${tile.height}`,
-    ],
-  });
-  const session = { api, browser, tileIndex, suppressAutoRefill: false, profileId, proxyKey };
-  activeBrowsers.add(session);
-  browser.on('disconnected', () => {
-    activeBrowsers.delete(session);
-    if (!session.suppressAutoRefill) {
-      if (!session.closingDueToTrafficBlocked) {
-        autoRefill.message = `Slot ${(session.tileIndex ?? 0) + 1} trống; đang tìm proxy thay thế.`;
-      }
-      queueAutomaticRefill();
-    }
-  });
-  await attachInteractionLogging(browser, profileId, logFilePath);
-
-  try {
-    const pages = await browser.pages();
-    const targetPage = pages[0] ?? (await browser.newPage());
-    const exitIp = await verifyBrowserExitIp(browser, usedExitIps, onExitIp);
-    session.exitIp = exitIp;
-
-    const response = await targetPage.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
-    const expectedUrl = new URL(websiteUrl);
-    const finalUrl = targetPage.url();
-    const finalTargetUrl = new URL(finalUrl);
-    const expectedPath = expectedUrl.pathname.replace(/\/+$/, '') || '/';
-    const finalPath = finalTargetUrl.pathname.replace(/\/+$/, '') || '/';
-    if (!response || response.status() >= 400) {
-      throw new Error(`website trả HTTP ${response?.status() ?? 'không có phản hồi'}`);
-    }
-    if (finalTargetUrl.origin !== expectedUrl.origin || finalPath !== expectedPath) {
-      throw new Error(`bị chuyển khỏi trang đích sang ${finalUrl}`);
-    }
-    if (await hasTrafficBlocked(targetPage)) {
-      throw new Error('trang đích hiển thị Traffic Blocked!');
-    }
-    await targetPage.bringToFront().catch(() => {});
-    return { exitIp, finalUrl, session };
-  } catch (error) {
-    session.suppressAutoRefill = true;
-    await browser.close().catch(() => {});
-    await api.exit().catch(() => {});
-    throw error;
-  }
-}
-
-/**
  * Xác minh IP thoát qua chính phiên trình duyệt, lưu IP và loại IP đã dùng.
  *
- * @param {object} browser Phiên GoLogin hoặc Chrome có phương thức newPage().
+ * @param {object} browser Phiên Playwright có phương thức newPage().
  * @param {Set<string>} usedExitIps Những IP đã ghi trong lịch sử và lượt hiện tại.
  * @param {(ip: string) => Promise<void>} onExitIp Lưu IP vào lịch sử trước khi dùng.
  * @return {Promise<string>} IP thoát đã xác minh.
  * @throws {IpVerificationError|Error} Khi dịch vụ IP lỗi hoặc IP đã dùng.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 async function verifyBrowserExitIp(browser, usedExitIps, onExitIp) {
   const ipPage = await browser.newPage();
@@ -566,267 +475,15 @@ async function verifyBrowserExitIp(browser, usedExitIps, onExitIp) {
 }
 
 /**
- * Tạo file JSONL mới dành riêng cho một phiên profile GoLogin.
- *
- * @param {string} profileId ID profile cần lưu nhật ký.
- * @return {Promise<string>} Đường dẫn tuyệt đối tới file log.
- * @throws {Error} Khi không thể tạo thư mục hoặc file nhật ký.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-08
- */
-async function createInteractionLogFile(profileId) {
-  await mkdir(interactionLogDirectory, { recursive: true, mode: 0o700 });
-  const safeProfileId = String(profileId).replace(/[^a-z0-9_-]/gi, '_');
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const logFilePath = join(interactionLogDirectory, `${timestamp}-profile-${safeProfileId}.jsonl`);
-  await appendFile(logFilePath, `${JSON.stringify({
-    timestamp: new Date().toISOString(),
-    profileId,
-    event: 'session_started',
-  })}\n`, { encoding: 'utf8', mode: 0o600 });
-  sessionLogPaths.add(logFilePath);
-  return logFilePath;
-}
-
-/**
- * Gắn bộ ghi sự kiện lên các tab hiện tại và tab mới trong profile.
- *
- * Log ghi URL, đích click, thao tác phím không chứa ký tự đã gõ, thao tác form đã che giá trị,
- * cùng vị trí con trỏ lấy mẫu tối đa 10 lần mỗi giây.
- *
- * @param {object} browser Phiên trình duyệt Puppeteer do GoLogin khởi chạy.
- * @param {string} profileId ID profile GoLogin.
- * @param {string} logFilePath File JSONL nhận các sự kiện.
- * @return {Promise<void>} Hoàn tất khi các tab hiện tại đã được theo dõi.
- * @throws {Error} Khi không thể cài bộ ghi lên một tab hiện có.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-08
- */
-async function attachInteractionLogging(browser, profileId, logFilePath) {
-  const observedPages = new WeakSet();
-
-  // Hàm ghi bị phơi ra cho JS của trang (gồm cả iframe/quảng cáo) nên phải tự vệ ở phía Node:
-  // chỉ nhận type đã biết (chống bơm dòng rác), chặn tổng dung lượng và số sự kiện đang chờ
-  // (chống làm đầy đĩa / phình bộ nhớ), và ghi nối tiếp để các dòng không xen nhau.
-  const allowedEvents = new Set([
-    'navigation', 'tab_closed', 'session_ended', 'interaction_logging_started',
-    'pointer_move', 'click', 'dblclick', 'mousedown', 'mouseup', 'contextmenu',
-    'scroll', 'key_down', 'input', 'change', 'form_submit',
-  ]);
-  const maxLogBytes = 20 * 1024 * 1024;
-  const maxDetailsChars = 2000;
-  const maxQueuedWrites = 1000;
-  const maxUrlChars = 2000;
-  let writeChain = Promise.resolve();
-  let bytesWritten = 0;
-  let queuedWrites = 0;
-  let droppedSinceNotice = 0;
-  let stoppedWriting = false;
-
-  const appendLine = (entry) =>
-    appendFile(logFilePath, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
-  const stamp = (event, details) => ({ timestamp: new Date().toISOString(), profileId, event, details });
-
-  const writeInteraction = (event) => {
-    if (typeof event?.type !== 'string' || !allowedEvents.has(event.type)) return Promise.resolve();
-    if (stoppedWriting) return Promise.resolve();
-    if (queuedWrites >= maxQueuedWrites) {
-      // Hàng đợi đầy: bỏ bớt nhưng đếm lại để báo một dòng, tránh log thủng im lặng.
-      droppedSinceNotice += 1;
-      return Promise.resolve();
-    }
-
-    let details = event.details ?? {};
-    if (JSON.stringify(details).length > maxDetailsChars) details = { truncated: true };
-    const entry = stamp(event.type, details);
-    entry.url = typeof event.url === 'string' ? event.url.slice(0, maxUrlChars) : '';
-
-    queuedWrites += 1;
-    writeChain = writeChain.then(async () => {
-      if (stoppedWriting) return;
-      if (droppedSinceNotice > 0) {
-        const notice = stamp('events_dropped', { count: droppedSinceNotice });
-        droppedSinceNotice = 0;
-        bytesWritten += Buffer.byteLength(`${JSON.stringify(notice)}\n`);
-        await appendLine(notice).catch(() => {});
-      }
-      const lineBytes = Buffer.byteLength(`${JSON.stringify(entry)}\n`);
-      if (bytesWritten + lineBytes > maxLogBytes) {
-        stoppedWriting = true;
-        await appendLine(stamp('log_truncated', {})).catch(() => {});
-        return;
-      }
-      bytesWritten += lineBytes;
-      await appendLine(entry);
-    }).catch(() => {}).finally(() => { queuedWrites -= 1; });
-    return writeChain;
-  };
-
-  const attachPage = async (page) => {
-    if (observedPages.has(page)) return;
-    observedPages.add(page);
-    await page.exposeFunction('__autoLeadWriteInteraction', writeInteraction);
-    await page.evaluateOnNewDocument(() => {
-      // D: chỉ ghi ở khung chính, bỏ qua iframe (thanh toán, captcha, auth bên thứ ba).
-      if (window.top !== window) return;
-
-      // Phần tử mang giá trị: không lấy text (gồm cả <select>/<option>, thứ trước đây lọt lưới).
-      const isValueBearing = (el) => el.matches('input, textarea, select, option') || el.isContentEditable;
-      // Chỉ lấy text của phần tử người dùng thực sự bấm vào, không phải mọi vùng trang.
-      const isInteractive = (el) => el.matches('a, button, summary, [role="button"], [role="link"], [role="menuitem"]');
-      // R4: nhãn có thể chứa dữ liệu động (số dư, tên...) nên cắt như text.
-      const short = (value) => (value ? String(value).trim().slice(0, 40) : undefined);
-      const describeElement = (element, includeText = false) => {
-        const target = element instanceof Element ? element : element?.parentElement;
-        if (!target) return null;
-        const info = {
-          tag: target.tagName.toLowerCase(),
-          id: target.id || undefined,
-          name: target.getAttribute('name') || undefined,
-          role: target.getAttribute('role') || undefined,
-          label: short(target.getAttribute('aria-label') || target.getAttribute('title')),
-        };
-        // C: chỉ innerText (không textContent, tránh text ẩn); B: tối đa 40 ký tự.
-        if (includeText && isInteractive(target) && !isValueBearing(target)) {
-          info.text = (target.innerText || '').trim().slice(0, 40);
-        }
-        return info;
-      };
-      const record = (type, details = {}) => {
-        window.__autoLeadWriteInteraction({ type, url: location.href, details }).catch(() => {});
-      };
-
-      let lastPointerRecordAt = 0;
-      document.addEventListener('pointermove', (event) => {
-        const now = performance.now();
-        if (now - lastPointerRecordAt < 100) return;
-        lastPointerRecordAt = now;
-        record('pointer_move', {
-          x: event.clientX,
-          y: event.clientY,
-          scrollX: window.scrollX,
-          scrollY: window.scrollY,
-          target: describeElement(event.target),
-        });
-      }, { capture: true, passive: true });
-
-      for (const eventName of ['click', 'dblclick', 'mousedown', 'mouseup', 'contextmenu']) {
-        document.addEventListener(eventName, (event) => {
-          record(eventName, {
-            x: event.clientX,
-            y: event.clientY,
-            button: event.button,
-            target: describeElement(event.target, true),
-          });
-        }, true);
-      }
-
-      document.addEventListener('wheel', (event) => {
-        record('scroll', {
-          deltaX: event.deltaX,
-          deltaY: event.deltaY,
-          target: describeElement(event.target),
-        });
-      }, { capture: true, passive: true });
-
-      document.addEventListener('keydown', (event) => {
-        const key = event.key.length === 1 ? 'character' : event.key;
-        record('key_down', {
-          key,
-          modifiers: { alt: event.altKey, ctrl: event.ctrlKey, meta: event.metaKey, shift: event.shiftKey },
-          target: describeElement(event.target, true),
-        });
-      }, true);
-
-      for (const eventName of ['input', 'change']) {
-        document.addEventListener(eventName, (event) => {
-          const target = event.target;
-          record(eventName, {
-            inputType: target?.type || target?.tagName?.toLowerCase(),
-            valueRedacted: true,
-            target: describeElement(target, true),
-          });
-        }, true);
-      }
-
-      document.addEventListener('submit', (event) => {
-        record('form_submit', {
-          target: describeElement(event.target, true),
-          fields: [...(event.target?.elements ?? [])].map((field) => ({
-            name: field.name || undefined,
-            type: field.type || field.tagName?.toLowerCase(),
-            valueRedacted: true,
-          })),
-        });
-      }, true);
-    });
-
-    page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) {
-        writeInteraction({ type: 'navigation', url: frame.url() }).catch(() => {});
-      }
-    });
-    page.on('close', () => {
-      writeInteraction({ type: 'tab_closed', url: page.url() }).catch(() => {});
-    });
-  };
-
-  browser.on('targetcreated', (target) => {
-    if (target.type() === 'page') target.page().then(attachPage).catch(() => {});
-  });
-  browser.on('disconnected', () => {
-    writeInteraction({ type: 'session_ended', url: '' }).catch(() => {});
-  });
-  for (const page of await browser.pages()) await attachPage(page);
-  await writeInteraction({ type: 'interaction_logging_started', url: '' });
-}
-
-/**
- * Tạo hoặc tái sử dụng profile GoLogin gắn với một proxy cụ thể.
- *
- * @param {object} options API GoLogin, proxy, profile ID đã lưu nếu có và số cửa sổ.
- * @return {Promise<{profileId: string, created: boolean}>} Profile đã được cấu hình proxy.
- * @throws {Error} Khi không tạo được profile hoặc không gán được proxy.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-08
- */
-async function prepareGologinProfile({ api, proxy, savedProfileId, browserNumber }) {
-  const proxyUrl = new URL(proxy.server);
-  const assignProxy = (profileId) => api.changeProfileProxy(profileId, {
-    mode: proxyUrl.protocol.slice(0, -1),
-    host: proxyUrl.hostname,
-    port: Number(proxyUrl.port),
-    username: proxy.username ?? '',
-    password: proxy.password ?? '',
-  });
-
-  // Profile đã lưu có thể đã bị xoá trong GoLogin; tạo lại thay vì để dòng proxy đó hỏng mãi.
-  if (savedProfileId) {
-    try {
-      await assignProxy(savedProfileId);
-      return { profileId: savedProfileId, created: false };
-    } catch {
-      // Rơi xuống nhánh tạo profile mới bên dưới.
-    }
-  }
-
-  const profile = await api.createProfileRandomFingerprint(`AutoLeadPC ${browserNumber}`);
-  const profileId = profile.id ?? profile._id;
-  if (!profileId) throw new Error('GoLogin tạo profile nhưng không trả về profile ID.');
-  await assignProxy(profileId);
-  return { profileId, created: true };
-}
-
-/**
- * Sinh khóa ổn định cho proxy, giữ các dòng proxy trùng nhau thành profile riêng.
+ * Sinh khóa ổn định cho proxy, giữ các dòng trùng nhau thành mục lịch sử riêng.
  *
  * @param {object} proxy Cấu hình proxy đã phân tích.
  * @param {number} occurrence Thứ tự xuất hiện của cấu hình giống hệt trong danh sách.
  * @return {string} Khóa băm không chứa thông tin đăng nhập dạng rõ.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-08
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
-export function createProxyProfileKey(proxy, occurrence) {
+export function createProxyUsageKey(proxy, occurrence) {
   const proxyHash = createHash('sha256').update(proxyIdentity(proxy)).digest('hex');
   return `${proxyHash}:${occurrence}`;
 }
@@ -849,73 +506,6 @@ function isRetryableIpVerificationFailure(historyRecord) {
 
   const reason = String(historyRecord.reason ?? '');
   return reason.startsWith('không lấy được IP qua trình duyệt');
-}
-
-/**
- * Cho phép thử lại các proxy chỉ thất bại vì GoLogin API hết quota hoặc chặn tốc độ.
- *
- * Một lần quota cạn làm vòng thử quét hết danh sách trong vài giây, nên nếu không nhận diện
- * lại thì toàn bộ proxy còn tốt bị loại vĩnh viễn. Bản ghi cũ trước khi có trạng thái
- * `service_error` được nhận diện qua thông báo; bản ghi đã có `exitIp` vẫn bị loại vì IP đó
- * đã dùng thật.
- *
- * @param {object|undefined} historyRecord Bản ghi lịch sử của proxy.
- * @return {boolean} True nếu proxy chưa thực sự được dùng và có thể thử lại.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-export function isRetryableGologinServiceFailure(historyRecord) {
-  if (!historyRecord) return false;
-  if (historyRecord.status === 'service_error') return !historyRecord.exitIp;
-  return historyRecord.status === 'failed'
-    && !historyRecord.exitIp
-    && gologinServiceErrorPattern.test(String(historyRecord.reason ?? ''));
-}
-
-/**
- * Dựng User-Agent macOS cho một Chrome major.
- *
- * Chrome hiện đóng băng phần nền tảng và chỉ đổi số major (UA reduction), nên dựng chuỗi
- * rẻ hơn là đọc UA cũ của profile về rồi sửa — tiết kiệm một request API mỗi profile.
- * Chỉ dùng cho profile macOS, đúng loại mà app tạo trên máy này.
- *
- * @param {number} major Chrome major cần đặt.
- * @return {string} Chuỗi User-Agent đầy đủ.
- * @throws {Error} Khi major không phải số nguyên dương.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-export function buildMacChromeUserAgent(major) {
-  if (!Number.isInteger(major) || major < 1) {
-    throw new Error('Chrome major để dựng User-Agent phải là số nguyên dương.');
-  }
-  return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) '
-    + `Chrome/${major}.0.0.0 Safari/537.36`;
-}
-
-/**
- * Đặt User-Agent của profile GoLogin khớp major của bản Orbita gán cho slot.
- *
- * Phải gọi trước khi mở profile: GoLogin ghi UA của profile vào preferences của Orbita và
- * Orbita spoof theo đó, nên UA không khớp engine thì site thấy sai phiên bản. Khi UA đã
- * đúng, GoLogin cũng tự chọn Orbita cùng major.
- *
- * @param {{token: string, profileId: string, major: number}} options Token, profile và major cần đặt.
- * @return {Promise<void>} Hoàn tất khi GoLogin nhận UA mới.
- * @throws {Error} Khi GoLogin từ chối yêu cầu.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-async function syncProfileUserAgentMajor({ token, profileId, major }) {
-  const response = await fetch(`${gologinApiUrl}/browser/${profileId}/ua`, {
-    method: 'PATCH',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ userAgent: buildMacChromeUserAgent(major) }),
-  });
-  if (!response.ok) {
-    const detail = (await response.text().catch(() => '')).slice(0, 120);
-    throw new Error(`GoLogin từ chối đổi User-Agent sang Chrome ${major} (HTTP ${response.status} ${detail})`);
-  }
 }
 
 /**
@@ -951,80 +541,17 @@ export function buildUsedExitIpList(usageHistory) {
 }
 
 /**
- * Danh tính proxy dùng để ghép profile.
+ * Danh tính ổn định của proxy để tra lịch sử sử dụng.
  *
- * Không tính password: PacketStream và các provider xoay password theo phiên, nếu băm cả
- * password thì mỗi lần chạy sinh một khoá mới và tài khoản GoLogin phình thêm profile.
+ * Không tính password vì một số provider xoay password theo phiên.
  *
  * @param {object} proxy Cấu hình proxy đã phân tích.
  * @return {string} Chuỗi danh tính ổn định giữa các lần chạy.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-09
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 function proxyIdentity(proxy) {
   return JSON.stringify([proxy.server, proxy.username ?? '']);
-}
-
-/**
- * Đọc ánh xạ proxy sang GoLogin profile đã lưu trên máy này.
- *
- * @return {Promise<{version: number, profiles: Record<string, {profileId: string}>}>} Ánh xạ profile.
- * @throws {Error} Khi file ánh xạ hỏng hoặc không thể đọc.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-08
- */
-async function readGologinProfileMap() {
-  let savedMap;
-  try {
-    savedMap = JSON.parse(await readFile(gologinProfileMapPath, 'utf8'));
-  } catch (error) {
-    if (error.code === 'ENOENT') return { version: 1, profiles: {} };
-    throw new Error(`Không đọc được danh sách profile GoLogin đã lưu: ${error.message}`);
-  }
-  if (savedMap?.version !== 1 || !savedMap.profiles || typeof savedMap.profiles !== 'object') {
-    throw new Error('File ánh xạ profile GoLogin không đúng định dạng.');
-  }
-  return pruneProfileMap(savedMap);
-}
-
-/**
- * Bỏ các ánh xạ lâu không dùng để profiles.json không phình vô hạn.
- *
- * Chỉ bỏ ánh xạ trên máy này; profile tương ứng vẫn còn trong tài khoản GoLogin nên muốn
- * dọn hẳn thì phải xoá trong GoLogin.
- *
- * @param {object} profileMap Ánh xạ vừa đọc từ đĩa.
- * @return {object} Ánh xạ đã lọc.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-09
- */
-function pruneProfileMap(profileMap) {
-  const oldestAllowed = Date.now() - profileMapMaxAgeDays * 24 * 60 * 60 * 1000;
-  const profiles = Object.fromEntries(
-    Object.entries(profileMap.profiles).filter(([, entry]) => {
-      // Bản ghi cũ chưa có lastUsedAt thì giữ lại, lần dùng tới sẽ được đóng dấu thời gian.
-      if (!entry?.lastUsedAt) return true;
-      const lastUsedAt = Date.parse(entry.lastUsedAt);
-      return Number.isNaN(lastUsedAt) || lastUsedAt >= oldestAllowed;
-    }),
-  );
-  return { ...profileMap, profiles };
-}
-
-/**
- * Ghi ánh xạ profile theo cách nguyên tử để tránh hỏng file nếu app dừng giữa lúc lưu.
- *
- * @param {{version: number, profiles: Record<string, {profileId: string}>}} profileMap Ánh xạ cần lưu.
- * @return {Promise<void>} Hoàn tất khi file ánh xạ đã được thay thế.
- * @throws {Error} Khi không thể tạo thư mục hoặc ghi file ánh xạ.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-08
- */
-async function writeGologinProfileMap(profileMap) {
-  await mkdir(dirname(gologinProfileMapPath), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${gologinProfileMapPath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(profileMap, null, 2), { encoding: 'utf8', mode: 0o600 });
-  await rename(temporaryPath, gologinProfileMapPath);
 }
 
 /**
@@ -1169,30 +696,27 @@ const runExclusively = (handler) => (requestBody) => enqueueExclusively(handler,
  * Dừng lượt và tạm tắt tự bù nếu dịch vụ xác minh IP không hoạt động.
  *
  * @param {string} requestBody Nội dung JSON nhận từ giao diện.
- * @param {{layoutTarget?: number, engine?: 'chrome'|'gologin'}} options Số ô và engine của lượt mở.
+ * @param {{layoutTarget?: number}} options Vị trí ô hiển thị các cửa sổ Chrome.
  * @return {Promise<{results: string[], warnings: string[]}>} Kết quả proxy thành công/thất bại và cảnh báo.
  * @throws {Error} Khi cấu hình không hợp lệ hoặc sổ proxy không đọc/ghi được.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engine = 'chrome' } = {}) {
+async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}) {
   const body = JSON.parse(requestBody);
-  if (engine === 'chrome' && templateProfileContext) {
+  if (templateProfileContext) {
     throw new Error('Hãy đóng cửa sổ profile mẫu RoboForm trước khi tạo profile Chrome mới.');
   }
-  const autofillRecords = engine === 'chrome' ? parseAutofillRecords(body.autofillData) : [];
-  const token = body.apiToken?.trim();
-  if (engine === 'gologin' && !token) throw new Error('Hãy nhập GoLogin API token.');
+  const autofillRecords = parseAutofillRecords(body.autofillData);
   const proxyType = body.proxyType ?? 'socks5';
   const inputProxies = selectProxies(body.proxyList, proxyType, '');
   const usageHistory = await readProxyUsageHistory();
   const usedExitIps = new Set(Object.values(usageHistory.proxies).map((entry) => entry.exitIp).filter(Boolean));
   const seenProxyKeys = new Set();
   const availableProxies = inputProxies.filter((proxy) => {
-    const proxyKey = createProxyProfileKey(proxy, 1);
+    const proxyKey = createProxyUsageKey(proxy, 1);
     const previousAttempt = usageHistory.proxies[proxyKey];
-    const retryable = isRetryableIpVerificationFailure(previousAttempt)
-      || isRetryableGologinServiceFailure(previousAttempt);
+    const retryable = isRetryableIpVerificationFailure(previousAttempt);
     if (seenProxyKeys.has(proxyKey) || (previousAttempt && !retryable)) return false;
     seenProxyKeys.add(proxyKey);
     return true;
@@ -1204,7 +728,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
     throw new Error('Số trình duyệt cần mở phải là số nguyên lớn hơn 0.');
   }
   if (requestedCount > maxAliveBrowsers) {
-    throw new Error(`Chỉ được mở tối đa ${maxAliveBrowsers} cửa sổ trình duyệt cùng lúc.`);
+    throw new Error('Chỉ được mở tối đa ' + maxAliveBrowsers + ' cửa sổ trình duyệt cùng lúc.');
   }
   const targetSuccessCount = Math.min(requestedCount, availableProxies.length);
   if (targetSuccessCount === 0) {
@@ -1214,95 +738,69 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
     };
   }
   const warnings = requestedCount > availableProxies.length
-    ? [`Bạn yêu cầu ${requestedCount} trình duyệt nhưng chỉ còn ${availableProxies.length} proxy chưa dùng.`]
+    ? ['Bạn yêu cầu ' + requestedCount + ' trình duyệt nhưng chỉ còn ' + availableProxies.length + ' proxy chưa dùng.']
     : [];
   const alreadyAlive = activeBrowsers.size;
   if (alreadyAlive + targetSuccessCount > maxAliveBrowsers) {
     const room = Math.max(0, maxAliveBrowsers - alreadyAlive);
     throw new Error(
-      `Máy này chỉ nên mở tối đa ${maxAliveBrowsers} trình duyệt cùng lúc để không bị treo` +
-        (alreadyAlive ? ` (đang mở ${alreadyAlive}, còn chỗ cho ${room})` : '') +
-        `. Bạn yêu cầu ${targetSuccessCount}. Hãy giảm số cửa sổ (hoặc bấm Đóng tất cả trước), ` +
-        'hoặc đóng bớt cửa sổ đang mở.',
+      'Máy này chỉ nên mở tối đa ' + maxAliveBrowsers + ' trình duyệt cùng lúc để không bị treo'
+        + (alreadyAlive ? ' (đang mở ' + alreadyAlive + ', còn chỗ cho ' + room + ')' : '')
+        + '. Bạn yêu cầu ' + targetSuccessCount + '. Hãy giảm số cửa sổ (hoặc bấm Đóng tất cả trước), '
+        + 'hoặc đóng bớt cửa sổ đang mở.',
     );
   }
+
   const websiteUrl = normalizeUrl(body.websiteUrl);
-  const profileApi = engine === 'gologin' ? GologinApi({ token }) : null;
   const screen = await readScreenSize();
   const layoutCount = layoutTarget ?? Math.min(maxAliveBrowsers, alreadyAlive + targetSuccessCount);
   const occupiedTileIndexes = new Set([...activeBrowsers].map((session) => session.tileIndex));
   const availableTileIndexes = Array.from({ length: layoutCount }, (_, index) => index)
     .filter((index) => !occupiedTileIndexes.has(index));
-  const profileMap = engine === 'gologin' ? await readGologinProfileMap() : null;
-  const orbitaBuilds = engine === 'gologin' ? await listInstalledOrbitaVersions() : [];
-  let availableChromeBuilds = [];
-  if (engine === 'chrome') {
-    const occupiedChromeMajors = new Set([...activeBrowsers]
-      .map((session) => Number(session.chromeVersion?.split('.')[0])).filter(Boolean));
-    availableChromeBuilds = (await listInstalledChromeChannels())
-      .filter((build) => !occupiedChromeMajors.has(build.major));
-    if (availableChromeBuilds.length < targetSuccessCount) {
-      throw new Error(`Cần ${targetSuccessCount} phiên bản Google Chrome thường khác nhau, `
-        + `nhưng hiện chỉ còn ${availableChromeBuilds.length} phiên bản chưa mở. `
-        + 'Hãy cài thêm phiên bản hoặc giảm số cửa sổ.');
-    }
-    warnings.push('Các phiên bản Google Chrome thường của lượt này: '
-      + availableChromeBuilds.slice(0, targetSuccessCount).map((build) => build.version).join(', ') + '.');
+  const occupiedChromeMajors = new Set([...activeBrowsers]
+    .map((session) => Number(session.chromeVersion?.split('.')[0])).filter(Boolean));
+  const availableChromeBuilds = (await listInstalledChromeChannels())
+    .filter((build) => !occupiedChromeMajors.has(build.major));
+  if (availableChromeBuilds.length < targetSuccessCount) {
+    throw new Error('Cần ' + targetSuccessCount + ' phiên bản Google Chrome thường khác nhau, '
+      + 'nhưng hiện chỉ còn ' + availableChromeBuilds.length + ' phiên bản chưa mở. '
+      + 'Hãy cài thêm phiên bản hoặc giảm số cửa sổ.');
   }
-  if (engine === 'gologin' && orbitaBuilds.length === 0) {
-    // Không chặn lượt mở: chưa tải bản nào thì GoLogin tự chọn Orbita như trước.
-    warnings.push('Chưa có bản Orbita nào trong ~/.gologin/browser nên lượt này GoLogin tự chọn '
-      + 'engine. Bấm "Tải các bản Orbita thật" để mỗi cửa sổ chạy một phiên bản riêng.');
-  } else if (engine === 'gologin') {
-    if (orbitaBuilds.length < targetSuccessCount) {
-      warnings.push(`Máy có ${orbitaBuilds.length} bản Orbita cho ${targetSuccessCount} cửa sổ, `
-        + 'nên một số bản bị dùng lại cho nhiều cửa sổ. Tải thêm bản để mỗi cửa sổ một phiên bản.');
-    }
-    warnings.push('Mỗi cửa sổ chạy một engine Orbita riêng và app đặt User-Agent của profile '
-      + 'khớp major đó, nên UA, Sec-CH-UA và engine cùng một phiên bản. Lần đầu mỗi profile tốn '
-      + 'thêm một request API GoLogin để đổi UA; các lần sau dùng lại major đã lưu.');
-  }
+  warnings.push('Các phiên bản Google Chrome thường của lượt này: '
+    + availableChromeBuilds.slice(0, targetSuccessCount).map((build) => build.version).join(', ') + '.');
+
   if (!autoRefill.settings) {
     autoRefill.settings = {
-      engine,
-      apiToken: body.apiToken,
       proxyList: body.proxyList,
-      proxyType: body.proxyType ?? 'socks5',
+      proxyType: proxyType,
       websiteUrl: body.websiteUrl,
       autofillData: body.autofillData,
     };
-    if (autoRefill.targetCount < 1) {
-      autoRefill.targetCount = targetSuccessCount;
-    }
+    if (autoRefill.targetCount < 1) autoRefill.targetCount = targetSuccessCount;
   }
   const results = [];
   let nextProxyIndex = 0;
   let successfulBrowsers = 0;
   let ipVerificationUnavailable = false;
-  let gologinServiceUnavailable = false;
 
   /**
-   * Thử proxy tiếp theo cho một slot đến khi mở thành công đúng một trình duyệt.
+   * Thử proxy tiếp theo cho một slot đến khi mở thành công một cửa sổ Chrome.
    *
-   * @param {number} workerIndex Chỉ số slot và phiên bản Chrome được giao.
-   * @return {Promise<void>} Kết thúc khi slot đã có trình duyệt hoặc hết proxy phù hợp.
+   * @param {number} workerIndex Chỉ số slot và bản Chrome được giao.
+   * @return {Promise<void>} Kết thúc khi slot mở được hoặc hết proxy phù hợp.
    * @throws {Error} Khi không thể ghi lịch sử sử dụng proxy.
-   * @author ductv <ductv@getflycrm.com>
-   * @since 2026-10-14
+   * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+   * @since 2026-10-15
    */
   const attemptProxy = async (workerIndex) => {
     while (!ipVerificationUnavailable
-      && !gologinServiceUnavailable
       && successfulBrowsers < targetSuccessCount
       && nextProxyIndex < availableProxies.length) {
-      const attemptIndex = nextProxyIndex;
+      const proxy = availableProxies[nextProxyIndex];
       nextProxyIndex += 1;
-      const proxy = availableProxies[attemptIndex];
-      const proxyKey = createProxyProfileKey(proxy, 1);
-      const profileIdFromMap = profileMap?.profiles[proxyKey]?.profileId;
-      let profileId = profileIdFromMap;
-      let launchApi;
-      let logFilePath;
+      const proxyKey = createProxyUsageKey(proxy, 1);
+      const installedChrome = availableChromeBuilds[workerIndex];
+      const browserProfileId = 'chrome-' + installedChrome.channel + '-' + installedChrome.major;
       let exitIp;
       let failureReason;
       let activeSession;
@@ -1315,7 +813,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
           exitIp: null,
           proxy: proxy.server,
           username: proxy.username ?? '',
-          websiteUrl,
+          websiteUrl: websiteUrl,
           attemptedAt: attemptStartedAt,
         };
         await persistProxyUsageHistory(usageHistory);
@@ -1324,87 +822,43 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
           exitIp = observedIp;
           usageHistory.proxies[proxyKey] = {
             status: 'attempting',
-            exitIp,
+            exitIp: exitIp,
             proxy: proxy.server,
             username: proxy.username ?? '',
-            websiteUrl,
+            websiteUrl: websiteUrl,
             attemptedAt: attemptStartedAt,
           };
           await persistProxyUsageHistory(usageHistory);
         };
-        let finalUrl;
-        if (engine === 'chrome') {
-          const installedChrome = availableChromeBuilds[workerIndex];
-          profileId = `chrome-${installedChrome.channel}-${installedChrome.major}`;
-          ({ finalUrl, session: activeSession } = await openBrowserWithInstalledChrome({
-            build: installedChrome,
-            proxy,
-            proxyKey,
-            websiteUrl,
-            usedExitIps,
-            onExitIp: recordExitIp,
-            tile: tileAt(tileIndex, layoutCount, screen),
-            tileIndex,
-            autofillRecords,
-          }));
-        } else {
-          const preparedProfile = await prepareGologinProfile({
-            api: profileApi,
-            proxy,
-            savedProfileId: profileIdFromMap,
-            browserNumber: attemptIndex + 1,
-          });
-          profileId = preparedProfile.profileId;
-          const savedUserAgentMajor = profileMap.profiles[proxyKey]?.userAgentMajor;
-          profileMap.profiles[proxyKey] = {
-            profileId,
-            lastUsedAt: new Date().toISOString(),
-            userAgentMajor: savedUserAgentMajor,
-          };
-          const orbitaBuild = orbitaBuilds[tileIndex % orbitaBuilds.length];
-          if (orbitaBuild && savedUserAgentMajor !== orbitaBuild.major) {
-            await syncProfileUserAgentMajor({ token, profileId, major: orbitaBuild.major });
-            profileMap.profiles[proxyKey].userAgentMajor = orbitaBuild.major;
-          }
-          launchApi = GologinApi({ token });
-          logFilePath = await createInteractionLogFile(profileId);
-          ({ finalUrl, session: activeSession } = await openGologinProfile({
-            api: launchApi,
-            profileId,
-            proxyKey,
-            websiteUrl,
-            usedExitIps,
-            onExitIp: recordExitIp,
-            logFilePath,
-            tile: tileAt(tileIndex, layoutCount, screen),
-            tileIndex,
-            orbitaExecutablePath: orbitaBuild?.executablePath,
-          }));
-        }
-        const usageRecord = {
+        const openedBrowser = await openBrowserWithInstalledChrome({
+          build: installedChrome,
+          proxy: proxy,
+          proxyKey: proxyKey,
+          websiteUrl: websiteUrl,
+          usedExitIps: usedExitIps,
+          onExitIp: recordExitIp,
+          tile: tileAt(tileIndex, layoutCount, screen),
+          tileIndex: tileIndex,
+          autofillRecords: autofillRecords,
+        });
+        activeSession = openedBrowser.session;
+        usageHistory.proxies[proxyKey] = {
           status: 'success',
-          exitIp,
+          exitIp: exitIp,
           proxy: proxy.server,
           username: proxy.username ?? '',
-          websiteUrl,
-          finalUrl,
-          profileId,
+          websiteUrl: websiteUrl,
+          finalUrl: openedBrowser.finalUrl,
+          profileId: browserProfileId,
           attemptedAt: attemptStartedAt,
           completedAt: new Date().toISOString(),
         };
-        usageHistory.proxies[proxyKey] = usageRecord;
         await persistProxyUsageHistory(usageHistory);
-        if (activeSession) watchTrafficBlockedPage(activeSession);
-        const openedBrowserNumber = successfulBrowsers + 1;
+        watchTrafficBlockedPage(activeSession);
         successfulBrowsers += 1;
-        const orbitaLabel = engine === 'chrome'
-          ? ` [Google Chrome ${availableChromeBuilds[workerIndex].version}]`
-          : orbitaBuilds.length > 0
-          ? ` [Orbita ${orbitaBuilds[tileIndex % orbitaBuilds.length].major} + UA Chrome/`
-            + `${orbitaBuilds[tileIndex % orbitaBuilds.length].major}]`
-          : '';
-        results.push(`Trình duyệt ${openedBrowserNumber}${orbitaLabel}: mở đúng trang đích qua `
-          + `IP ${exitIp} (${proxy.server}).`);
+        results.push('Trình duyệt ' + successfulBrowsers + ' [Google Chrome '
+          + installedChrome.version + ']: mở đúng trang đích qua IP ' + exitIp
+          + ' (' + proxy.server + ').');
         return;
       } catch (error) {
         failureReason = error.message.split('\n')[0];
@@ -1412,45 +866,28 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
           activeSession.suppressAutoRefill = true;
           await activeSession.browser?.close?.().catch(() => {});
         }
-        for (const session of activeBrowsers) {
-          if (session.api === launchApi) session.suppressAutoRefill = true;
-        }
-        await launchApi?.exit().catch(() => {});
-        if (logFilePath) {
-          sessionLogPaths.delete(logFilePath);
-          await rm(logFilePath, { force: true }).catch(() => {});
-        }
         const verificationFailure = error instanceof IpVerificationError;
-        const serviceFailure = engine === 'gologin' && !verificationFailure
-          && gologinServiceErrorPattern.test(failureReason);
         usageHistory.proxies[proxyKey] = {
-          status: verificationFailure ? 'verification_error' : serviceFailure ? 'service_error' : 'failed',
+          status: verificationFailure ? 'verification_error' : 'failed',
           exitIp: exitIp ?? null,
           proxy: proxy.server,
           username: proxy.username ?? '',
-          websiteUrl,
+          websiteUrl: websiteUrl,
           reason: failureReason,
           attemptedAt: attemptStartedAt,
           completedAt: new Date().toISOString(),
         };
         await persistProxyUsageHistory(usageHistory);
-        if (serviceFailure) {
-          gologinServiceUnavailable = true;
-          autoRefill.enabled = false;
-          autoRefill.message = 'Tự bù đã tạm dừng vì GoLogin API chặn tốc độ hoặc hết quota.';
-          results.push(`Proxy ${proxy.server}: GoLogin API từ chối yêu cầu (${failureReason}); `
-            + 'đã giữ proxy để thử lại sau. Dừng các proxy còn lại trong lượt này.');
-          continue;
-        }
         if (verificationFailure) {
           ipVerificationUnavailable = true;
           autoRefill.enabled = false;
           autoRefill.message = 'Tự bù đã tạm dừng vì dịch vụ xác minh IP không hoạt động.';
-          results.push(`Proxy ${proxy.server}: chưa xác minh được IP; đã giữ proxy để thử lại sau `
-            + `(${failureReason}). Dừng thử các proxy tiếp theo trong lượt này.`);
+          results.push('Proxy ' + proxy.server + ': chưa xác minh được IP; đã giữ proxy để thử lại sau ('
+            + failureReason + '). Dừng thử các proxy tiếp theo trong lượt này.');
           continue;
         }
-        results.push(`Proxy ${proxy.server}: loại bỏ IP ${exitIp ?? 'chưa xác định'} — ${failureReason}; sẽ thử proxy khác.`);
+        results.push('Proxy ' + proxy.server + ': loại bỏ IP ' + (exitIp ?? 'chưa xác định')
+          + ' — ' + failureReason + '; sẽ thử proxy khác.');
       }
     }
   };
@@ -1460,37 +897,26 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, engin
     (_, workerIndex) => attemptProxy(workerIndex),
   ));
 
-  if (profileMap && Object.values(profileMap.profiles).some((entry) => entry?.lastUsedAt)) {
-    try {
-      await writeGologinProfileMap(profileMap);
-    } catch (error) {
-      warnings.push(`Không lưu được ánh xạ profile; lần sau có thể phải tạo lại: ${error.message}`);
-    }
-  }
-  if (gologinServiceUnavailable) {
-    warnings.push('GoLogin API chặn tốc độ hoặc đã hết quota API của gói hiện tại (thông báo gốc '
-      + 'là lỗi JSON vì GoLogin trả text thường). Không proxy nào bị đánh dấu đã dùng; lượt đã '
-      + 'dừng và tự bù đã tạm dừng. Chờ quota hồi hoặc nâng gói rồi mở lại.');
-  } else if (ipVerificationUnavailable) {
+  if (ipVerificationUnavailable) {
     warnings.push('Dịch vụ xác minh IP trả lỗi hoặc dữ liệu không hợp lệ. Proxy bị ảnh hưởng chưa bị '
       + 'đánh dấu hỏng; lượt đã dừng và tự bù đã tạm dừng để tránh tiêu thụ thêm proxy.');
   } else if (successfulBrowsers < targetSuccessCount) {
-    warnings.push(`Chỉ mở được ${successfulBrowsers}/${targetSuccessCount} trình duyệt; các proxy còn lại đã hết hoặc không tải đúng trang đích.`);
+    warnings.push('Chỉ mở được ' + successfulBrowsers + '/' + targetSuccessCount
+      + ' trình duyệt; các proxy còn lại đã hết hoặc không tải đúng trang đích.');
   }
-  return { results, warnings };
+  return { results: results, warnings: warnings };
 }
 
 /**
- * Mở profile theo yêu cầu và có thể tự chạy kịch bản QA trên nhóm profile vừa mở.
+ * Mở Chrome theo yêu cầu và có thể tự chạy kịch bản QA trên các cửa sổ vừa mở.
  *
  * @param {string} requestBody Nội dung JSON nhận từ giao diện.
- * @param {'chrome'|'gologin'} engine Engine của lượt mở.
- * @return {Promise<object>} Kết quả mở profile và trạng thái tự bù.
+ * @return {Promise<object>} Kết quả mở Chrome và trạng thái tự bù.
  * @throws {Error} Khi cấu hình launch hoặc kịch bản QA không hợp lệ.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-async function launchUserRequestedBrowsers(requestBody, engine = 'chrome') {
+async function launchUserRequestedBrowsers(requestBody) {
   const body = JSON.parse(requestBody);
   const autoRunQa = body.autoRunQa === true || body.autoRunQa === 'true';
   const activeBeforeLaunch = activeBrowsers.size;
@@ -1521,10 +947,10 @@ async function launchUserRequestedBrowsers(requestBody, engine = 'chrome') {
     const seenQaProxyKeys = new Set();
     const availableQaProxyCount = selectProxies(body.proxyList, body.proxyType ?? 'socks5', '')
       .filter((proxy) => {
-        const proxyKey = createProxyProfileKey(proxy, 1);
+        const proxyKey = createProxyUsageKey(proxy, 1);
         const previousAttempt = qaProxyHistory.proxies[proxyKey];
         const retryableServiceFailure = isRetryableIpVerificationFailure(previousAttempt)
-          || isRetryableGologinServiceFailure(previousAttempt);
+
         if (seenQaProxyKeys.has(proxyKey) || (previousAttempt && !retryableServiceFailure)) return false;
         seenQaProxyKeys.add(proxyKey);
         return true;
@@ -1540,7 +966,7 @@ async function launchUserRequestedBrowsers(requestBody, engine = 'chrome') {
 
   const sessionsBeforeLaunch = new Set(activeBrowsers);
   const launchBody = autoRunQa ? JSON.stringify({ ...body, autofillData: '' }) : requestBody;
-  const result = await launchRequestedBrowsers(launchBody, { engine });
+  const result = await launchRequestedBrowsers(launchBody);
   const requestedCount = body.requestedCount === undefined || body.requestedCount === ''
     ? selectProxies(body.proxyList, body.proxyType ?? 'socks5', '').length
     : Number(body.requestedCount);
@@ -1575,8 +1001,6 @@ async function launchUserRequestedBrowsers(requestBody, engine = 'chrome') {
 
   if (activeBrowsers.size > 0) {
     autoRefill.settings = {
-      engine,
-      apiToken: body.apiToken,
       proxyList: body.proxyList,
       proxyType: body.proxyType ?? 'socks5',
       websiteUrl: body.websiteUrl,
@@ -1620,7 +1044,7 @@ function queueAutomaticRefill() {
     const result = await launchRequestedBrowsers(JSON.stringify({
       ...activeSettings,
       requestedCount: neededSlots,
-    }), { layoutTarget: autoRefill.targetCount, engine: activeSettings.engine });
+    }), { layoutTarget: autoRefill.targetCount });
     autoRefill.message = activeBrowsers.size >= autoRefill.targetCount
       ? `Đã bù đủ ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`
       : result.warnings.at(-1) ?? `Hiện mở ${activeBrowsers.size}/${autoRefill.targetCount}; không còn proxy phù hợp để bù.`;
@@ -1806,8 +1230,8 @@ function requestProxyIpInfo(proxy) {
  * trình thoát — nó nằm chờ trên CDP pipe và vẫn hiện icon dưới Dock. Phải gọi close().
  *
  * @return {Promise<{results: string[], warnings: string[]}>} Số trình duyệt đã đóng.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-10
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 async function closeActiveBrowsers() {
   const sessions = [...activeBrowsers];
@@ -1816,29 +1240,14 @@ async function closeActiveBrowsers() {
   autoRefill.targetCount = 0;
   autoRefill.message = 'Đã đóng tất cả; tự bù đã tắt.';
   for (const session of sessions) session.suppressAutoRefill = true;
-  const apis = new Set(sessions.map((session) => session.api).filter(Boolean));
-  const chromeSessions = sessions.filter((session) => !session.api);
-  await Promise.all([
-    ...[...apis].map((api) => api.exit().catch(() => {})),
-    ...chromeSessions.map((session) => Promise.resolve(session.browser.close()).catch(() => {})),
-  ]);
+  await Promise.all(sessions.map((session) => Promise.resolve(session.browser.close()).catch(() => {})));
   activeBrowsers.clear();
 
-  // Chỉ xoá log do tiến trình này tạo; log của phiên khác không phải của mình.
-  const logPaths = [...sessionLogPaths];
-  const warnings = [];
-  await Promise.all(logPaths.map((logPath) => rm(logPath, { force: true }).catch((error) => {
-    warnings.push(`Không xóa được ${logPath}: ${error.message}`);
-  })));
-  sessionLogPaths.clear();
-
   return {
-    results: [
-      sessions.length > 0
-        ? `Đã đóng ${sessions.length} trình duyệt và xóa ${logPaths.length} file nhật ký của lần chạy này.`
-        : `Không có trình duyệt nào đang mở; đã xóa ${logPaths.length} file nhật ký của lần chạy này.`,
-    ],
-    warnings,
+    results: [sessions.length > 0
+      ? 'Đã đóng ' + sessions.length + ' trình duyệt.'
+      : 'Không có trình duyệt nào đang mở.'],
+    warnings: [],
     autoRefillEnabled: false,
   };
 }
@@ -2115,7 +1524,7 @@ async function waitForQaScreen(page, step, expectedOrigin) {
  * Chạy các bước QA trên một profile và trả trạng thái từng màn.
  *
  * @param {object} plan Kịch bản đã được kiểm tra origin và giới hạn.
- * @param {object} session Profile GoLogin đang mở.
+ * @param {object} session Phiên Chrome đang mở.
  * @param {number} sessionIndex Vị trí profile để tạo fixture ổn định riêng.
  * @return {Promise<object>} Kết quả các màn hoặc lỗi đầu tiên cùng ảnh chụp.
  * @author ductv <ductv@getflycrm.com>
@@ -2369,13 +1778,13 @@ async function listUsedExitIps() {
 }
 
 /**
- * Tải các bản Chrome for Testing để mở cửa sổ không cần GoLogin.
+ * Tải các bản Chrome for Testing vào kho thử nghiệm riêng.
  *
  * @param {string} requestBody JSON gồm số phiên bản cần có.
  * @return {Promise<{results: string[], warnings: string[]}>} Các bản Chrome đang có trên máy.
  * @throws {Error} Khi không gọi được danh mục Google hoặc giải nén thất bại.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 async function downloadRealChromeVersions(requestBody) {
   const body = requestBody ? JSON.parse(requestBody) : {};
@@ -2728,16 +2137,8 @@ async function openBrowserWithInstalledChrome({
     const exitIp = await verifyBrowserExitIp(context, usedExitIps, onExitIp);
     session.exitIp = exitIp;
     const response = await page.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
-    const expectedUrl = new URL(websiteUrl);
-    const finalUrl = page.url();
-    const finalTargetUrl = new URL(finalUrl);
-    const expectedPath = expectedUrl.pathname.replace(/\/+$/, '') || '/';
-    const finalPath = finalTargetUrl.pathname.replace(/\/+$/, '') || '/';
     if (!response || response.status() >= 400) {
       throw new Error(`website trả HTTP ${response?.status() ?? 'không có phản hồi'}`);
-    }
-    if (finalTargetUrl.origin !== expectedUrl.origin || finalPath !== expectedPath) {
-      throw new Error(`bị chuyển khỏi trang đích sang ${finalUrl}`);
     }
     if (await hasTrafficBlocked(page)) {
       throw new Error('trang đích hiển thị Traffic Blocked!');
@@ -2830,7 +2231,7 @@ export async function hasTrafficBlocked(page) {
 /**
  * Đóng cửa sổ và tự động mở proxy khác thay thế khi trang hiển thị thông báo "Traffic Blocked!".
  *
- * @param {object} session Phiên Chrome hoặc GoLogin đã mở thành công.
+ * @param {object} session Phiên Chrome đã mở thành công.
  * @return {void} Gắn lịch kiểm tra vào các tab của phiên.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
@@ -2880,7 +2281,6 @@ export function watchTrafficBlockedPage(session) {
               + 'đã đóng cửa sổ và đang tự động mở IP khác thay thế…';
 
             await page.close().catch(() => {});
-            if (session.api) await session.api.exit().catch(() => {});
             await session.browser?.close?.().catch(() => {});
             queueAutomaticRefill();
             break;
@@ -2898,40 +2298,6 @@ export function watchTrafficBlockedPage(session) {
     session.browser.on('close', () => clearInterval(timer));
     session.browser.on('disconnected', () => clearInterval(timer));
   }
-}
-
-/**
- * Tải các bản Orbita thật để mỗi profile GoLogin chạy một engine major khác nhau.
- *
- * Orbita là bản Chromium của GoLogin; CDN chỉ phát hành một dải major nhất định nên app dò
- * từ Chrome Stable đi xuống và lấy các bản còn tải được.
- *
- * @param {string} requestBody JSON gồm số bản Orbita cần có.
- * @return {Promise<{results: string[], warnings: string[]}>} Các bản Orbita đang có trên máy.
- * @throws {Error} Khi CDN không còn đủ bản hoặc giải nén thất bại.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-14
- */
-async function downloadOrbitaVersions(requestBody) {
-  const body = requestBody ? JSON.parse(requestBody) : {};
-  const versionCount = body.orbitaVersionCount === undefined || body.orbitaVersionCount === ''
-    ? 10
-    : Number(body.orbitaVersionCount);
-  // ponytail: tiến độ chỉ ra stdout như đường Chrome for Testing; UI đứng chờ tới khi xong.
-  const { builds, downloadedMajors, warnings } = await installOrbitaVersions({
-    versionCount,
-    onProgress: (message) => console.log(message),
-  });
-
-  return {
-    results: [
-      downloadedMajors.length > 0
-        ? `Đã tải ${downloadedMajors.length} bản Orbita: ${downloadedMajors.join(', ')}.`
-        : 'Không cần tải thêm; các bản Orbita yêu cầu đã có trong ~/.gologin/browser.',
-      `Sẵn sàng ${builds.length} major: ${builds.map((build) => build.major).join(', ')}.`,
-    ],
-    warnings,
-  };
 }
 
 /**
@@ -2964,22 +2330,19 @@ function exitWhenParentExits() {
  *
  * @return {Promise<void>} Hoàn tất khi giao diện được mở.
  * @throws {Error} Khi máy chủ giao diện không thể lắng nghe cổng cục bộ.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-10
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
  */
 async function startLocalInterface() {
   const interfaceHtml = await readFile(userInterfacePath, 'utf8');
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
-    '/gologin/launch': runExclusively((body) => launchUserRequestedBrowsers(body, 'gologin')),
     '/check': checkRequestedProxies,
     '/close': runExclusively(closeActiveBrowsers),
     '/auto-refill': updateAutoRefill,
     '/qa-run': runExclusively(runQaPlan),
     '/used-ips': listUsedExitIps,
-    '/orbita-versions/download': runExclusively(downloadOrbitaVersions),
     '/chrome-versions/download': runExclusively(downloadRealChromeVersions),
-    '/chrome-versions/launch': runExclusively(launchUserRequestedBrowsers),
     '/template-profile/open': runExclusively(openTemplateProfile),
   };
 

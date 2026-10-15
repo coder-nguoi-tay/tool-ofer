@@ -72,7 +72,13 @@ let browser;
  * @since 2026-10-10
  */
 async function startTestBrowser() {
-  browser = await chromium.launch({ headless: true });
+  const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  const options = { headless: true };
+  try {
+    const { existsSync } = await import('node:fs');
+    if (existsSync(chromePath)) options.executablePath = chromePath;
+  } catch {}
+  browser = await chromium.launch(options);
 }
 
 /**
