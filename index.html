@@ -141,6 +141,7 @@
           <button id="download-csv-button" class="secondary" type="button" hidden>Tải CSV</button>
           <button id="usage-history-csv-button" class="secondary" type="button">Tải CSV lịch sử</button>
           <button id="used-ips-button" class="secondary" type="button">Xem IP đã dùng</button>
+          <button id="clear-history-button" class="secondary" type="button">Xóa lịch sử IP đã dùng</button>
         </div>
         <p class="hint">Kiểm tra sẽ đánh dấu proxy chết, trùng IP exit và dòng trùng. CSV lịch sử gồm các lần thử, IP exit và trạng thái mở trang đã lưu qua nhiều phiên.</p>
         <div id="used-ips" role="region" aria-live="polite"></div>
@@ -203,8 +204,9 @@
     const saveStatus = document.querySelector('#save-status');
     const warnings = document.querySelector('#warnings');
     const templateProfileButton = document.querySelector('#template-profile-button');
+    const clearHistoryButton = document.querySelector('#clear-history-button');
     const buttons = [templateProfileButton, launchButton, chromeVersionsDownloadButton,
-      checkButton, usedIpsButton, saveButton, closeButton];
+      checkButton, usedIpsButton, clearHistoryButton, saveButton, closeButton];
     const preferencesBridge = window.webkit?.messageHandlers?.autoleadPreferences;
     let autoRefillEnabled = true;
     let isRefreshingAutoRefillState = false;
@@ -486,6 +488,11 @@
     }
 
     usedIpsButton.addEventListener('click', showUsedIps);
+    clearHistoryButton.addEventListener('click', async () => {
+      if (!confirm('Bạn có chắc chắn muốn xóa toàn bộ lịch sử IP/proxy đã dùng để dùng lại từ đầu?')) return;
+      await send('/used-ips/clear', 'Đang xóa lịch sử proxy và IP đã dùng…');
+      usedIpsBox.textContent = '';
+    });
     templateProfileButton.addEventListener('click', () => send(
       '/template-profile/open',
       'Đang mở profile mẫu để cài RoboForm…',

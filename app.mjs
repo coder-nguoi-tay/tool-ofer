@@ -1187,6 +1187,27 @@ async function listUsedExitIps() {
 }
 
 /**
+ * Xóa toàn bộ lịch sử proxy và IP đã dùng để người dùng có thể sử dụng lại từ đầu.
+ *
+ * @return {Promise<{results: string[], warnings: string[]}>} Kết quả xóa.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-15
+ */
+async function clearUsedProxyHistory() {
+  const usageHistory = await readProxyUsageHistory();
+  const count = Object.keys(usageHistory.proxies).length;
+  await persistProxyUsageHistory({ version: 1, proxies: {} });
+  try {
+    const profilesDir = join(chromeProfileDirectory, 'stable');
+    await rm(profilesDir, { recursive: true, force: true });
+  } catch {}
+  return {
+    results: [`Đã xóa toàn bộ lịch sử (${count} proxy/IP đã dùng). Tất cả proxy có thể dùng lại bình thường.`],
+    warnings: [],
+  };
+}
+
+/**
  * Tải các bản Chrome for Testing vào kho thử nghiệm riêng.
  *
  * @param {string} requestBody JSON gồm số phiên bản cần có.
@@ -1791,6 +1812,7 @@ async function startLocalInterface() {
     '/close': runExclusively(closeActiveBrowsers),
     '/auto-refill': updateAutoRefill,
     '/used-ips': listUsedExitIps,
+    '/used-ips/clear': runExclusively(clearUsedProxyHistory),
     '/chrome-versions/download': runExclusively(downloadRealChromeVersions),
     '/template-profile/open': runExclusively(openTemplateProfile),
   };
