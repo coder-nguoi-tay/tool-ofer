@@ -1644,8 +1644,28 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       if (filled > 0) {
         noProgressRounds = 0;
       } else {
-        noProgressRounds += 1;
-        // 3 lần scan liên tiếp không fill được gì và không đang đợi lead → nhờ AI Assist
+        // Chỉ đếm vòng không tiến triển khi trang thực sự có form/input cần điền
+        let hasInteractable = true;
+        try {
+          if (typeof page.evaluate === 'function' && !page.isClosed()) {
+            hasInteractable = await page.evaluate(() => {
+              return Boolean(document.querySelector(
+                'input:not([type="hidden"]), select, textarea, button[type="submit"], input[type="submit"], [data-vector-submit="true"], button.btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"]'
+              ));
+            });
+          }
+        } catch {
+          hasInteractable = true;
+        }
+
+        if (hasInteractable) {
+          noProgressRounds += 1;
+        } else {
+          // Trang chưa có form (đang redirect hoặc đang tải), reset bộ đếm để không trigger AI nhầm
+          noProgressRounds = 0;
+        }
+
+        // 3 lần scan liên tiếp có form mà không fill được gì và không đang đợi lead → nhờ AI Assist
         if (noProgressRounds >= 3 && !session.aiAssistRunning && session.leadCheckStatus !== 'waiting' && !page.isClosed()) {
           noProgressRounds = 0;
           options.onStuck?.(page);

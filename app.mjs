@@ -2079,14 +2079,26 @@ async function openBrowserWithInstalledChrome({
       void runAiAssist(page, currentRecord, session).then(async () => {
         // AI xong → kích autofill quét lại một lần
         session.triggerAutofillScan?.();
-        // Chờ 3s để trang ổn định, nếu không còn form/submit → đóng browser → phiên mới
+        // Chờ 3s để trang ổn định
         await new Promise((r) => setTimeout(r, 3000));
         if (page.isClosed()) return;
         const stillHasWork = await pageHasWork(page);
-        if (!stillHasWork) {
-          console.log(`[AI-Assist] Slot ${tileIndex + 1}: hoàn tất, đóng trình duyệt và mở phiên mới.`);
+        // CHỈ ĐÓNG TRÌNH DUYỆT KHI ĐÃ ĐIỀN ĐƯỢC FORM (autofillFields > 0)
+        // Tuyệt đối không đóng khi autofillFields === 0 vì đó là trang chưa load kịp hoặc đang chuyển hướng
+        if (!stillHasWork && (session.autofillFields ?? 0) > 0) {
+          console.log(`[AI-Assist] Slot ${tileIndex + 1}: hoàn tất (${session.autofillFields} trường), đóng trình duyệt và mở phiên mới.`);
+          const logs = browserSessionLogs.get(session);
+          if (logs) {
+            logs.push({
+              time: new Date().toISOString(),
+              type: 'ai_completed',
+              detail: `AI Assist đã hoàn tất các màn form (${session.autofillFields} trường). Đóng trình duyệt và mở phiên mới.`,
+            });
+          }
           session.suppressAutoRefill = false;
           await session.browser?.close?.().catch(() => {});
+        } else if (!stillHasWork) {
+          console.log(`[AI-Assist] Slot ${tileIndex + 1}: trang chưa có form hoặc chưa điền được trường nào, tiếp tục giữ trình duyệt để trang tải.`);
         }
       });
     },
@@ -2437,6 +2449,15 @@ export function watchTrafficBlockedPage(session) {
             autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) bị ${deadReason}; `
               + 'đã đóng cửa sổ và đang tự động mở sock khác thay thế…';
 
+            const logs = browserSessionLogs.get(session);
+            if (logs) {
+              logs.push({
+                time: new Date().toISOString(),
+                type: 'traffic_blocked',
+                detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị ${deadReason}. Đóng cửa sổ và đổi sock khác.`,
+              });
+            }
+
             try {
               if (session.browser?.pages) {
                 for (const p of session.browser.pages()) {
@@ -2544,23 +2565,43 @@ async function startLocalInterface() {
 
     if (request.method === 'POST' && request.url === '/proxy-queue/import') {
       const body = JSON.parse(await readRequestBody(request));
-      const added = importProxyLines((body.proxyList ?? '').split(/\r?\n/), body.proxyType ?? 'socks5');
+      const proxyType = body.proxyType ?? 'socks5';
+      const rawLines = (body.proxyList ?? '').split(/\r?\n/)
+        .map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      // Validate từng dòng
+      const validLines = rawLines.filter((line) => {
+        try { parseProxyLine(line, 1, proxyType); return true; } catch { return false; }
+      });
+      // Đồng bộ: available = danh sách hợp lệ từ textarea, trừ những proxy đã dùng
+      const usedSet = new Set(proxyQueue.used.map((l) => l.trim()));
+      proxyQueue.available = validLines.filter((l) => !usedSet.has(l));
       await saveProxyQueue();
       respondWithJson(response, 200, {
-        added,
         available: proxyQueue.available.length,
         used: proxyQueue.used.length,
-        message: `Đã thêm ${added} proxy mới vào hàng đợi. Còn lại: ${proxyQueue.available.length}.`,
+        message: `Đã đồng bộ: ${proxyQueue.available.length} proxy sẵn sàng, ${proxyQueue.used.length} đã dùng.`,
       });
       return;
     }
 
     if (request.method === 'POST' && request.url === '/proxy-queue/reset') {
-      proxyQueue.available.push(...proxyQueue.used.splice(0));
+      const body = JSON.parse(await readRequestBody(request));
+      const rawLines = (body.proxyList ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (rawLines.length > 0) {
+        // Chỉ reset proxy nằm trong danh sách hiện tại của textarea
+        const allowedSet = new Set(rawLines);
+        const toRestore = proxyQueue.used.filter((line) => allowedSet.has(line.trim()));
+        const keepUsed = proxyQueue.used.filter((line) => !allowedSet.has(line.trim()));
+        proxyQueue.available.push(...toRestore);
+        proxyQueue.used = keepUsed;
+      } else {
+        // Không có danh sách → reset toàn bộ
+        proxyQueue.available.push(...proxyQueue.used.splice(0));
+      }
       await saveProxyQueue();
       respondWithJson(response, 200, {
         available: proxyQueue.available.length,
-        used: 0,
+        used: proxyQueue.used.length,
         message: `Đã đặt lại: ${proxyQueue.available.length} proxy sẵn sàng dùng lại.`,
       });
       return;

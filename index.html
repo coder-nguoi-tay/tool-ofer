@@ -596,7 +596,19 @@
       const btn = document.querySelector('#sequential-start-btn');
       btn.disabled = true;
       try {
-        const settings = buildRequestBody(); // dùng cùng hàm build settings hiện có
+        // Không gửi autofillData/proxyList (server đã có queue) — chỉ gửi config nhỏ
+        const full = buildRequestBody();
+        const settings = {
+          websiteUrl: full.websiteUrl,
+          proxyType: full.proxyType,
+          autoSubmitForm: full.autoSubmitForm,
+          enableLeadCheck: full.enableLeadCheck,
+          leadCheckApiUrl: full.leadCheckApiUrl,
+          leadCheckCookie: full.leadCheckCookie,
+          leadCheckDatas: full.leadCheckDatas,
+          leadCheckInterval: full.leadCheckInterval,
+          leadCheckMaxAttempts: full.leadCheckMaxAttempts,
+        };
         const res = await fetch('/auto-refill/sequential', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1036,7 +1048,12 @@
     });
 
     document.querySelector('#pq-reset-btn').addEventListener('click', async () => {
-      const res = await fetch('/proxy-queue/reset', { method: 'POST' }).then((r) => r.json());
+      const proxyList = document.querySelector('#proxy-list')?.value ?? '';
+      const res = await fetch('/proxy-queue/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proxyList }),
+      }).then((r) => r.json());
       status.textContent = res.message ?? 'Đã đặt lại.';
       await refreshProxyQueue();
     });
