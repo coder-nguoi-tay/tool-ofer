@@ -2117,8 +2117,9 @@ async function startLeadVerification(session, leadConfig) {
   const intervalSeconds = leadConfig.intervalSeconds || DEFAULT_LEAD_CONFIG.intervalSeconds;
   const maxAttempts = leadConfig.maxAttempts || DEFAULT_LEAD_CONFIG.maxAttempts;
   const intervalMs = intervalSeconds * 1000;
+  const initialWaitSeconds = Math.min(5, intervalSeconds);
 
-  session.leadCheckMessage = `Đã xong màn 1; đang dừng chờ ${intervalSeconds}s để kiểm tra lead lần 1...`;
+  session.leadCheckMessage = `Đã xong màn 1; đang dừng chờ ${initialWaitSeconds}s để kiểm tra lead lần 1...`;
   updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang chờ lead (lần 1/${maxAttempts})...</span>`);
 
   let leadFound = false;
@@ -2128,8 +2129,12 @@ async function startLeadVerification(session, leadConfig) {
 
   while (attempt < maxAttempts) {
     attempt += 1;
-    // Chờ 30 giây (hoặc intervalMs)
-    await new Promise((resolve) => { setTimeout(resolve, intervalMs); });
+    const currentWaitSeconds = attempt === 1 ? initialWaitSeconds : intervalSeconds;
+    if (attempt > 1) {
+      session.leadCheckMessage = `Chưa có lead lần ${attempt - 1}; chờ tiếp ${currentWaitSeconds}s để kiểm tra lần ${attempt}/${maxAttempts}...`;
+      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang chờ lead (lần ${attempt}/${maxAttempts})...</span>`);
+    }
+    await new Promise((resolve) => { setTimeout(resolve, currentWaitSeconds * 1000); });
 
     if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
       return; // Phiên đã bị đóng bởi người dùng
@@ -2150,10 +2155,6 @@ async function startLeadVerification(session, leadConfig) {
       } else {
         hasApiError = false;
         console.log(`[LeadCheck] ${label}: ⚠️ Chưa thấy IP ${exitIp} trong dữ liệu lead (lần ${attempt}/${maxAttempts}).`);
-        if (attempt < maxAttempts) {
-          session.leadCheckMessage = `Chưa có lead lần ${attempt}; chờ tiếp ${intervalSeconds}s để kiểm tra lần ${attempt + 1}...`;
-          updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang chờ lead (lần ${attempt + 1}/${maxAttempts})...</span>`);
-        }
       }
     } catch (err) {
       hasApiError = true;
@@ -2201,6 +2202,10 @@ async function startLeadVerification(session, leadConfig) {
         detail: `Lỗi gọi API toffers.top: ${lastApiErrorMessage}. Trình duyệt được giữ nguyên.`,
       });
     }
+
+    try {
+      session.triggerAutofillScan?.();
+    } catch {}
   } else {
     // API hoạt động bình thường 100%, trả dữ liệu lead đầy đủ, nhưng thực sự IP sock không có lead:
     // Đóng Chrome và chuyển sang phiên bản mới với sock tiếp theo

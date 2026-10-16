@@ -1073,7 +1073,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
 
         if (radioLocator && (await radioLocator.count() > 0)) {
           if (typeof radioLocator.scrollIntoViewIfNeeded === 'function') {
-            await radioLocator.scrollIntoViewIfNeeded().catch(() => {});
+            await radioLocator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
           }
           const radioPause = Math.floor(Math.random() * 120) + 120;
           await new Promise((r) => setTimeout(r, radioPause));
@@ -1118,15 +1118,15 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
         '.options-container a',
       ].join(', ');
 
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        return Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+      };
+
       const containerSelector = [
-        '.step-container',
         '.options-container',
-        '.creative',
-        '[data-element-type="survey_question"]',
-        '.question',
-        '.survey-step',
-        '.quiz-step',
-        'fieldset',
         '.card-options',
         '.choice-container',
         '.options-grid',
@@ -1134,21 +1134,34 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
         '.choices',
         '.survey-question',
         '.options-list',
+        'fieldset',
+        '[data-element-type="survey_question"]',
+        '.question',
+        '.creative',
+        '.quiz-step',
+        '.survey-step',
+        '.step-container',
       ].join(', ');
 
       const containers = Array.from(document.querySelectorAll(containerSelector));
 
       containers.forEach((container, groupIndex) => {
+        if (!isVisible(container)) return;
+
+        // Bỏ qua container cha nếu nó bao bọc một container con khác để tránh bắt nhầm toàn bộ page
+        const hasChildContainer = containers.some((other) => other !== container && container.contains(other));
+        if (hasChildContainer) return;
+
         // Bỏ qua nếu bên trong chứa các input thông thường cần điền (tránh nhầm với form điền)
         if (container.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])')) return;
 
         // Bỏ qua nếu thuộc Offerwall Card
         if (container.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) return;
 
-        const candidateOptions = Array.from(container.querySelectorAll(optionSelector));
+        const candidateOptions = Array.from(container.querySelectorAll(optionSelector)).filter(isVisible);
         if (candidateOptions.length < 2) return;
 
-        // Kiểm tra xem đã có nút nào trong container này được click hoặc đang active
+        // Kiểm tra xem đã có nút nào ĐANG HIỂN THỊ trong container này được click hoặc đang active
         const alreadyActive = candidateOptions.some((b) =>
           b.classList.contains('active') ||
           b.classList.contains('selected') ||
@@ -1185,9 +1198,13 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
 
       // Fallback: Nếu không tìm thấy trong container, tìm các cụm nút Yes/No hoặc Survey standalone
       if (!results.length) {
-        const standaloneVectorButtons = Array.from(document.querySelectorAll('button[data-vector-answer="true"], button.btn-option'));
+        const standaloneVectorButtons = Array.from(document.querySelectorAll('button[data-vector-answer="true"], button.btn-option')).filter(isVisible);
         if (standaloneVectorButtons.length >= 2) {
-          const alreadyActive = standaloneVectorButtons.some((b) => b.getAttribute('data-autolead-clicked') === '1');
+          const alreadyActive = standaloneVectorButtons.some((b) =>
+            b.classList.contains('active') ||
+            b.classList.contains('selected') ||
+            b.getAttribute('data-autolead-clicked') === '1'
+          );
           if (!alreadyActive) {
             results.push({
               questionTitle: 'vector_survey',
@@ -1209,7 +1226,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
       }
 
       if (!results.length) {
-        const allButtons = Array.from(document.querySelectorAll('button:not([type="submit"]):not(.btn-submit):not(.faq-trigger):not(.offerwall-btn), [role="button"]:not(.btn-submit):not(.offerwall-btn)'));
+        const allButtons = Array.from(document.querySelectorAll('button:not([type="submit"]):not(.btn-submit):not(.faq-trigger):not(.offerwall-btn), [role="button"]:not(.btn-submit):not(.offerwall-btn)')).filter(isVisible);
         const yesBtn = allButtons.find((b) => /^(yes|có|true|agree)$/i.test((b.innerText || b.textContent || '').trim()));
         const noBtn = allButtons.find((b) => /^(no|không|false|disagree)$/i.test((b.innerText || b.textContent || '').trim()));
         if (yesBtn && noBtn) {
@@ -1270,7 +1287,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
           const locator = frame.locator(`[data-autolead-choice-id="${picked.uid}"]`).first();
           if (locator && (await locator.count() > 0)) {
             if (typeof locator.scrollIntoViewIfNeeded === 'function') {
-              await locator.scrollIntoViewIfNeeded().catch(() => {});
+              await locator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
             }
             const surveyPause = Math.floor(Math.random() * 200) + 200;
             await new Promise((r) => setTimeout(r, surveyPause));
@@ -1395,7 +1412,7 @@ export async function humanType(field, text, page = null) {
 
   try {
     if (typeof field.scrollIntoViewIfNeeded === 'function') {
-      await field.scrollIntoViewIfNeeded().catch(() => {});
+      await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
     }
     if (typeof field.click === 'function') {
       await field.click({ force: true, timeout: 1500 }).catch(() => {});
@@ -1637,7 +1654,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               visibleFieldCount += 1;
               if (!metadata.checked) {
                 try {
-                  await field.scrollIntoViewIfNeeded().catch(() => {});
+                  await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
                   const consentPause = Math.floor(Math.random() * 120) + 120;
                   if (page && typeof page.waitForTimeout === 'function') {
                     await page.waitForTimeout(consentPause).catch(() => {});
@@ -1724,7 +1741,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           }
 
           if (metadata.kind === 'select') {
-            await field.scrollIntoViewIfNeeded().catch(() => {});
+            await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
             await field.click({ force: true, timeout: 1000 }).catch(() => {});
             const selectPause = Math.floor(Math.random() * 100) + 120;
             if (page && typeof page.waitForTimeout === 'function') {
@@ -2031,7 +2048,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               await new Promise((resolve) => { setTimeout(resolve, reviewPause); });
 
               // Cuộn phần tử vào tầm nhìn
-              await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+              await submitBtn.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
               await new Promise((resolve) => { setTimeout(resolve, Math.floor(Math.random() * 200) + 150); });
 
               // Đảm bảo gỡ bỏ hoàn toàn disabled và pointer-events bị khóa
@@ -2115,14 +2132,38 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       if (filled > 0) {
         noProgressRounds = 0;
       } else {
-        // Chỉ đếm vòng không tiến triển khi trang thực sự có form/input cần điền
+        // Chỉ đếm vòng không tiến triển khi trang thực sự có form/input chưa điền hoặc khảo sát chưa trả lời
         let hasInteractable = true;
         try {
           if (typeof page.evaluate === 'function' && !page.isClosed()) {
             hasInteractable = await page.evaluate(() => {
-              return Boolean(document.querySelector(
-                'input:not([type="hidden"]), select, textarea, button[type="submit"], input[type="submit"], [data-vector-submit="true"], button.btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"]'
-              ));
+              const isVisible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                return Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+              };
+
+              // 1. Kiểm tra có ô text/email/tel/number nào đang hiển thị và CHƯA ĐIỀN không
+              const textInputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea'));
+              const hasEmptyInput = textInputs.some((el) => isVisible(el) && !el.disabled && !el.readOnly && !el.value?.trim());
+              if (hasEmptyInput) return true;
+
+              // 2. Kiểm tra có select nào đang hiển thị và chưa chọn giá trị không
+              const selects = Array.from(document.querySelectorAll('select'));
+              const hasEmptySelect = selects.some((el) => isVisible(el) && !el.disabled && (!el.value || el.value === ''));
+              if (hasEmptySelect) return true;
+
+              // 3. Kiểm tra có nhóm khảo sát hoặc nút lựa chọn chưa được trả lời không
+              const optionButtons = Array.from(document.querySelectorAll('button.btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"], button[type="button"]'));
+              const hasUnansweredSurvey = optionButtons.some((el) => {
+                if (!isVisible(el) || el.disabled) return false;
+                if (el.classList.contains('active') || el.classList.contains('selected') || el.getAttribute('data-autolead-clicked') === '1') return false;
+                return el.closest('.step-container, .survey-container, form, [data-step], .question-container, .creative, fieldset') !== null;
+              });
+              if (hasUnansweredSurvey) return true;
+
+              return false;
             });
           }
         } catch {
@@ -2132,11 +2173,11 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         if (hasInteractable) {
           noProgressRounds += 1;
         } else {
-          // Trang chưa có form (đang redirect hoặc đang tải), reset bộ đếm để không trigger AI nhầm
+          // Trang không có trường nào cần điền (đang redirect hoặc đang tải), reset bộ đếm để không trigger AI nhầm
           noProgressRounds = 0;
         }
 
-        // 3 lần scan liên tiếp có form mà không fill được gì và không đang đợi lead → nhờ AI Assist
+        // 3 lần scan liên tiếp có trường chưa điền được và không đang chờ lead → nhờ AI Assist
         if (noProgressRounds >= 3 && !session.aiAssistRunning && session.leadCheckStatus !== 'waiting' && !page.isClosed()) {
           noProgressRounds = 0;
           options.onStuck?.(page);
@@ -2144,7 +2185,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       }
     };
     session.triggerAutofillScan = () => { void scan(); };
-    const timer = setInterval(() => { void scan(); }, 1500);
+    const timer = setInterval(() => { void scan(); }, 650);
     timer.unref?.();
     page.on('domcontentloaded', scan);
     page.on('load', scan);
