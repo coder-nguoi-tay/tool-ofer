@@ -2504,6 +2504,7 @@ async function openBrowserWithInstalledChrome({
     if (deadReason) {
       throw new Error(`trang đích hiển thị ${deadReason}`);
     }
+    session.mainPage = page; // dùng để phân biệt tab chính vs tab phụ
     await page.bringToFront().catch(() => {});
 
     // Đặt tiền tố IP và thiết bị vào tiêu đề trang và gắn badge để khi xem đều thấy rõ IP và loại thiết bị
@@ -2545,6 +2546,37 @@ async function openBrowserWithInstalledChrome({
             document.title = prefix + document.title;
           }
         }, { ip: exitIp, deviceProfile }).catch(() => {});
+      });
+
+      // Guard cho tab phụ: load quá 15s không xong → đóng tab, quay về tab chính
+      const slowLoadTimer = setTimeout(async () => {
+        if (newPage.isClosed() || newPage === session.mainPage) return;
+        try {
+          const readyState = await newPage.evaluate(() => document.readyState).catch(() => 'complete');
+          if (readyState !== 'complete') {
+            console.log(`[SlowLoad] Tab phụ load quá 15s (${newPage.url()}), đóng và quay về tab chính.`);
+            session.addBrowserLog?.({ type: 'navigate', url: newPage.url(), title: '[Đóng - load quá 15s]', html: '' });
+            await newPage.close().catch(() => {});
+            const remaining = context.pages().filter((p) => !p.isClosed());
+            if (remaining.length > 0) await (session.mainPage?.isClosed?.() ? remaining[0] : session.mainPage).bringToFront().catch(() => {});
+          }
+        } catch {}
+      }, 15000);
+      newPage.once('load', () => clearTimeout(slowLoadTimer));
+      newPage.once('close', () => clearTimeout(slowLoadTimer));
+
+      // Guard tab phụ bị lỗi mạng → đóng tab đó thôi, không đóng cả browser
+      newPage.on('load', async () => {
+        if (newPage.isClosed() || newPage === session.mainPage) return;
+        try {
+          const deadReason = await getDeadOrBlockedReason(newPage);
+          if (!deadReason) return;
+          console.log(`[DeadTab] Tab phụ lỗi "${deadReason}" (${newPage.url()}), đóng và quay về tab chính.`);
+          session.addBrowserLog?.({ type: 'traffic_blocked', detail: `Tab phụ lỗi: ${deadReason}` });
+          await newPage.close().catch(() => {});
+          const remaining = context.pages().filter((p) => !p.isClosed());
+          if (remaining.length > 0) await (session.mainPage?.isClosed?.() ? remaining[0] : session.mainPage).bringToFront().catch(() => {});
+        } catch {}
       });
     });
 
@@ -2884,6 +2916,16 @@ export function watchTrafficBlockedPage(session) {
           // 1. Kiểm tra trang có bị lỗi mạng hoặc thông báo blocked không
           const deadReason = await getDeadOrBlockedReason(page);
           if (deadReason) {
+            // Tab phụ bị lỗi → chỉ đóng tab đó, quay về tab chính (không đóng browser)
+            if (page !== session.mainPage) {
+              console.log(`[DeadTab] Tab phụ bị ${deadReason} (${page.url()}), đóng tab và quay về tab chính.`);
+              session.addBrowserLog?.({ type: 'traffic_blocked', detail: `Tab phụ bị ${deadReason}. Đóng tab, giữ trình duyệt.` });
+              await page.close().catch(() => {});
+              const remaining = context.pages().filter((p) => !p.isClosed());
+              if (remaining.length > 0) await (session.mainPage?.isClosed?.() ? remaining[0] : session.mainPage).bringToFront().catch(() => {});
+              continue;
+            }
+            // Tab chính bị lỗi → đóng cả browser như cũ
             blocked = true;
             clearInterval(timer);
             session.closingDueToTrafficBlocked = true;
