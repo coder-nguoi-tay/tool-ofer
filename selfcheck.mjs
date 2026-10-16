@@ -1445,6 +1445,73 @@ assert.ok(
   'Option được click phải nằm trong danh sách nhóm btn-option'
 );
 
+// 11.6 Kiểm tra autofill tiếp tục chạy và kiểm tra submit liên tục khi leadCheckStatus = 'waiting' (không bị đứng màn hình)
+let submitClickedDuringLeadWait = false;
+const mockLeadWaitPageEvents = {};
+const mockSubmitButton = {
+  tagName: 'BUTTON',
+  id: 'btnNext',
+  className: 'continue-btn',
+  innerText: 'Next Step',
+  dataset: {},
+  disabled: false,
+  removeAttribute: () => {},
+  classList: { remove: () => {} },
+  setAttribute: () => {},
+  getBoundingClientRect: () => ({ width: 120, height: 40 }),
+  closest: () => null,
+  dispatchEvent: () => {},
+  click: () => { submitClickedDuringLeadWait = true; },
+};
+
+const mockLeadWaitPage = {
+  isClosed: () => false,
+  url: () => 'https://example.com/step2',
+  on: (evt, handler) => { mockLeadWaitPageEvents[evt] = handler; },
+  evaluate: async (fn, arg) => {
+    if (typeof fn === 'function') {
+      return fn(mockSubmitButton, arg);
+    }
+    return true;
+  },
+  frames: () => [{
+    locator: (sel) => ({
+      all: async () => {
+        if (sel.includes('button') || sel.includes('continue')) {
+          return [{
+            isVisible: async () => true,
+            isEnabled: async () => true,
+            scrollIntoViewIfNeeded: async () => {},
+            hover: async () => {},
+            click: async () => { submitClickedDuringLeadWait = true; },
+            evaluate: async (fn) => fn(mockSubmitButton),
+          }];
+        }
+        return [];
+      },
+    }),
+    evaluate: async () => ({ unfilled: false }),
+  }],
+};
+
+const mockContextLeadWait = {
+  on: (evt, handler) => { mockLeadWaitPageEvents[evt] = handler; },
+  pages: () => [mockLeadWaitPage],
+};
+
+const mockSessionLeadWait = {
+  autofillFields: 2,
+  leadCheckStatus: 'waiting', // Đang trong quá trình chờ lead API
+};
+
+attachAutofill(mockContextLeadWait, [{ firstname: 'John' }], 'https://example.com', mockSessionLeadWait, {
+  autoSubmit: true,
+});
+
+mockSessionLeadWait.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 250));
+assert.ok(submitClickedDuringLeadWait, 'Submit phải được kiểm tra và bấm liên tục ngay cả khi leadCheckStatus đang là waiting');
+
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 
 

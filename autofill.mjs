@@ -1812,7 +1812,7 @@ export async function humanType(field, text, page = null) {
     }
   } catch {}
 
-  const prePause = Math.floor(Math.random() * 80) + 60;
+  const prePause = Math.floor(Math.random() * 40) + 25;
   if (activePage && typeof activePage.waitForTimeout === 'function') {
     await activePage.waitForTimeout(prePause).catch(() => {});
   } else {
@@ -1842,15 +1842,15 @@ export async function humanType(field, text, page = null) {
     }).catch(() => {});
   }
 
-  // Gõ tuần tự từng ký tự mô phỏng nhịp gõ phím của người thật
+  // Gõ tuần tự từng ký tự mô phỏng nhịp gõ phím của người thật (nhanh và liên tục)
   let typedOk = false;
   if (activePage?.keyboard && typeof activePage.keyboard.type === 'function') {
     try {
       for (let i = 0; i < str.length; i++) {
         const char = str[i];
-        let charDelay = Math.floor(Math.random() * 45) + 35; // 35ms - 80ms
+        let charDelay = Math.floor(Math.random() * 25) + 30; // 30ms - 55ms
         if ([' ', '@', '.', '-', '_', '/'].includes(char)) {
-          charDelay += Math.floor(Math.random() * 60) + 40; // 75ms - 135ms
+          charDelay += Math.floor(Math.random() * 25) + 20; // 50ms - 80ms
         }
         await activePage.keyboard.type(char, { delay: charDelay });
       }
@@ -1862,9 +1862,9 @@ export async function humanType(field, text, page = null) {
     try {
       for (let i = 0; i < str.length; i++) {
         const char = str[i];
-        let charDelay = Math.floor(Math.random() * 50) + 35;
+        let charDelay = Math.floor(Math.random() * 25) + 30;
         if ([' ', '@', '.', '-', '_', '/'].includes(char)) {
-          charDelay += Math.floor(Math.random() * 70) + 50;
+          charDelay += Math.floor(Math.random() * 25) + 20;
         }
         await field.pressSequentially(char, { delay: charDelay });
       }
@@ -1877,7 +1877,7 @@ export async function humanType(field, text, page = null) {
   // Fallback an toàn nếu chưa gõ được qua keyboard/pressSequentially
   if (!typedOk && typeof field.pressSequentially === 'function') {
     try {
-      await field.pressSequentially(str, { delay: 45 });
+      await field.pressSequentially(str, { delay: 30 });
       typedOk = true;
     } catch {}
   }
@@ -1907,8 +1907,8 @@ export async function humanType(field, text, page = null) {
     }, str).catch(() => {});
   }
 
-  // Dừng nhẹ tự nhiên sau khi gõ xong trường (60ms - 120ms)
-  const postPause = Math.floor(Math.random() * 60) + 60;
+  // Dừng siêu ngắn tự nhiên sau khi gõ xong trường (25ms - 50ms)
+  const postPause = Math.floor(Math.random() * 25) + 25;
   if (activePage && typeof activePage.waitForTimeout === 'function') {
     await activePage.waitForTimeout(postPause).catch(() => {});
   } else {
@@ -1955,7 +1955,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
    */
   async function fillVisibleForms(page) {
     if (page.isClosed()) return;
-    if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
+    if (session.leadCheckStatus === 'failed') return;
     const currentUrl = page.url();
     if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:')) return;
 
@@ -1969,7 +1969,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     let visibleFieldCount = 0;
 
     for (const frame of frames) {
-      if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
+      if (session.leadCheckStatus === 'failed') return;
       let fields = [];
       try {
         fields = await frame.locator('input, textarea, select').all();
@@ -1999,7 +1999,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       } catch {}
 
       for (const field of fields) {
-        if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
+        if (session.leadCheckStatus === 'failed') return;
         try {
           const isEnabled = await field.isEnabled().catch(() => true);
           if (!isEnabled) continue;
@@ -2423,8 +2423,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             detail: `Đã điền [${metadata.names?.[0] || metadata.id || 'ô'}]: ${String(valueToFill).slice(0, 30)}`,
           });
 
-          // Dừng nhẹ giữa các trường (120ms - 250ms) như người dùng liếc mắt chuyển sang ô tiếp theo
-          const fieldPause = Math.floor(Math.random() * 130) + 120;
+          // Dừng nhẹ giữa các trường (35ms - 75ms) để điền liên tục không khựng
+          const fieldPause = Math.floor(Math.random() * 40) + 35;
           if (page && typeof page.waitForTimeout === 'function') {
             await page.waitForTimeout(fieldPause).catch(() => {});
           } else {
@@ -2435,9 +2435,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         }
       }
 
-      // Nếu có trường vừa được điền hoặc tick trong pass này, chờ 350ms để DOM cập nhật trạng thái
+      // Nếu có trường vừa được điền hoặc tick trong pass này, chờ 50ms để DOM cập nhật trạng thái
       if (filledInThisPass > 0) {
-        await new Promise((resolve) => { setTimeout(resolve, 350); });
+        await new Promise((resolve) => { setTimeout(resolve, 50); });
       }
 
       // Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên radio buttons hoặc lựa chọn Yes/No/Tuổi/Thu nhập
@@ -2532,13 +2532,21 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       // Tự động bấm nút gửi / tiếp tục nếu có tùy chọn autoSubmit và vừa điền hoặc tích xong các trường
       // Kiểm tra an toàn trước khi submit: Nếu trên form hiện tại vẫn còn trường bắt buộc (required / *) hoặc trường đang bị lỗi chưa có dữ liệu, KHÔNG được bấm submit!
       const hasUnfilledRequiredOrErrorField = await frame.evaluate(() => {
+        const isVisible = (el) => {
+          if (!el || el.disabled) return false;
+          if (el.closest('header, footer, nav')) return false;
+          // Loại trừ trường nằm trong step ẩn, tab ẩn, carousel ẩn hoặc aria-hidden
+          if (el.closest('[aria-hidden="true"], [inert], .inactive, .hidden, .hide, .step:not(.active):not(.current), .tab-pane:not(.active), .carousel-item:not(.active)')) return false;
+          const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+          if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) return false;
+          return true;
+        };
+
         const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea'));
         for (const input of inputs) {
-          // Bỏ qua field nằm trong header / footer / nav (không liên quan đến form chính)
-          if (input.closest('header, footer, nav')) continue;
-          if (input.disabled || input.offsetParent === null) continue;
-          const style = window.getComputedStyle(input);
-          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+          if (!isVisible(input)) continue;
 
           const val = (input.value || '').trim();
           let isChecked = true;
@@ -2557,7 +2565,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
           const isRequiredAttr = input.required || input.getAttribute('aria-required') === 'true';
           const hasErrorClass = input.classList.contains('error') || input.getAttribute('aria-invalid') === 'true';
-          // Chỉ kiểm tra lỗi trong group gần nhất (input-group, form-group, field, loco-group), KHÔNG dùng step-container (tránh bắt nhầm cả step)
+          // Chỉ kiểm tra lỗi trong group gần nhất (input-group, form-group, field, loco-group), KHÔNG dùng step-container
           const parentGroup = input.closest('.input-group, .form-group, .field, .loco-group');
           const hasParentError = parentGroup ? Boolean(parentGroup.querySelector('.error:not(input):not(select), .error-message, .invalid-feedback')) : false;
 
@@ -2582,12 +2590,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         return { unfilled: false };
       }).catch(() => ({ unfilled: false }));
 
-      if (hasUnfilledRequiredOrErrorField?.unfilled) {
-        options.onLog?.({
-          type: 'submit_deferred',
-          detail: `Chưa thể submit vì trường bắt buộc [${hasUnfilledRequiredOrErrorField.id}] còn trống hoặc đang báo lỗi.`,
-        });
-      } else if (options.autoSubmit !== false && (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0)) {
+      // Kiểm tra và bấm nút submit liên tục: nếu không còn trường bắt buộc nào còn trống
+      if (!hasUnfilledRequiredOrErrorField?.unfilled && options.autoSubmit !== false) {
         try {
           // 1. Thử tìm nút submit trong frame hiện tại
           let submitBtn = await findSubmitButton(frame);
@@ -2611,8 +2615,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               const id = btn.id || null;
               const now = Date.now();
               const lastClick = Number(btn.dataset.autoleadLastSubmitTime || 0);
-              // Nếu vừa click trong vòng 2.5s thì không click lại để tránh duplicate submit
-              if (now - lastClick < 2500) return { shouldClick: false, text, tag, id };
+              // Giảm thời gian khóa chống duplicate submit xuống 800ms để kiểm tra và bấm liên tục
+              if (now - lastClick < 800) return { shouldClick: false, text, tag, id };
               btn.dataset.autoleadLastSubmitTime = String(now);
               btn.dataset.autoleadSubmitted = '1';
               return { shouldClick: true, text, tag, id };
@@ -2631,16 +2635,16 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 detail: `Đã bấm nút submit/tiếp tục: <${btnInfo.tag}> "${submitLabel}"`,
               });
 
-              // Mô phỏng người dùng dừng lại kiểm tra form trước khi bấm submit (500ms - 900ms)
-              const reviewPause = Math.floor(Math.random() * 400) + 500;
+              // Dừng ngắn tự nhiên (40ms - 80ms)
+              const reviewPause = Math.floor(Math.random() * 40) + 40;
               await new Promise((resolve) => { setTimeout(resolve, reviewPause); });
 
               // Cuộn phần tử vào tầm nhìn
-              await submitBtn.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+              await submitBtn.scrollIntoViewIfNeeded({ timeout: 400 }).catch(() => {});
               if (typeof submitBtn.hover === 'function') {
-                await submitBtn.hover({ timeout: 600 }).catch(() => {});
+                await submitBtn.hover({ timeout: 400 }).catch(() => {});
               }
-              await new Promise((resolve) => { setTimeout(resolve, Math.floor(Math.random() * 200) + 150); });
+              await new Promise((resolve) => { setTimeout(resolve, 30); });
 
               // Đảm bảo gỡ bỏ hoàn toàn disabled và pointer-events bị khóa
               await submitBtn.evaluate((b) => {
@@ -2662,7 +2666,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
               // Thao tác click Playwright
               try {
-                await submitBtn.click({ force: true, timeout: 2500 });
+                await submitBtn.click({ force: true, timeout: 2000 });
               } catch (clickErr) {
                 console.warn('[Autofill] Playwright click lỗi, dùng fallback evaluate click:', clickErr.message);
               }
@@ -2678,14 +2682,14 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 }
               }).catch(() => {});
 
-              // Xử lý đặc thù màn đầu: Lần đầu bấm submit thường bị trang web đẩy qua trang khác không đúng (quảng cáo/redirect/privacy).
-              // Tắt tab quảng cáo nếu có, hoặc mở lại trang đầu rồi submit cho người dùng (chỉ làm ở lần đầu mở trang).
+              // Xử lý đặc thù màn đầu nếu có tab quảng cáo mở ra ngoài
               if (isFirstSubmitOfSession) {
                 session.firstSubmitHandled = true;
-                await new Promise((resolve) => setTimeout(resolve, 1800));
+                // Chờ ngắn 200ms để bắt popup (nếu trang web cố bật tab quảng cáo)
+                await new Promise((resolve) => setTimeout(resolve, 200));
                 page.off?.('popup', popupHandler);
 
-                // 1. Tắt tab mới mở không đúng (nếu có)
+                // 1. Tắt tab popup quảng cáo mở không đúng (nếu có)
                 if (openedPopup && !openedPopup.isClosed()) {
                   console.log(`[Autofill] Phát hiện tab mới bật lên (${openedPopup.url()}) sau submit lần 1. Đang tắt tab này...`);
                   options.onLog?.({
@@ -2696,48 +2700,32 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   await page.bringToFront().catch(() => {});
                 }
 
-                // 2. Kiểm tra nếu trang chính bị đẩy sang URL khác không đúng (khác initialUrl)
+                // 2. Chỉ khôi phục về initialUrl nếu trang chính bị đẩy sang URL quảng cáo rác trắng trợn
                 const currentUrl = page.url();
-                const isPushedAway = currentUrl !== initialUrl && !currentUrl.includes('#');
-                if (isPushedAway) {
-                  console.log(`[Autofill] Trang bị đẩy sang URL không đúng: [${currentUrl}]. Đang tắt đi và mở lại trang đầu: [${initialUrl}]...`);
-                  options.onLog?.({
-                    type: 'first_submit_redirect_recovered',
-                    detail: `Trang bị đẩy sang [${currentUrl}]. Đang mở lại trang đầu [${initialUrl}] để submit lại.`,
-                  });
+                const isSpamAdRedirect = /doubleclick\.net|googleadservices|popads|about:blank/i.test(currentUrl);
+                if (isSpamAdRedirect) {
+                  console.log(`[Autofill] Trang bị đẩy sang URL quảng cáo không đúng: [${currentUrl}]. Đang mở lại trang đầu [${initialUrl}]...`);
                   try {
                     await page.goto(initialUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                    await new Promise((r) => setTimeout(r, 1200));
                   } catch (gotoErr) {
                     console.warn('[Autofill] Lỗi khi mở lại trang đầu:', gotoErr.message);
                   }
                 }
-
-                // Xóa đánh dấu đã submit trên các nút để khi quay lại form có thể click submit lại ngay
-                await page.evaluate(() => {
-                  document.querySelectorAll('[data-autolead-submitted]').forEach((b) => {
-                    delete b.dataset.autoleadSubmitted;
-                    delete b.dataset.autoleadLastSubmitTime;
-                  });
-                }).catch(() => {});
-
-                // Kích hoạt quét và điền lại (nếu cần) rồi tự động submit lại lần 2
-                session.triggerAutofillScan?.();
-                return;
               }
 
-              // Màn đầu tiên vừa được submit chính thức: kích hoạt kiểm tra lead từ API nếu được cấu hình
+              // Màn đầu tiên vừa được submit chính thức: kích hoạt kiểm tra lead chạy ngầm từ API
               if (options.enableLeadCheck !== false && !session.screen1Completed) {
                 session.screen1Completed = true;
-                session.leadCheckStatus = 'waiting';
+                session.leadCheckStatus = 'checking';
                 if (typeof options.onFirstScreenCompleted === 'function') {
                   options.onFirstScreenCompleted(session, page);
                 }
-                return;
+                // Tiếp tục chu trình để màn 2 được xử lý ngay lập tức, KHÔNG return
               }
+
+              // Kích hoạt quét tiếp theo sau 120ms để màn hình thao tác liên tục không nghỉ
+              setTimeout(() => { session.triggerAutofillScan?.(); }, 120);
             }
-          } else if (filledInThisPass > 0) {
-            console.log(`[Autofill] Đã điền ${filledInThisPass} trường nhưng chưa tìm thấy nút Submit phù hợp trên trang.`);
           }
         } catch (submitErr) {
           console.error('[Autofill] Lỗi trong quá trình xử lý submit:', submitErr.message);
@@ -2779,6 +2767,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       const filled = (session.autofillFields ?? 0) - fieldsBefore;
       if (filled > 0) {
         noProgressRounds = 0;
+        // Điền được trường hoặc submit, quét tiếp ngay tức thì (80ms) để màn hình chạy liên tục
+        setTimeout(() => { void scan(); }, 80);
       } else {
         // Chỉ đếm vòng không tiến triển khi trang thực sự có form/input, khảo sát hoặc nút bấm cần tương tác
         let hasInteractable = true;
@@ -2837,15 +2827,16 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           noProgressRounds = 0;
         }
 
-        // 3 lần scan liên tiếp không tiến triển và không đang chờ lead → nhờ AI Assist
-        if (noProgressRounds >= 3 && !session.aiAssistRunning && session.leadCheckStatus !== 'waiting' && !page.isClosed()) {
+        // Gọi AI Assist khi thực sự kẹt sau nhiều vòng liên tục không có tiến triển
+        const stuckThreshold = options.stuckThreshold ?? 3;
+        if (noProgressRounds >= stuckThreshold && !session.aiAssistRunning && !page.isClosed()) {
           noProgressRounds = 0;
           options.onStuck?.(page);
         }
       }
     };
     session.triggerAutofillScan = () => { void scan(); };
-    const timer = setInterval(() => { void scan(); }, 650);
+    const timer = setInterval(() => { void scan(); }, 250);
     timer.unref?.();
     page.on('domcontentloaded', scan);
     page.on('load', scan);
@@ -2853,7 +2844,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       if (options.enableLeadCheck !== false && !session.screen1Completed && (session.autofillFields ?? 0) > 0) {
         if (typeof page.mainFrame === 'function' && frame === page.mainFrame()) {
           session.screen1Completed = true;
-          session.leadCheckStatus = 'waiting';
+          session.leadCheckStatus = 'checking';
           if (typeof options.onFirstScreenCompleted === 'function') {
             options.onFirstScreenCompleted(session, page);
           }

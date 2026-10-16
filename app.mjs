@@ -2099,7 +2099,7 @@ async function startLeadVerification(session, leadConfig) {
   const slotNum = (session.tileIndex ?? 0) + 1;
   const label = `Slot ${slotNum} [IP: ${exitIp}]`;
 
-  console.log(`[LeadCheck] ${label}: Đã xong màn 1. Bắt đầu dừng chờ kiểm tra lead từ toffers.top...`);
+  console.log(`[LeadCheck] ${label}: Đã xong màn 1. Bắt đầu kiểm tra lead chạy ngầm từ toffers.top...`);
 
   const updateBadge = (text) => {
     try {
@@ -2121,8 +2121,8 @@ async function startLeadVerification(session, leadConfig) {
   const intervalMs = intervalSeconds * 1000;
   const initialWaitSeconds = Math.min(5, intervalSeconds);
 
-  session.leadCheckMessage = `Đã xong màn 1; đang dừng chờ ${initialWaitSeconds}s để kiểm tra lead lần 1...`;
-  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang chờ lead (lần 1/${maxAttempts})...</span>`);
+  session.leadCheckMessage = `Đã xong màn 1; đang chạy ngầm kiểm tra lead lần 1...`;
+  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chạy ngầm kiểm tra lead (1/${maxAttempts})...</span>`);
 
   let leadFound = false;
   let attempt = 0;
@@ -2434,6 +2434,19 @@ async function openBrowserWithInstalledChrome({
       void startLeadVerification(session, leadConfig);
     },
     onStuck: (page) => {
+      // Chỉ chạy AI Assist cho tab chính đang active, không chạy trên tab phụ/ad/trang blog
+      if (session.mainPage && page !== session.mainPage) return;
+      if (session.aiAssistRunning) return;
+
+      const currentUrl = page.url?.() || '';
+      const now = Date.now();
+      // Chống spam AI: Nếu cùng 1 URL vừa chạy AI trong vòng 15s thì không chạy lại
+      if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 15000)) {
+        return;
+      }
+      session.lastAiUrl = currentUrl;
+      session.lastAiTime = now;
+
       const currentRecord = session.currentRecord || (recordPool[session.recordIndex] ?? recordPool[0]);
       if (session.assignedEmail && currentRecord) {
         currentRecord.email = session.assignedEmail;
@@ -2446,8 +2459,8 @@ async function openBrowserWithInstalledChrome({
       }).then(async () => {
         // AI xong → kích autofill quét lại một lần
         session.triggerAutofillScan?.();
-        // Chờ 3s để trang ổn định
-        await new Promise((r) => setTimeout(r, 3000));
+        // Chờ ngắn 600ms để trang ổn định
+        await new Promise((r) => setTimeout(r, 600));
         if (page.isClosed()) return;
         const stillHasWork = await pageHasWork(page);
 
