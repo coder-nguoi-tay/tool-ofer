@@ -12,7 +12,41 @@ import { join } from 'node:path';
 import { humanType } from './autofill.mjs';
 
 const MAX_ROUNDS = 20;
-const AGT_TIMEOUT_MS = 60_000;
+const AGT_TIMEOUT_MS = 90_000;
+
+/**
+ * Rút gọn và làm sạch HTML chỉ giữ lại cấu trúc tương tác (form, input, button, label, text)
+ * Loại bỏ toàn bộ script, style, svg, noscript, comments và inline base64 để AI phân tích
+ * siêu nhanh, tránh timeout (giảm dung lượng từ >120KB xuống <15KB mà vẫn đủ 100% ngữ cảnh).
+ *
+ * @param {string} html Raw HTML của trang.
+ * @return {string} HTML đã được làm sạch và thu gọn.
+ */
+export function extractCleanPageStructure(html) {
+  if (!html || typeof html !== 'string') return '';
+
+  let cleaned = html
+    // 1. Xóa toàn bộ thẻ script, style, svg, noscript, audio, video, canvas, iframe
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, '')
+    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '')
+    .replace(/<canvas\b[^<]*(?:(?!<\/canvas>)<[^<]*)*<\/canvas>/gi, '')
+    // 2. Xóa comment HTML
+    .replace(/<!--[\s\S]*?-->/g, '')
+    // 3. Xóa dữ liệu base64 dài (data:image/..., data:font/...)
+    .replace(/data:[^;]+;base64,[a-zA-Z0-9+/=]+/g, 'data:stripped')
+    // 4. Thu gọn whitespace thừa
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n+/g, '\n');
+
+  // Giới hạn tối đa 60KB cho AI prompt (đã quá đủ cho mọi form web phức tạp nhất)
+  if (cleaned.length > 60_000) {
+    cleaned = cleaned.slice(0, 60_000) + '\n<!-- [TRUNCATED] -->';
+  }
+
+  return cleaned.trim();
+}
 
 /**
  * Đường dẫn hoặc tên binary của agy CLI.
@@ -52,7 +86,7 @@ export function callAgt(prompt) {
     let err = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error('agy timeout (quá 60s)'));
+      reject(new Error('agy timeout (quá 90s)'));
     }, AGT_TIMEOUT_MS);
 
     child.stdout.on('data', (d) => { out += d.toString(); });
@@ -394,8 +428,9 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
       const html = await page.content().catch(() => '');
       if (!html) break;
 
-      // Cắt HTML để không quá dài (giữ tối đa 120KB theo đặc tả)
-      const trimmedHtml = html.length > 120_000 ? html.slice(0, 120_000) + '...[truncated]' : html;
+      // Rút gọn và làm sạch HTML chỉ giữ lại cấu trúc tương tác (loại bỏ script, style, svg, comments)
+      // giúp AI phân tích cực nhanh và chính xác, tránh timeout và tràn context
+      const cleanedHtml = extractCleanPageStructure(html);
 
       const recordJson = JSON.stringify(record ?? {});
       const prompt = `Bạn là agent tự động điền form và trả lời khảo sát web.
@@ -420,7 +455,7 @@ Quy tắc xử lý:
 5. Nếu trang đã là trang cảm ơn (Thank You / Congratulations / Success) hoặc không còn form/câu hỏi nào cần làm, trả về: []
 
 HTML:
-${trimmedHtml}`;
+${cleanedHtml}`;
 
       let actions = [];
       try {

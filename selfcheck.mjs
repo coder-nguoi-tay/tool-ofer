@@ -16,9 +16,10 @@ import {
   DEFAULT_PHONE_AREA_CODES,
   getPhoneAreaCode,
   getNormalizedPhone,
+  handleNegativeSkipButtons,
 } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
-import { parseActions, pageHasWork, executeAction } from './ai-assist.mjs';
+import { parseActions, pageHasWork, executeAction, extractCleanPageStructure } from './ai-assist.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
@@ -1329,6 +1330,55 @@ autoRefill.deviceProfiles = ['windows'];
 assert.ok(DEVICE_PROFILES.android.ua('150.0.7871.187').includes('Chrome/150.0.7871.187'), 'Android UA phải chứa Chrome/150');
 assert.ok(DEVICE_PROFILES.ios.ua('151.0.7922.174').includes('CriOS/151.0.7922.174'), 'iOS UA phải chứa CriOS/151');
 assert.ok(DEVICE_PROFILES.ipad.ua('152.0.7977.83').includes('CriOS/152.0.7977.83'), 'iPad UA phải chứa CriOS/152');
+
+// 11. Kiểm tra các cơ chế được huấn luyện từ log HTML thực tế
+// 11.1 Tự động nhận diện và sinh ssn_last4 / last4 / ssn4
+assert.equal(
+  matchFieldValue(['ssn_last4', 'last4'], { ssn: '123-45-6789' }),
+  '6789',
+  'Khi có ssn đầy đủ, ssn_last4 phải lấy 4 số cuối của SSN'
+);
+assert.equal(
+  matchFieldValue(['ssn_last4', 'ssn4'], { phone: '8149143396' }),
+  '3396',
+  'Khi thiếu ssn, ssn_last4 phải fallback lấy 4 số cuối của số điện thoại'
+);
+const fallbackSsn4 = matchFieldValue(['ssn_last4'], {});
+assert.ok(/^\d{4}$/.test(fallbackSsn4), 'Khi record rỗng, ssn_last4 phải tự động sinh chuỗi 4 chữ số');
+
+// 11.2 Kiểm tra extractCleanPageStructure (làm sạch HTML trước khi gửi AI Assist)
+const dirtyHtml = `
+<html>
+<head>
+  <style>body { background: #fff; } .hero { font-size: 14px; }</style>
+  <script src="https://analytics.example.com/gtm.js"></script>
+  <script>window.dataLayer = window.dataLayer || [];</script>
+</head>
+<body>
+  <!-- Đây là comment ẩn của tracker -->
+  <svg width="24" height="24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+  <noscript><iframe src="https://ns.example.com"></iframe></noscript>
+  <form id="lead-form">
+    <label for="fname">First Name</label>
+    <input id="fname" name="first_name" type="text" />
+    <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" />
+    <button type="submit" class="continue-button">Continue</button>
+  </form>
+</body>
+</html>
+`;
+const cleaned = extractCleanPageStructure(dirtyHtml);
+assert.ok(!cleaned.includes('<script'), 'HTML sau khi làm sạch không được chứa thẻ script');
+assert.ok(!cleaned.includes('<style'), 'HTML sau khi làm sạch không được chứa thẻ style');
+assert.ok(!cleaned.includes('<svg'), 'HTML sau khi làm sạch không được chứa thẻ svg');
+assert.ok(!cleaned.includes('<noscript'), 'HTML sau khi làm sạch không được chứa thẻ noscript');
+assert.ok(!cleaned.includes('Đây là comment ẩn'), 'HTML sau khi làm sạch không được chứa comment');
+assert.ok(!cleaned.includes('iVBORw0KGgoAAA'), 'HTML sau khi làm sạch phải xóa base64');
+assert.ok(cleaned.includes('<input id="fname" name="first_name" type="text" />'), 'HTML làm sạch phải giữ nguyên ô input');
+assert.ok(cleaned.includes('class="continue-button"'), 'HTML làm sạch phải giữ nguyên nút submit');
+
+// 11.3 Kiểm tra handleNegativeSkipButtons là hàm hợp lệ
+assert.equal(typeof handleNegativeSkipButtons, 'function');
 
 
 

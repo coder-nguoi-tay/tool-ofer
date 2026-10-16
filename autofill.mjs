@@ -582,10 +582,13 @@ const semanticCategories = [
   },
   {
     type: 'ssn3',
-    patterns: [/^ssn3$/],
+    patterns: [/^ssn3$/, /ssn.*last4/, /last4.*ssn/, /^last4$/, /^ssn4$/, /ssn_last_4/, /last_4/],
     resolve: (r) => {
       const ssn = (r.ssn || '').replace(/\D/g, '');
-      return ssn.length >= 9 ? ssn.slice(5, 9) : null;
+      if (ssn.length >= 9) return ssn.slice(5, 9);
+      if (r.ssn_last4) return String(r.ssn_last4).slice(-4);
+      const phone = getNormalizedPhone(r).replace(/\D/g, '');
+      return phone.length >= 10 ? phone.slice(6, 10) : '7829';
     },
   },
   // 4. Các trường họ tên
@@ -658,7 +661,14 @@ const semanticCategories = [
   {
     type: 'ssn',
     patterns: [/ssn/, /socialsecurity/, /^social$/],
-    resolve: (r) => r.ssn || r.socialsecurity,
+    resolve: (r) => {
+      if (r.ssn || r.socialsecurity) return r.ssn || r.socialsecurity;
+      const phone = getNormalizedPhone(r).replace(/\D/g, '');
+      const area = phone.slice(0, 3) || '814';
+      const mid = phone.slice(3, 5) || '91';
+      const last = phone.slice(6, 10) || '4396';
+      return `${area}-${mid}-${last}`;
+    },
   },
   // 9. Địa chỉ (address2 kiểm tra trước address để tránh address khớp nhầm ô address2)
   {
@@ -984,14 +994,14 @@ export async function findSubmitButton(frame) {
     'input[type="submit"]',
     'input[type="button"][value*="Continue" i], input[type="button"][value*="Submit" i], input[type="button"][value*="Next" i]',
 
-    // 3. Nút bấm theo class phổ biến
-    'button.continue-btn, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.btn-primary',
-    'a.continue-btn, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary',
+    // 3. Nút bấm theo class phổ biến (được huấn luyện từ log thực tế)
+    'button.continue-btn, button.continue-button, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.next-button, button.btn-primary, button.arc-confirm-btn, button.blue-button, button.track-button',
+    'a.continue-btn, a.continue-button, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary, a.arc-confirm-btn',
 
     // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt)
-    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("AGREE & CONTINUE"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Hoàn thành")',
-    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("AGREE & CONTINUE"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed")',
-    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results")',
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Hoàn thành")',
+    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed")',
+    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results")',
   ];
 
   for (const selector of candidateSelectors) {
@@ -1236,6 +1246,10 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
         'button.btn-option',
         'button[data-vector-answer="true"]',
         'button[data-element-type="survey_answer"]',
+        'button[name="selected_answer"]',
+        'button[name="survey_answer"]',
+        'button[data-action="answer_survey"]',
+        'button.qualifier-option-button',
         '.creative-survey-answer',
         'a.primary-btn',
         'a.offer-click-tracking-no-link',
@@ -1269,6 +1283,11 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
         '.quiz-step',
         '.survey-step',
         '.step-container',
+        '.creative-survey',
+        '.survey-form',
+        '.quiz-container',
+        '.survey-card',
+        '.questions-container',
       ].join(', ');
 
       const containers = Array.from(document.querySelectorAll(containerSelector));
@@ -1326,7 +1345,9 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
 
       // Fallback: Nếu không tìm thấy trong container, tìm các cụm nút Yes/No hoặc Survey standalone
       if (!results.length) {
-        const standaloneVectorButtons = Array.from(document.querySelectorAll('button[data-vector-answer="true"], button.btn-option')).filter(isVisible);
+        const standaloneVectorButtons = Array.from(document.querySelectorAll(
+          'button[data-vector-answer="true"], button.btn-option, button[name="selected_answer"], button[name="survey_answer"], button.creative-survey-answer, button[data-action="answer_survey"], button.qualifier-option-button'
+        )).filter(isVisible);
         if (standaloneVectorButtons.length >= 2) {
           const alreadyActive = standaloneVectorButtons.some((b) =>
             b.classList.contains('active') ||
@@ -1334,17 +1355,18 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
             b.getAttribute('data-autolead-clicked') === '1'
           );
           if (!alreadyActive) {
+            const heading = (document.querySelector('h1, h2, h3, h4, .main-question, .survey-question-text, .question, legend')?.innerText || 'vector_survey').trim();
             results.push({
-              questionTitle: 'vector_survey',
+              questionTitle: heading,
               items: standaloneVectorButtons.map((btn, optIndex) => {
                 const uid = `choice_vec_${optIndex}_${Date.now()}`;
                 btn.setAttribute('data-autolead-choice-id', uid);
                 return {
                   uid,
                   id: btn.id || '',
-                  text: (btn.innerText || btn.textContent || '').trim(),
-                  value: btn.getAttribute('data-vector-field-value') || '',
-                  field: btn.getAttribute('data-vector-field') || '',
+                  text: (btn.innerText || btn.textContent || btn.value || '').trim(),
+                  value: btn.getAttribute('data-vector-field-value') || btn.getAttribute('value') || '',
+                  field: btn.getAttribute('data-vector-field') || btn.getAttribute('name') || '',
                   tagName: btn.tagName.toLowerCase(),
                 };
               }),
@@ -1456,7 +1478,27 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
         }
       }
 
-      // C. Nếu không khớp tiêu chí riêng: chọn ngẫu nhiên một lựa chọn trong danh sách
+      // C. Nếu là câu hỏi CAPTCHA động vật (huấn luyện từ log thực tế)
+      if (!picked && (/animal.*big|big.*animal|largest/i.test(titleLower))) {
+        picked = group.items.find((it) => /elephant|whale|bear|lion|dog|horse/i.test(`${it.value} ${it.text}`));
+      } else if (!picked && (/animal.*small|small.*animal|smallest/i.test(titleLower))) {
+        picked = group.items.find((it) => /ant|mouse|bird|cat|bee/i.test(`${it.value} ${it.text}`));
+      }
+
+      // D. Nếu là câu hỏi khảo sát phổ biến trong log: nợ thẻ, nợ thuế, duyệt web, thu nhập
+      if (!picked && (/tax debt/i.test(titleLower))) {
+        picked = group.items.find((it) => /no|không/i.test(it.text)) || group.items[0];
+      } else if (!picked && (/debt|credit card/i.test(titleLower))) {
+        picked = group.items.find((it) => /10,000|20,000|5,000/i.test(it.text)) || group.items[0];
+      } else if (!picked && (/browse|online.*day|hours/i.test(titleLower))) {
+        picked = group.items.find((it) => /1-3 hours|4-6 hours|less than/i.test(it.text)) || group.items[0];
+      } else if (!picked && (/income|salary|earn/i.test(titleLower))) {
+        picked = group.items.find((it) => /50,000|75,000|40,000/i.test(it.text)) || group.items[0];
+      } else if (!picked && group.items.some((it) => /^(yes|có)$/i.test(it.text))) {
+        picked = group.items.find((it) => /^(yes|có)$/i.test(it.text));
+      }
+
+      // E. Nếu không khớp tiêu chí riêng: chọn ngẫu nhiên một lựa chọn trong danh sách
       if (!picked) {
         picked = group.items[Math.floor(Math.random() * group.items.length)];
       }
@@ -1586,6 +1628,49 @@ export async function handleOfferwallCards(frame, page = null) {
     }
   } catch {}
   return openedCount;
+}
+
+/**
+ * Phát hiện và tự động bấm nút bỏ qua / negative button trên các màn ưu đãi offerwall trung gian
+ * để tiếp tục chuyển sang câu hỏi hoặc màn tiếp theo trong phễu (được huấn luyện từ log thực tế).
+ *
+ * @param {object} frame Frame Playwright đang quét.
+ * @return {Promise<number>} Số lượng nút đã bấm.
+ */
+export async function handleNegativeSkipButtons(frame) {
+  let skipped = 0;
+  try {
+    const skipSelector = [
+      'button[data-element-type="negative_button"]',
+      'button.creative-button-negative',
+      'button.skip-btn',
+      'a.skip-btn',
+      'button:has-text("No, I don\'t need extra money")',
+      'button:has-text("I don\'t want my gift")',
+      'button:has-text("No, Skip")',
+      'button:has-text("None/Skip")',
+      'button:has-text("No Thanks")',
+      'a:has-text("No Thanks")',
+    ].join(', ');
+
+    const buttons = await frame.locator(skipSelector).all();
+    for (const btn of buttons) {
+      if (!(await btn.isVisible().catch(() => false))) continue;
+      const alreadyClicked = await btn.getAttribute('data-autolead-clicked').catch(() => null);
+      if (alreadyClicked === '1') continue;
+
+      await btn.click({ timeout: 1500, force: true }).catch(async () => {
+        await btn.evaluate((b) => b.click()).catch(() => {});
+      });
+      await btn.evaluate((b) => {
+        b.setAttribute('data-autolead-clicked', '1');
+      }).catch(() => {});
+      skipped += 1;
+      await new Promise((r) => setTimeout(r, 400));
+      break; // Chỉ bấm 1 nút skip mỗi lần quét
+    }
+  } catch {}
+  return skipped;
 }
 
 /**
@@ -1789,11 +1874,46 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
       let filledInThisPass = 0;
 
+      // Tự động xử lý Phone Modal nếu xuất hiện (đặc trưng trên 16.dlysurge.com & 16.gettngood.com)
+      try {
+        const phoneModalInput = frame.locator('#update-phone-modal-input, input.update-phone-modal-input').first();
+        if ((await phoneModalInput.count().catch(() => 0)) > 0 && (await phoneModalInput.isVisible().catch(() => false))) {
+          const rawPhone = getNormalizedPhone(record) || '8149143396';
+          const area = rawPhone.slice(0, 3);
+          const mid = rawPhone.slice(3, 6);
+          const last = rawPhone.slice(6, 10);
+          const formattedPhone = `(${area}) ${mid}-${last}`;
+          await humanType(phoneModalInput, formattedPhone, page);
+          const submitModalBtn = frame.locator('#update-phone-modal-submit, button.update-phone-modal-submit').first();
+          if ((await submitModalBtn.count().catch(() => 0)) > 0 && (await submitModalBtn.isVisible().catch(() => false))) {
+            await submitModalBtn.click({ force: true, timeout: 1500 });
+            filledInThisPass += 1;
+            session.autofillFields = (session.autofillFields ?? 0) + 1;
+          }
+        }
+      } catch {}
+
       for (const field of fields) {
         if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
         try {
           const isEnabled = await field.isEnabled().catch(() => true);
           if (!isEnabled) continue;
+
+          // Bảo vệ chống bẫy honeypot (như trên find.mysamplesearchtwentythree.com):
+          const isHoneypot = await field.evaluate((el) => {
+            if (el.closest('[inert]')) return true;
+            const parent = el.closest('div, span');
+            if (parent) {
+              const s = parent.style;
+              if (s.left === '-9999px' || s.top === '-9999px' || (s.opacity === '0' && s.width === '1px')) return true;
+            }
+            const rect = el.getBoundingClientRect();
+            if (rect.left < -100 || rect.top < -100 || (rect.width <= 1 && rect.height <= 1)) return true;
+            const name = (el.name || el.id || '').toLowerCase();
+            if (['website', 'address3', 'confirm_email', 'emailidaddress'].includes(name) && rect.top < 0) return true;
+            return false;
+          }).catch(() => false);
+          if (isHoneypot) continue;
 
           const isCheckbox = await field.evaluate((el) => el.type === 'checkbox').catch(() => false);
           if (isCheckbox) {
@@ -2239,6 +2359,20 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           options.onLog?.({
             type: 'offerwall_opened',
             detail: `Đã tự động mở ${openedOffers} thẻ ưu đãi (Offerwall).`,
+          });
+        }
+      } catch {}
+
+      // Tự động phát hiện và bấm các nút bỏ qua / skip / negative trên màn ưu đãi trung gian
+      try {
+        const skippedOffers = await handleNegativeSkipButtons(frame);
+        if (skippedOffers > 0) {
+          filledInThisPass += skippedOffers;
+          session.autofillFields = (session.autofillFields ?? 0) + skippedOffers;
+          session.autofillError = null;
+          options.onLog?.({
+            type: 'negative_skip_clicked',
+            detail: `Đã tự động bấm nút bỏ qua ưu đãi trung gian (${skippedOffers} nút).`,
           });
         }
       } catch {}
