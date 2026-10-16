@@ -49,11 +49,11 @@ export function extractCleanPageStructure(html) {
 }
 
 /**
- * Đường dẫn hoặc tên binary của agy CLI.
+ * Đường dẫn hoặc tên binary của codex / agy CLI.
  * Tự động mở rộng PATH để nhận diện ~/.local/bin, /opt/homebrew/bin, /usr/local/bin.
  */
 function getAgtSpawnConfig() {
-  const agyBin = process.env.AGY_BIN || 'agy';
+  const codexBin = process.env.CODEX_BIN || 'codex';
   const augmentedPath = [
     join(homedir(), '.local', 'bin'),
     join(homedir(), '.gemini', 'antigravity-cli', 'bin'),
@@ -63,21 +63,26 @@ function getAgtSpawnConfig() {
   ].filter(Boolean).join(':');
 
   return {
-    bin: agyBin,
+    bin: codexBin,
     env: { ...process.env, PATH: augmentedPath },
   };
 }
 
 /**
- * Gọi `agy` CLI với prompt, trả về text output.
+ * Gọi `codex` hoặc `agy` CLI với prompt, trả về text output.
  *
- * @param {string} prompt Nội dung truyền vào stdin của agy.
- * @return {Promise<string>} Output từ agy.
+ * @param {string} prompt Nội dung truyền vào stdin của codex/agy.
+ * @return {Promise<string>} Output từ AI CLI.
  */
 export function callAgt(prompt) {
   return new Promise((resolve, reject) => {
     const { bin, env } = getAgtSpawnConfig();
-    const child = spawn(bin, [], {
+    const isCodex = bin.includes('codex');
+    const args = isCodex
+      ? ['exec', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--ephemeral', '--json', '-']
+      : [];
+
+    const child = spawn(bin, args, {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -86,7 +91,7 @@ export function callAgt(prompt) {
     let err = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error('agy timeout (quá 90s)'));
+      reject(new Error(`${bin} timeout (quá ${AGT_TIMEOUT_MS / 1000}s)`));
     }, AGT_TIMEOUT_MS);
 
     child.stdout.on('data', (d) => { out += d.toString(); });
@@ -95,7 +100,17 @@ export function callAgt(prompt) {
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0 && !out.trim()) {
-        reject(new Error(`agy exited ${code}: ${err.slice(0, 200)}`));
+        reject(new Error(`${bin} exited ${code}: ${err.slice(0, 200)}`));
+        return;
+      }
+      if (isCodex) {
+        // Parse JSONL: gom tất cả item.completed[agent_message].text
+        const text = out.split('\n')
+          .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+          .filter((ev) => ev?.type === 'item.completed' && ev?.item?.type === 'agent_message')
+          .map((ev) => ev.item.text)
+          .join('\n');
+        resolve(text || out);
       } else {
         resolve(out);
       }
@@ -104,7 +119,7 @@ export function callAgt(prompt) {
     child.on('error', (e) => {
       clearTimeout(timer);
       if (e.code === 'ENOENT') {
-        reject(new Error('agy CLI không có trong PATH. Bỏ qua tầng AI.'));
+        reject(new Error(`${bin} CLI không có trong PATH. Bỏ qua tầng AI.`));
       } else {
         reject(e);
       }
@@ -371,8 +386,10 @@ export async function executeAction(page, act, session = null) {
  * @return {Promise<void>}
  */
 export async function runAiAssist(page, record, session = {}, options = {}) {
-  if (session.aiAssistRunning) return;
-  session.aiAssistRunning = true;
+  if (!session.aiRunningPages) session.aiRunningPages = new Set();
+  if (session.aiRunningPages.has(page)) return; // tab này đang chạy AI rồi
+  session.aiRunningPages.add(page);
+  session.aiAssistRunning = session.aiRunningPages.size > 0;
 
   const slotNum = (session.tileIndex ?? 0) + 1;
   const ip = session.exitIp ?? 'chưa rõ';
@@ -433,12 +450,12 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
       const cleanedHtml = extractCleanPageStructure(html);
 
       const recordJson = JSON.stringify(record ?? {});
-      const prompt = `Bạn là agent tự động điền form và trả lời khảo sát web.
+      const prompt = `Bạn là agent tự động điền form, trả lời khảo sát và bấm chuyển bước trên web.
 URL: ${page.url()}
 Thông tin người dùng: ${recordJson}
 Vòng thực thi: ${round}/${MAX_ROUNDS}
 
-Nhiệm vụ: Phân tích HTML bên dưới và trả về JSON array các action cần thực hiện để hoàn thành bước hiện tại (điền ô nhập, chọn dropdown, trả lời câu hỏi khảo sát/quiz/radio, tích checkbox điều khoản, và click nút Tiếp tục/Next/Submit).
+Nhiệm vụ: Phân tích HTML bên dưới và trả về JSON array các action cần thực hiện để hoàn thành bước hiện tại (điền ô nhập, chọn dropdown, trả lời câu hỏi khảo sát/quiz/radio, tích checkbox điều khoản, và ĐẶC BIỆT là click nút Tiếp tục / Next / Continue / Submit để chuyển màn).
 Chỉ trả về JSON array, không giải thích gì thêm.
 
 Format các action được hỗ trợ:
@@ -447,33 +464,53 @@ Format các action được hỗ trợ:
 - Tích checkbox: {"action":"check","selector":"CSS_SELECTOR"}
 - Chọn radio hoặc bấm nút / thẻ lựa chọn / nút Tiếp tục: {"action":"click","selector":"CSS_SELECTOR"}
 
-Quy tắc xử lý:
-1. Nếu có ô text/number/email/tel chưa điền: điền bằng thông tin phù hợp từ người dùng.
-2. Nếu có câu hỏi khảo sát / câu hỏi quiz (radio, card lựa chọn, danh sách nút Yes/No): click chọn một phương án phù hợp nhất với người dùng (ví dụ: Yes, Own home, Good, v.v.).
-3. Nếu có checkbox điều khoản (consent, terms, TCPA, agree): tích checkbox đó bằng action "check" hoặc "click".
-4. Sau khi điền/chọn đủ các trường trên màn hình hiện tại: thêm action "click" vào nút "Continue", "Next", "Submit", "Get Quote", "Tiếp tục" để chuyển sang câu hỏi hoặc màn tiếp theo.
-5. Nếu trang đã là trang cảm ơn (Thank You / Congratulations / Success) hoặc không còn form/câu hỏi nào cần làm, trả về: []
+Quy tắc xử lý QUAN TRỌNG:
+1. Nếu trên form các trường đã có dữ liệu hoặc đã được điền đủ: BẮT BUỘC tìm và trả về action "click" vào nút "Continue", "Next", "Submit", "Get Quote", "Tiếp tục", "Xem kết quả" để chuyển sang bước tiếp theo!
+2. Nếu có ô text/number/email/tel chưa điền: điền bằng thông tin phù hợp từ người dùng.
+3. Nếu có câu hỏi khảo sát / câu hỏi quiz (radio, card lựa chọn, danh sách nút Yes/No): click chọn một phương án phù hợp nhất với người dùng (ví dụ: Yes, Own home, Good, v.v.).
+4. Nếu có checkbox điều khoản (consent, terms, TCPA, agree): tích checkbox đó bằng action "check" hoặc "click".
+5. Sau khi điền/chọn xong các trường trên màn hình hiện tại: luôn thêm action "click" vào nút "Continue", "Next", "Submit" để chuyển màn!
+6. Tuyệt đối KHÔNG trả về mảng rỗng [] nếu trên trang vẫn còn form, câu hỏi, hoặc nút Tiếp tục/Next/Submit chưa bấm!
+7. Chỉ trả về [] khi trang ĐÃ LÀ TRANG CẢM ƠN (Thank You / Congratulations / Success / Application Received) hoặc HOÀN TOÀN KHÔNG CÒN BẤT KỲ NÚT TIẾP TỤC / FORM NÀO!
 
 HTML:
 ${cleanedHtml}`;
 
       let actions = [];
+      const t0 = Date.now();
+      addLog({
+        time: new Date().toISOString(),
+        type: 'ai_waiting_codex',
+        detail: `[AI Assist] ⏳ Đang chờ AI phản hồi (vòng ${round}/${MAX_ROUNDS})… URL: ${page.url()}`,
+      });
       try {
         const raw = await callAgt(prompt);
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
         actions = parseActions(raw);
-        console.log(`[AI-Assist] Slot ${slotNum} round ${round}: agy trả ${actions.length} action(s)`);
+        console.log(`[AI-Assist] Slot ${slotNum} round ${round}: AI trả ${actions.length} action(s) (${elapsed}s)`);
+        addLog({
+          time: new Date().toISOString(),
+          type: 'ai_codex_reply',
+          detail: `[AI Assist] ✅ AI phản hồi sau ${elapsed}s — ${actions.length} action(s)`,
+        });
       } catch (err) {
-        console.warn(`[AI-Assist] Slot ${slotNum} round ${round}: cảnh báo agy — ${err.message}`);
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+        console.warn(`[AI-Assist] Slot ${slotNum} round ${round}: cảnh báo AI sau ${elapsed}s — ${err.message}`);
         addLog({
           time: new Date().toISOString(),
           type: 'ai_error',
-          detail: `[AI Assist] Lỗi gọi AI: ${err.message}`,
+          detail: `[AI Assist] ❌ Lỗi gọi AI sau ${elapsed}s: ${err.message}`,
         });
         break;
       }
 
       if (actions.length === 0) {
         console.log(`[AI-Assist] Slot ${slotNum}: AI báo không còn việc cần làm ([] trả về).`);
+        addLog({
+          time: new Date().toISOString(),
+          type: 'ai_no_actions',
+          detail: `[AI Assist] AI trả [] — không còn form/câu hỏi cần xử lý.`,
+        });
         break;
       }
 
@@ -494,12 +531,22 @@ ${cleanedHtml}`;
         }
       }
 
+      // Sync: kích autofill quét lại ngay sau khi AI thực thi xong actions
+      session.triggerAutofillScan?.();
+      addLog({
+        time: new Date().toISOString(),
+        type: 'ai_sync_scan',
+        detail: `[AI Assist] 🔄 Sync: kích autofill quét lại sau ${actions.length} action(s) của AI.`,
+      });
+
       // Chờ trang load ổn định hoặc chuyển màn (1.2s)
       await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
       await new Promise((r) => setTimeout(r, 1200));
     }
   } finally {
-    session.aiAssistRunning = false;
+    session.aiRunningPages?.delete(page);
+    session.aiAssistRunning = (session.aiRunningPages?.size ?? 0) > 0;
+    session.aiCallCount = 0;
     updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#22c55e;font-weight:600;">🤖 AI xong</span>`);
     if (totalActionsExecuted > 0) {
       addLog({

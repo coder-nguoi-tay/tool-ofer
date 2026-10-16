@@ -987,7 +987,7 @@ export async function findSubmitButton(frame) {
     // 1. Nút Submit / Continue theo data- attributes chuẩn của Vector & Lead forms (chỉ chọn thẻ tương tác, không chọn generic container)
     'button[data-vector-submit="true"], button[data-vector-submit], a[data-vector-submit="true"], a[data-vector-submit], input[data-vector-submit="true"], [role="button"][data-vector-submit="true"]',
     'button[data-tf-element-role="submit"], a[data-tf-element-role="submit"], [role="button"][data-tf-element-role="submit"]',
-    'button#btn-submit, button#submit-btn, button#submit, button#continue, a#btn-submit, a#continue',
+    'button#btn-submit, button#submit-btn, button#submit, button#continue, button#btnSubmit, button#btnNext, button#btnContinue, a#btn-submit, a#continue, a#btnSubmit, input#btnSubmit',
 
     // 2. Thẻ submit tiêu chuẩn của HTML
     'button[type="submit"]',
@@ -995,13 +995,16 @@ export async function findSubmitButton(frame) {
     'input[type="button"][value*="Continue" i], input[type="button"][value*="Submit" i], input[type="button"][value*="Next" i]',
 
     // 3. Nút bấm theo class phổ biến (được huấn luyện từ log thực tế)
-    'button.continue-btn, button.continue-button, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.next-button, button.btn-primary, button.arc-confirm-btn, button.blue-button, button.track-button',
-    'a.continue-btn, a.continue-button, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary, a.arc-confirm-btn',
+    'button.continue-btn, button.continue-button, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.next-button, button.btn-primary, button.arc-confirm-btn, button.blue-button, button.track-button, button.step-submit, button.forward-btn, button.btn-step',
+    'a.continue-btn, a.continue-button, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary, a.arc-confirm-btn, a.forward-step',
+    '[role="button"].continue-btn, [role="button"].continue-button, [role="button"].btn-continue, [role="button"].btn-next, [role="button"].next-btn, [role="button"].btn-primary',
+    'div.continue-btn, div.continue-button, div.btn-continue, div.btn-next, div.next-btn, div.submit-btn, div.button-next, div.forward-step',
 
     // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt)
-    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Hoàn thành")',
-    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed")',
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành")',
+    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Explore Plans")',
     '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results")',
+    'div[class*="btn"]:has-text("Continue"), div[class*="button"]:has-text("Continue"), div[class*="btn"]:has-text("Next"), div[class*="button"]:has-text("Next"), span[class*="btn"]:has-text("Continue")',
   ];
 
   for (const selector of candidateSelectors) {
@@ -1024,6 +1027,11 @@ export async function findSubmitButton(frame) {
             if (rect.height > 180 || rect.width > 900) return { valid: false, reason: 'too_large' };
           }
 
+          // Bỏ qua nút nằm trong header / footer / nav (tránh bấm nhầm menu/privacy link)
+          if (typeof el.closest === 'function' && el.closest('header, footer, nav')) {
+            return { valid: false, reason: 'header_footer' };
+          }
+
           // Bỏ qua các nút thuộc Offerwall Cards để nhường quyền xử lý cho handleOfferwallCards
           if (
             (typeof el.closest === 'function' && el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) ||
@@ -1041,6 +1049,7 @@ export async function findSubmitButton(frame) {
           if (tag === 'BUTTON') return { valid: true };
           if (tag === 'INPUT' && ['submit', 'button', 'image'].includes((el.type || '').toLowerCase())) return { valid: true };
           if (tag === 'A' || (typeof el.getAttribute === 'function' && el.getAttribute('role') === 'button')) return { valid: true };
+          if (el.classList && (el.classList.contains('btn') || el.classList.contains('button') || /continue|next|submit/i.test(el.className || ''))) return { valid: true };
 
           if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
             const style = window.getComputedStyle(el);
@@ -2429,17 +2438,32 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       const hasUnfilledRequiredOrErrorField = await frame.evaluate(() => {
         const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea'));
         for (const input of inputs) {
+          // Bỏ qua field nằm trong header / footer / nav (không liên quan đến form chính)
+          if (input.closest('header, footer, nav')) continue;
           if (input.disabled || input.offsetParent === null) continue;
           const style = window.getComputedStyle(input);
           if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
 
           const val = (input.value || '').trim();
-          const isChecked = input.type === 'checkbox' || input.type === 'radio' ? input.checked : true;
+          let isChecked = true;
+          if (input.type === 'checkbox') {
+            isChecked = input.checked;
+          } else if (input.type === 'radio') {
+            // Đối với nhóm radio buttons: Nếu CÙNG NAME có bất kỳ radio nào đã được tích, thì nhóm đó đã hợp lệ!
+            const radioName = input.name;
+            if (radioName) {
+              const group = Array.from(document.querySelectorAll(`input[type="radio"][name="${radioName}"]`));
+              isChecked = group.some((r) => r.checked);
+            } else {
+              isChecked = input.checked;
+            }
+          }
 
           const isRequiredAttr = input.required || input.getAttribute('aria-required') === 'true';
           const hasErrorClass = input.classList.contains('error') || input.getAttribute('aria-invalid') === 'true';
-          const parentGroup = input.closest('.input-group, .form-group, .field, .loco-group, .step-container');
-          const hasParentError = parentGroup ? Boolean(parentGroup.querySelector('.error, .visible, .helper-text.visible')) : false;
+          // Chỉ kiểm tra lỗi trong group gần nhất (input-group, form-group, field, loco-group), KHÔNG dùng step-container (tránh bắt nhầm cả step)
+          const parentGroup = input.closest('.input-group, .form-group, .field, .loco-group');
+          const hasParentError = parentGroup ? Boolean(parentGroup.querySelector('.error:not(input):not(select), .error-message, .invalid-feedback')) : false;
 
           let labelIsRequired = false;
           if (input.id) {

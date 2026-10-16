@@ -1380,6 +1380,32 @@ assert.ok(cleaned.includes('class="continue-button"'), 'HTML làm sạch phải 
 // 11.3 Kiểm tra handleNegativeSkipButtons là hàm hợp lệ
 assert.equal(typeof handleNegativeSkipButtons, 'function');
 
+// 11.4 Kiểm tra findSubmitButton phát hiện nút bấm Continue / Submit dạng div, a, button
+const mockFrameWithContinue = {
+  locator: (sel) => ({
+    all: async () => {
+      if (sel.includes('button#btnSubmit') || sel.includes('button.continue-btn') || sel.includes('div.continue-btn')) {
+        return [{
+          isVisible: async () => true,
+          isEnabled: async () => true,
+          evaluate: async (fn) => fn({
+            tagName: 'BUTTON',
+            id: 'btnSubmit',
+            className: 'continue-btn',
+            innerText: 'Continue to Next Step',
+            getBoundingClientRect: () => ({ width: 150, height: 45 }),
+            closest: () => null,
+          }),
+        }];
+      }
+      return [];
+    },
+  }),
+};
+const foundBtn = await findSubmitButton(mockFrameWithContinue);
+assert.ok(foundBtn !== null, 'findSubmitButton phải tìm thấy nút button#btnSubmit');
+
+
 
 
 
