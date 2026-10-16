@@ -1413,6 +1413,8 @@ export async function humanType(field, text, page = null) {
   const str = String(text ?? '');
   if (!str) return;
 
+  const activePage = page || (typeof field?.page === 'function' ? field.page() : null);
+
   try {
     if (typeof field.scrollIntoViewIfNeeded === 'function') {
       await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
@@ -1428,21 +1430,53 @@ export async function humanType(field, text, page = null) {
     }
   } catch {}
 
-  const prePause = Math.floor(Math.random() * 120) + 100;
-  if (page && typeof page.waitForTimeout === 'function') {
-    await page.waitForTimeout(prePause).catch(() => {});
+  const prePause = Math.floor(Math.random() * 80) + 60;
+  if (activePage && typeof activePage.waitForTimeout === 'function') {
+    await activePage.waitForTimeout(prePause).catch(() => {});
   } else {
     await new Promise((r) => setTimeout(r, prePause));
   }
 
-  // Xóa giá trị cũ nếu đang có để tránh bị dính ký tự trước đó
+  // Xóa nội dung cũ tự nhiên qua tổ hợp phím (Select All + Backspace) nếu trường đã có chữ
+  try {
+    const isMac = process.platform === 'darwin';
+    const selectAllKey = isMac ? 'Meta+A' : 'Control+A';
+    if (activePage?.keyboard) {
+      await activePage.keyboard.press(selectAllKey).catch(() => {});
+      await activePage.keyboard.press('Backspace').catch(() => {});
+    } else if (typeof field.press === 'function') {
+      await field.press(selectAllKey).catch(() => {});
+      await field.press('Backspace').catch(() => {});
+    }
+  } catch {}
+
+  // Đảm bảo không còn ký tự cũ sót lại để tránh ghép nối chuỗi không mong muốn
   if (typeof field.evaluate === 'function') {
-    await field.evaluate((el) => { el.value = ''; }).catch(() => {});
+    await field.evaluate((el) => {
+      if (el && el.value) {
+        el.value = '';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }).catch(() => {});
   }
 
-  // Gõ tuần tự từng ký tự mô phỏng nhịp gõ của con người
+  // Gõ tuần tự từng ký tự mô phỏng nhịp gõ phím của người thật
   let typedOk = false;
-  if (typeof field.pressSequentially === 'function') {
+  if (activePage?.keyboard && typeof activePage.keyboard.type === 'function') {
+    try {
+      for (let i = 0; i < str.length; i++) {
+        const char = str[i];
+        let charDelay = Math.floor(Math.random() * 45) + 35; // 35ms - 80ms
+        if ([' ', '@', '.', '-', '_', '/'].includes(char)) {
+          charDelay += Math.floor(Math.random() * 60) + 40; // 75ms - 135ms
+        }
+        await activePage.keyboard.type(char, { delay: charDelay });
+      }
+      typedOk = true;
+    } catch {
+      typedOk = false;
+    }
+  } else if (typeof field.pressSequentially === 'function') {
     try {
       for (let i = 0; i < str.length; i++) {
         const char = str[i];
@@ -1458,7 +1492,13 @@ export async function humanType(field, text, page = null) {
     }
   }
 
-  // Fallback: nếu pressSequentially bị gián đoạn hoặc chưa có, dùng fill
+  // Fallback an toàn nếu chưa gõ được qua keyboard/pressSequentially
+  if (!typedOk && typeof field.pressSequentially === 'function') {
+    try {
+      await field.pressSequentially(str, { delay: 45 });
+      typedOk = true;
+    } catch {}
+  }
   if (!typedOk && typeof field.fill === 'function') {
     try {
       await field.fill(str, { force: true, timeout: 2500 });
@@ -1466,7 +1506,7 @@ export async function humanType(field, text, page = null) {
     } catch {}
   }
 
-  // Kiểm tra lại giá trị sau khi gõ: nếu rỗng (do mask hoặc validator trang), đặt trực tiếp qua property descriptor
+  // Kiểm tra lại giá trị sau khi gõ: nếu rỗng (do mask hoặc validator trang), đặt qua property descriptor
   let postVal = '';
   if (typeof field.inputValue === 'function') {
     postVal = await field.inputValue().catch(() => '');
@@ -1485,10 +1525,10 @@ export async function humanType(field, text, page = null) {
     }, str).catch(() => {});
   }
 
-  // Dừng nhẹ tự nhiên sau khi hoàn thành trường (80ms - 160ms)
-  const postPause = Math.floor(Math.random() * 80) + 80;
-  if (page && typeof page.waitForTimeout === 'function') {
-    await page.waitForTimeout(postPause).catch(() => {});
+  // Dừng nhẹ tự nhiên sau khi gõ xong trường (60ms - 120ms)
+  const postPause = Math.floor(Math.random() * 60) + 60;
+  if (activePage && typeof activePage.waitForTimeout === 'function') {
+    await activePage.waitForTimeout(postPause).catch(() => {});
   } else {
     await new Promise((r) => setTimeout(r, postPause));
   }

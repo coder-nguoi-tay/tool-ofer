@@ -581,6 +581,29 @@ assert.equal(typedChars.map((t) => t.char).join(''), 'Hello 123');
 assert.equal(typedChars.length, 9);
 assert.ok(typedChars.every((t) => typeof t.delay === 'number' && t.delay >= 30), 'Độ trễ mỗi phím phải >= 30ms mô phỏng người thật');
 
+// Test humanType với page.keyboard (mô phỏng phím native trong Playwright browser)
+const pageTypedChars = [];
+const mockPage = {
+  keyboard: {
+    press: async () => {},
+    type: async (char, opts) => {
+      pageTypedChars.push({ char, delay: opts?.delay });
+    },
+  },
+  waitForTimeout: async () => {},
+};
+const mockPageField = {
+  scrollIntoViewIfNeeded: async () => {},
+  click: async () => {},
+  focus: async () => {},
+  inputValue: async () => pageTypedChars.map((t) => t.char).join(''),
+  page: () => mockPage,
+};
+await humanType(mockPageField, 'Jane Doe', mockPage);
+assert.equal(pageTypedChars.map((t) => t.char).join(''), 'Jane Doe');
+assert.equal(pageTypedChars.length, 8);
+assert.ok(pageTypedChars.every((t) => typeof t.delay === 'number' && t.delay >= 30), 'Độ trễ mỗi phím trên page.keyboard phải >= 30ms');
+
 // Test findSubmitButton nhận diện nút data-vector-submit="true" và data-tf-element-role="submit"
 const mockVectorSubmitBtn = {
   isVisible: async () => true,
