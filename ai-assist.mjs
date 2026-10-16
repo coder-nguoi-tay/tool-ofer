@@ -233,6 +233,10 @@ export async function pageHasWork(page) {
 
       // 4. Câu hỏi khảo sát / quiz cards / lựa chọn chưa click
       const surveyCandidates = Array.from(document.querySelectorAll([
+        '[id="btn-option"]:not([data-autolead-clicked="1"])',
+        '[id^="btn-option"]:not([data-autolead-clicked="1"])',
+        '[id*="btn-option"]:not([data-autolead-clicked="1"])',
+        '.btn-option:not([data-autolead-clicked="1"])',
         'button.btn-option:not([data-autolead-clicked="1"])',
         '[data-vector-answer="true"]:not([data-autolead-clicked="1"])',
         '[data-element-type="survey_answer"]:not([data-autolead-clicked="1"])',
@@ -251,6 +255,9 @@ export async function pageHasWork(page) {
 
       // 5. Nút gửi/tiếp tục/bước tiếp theo đang hiển thị và chưa bấm
       const submitCandidates = Array.from(document.querySelectorAll([
+        '#btnSubmit',
+        '#btnNext',
+        '#btnContinue',
         'button[type="submit"]',
         'input[type="submit"]',
         '[data-vector-submit="true"]',
@@ -261,6 +268,9 @@ export async function pageHasWork(page) {
         '.btn-submit',
         '.btn-next',
         '.btn-continue',
+        'div.continue-btn',
+        'div.btn-next',
+        'a.forward-step',
         'button',
         'a[role="button"]',
         'a.btn',

@@ -1156,6 +1156,98 @@ export function matchAgeRange(optionText, age) {
 export async function handleRadioAndSurveyOptions(frame, record = {}) {
   let answeredCount = 0;
 
+  // 0. ƯU TIÊN: Đáp ứng yêu cầu "các phần trả lời đáp án chọn ramdom trong danh sách các id='btn-option' cứ hiện là chọn"
+  // Tự động tìm tất cả đáp án có id="btn-option", id bắt đầu/chứa "btn-option" hoặc class "btn-option", gom nhóm và chọn random ngay khi xuất hiện
+  try {
+    const btnOptionGroups = await frame.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+        return Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+      };
+
+      const allCandidates = Array.from(document.querySelectorAll(
+        '[id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, [data-btn-option]'
+      )).filter((el) => {
+        if (el.disabled) return false;
+        if (!isVisible(el)) return false;
+        if (el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) return false;
+        return true;
+      });
+
+      if (!allCandidates.length) return [];
+
+      // Gom nhóm theo container câu hỏi
+      const groups = new Map();
+      allCandidates.forEach((btn, idx) => {
+        const parent = btn.closest('.question, .survey-question, fieldset, .step-container, .choice-container, .options-container, .quiz-step, form') || document.body;
+        if (!groups.has(parent)) {
+          groups.set(parent, []);
+        }
+        const uid = `btn_option_${idx}_${Date.now()}`;
+        btn.setAttribute('data-autolead-btn-option-id', uid);
+        const isActive = btn.classList.contains('active') ||
+          btn.classList.contains('selected') ||
+          btn.getAttribute('aria-checked') === 'true' ||
+          btn.getAttribute('data-autolead-clicked') === '1';
+
+        groups.get(parent).push({
+          uid,
+          id: btn.id || '',
+          className: btn.className || '',
+          text: (btn.innerText || btn.textContent || btn.value || '').trim(),
+          isActive,
+        });
+      });
+
+      const actionableGroups = [];
+      for (const [, items] of groups.entries()) {
+        const alreadyChosen = items.some((it) => it.isActive);
+        if (!alreadyChosen && items.length > 0) {
+          actionableGroups.push(items);
+        }
+      }
+
+      return actionableGroups;
+    }).catch(() => []);
+
+    for (const group of btnOptionGroups) {
+      if (!group.length) continue;
+      // Chọn ngẫu nhiên 1 đáp án trong danh sách các btn-option
+      const picked = group[Math.floor(Math.random() * group.length)];
+      if (picked?.uid) {
+        try {
+          const locator = frame.locator(`[data-autolead-btn-option-id="${picked.uid}"]`).first();
+          if (locator && (await locator.count() > 0)) {
+            if (typeof locator.scrollIntoViewIfNeeded === 'function') {
+              await locator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+            }
+            if (typeof locator.hover === 'function') {
+              await locator.hover({ timeout: 600 }).catch(() => {});
+            }
+            const pause = Math.floor(Math.random() * 150) + 150;
+            await new Promise((r) => setTimeout(r, pause));
+
+            await locator.click({ force: true, timeout: 1500 }).catch(async () => {
+              await locator.evaluate((el) => el.click()).catch(() => {});
+            });
+
+            await locator.evaluate((el) => {
+              el.setAttribute('data-autolead-clicked', '1');
+              el.classList.add('active', 'selected');
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }).catch(() => {});
+
+            answeredCount += 1;
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
   // 1. Xử lý các nhóm radio buttons tiêu chuẩn (<input type="radio">)
   try {
     const radioGroups = await frame.locator('input[type="radio"]').evaluateAll((radios) => {
@@ -1252,6 +1344,10 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
     const questionChoiceGroups = await frame.evaluate(() => {
       const results = [];
       const optionSelector = [
+        '[id="btn-option"]',
+        '[id^="btn-option"]',
+        '[id*="btn-option"]',
+        '.btn-option',
         'button.btn-option',
         'button[data-vector-answer="true"]',
         'button[data-element-type="survey_answer"]',
@@ -1355,7 +1451,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
       // Fallback: Nếu không tìm thấy trong container, tìm các cụm nút Yes/No hoặc Survey standalone
       if (!results.length) {
         const standaloneVectorButtons = Array.from(document.querySelectorAll(
-          'button[data-vector-answer="true"], button.btn-option, button[name="selected_answer"], button[name="survey_answer"], button.creative-survey-answer, button[data-action="answer_survey"], button.qualifier-option-button'
+          '[id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, button[data-vector-answer="true"], button.btn-option, button[name="selected_answer"], button[name="survey_answer"], button.creative-survey-answer, button[data-action="answer_survey"], button.qualifier-option-button'
         )).filter(isVisible);
         if (standaloneVectorButtons.length >= 2) {
           const alreadyActive = standaloneVectorButtons.some((b) =>
@@ -2719,7 +2815,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
               // 3. Kiểm tra có radio group hoặc câu hỏi khảo sát/quiz nào đang hiển thị không
               const surveyOptions = Array.from(document.querySelectorAll(
-                'input[type="radio"], [role="radio"], .btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"], .choice-btn, .option-btn, .quiz-btn, .answer-btn, label.btn, .creative-survey-answer'
+                'input[type="radio"], [role="radio"], [id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"], .choice-btn, .option-btn, .quiz-btn, .answer-btn, label.btn, .creative-survey-answer'
               ));
               if (surveyOptions.some((el) => isVisible(el) && !el.disabled)) return true;
 

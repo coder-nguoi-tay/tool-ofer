@@ -1405,6 +1405,48 @@ const mockFrameWithContinue = {
 const foundBtn = await findSubmitButton(mockFrameWithContinue);
 assert.ok(foundBtn !== null, 'findSubmitButton phải tìm thấy nút button#btnSubmit');
 
+// 11.5 Kiểm tra tự động phát hiện và chọn ngẫu nhiên đáp án id="btn-option"
+const clickedOptions = [];
+const mockFrameForBtnOption = {
+  evaluate: async () => [
+    [
+      { uid: 'btn_opt_1', id: 'btn-option', className: 'btn-choice', text: 'Yes', isActive: false },
+      { uid: 'btn_opt_2', id: 'btn-option', className: 'btn-choice', text: 'No', isActive: false },
+      { uid: 'btn_opt_3', id: 'btn-option', className: 'btn-choice', text: 'Maybe', isActive: false },
+    ],
+  ],
+  locator: (sel) => ({
+    first: () => ({
+      count: async () => 1,
+      scrollIntoViewIfNeeded: async () => {},
+      hover: async () => {},
+      click: async () => {
+        clickedOptions.push(sel);
+      },
+      evaluate: async (fn) => {
+        const dummyEl = {
+          setAttribute: () => {},
+          classList: { add: () => {} },
+          dispatchEvent: () => {},
+        };
+        return fn(dummyEl);
+      },
+    }),
+  }),
+};
+
+const answered = await handleRadioAndSurveyOptions(mockFrameForBtnOption);
+assert.equal(answered, 1, 'handleRadioAndSurveyOptions phải chọn được 1 đáp án từ nhóm btn-option');
+assert.equal(clickedOptions.length, 1, 'Đúng 1 option được click');
+assert.ok(
+  clickedOptions[0].includes('btn_opt_1') ||
+  clickedOptions[0].includes('btn_opt_2') ||
+  clickedOptions[0].includes('btn_opt_3'),
+  'Option được click phải nằm trong danh sách nhóm btn-option'
+);
+
+console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
+
 
 
 
