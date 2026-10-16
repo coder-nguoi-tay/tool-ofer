@@ -231,15 +231,15 @@ export async function pageHasWork(page) {
       const hasUncheckedRadioGroup = Object.values(radioGroups).some((group) => !group.some((r) => r.checked));
       if (hasUncheckedRadioGroup) return true;
 
-      // 4. Câu hỏi khảo sát / quiz cards / lựa chọn chưa click
+      // 4. Câu hỏi khảo sát / quiz cards / lựa chọn chưa click hoặc chưa hoàn thành
       const surveyCandidates = Array.from(document.querySelectorAll([
-        '[id="btn-option"]:not([data-autolead-clicked="1"])',
-        '[id^="btn-option"]:not([data-autolead-clicked="1"])',
-        '[id*="btn-option"]:not([data-autolead-clicked="1"])',
-        '.btn-option:not([data-autolead-clicked="1"])',
-        'button.btn-option:not([data-autolead-clicked="1"])',
-        '[data-vector-answer="true"]:not([data-autolead-clicked="1"])',
-        '[data-element-type="survey_answer"]:not([data-autolead-clicked="1"])',
+        '[id="btn-option"]:not(.active):not(.selected)',
+        '[id^="btn-option"]:not(.active):not(.selected)',
+        '[id*="btn-option"]:not(.active):not(.selected)',
+        '.btn-option:not(.active):not(.selected)',
+        'button.btn-option:not(.active):not(.selected)',
+        '[data-vector-answer="true"]:not(.active):not(.selected)',
+        '[data-element-type="survey_answer"]:not(.active):not(.selected)',
         '[role="radio"]:not([aria-checked="true"])',
         '.option-btn:not(.active):not(.selected)',
         '.choice-btn:not(.active):not(.selected)',
@@ -253,7 +253,7 @@ export async function pageHasWork(page) {
 
       if (surveyCandidates.length > 0) return true;
 
-      // 5. Nút gửi/tiếp tục/bước tiếp theo đang hiển thị và chưa bấm
+      // 5. Nút gửi/tiếp tục/bước tiếp theo đang hiển thị và chưa bấm (bao gồm cả Jump Page màn 5 / Reward)
       const submitCandidates = Array.from(document.querySelectorAll([
         '#btnSubmit',
         '#btnNext',
@@ -265,12 +265,24 @@ export async function pageHasWork(page) {
         'button.submit-btn',
         'button.next-btn',
         'button.primary-btn',
+        'button.cta-button',
+        'button.rjp-cta-button',
+        'button.sjp-cta-button',
         '.btn-submit',
         '.btn-next',
         '.btn-continue',
         'div.continue-btn',
         'div.btn-next',
         'a.forward-step',
+        'a.cta-button',
+        'a.rjp-cta-button',
+        'a.sjp-cta-button',
+        '.cta-button',
+        '.rjp-cta-button',
+        '.sjp-cta-button',
+        'a[href*="/next"]',
+        'a[aria-label*="Reward" i]',
+        'a[aria-label*="Get My" i]',
         'button',
         'a[role="button"]',
         'a.btn',
@@ -280,12 +292,12 @@ export async function pageHasWork(page) {
         if (!isVisible(el)) return false;
         if (el.getAttribute('data-autolead-clicked') === '1') return false;
 
-        if (el.type === 'submit' || el.getAttribute('data-vector-submit') === 'true' || /submit|continue|next/i.test(el.className)) {
+        if (el.type === 'submit' || el.getAttribute('data-vector-submit') === 'true' || /submit|continue|next|cta-button|rjp-cta/i.test(el.className) || (el.tagName === 'A' && el.href && el.href.includes('/next'))) {
           return true;
         }
 
-        const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
-        return /^(continue|next|submit|proceed|start|get\s*quote|see\s*my\s*options|view\s*results|tiếp\s*tục|xem\s*kết\s*quả|bước\s*tiếp|gửi)/i.test(text);
+        const text = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
+        return /^(continue|next|submit|proceed|start|get\s*quote|see\s*my\s*options|view\s*results|get\s*my\s*reward|claim\s*reward|claim\s*my\s*reward|get\s*reward|view\s*deals|unlock|tiếp\s*tục|xem\s*kết\s*quả|bước\s*tiếp|gửi)/i.test(text);
       });
 
       if (submitCandidates) return true;
@@ -343,7 +355,10 @@ export async function executeAction(page, act, session = null) {
       el.setAttribute('data-autolead-ai-done', '1');
       el.setAttribute('data-autolead-filled', '1');
     }).catch(() => {});
-    if (session) session.autofillFields = (session.autofillFields || 0) + 1;
+    if (session) {
+      session.autofillFields = (session.autofillFields || 0) + 1;
+      session.lastActionTime = Date.now();
+    }
   } else if (action === 'click') {
     await locator.click({ force: true, timeout: 2500 }).catch(async () => {
       await locator.evaluate((el) => el.click()).catch(() => {});
@@ -354,8 +369,15 @@ export async function executeAction(page, act, session = null) {
       el.classList.add('active', 'selected');
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
+      // Nếu là thẻ A Jump Page (/next hoặc link chuyển tiếp), hỗ trợ điều hướng thẳng nếu click chưa chuyển
+      if (el.tagName === 'A' && el.href && !el.href.startsWith('javascript:')) {
+        try { window.location.href = el.href; } catch {}
+      }
     }).catch(() => {});
-    if (session) session.autofillFields = (session.autofillFields || 0) + 1;
+    if (session) {
+      session.autofillFields = (session.autofillFields || 0) + 1;
+      session.lastActionTime = Date.now();
+    }
   } else if (action === 'select') {
     await locator.selectOption(String(value ?? ''), { force: true, timeout: 2000 }).catch(async () => {
       await locator.selectOption({ label: String(value ?? '') }, { force: true, timeout: 1000 }).catch(() => {});
@@ -366,7 +388,10 @@ export async function executeAction(page, act, session = null) {
       el.setAttribute('data-autolead-ai-done', '1');
       el.setAttribute('data-autolead-filled', '1');
     }).catch(() => {});
-    if (session) session.autofillFields = (session.autofillFields || 0) + 1;
+    if (session) {
+      session.autofillFields = (session.autofillFields || 0) + 1;
+      session.lastActionTime = Date.now();
+    }
   } else if (action === 'check') {
     await locator.check({ force: true, timeout: 2000 }).catch(async () => {
       await locator.click({ force: true, timeout: 1000 }).catch(async () => {
@@ -382,7 +407,10 @@ export async function executeAction(page, act, session = null) {
       el.setAttribute('data-autolead-filled', '1');
       el.checked = true;
     }).catch(() => {});
-    if (session) session.autofillFields = (session.autofillFields || 0) + 1;
+    if (session) {
+      session.autofillFields = (session.autofillFields || 0) + 1;
+      session.lastActionTime = Date.now();
+    }
   }
 }
 
@@ -477,11 +505,12 @@ Format các action được hỗ trợ:
 Quy tắc xử lý QUAN TRỌNG:
 1. Nếu trên form các trường đã có dữ liệu hoặc đã được điền đủ: BẮT BUỘC tìm và trả về action "click" vào nút "Continue", "Next", "Submit", "Get Quote", "Tiếp tục", "Xem kết quả" để chuyển sang bước tiếp theo!
 2. Nếu có ô text/number/email/tel chưa điền: điền bằng thông tin phù hợp từ người dùng.
-3. Nếu có câu hỏi khảo sát / câu hỏi quiz (radio, card lựa chọn, danh sách nút Yes/No): click chọn một phương án phù hợp nhất với người dùng (ví dụ: Yes, Own home, Good, v.v.).
+3. Nếu có câu hỏi khảo sát / câu hỏi quiz (radio, card lựa chọn, danh sách nút Yes/No, btn-option): click chọn một phương án phù hợp hoặc ngẫu nhiên (ví dụ: Yes, Own home, Good, v.v.).
 4. Nếu có checkbox điều khoản (consent, terms, TCPA, agree): tích checkbox đó bằng action "check" hoặc "click".
 5. Sau khi điền/chọn xong các trường trên màn hình hiện tại: luôn thêm action "click" vào nút "Continue", "Next", "Submit" để chuyển màn!
-6. Tuyệt đối KHÔNG trả về mảng rỗng [] nếu trên trang vẫn còn form, câu hỏi, hoặc nút Tiếp tục/Next/Submit chưa bấm!
-7. Chỉ trả về [] khi trang ĐÃ LÀ TRANG CẢM ƠN (Thank You / Congratulations / Success / Application Received) hoặc HOÀN TOÀN KHÔNG CÒN BẤT KỲ NÚT TIẾP TỤC / FORM NÀO!
+6. ĐẶC BIỆT CHÚ Ý TRANG CHUYỂN TIẾP / JUMP PAGE / REWARD SCREEN (ví dụ: màn hình thứ 5 sau khi nhập ngày sinh/giới tính): Nếu trang hiển thị nút nhận thưởng hoặc chuyển tiếp như "Get My Reward", "Claim Reward", "View Deals", "Continue", thẻ <a class="cta-button" href="/next..."> hoặc <a class="rjp-cta-button">, BẮT BUỘC trả về action click nút/link đó: {"action":"click","selector":".cta-button"} hoặc selector tương ứng!
+7. Tuyệt đối KHÔNG trả về mảng rỗng [] nếu trên trang vẫn còn form, câu hỏi, hoặc nút Tiếp tục/Next/Submit chưa bấm!
+8. Chỉ trả về [] khi trang ĐÃ LÀ TRANG CẢM ƠN (Thank You / Congratulations / Success / Application Received) hoặc HOÀN TOÀN KHÔNG CÒN BẤT KỲ NÚT TIẾP TỤC / FORM NÀO!
 
 HTML:
 ${cleanedHtml}`;
@@ -515,13 +544,31 @@ ${cleanedHtml}`;
       }
 
       if (actions.length === 0) {
-        console.log(`[AI-Assist] Slot ${slotNum}: AI báo không còn việc cần làm ([] trả về).`);
-        addLog({
-          time: new Date().toISOString(),
-          type: 'ai_no_actions',
-          detail: `[AI Assist] AI trả [] — không còn form/câu hỏi cần xử lý.`,
-        });
-        break;
+        // Fallback tự động: nếu AI trả về [] nhưng trang thực tế có nút Jump Page CTA hoặc btn-option chưa chọn
+        let fallbackHandled = false;
+        try {
+          const ctaLoc = page.locator('.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i]').first();
+          if ((await ctaLoc.count().catch(() => 0)) > 0 && (await ctaLoc.isVisible().catch(() => false))) {
+            fallbackHandled = true;
+            actions = [{ action: 'click', selector: '.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i]' }];
+            console.log(`[AI-Assist] Slot ${slotNum}: AI trả [], tự động kích hoạt fallback click nút Jump Page CTA.`);
+            addLog({
+              time: new Date().toISOString(),
+              type: 'ai_fallback_cta',
+              detail: `[AI Assist] Tự động phát hiện và bấm nút Jump Page / Reward (.cta-button).`,
+            });
+          }
+        } catch {}
+
+        if (!fallbackHandled) {
+          console.log(`[AI-Assist] Slot ${slotNum}: AI báo không còn việc cần làm ([] trả về).`);
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_no_actions',
+            detail: `[AI Assist] AI trả [] — không còn form/câu hỏi cần xử lý.`,
+          });
+          break;
+        }
       }
 
       for (const act of actions) {

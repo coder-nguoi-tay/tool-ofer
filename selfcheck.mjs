@@ -1512,6 +1512,78 @@ mockSessionLeadWait.triggerAutofillScan?.();
 await new Promise((r) => setTimeout(r, 250));
 assert.ok(submitClickedDuringLeadWait, 'Submit phải được kiểm tra và bấm liên tục ngay cả khi leadCheckStatus đang là waiting');
 
+// 11.7 Kiểm tra findSubmitButton nhận diện nút Jump Page CTA (màn hình thứ 5 sau DOB/Gender)
+const mockJumpPageCta = {
+  tagName: 'A',
+  href: 'https://16.dlysurge.com/next?s=123',
+  className: 'cta-button',
+  innerText: 'Get My Reward',
+  getAttribute: (attr) => (attr === 'aria-label' ? 'Get My Reward' : null),
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  evaluate: async (fn) => fn({
+    tagName: 'A',
+    href: 'https://16.dlysurge.com/next?s=123',
+    className: 'cta-button',
+    innerText: 'Get My Reward',
+    closest: () => null,
+    getBoundingClientRect: () => ({ width: 200, height: 50 }),
+  }),
+};
+
+const mockJumpPageFrame = {
+  locator: (sel) => ({
+    all: async () => {
+      if (sel.includes('.cta-button') || sel.includes('Get My Reward') || sel.includes('a[href*="/next"]')) {
+        return [mockJumpPageCta];
+      }
+      return [];
+    },
+  }),
+};
+
+const foundJumpCta = await findSubmitButton(mockJumpPageFrame);
+assert.ok(foundJumpCta !== null, 'findSubmitButton phải tìm thấy nút Jump Page CTA (a.cta-button / Get My Reward)');
+assert.equal(foundJumpCta, mockJumpPageCta, 'Nút tìm thấy phải là mockJumpPageCta');
+
+// 11.8 Kiểm tra handleRadioAndSurveyOptions cập nhật session.lastActionTime và session.autofillFields
+const mockSessionForSurvey = {
+  lastActionTime: 0,
+  autofillFields: 0,
+};
+const mockSurveyClicked = [];
+const mockFrameForSurveyOption = {
+  evaluate: async () => [
+    [
+      { uid: 'btn_opt_choice_1', id: 'btn-option', className: 'btn-option', text: 'Option A' },
+      { uid: 'btn_opt_choice_2', id: 'btn-option', className: 'btn-option', text: 'Option B' },
+    ],
+  ],
+  locator: (sel) => ({
+    first: () => ({
+      count: async () => 1,
+      scrollIntoViewIfNeeded: async () => {},
+      hover: async () => {},
+      click: async () => {
+        mockSurveyClicked.push(sel);
+      },
+      evaluate: async (fn) => {
+        const dummyEl = {
+          setAttribute: () => {},
+          classList: { add: () => {} },
+          dispatchEvent: () => {},
+        };
+        return fn(dummyEl);
+      },
+    }),
+  }),
+};
+
+const surveyResult = await handleRadioAndSurveyOptions(mockFrameForSurveyOption, {}, mockSessionForSurvey);
+assert.equal(surveyResult, 1, 'handleRadioAndSurveyOptions phải chọn được 1 option');
+assert.ok(mockSessionForSurvey.lastActionTime > 0, 'session.lastActionTime phải được cập nhật');
+assert.equal(mockSessionForSurvey.autofillFields, 1, 'session.autofillFields phải được tăng lên');
+
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 
 

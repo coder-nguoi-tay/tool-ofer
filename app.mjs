@@ -2117,7 +2117,7 @@ async function startLeadVerification(session, leadConfig) {
   };
 
   const intervalSeconds = leadConfig.intervalSeconds || DEFAULT_LEAD_CONFIG.intervalSeconds;
-  const maxAttempts = leadConfig.maxAttempts || DEFAULT_LEAD_CONFIG.maxAttempts;
+  let maxAttempts = leadConfig.maxAttempts || DEFAULT_LEAD_CONFIG.maxAttempts;
   const intervalMs = intervalSeconds * 1000;
   const initialWaitSeconds = Math.min(5, intervalSeconds);
 
@@ -2165,6 +2165,17 @@ async function startLeadVerification(session, leadConfig) {
       session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}`;
       updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#dc2626;">⚠️ Lỗi API (${err.code || 'ERR'})</span>`);
     }
+
+    // Nếu chưa thấy lead nhưng phiên đang thao tác tích cực (vừa bấm/điền form trong 60s qua)
+    // thì tự động gia hạn thêm lượt kiểm tra để không gián đoạn quá trình
+    if (!leadFound && attempt >= maxAttempts) {
+      const timeSinceLastAction = Date.now() - (session.lastActionTime || 0);
+      const isActivelyProgressing = (session.lastActionTime && timeSinceLastAction < 60000) || session.autofillRunning || session.aiAssistRunning;
+      if (isActivelyProgressing && attempt < 8) {
+        maxAttempts += 1;
+        console.log(`[LeadCheck] ${label}: Trình duyệt vẫn đang thao tác (${(timeSinceLastAction / 1000).toFixed(0)}s trước), gia hạn kiểm tra lead lần ${attempt + 1}...`);
+      }
+    }
   }
 
   if (leadFound) {
@@ -2209,51 +2220,66 @@ async function startLeadVerification(session, leadConfig) {
       session.triggerAutofillScan?.();
     } catch {}
   } else {
-    // API hoạt động bình thường 100%, trả dữ liệu lead đầy đủ, nhưng thực sự IP sock không có lead:
-    // Đóng Chrome và chuyển sang phiên bản mới với sock tiếp theo
-    session.leadCheckStatus = 'failed';
-    session.closingDueToNoLead = true;
-    session.leadCheckMessage = `❌ Không có lead về cho IP ${exitIp} sau ${maxAttempts} lần kiểm tra (${maxAttempts * intervalSeconds}s). Đang đổi sock và mở phiên bản mới...`;
-    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead, đang đổi phiên bản mới...</span>`);
+    // BỎ THỜI GIAN KILL TRÌNH DUYỆT: Giữ nguyên trình duyệt để chờ kết quả từ AI và autofill tiếp tục xử lý các màn
+    session.leadCheckStatus = 'waiting_lead';
+    session.leadCheckMessage = `⏳ Chưa thấy lead sau ${attempt} lần kiểm tra. Đang giữ trình duyệt và kích hoạt AI/Autofill hỗ trợ...`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#a78bfa;">🤖 Giữ browser: Chờ AI...</span>`);
 
-    console.log(`[LeadCheck] ${label}: ❌ Không có lead sau ${maxAttempts} lần kiểm tra. Đóng Chrome này để mở phiên bản mới.`);
+    console.log(`[LeadCheck] ${label}: Chưa thấy lead sau ${attempt} lần kiểm tra. Giữ nguyên trình duyệt để AI/Autofill tiếp tục xử lý các màn.`);
 
-    try {
-      if (session.proxyKey) {
-        const history = await readProxyUsageHistory();
-        if (history?.proxies?.[session.proxyKey]) {
-          history.proxies[session.proxyKey] = {
-            ...history.proxies[session.proxyKey],
-            status: 'failed',
-            reason: `Không có lead về sau ${maxAttempts} lần kiểm tra (IP ${exitIp})`,
-            completedAt: new Date().toISOString(),
-          };
-          await persistProxyUsageHistory(history);
-        }
-      }
-    } catch {}
+    const logs = browserSessionLogs.get(session);
+    if (logs) {
+      logs.push({
+        time: new Date().toISOString(),
+        type: 'lead_waiting_ai',
+        ip: exitIp,
+        detail: `Chưa thấy lead sau ${attempt} lần kiểm tra. Giữ nguyên trình duyệt để AI & Autofill tiếp tục xử lý.`,
+      });
+    }
 
-    chromeBuildRotationCounter += 1;
-    autoRefill.message = `Slot ${slotNum} (IP ${exitIp}) không có lead về; đang thử AI trước khi đổi phiên bản mới…`;
-
-    // Thử AI assist trước khi đóng — form có thể fill sai, AI có thể cứu
+    // Thử AI assist giải cứu form / btn-option / jump page nếu đang kẹt
     if (!session.aiAssistRunning) {
       try {
         const pages = await session.browser?.pages?.().catch(() => []) ?? [];
         const activePage = pages.find((p) => !p.isClosed?.());
         if (activePage) {
           const record = session.currentRecord ?? {};
-          console.log(`[LeadCheck] ${label}: thử AI assist trước khi đóng.`);
+          console.log(`[LeadCheck] ${label}: kích hoạt AI assist hỗ trợ...`);
           await runAiAssist(activePage, record, session, {
             onLog: (entry) => session.addLog?.(entry),
           });
         }
-      } catch {}
+      } catch (err) {
+        console.warn(`[LeadCheck] ${label}: AI assist hoàn tất:`, err.message);
+      }
     }
 
-    autoRefill.message = `Slot ${slotNum} (IP ${exitIp}) không có lead về; đã đóng và đang mở phiên bản mới với sock tiếp theo…`;
-    session.suppressAutoRefill = false;
-    await session.browser?.close?.().catch(() => {});
+    try {
+      session.triggerAutofillScan?.();
+    } catch {}
+
+    // Tiếp tục kiểm tra lead chạy ngầm định kỳ (mỗi intervalSeconds), KHÔNG BAO GIỜ đóng trình duyệt đột ngột
+    let bgAttempts = 0;
+    const bgChecker = setInterval(async () => {
+      if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
+        clearInterval(bgChecker);
+        return;
+      }
+      bgAttempts += 1;
+      try {
+        const bgLeadData = await fetchLeadDatas(leadConfig);
+        if (isLeadPresent(bgLeadData, targetIps)) {
+          clearInterval(bgChecker);
+          session.leadCheckStatus = 'confirmed';
+          session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp} (sau khi AI hỗ trợ)!`;
+          updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead về!</span>`);
+          console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead chạy ngầm cho IP ${exitIp}!`);
+          session.triggerAutofillScan?.();
+        }
+      } catch {}
+      if (bgAttempts > 20) clearInterval(bgChecker);
+    }, intervalMs);
+    bgChecker.unref?.();
   }
 }
 
@@ -2440,8 +2466,8 @@ async function openBrowserWithInstalledChrome({
 
       const currentUrl = page.url?.() || '';
       const now = Date.now();
-      // Chống spam AI: Nếu cùng 1 URL vừa chạy AI trong vòng 15s thì không chạy lại
-      if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 15000)) {
+      // Chống spam AI: Nếu cùng 1 URL vừa chạy AI trong vòng 4s thì không chạy lại dồn dập
+      if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 4000)) {
         return;
       }
       session.lastAiUrl = currentUrl;

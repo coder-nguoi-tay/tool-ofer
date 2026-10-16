@@ -994,16 +994,17 @@ export async function findSubmitButton(frame) {
     'input[type="submit"]',
     'input[type="button"][value*="Continue" i], input[type="button"][value*="Submit" i], input[type="button"][value*="Next" i]',
 
-    // 3. Nút bấm theo class phổ biến (được huấn luyện từ log thực tế)
-    'button.continue-btn, button.continue-button, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.next-button, button.btn-primary, button.arc-confirm-btn, button.blue-button, button.track-button, button.step-submit, button.forward-btn, button.btn-step',
-    'a.continue-btn, a.continue-button, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary, a.arc-confirm-btn, a.forward-step',
-    '[role="button"].continue-btn, [role="button"].continue-button, [role="button"].btn-continue, [role="button"].btn-next, [role="button"].next-btn, [role="button"].btn-primary',
-    'div.continue-btn, div.continue-button, div.btn-continue, div.btn-next, div.next-btn, div.submit-btn, div.button-next, div.forward-step',
+    // 3. Nút bấm theo class phổ biến (bao gồm Jump Page, CTA button màn 5, màn Reward)
+    'button.continue-btn, button.continue-button, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.next-button, button.btn-primary, button.arc-confirm-btn, button.blue-button, button.track-button, button.step-submit, button.forward-btn, button.btn-step, button.cta-button, button.rjp-cta-button, button.sjp-cta-button, button.cta-btn',
+    'a.continue-btn, a.continue-button, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary, a.arc-confirm-btn, a.forward-step, a.cta-button, a.rjp-cta-button, a.sjp-cta-button, a.cta-btn',
+    '[role="button"].continue-btn, [role="button"].continue-button, [role="button"].btn-continue, [role="button"].btn-next, [role="button"].next-btn, [role="button"].btn-primary, [role="button"].cta-button, [role="button"].rjp-cta-button',
+    'div.continue-btn, div.continue-button, div.btn-continue, div.btn-next, div.next-btn, div.submit-btn, div.button-next, div.forward-step, .cta-button, .rjp-cta-button, .sjp-cta-button',
+    'a[href*="/next"], a[aria-label*="Reward" i], a[aria-label*="Get My" i], a[aria-label*="Continue" i], a[aria-label*="Claim" i], button[aria-label*="Reward" i], button[aria-label*="Get My" i]',
 
-    // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt)
-    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành")',
-    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Explore Plans")',
-    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results")',
+    // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt, bao gồm Jump Page Get My Reward)
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành"), button:has-text("Get My Reward"), button:has-text("Claim Reward"), button:has-text("Claim My Reward"), button:has-text("Get Reward"), button:has-text("Unlock Reward"), button:has-text("View Deals"), button:has-text("Continue to Deals"), button:has-text("View Offers")',
+    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Explore Plans"), a:has-text("Get My Reward"), a:has-text("Claim Reward"), a:has-text("Claim My Reward"), a:has-text("Get Reward"), a:has-text("Unlock Reward"), a:has-text("View Deals"), a:has-text("Continue to Deals"), a:has-text("View Offers"), a:has-text("See Offers")',
+    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results"), [role="button"]:has-text("Get My Reward"), [role="button"]:has-text("Claim Reward"), [role="button"]:has-text("Get Reward")',
     'div[class*="btn"]:has-text("Continue"), div[class*="button"]:has-text("Continue"), div[class*="btn"]:has-text("Next"), div[class*="button"]:has-text("Next"), span[class*="btn"]:has-text("Continue")',
   ];
 
@@ -1153,24 +1154,26 @@ export function matchAgeRange(optionText, age) {
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-export async function handleRadioAndSurveyOptions(frame, record = {}) {
+export async function handleRadioAndSurveyOptions(frame, record = {}, session = null) {
   let answeredCount = 0;
 
-  // 0. ƯU TIÊN: Đáp ứng yêu cầu "các phần trả lời đáp án chọn ramdom trong danh sách các id='btn-option' cứ hiện là chọn"
+  // 0. ƯU TIÊN CAO NHẤT: Đáp ứng yêu cầu "các phần trả lời đáp án chọn ramdom trong danh sách các id='btn-option' cứ hiện là chọn"
   // Tự động tìm tất cả đáp án có id="btn-option", id bắt đầu/chứa "btn-option" hoặc class "btn-option", gom nhóm và chọn random ngay khi xuất hiện
   try {
     const btnOptionGroups = await frame.evaluate(() => {
       const isVisible = (el) => {
-        if (!el) return false;
+        if (!el || el.disabled) return false;
         const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
         if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
-        return Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+        if (el.closest('[aria-hidden="true"], [inert], .inactive, .hidden, .hide, .step:not(.active):not(.current), .tab-pane:not(.active)')) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        return true;
       };
 
       const allCandidates = Array.from(document.querySelectorAll(
-        '[id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, [data-btn-option]'
+        '[id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, [data-btn-option], button.btn-option, a.btn-option'
       )).filter((el) => {
-        if (el.disabled) return false;
         if (!isVisible(el)) return false;
         if (el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) return false;
         return true;
@@ -1178,33 +1181,41 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
 
       if (!allCandidates.length) return [];
 
-      // Gom nhóm theo container câu hỏi
+      // Gom nhóm theo container câu hỏi gần nhất (TUYỆT ĐỐI không dùng form hoặc body vì sẽ gộp mọi câu hỏi làm 1)
       const groups = new Map();
+      const now = Date.now();
+
       allCandidates.forEach((btn, idx) => {
-        const parent = btn.closest('.question, .survey-question, fieldset, .step-container, .choice-container, .options-container, .quiz-step, form') || document.body;
+        const parent = btn.closest('.question, .survey-question, fieldset, .choice-container, .options-container, .quiz-step, .question-container, .survey-step, [role="radiogroup"], .choices, .answers, ul, ol') || btn.parentElement || document.body;
         if (!groups.has(parent)) {
           groups.set(parent, []);
         }
-        const uid = `btn_option_${idx}_${Date.now()}`;
+        const uid = `btn_option_${idx}_${now}`;
         btn.setAttribute('data-autolead-btn-option-id', uid);
-        const isActive = btn.classList.contains('active') ||
+
+        const isSelected = btn.classList.contains('active') ||
           btn.classList.contains('selected') ||
           btn.getAttribute('aria-checked') === 'true' ||
-          btn.getAttribute('data-autolead-clicked') === '1';
+          (btn.tagName === 'INPUT' && btn.checked);
+
+        const lastClickedTime = Number(btn.getAttribute('data-autolead-btn-clicked-time') || 0);
+        const recentlyClicked = (now - lastClickedTime) < 1200;
 
         groups.get(parent).push({
           uid,
           id: btn.id || '',
           className: btn.className || '',
           text: (btn.innerText || btn.textContent || btn.value || '').trim(),
-          isActive,
+          isSelected,
+          recentlyClicked,
         });
       });
 
       const actionableGroups = [];
       for (const [, items] of groups.entries()) {
-        const alreadyChosen = items.some((it) => it.isActive);
-        if (!alreadyChosen && items.length > 0) {
+        const hasRecentlyClicked = items.some((it) => it.recentlyClicked);
+        // Nếu chưa từng click gần đây (trong 1.2s qua), chọn random đáp án ngay
+        if (!hasRecentlyClicked && items.length > 0) {
           actionableGroups.push(items);
         }
       }
@@ -1219,29 +1230,34 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
       if (picked?.uid) {
         try {
           const locator = frame.locator(`[data-autolead-btn-option-id="${picked.uid}"]`).first();
-          if (locator && (await locator.count() > 0)) {
+          if (locator && (await locator.count().catch(() => 0) > 0)) {
             if (typeof locator.scrollIntoViewIfNeeded === 'function') {
-              await locator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+              await locator.scrollIntoViewIfNeeded({ timeout: 400 }).catch(() => {});
             }
-            if (typeof locator.hover === 'function') {
-              await locator.hover({ timeout: 600 }).catch(() => {});
-            }
-            const pause = Math.floor(Math.random() * 150) + 150;
-            await new Promise((r) => setTimeout(r, pause));
 
-            await locator.click({ force: true, timeout: 1500 }).catch(async () => {
+            try {
+              await locator.click({ force: true, timeout: 1200 });
+            } catch {
               await locator.evaluate((el) => el.click()).catch(() => {});
-            });
+            }
 
             await locator.evaluate((el) => {
+              const now = Date.now();
+              el.setAttribute('data-autolead-btn-clicked-time', String(now));
               el.setAttribute('data-autolead-clicked', '1');
               el.classList.add('active', 'selected');
+              el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+              el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+              el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
               el.dispatchEvent(new Event('input', { bubbles: true }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
             }).catch(() => {});
 
             answeredCount += 1;
-            await new Promise((r) => setTimeout(r, 200));
+            if (session) {
+              session.lastActionTime = Date.now();
+              session.autofillFields = (session.autofillFields ?? 0) + 1;
+            }
           }
         } catch {}
       }
@@ -2411,6 +2427,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             }
           }).catch(() => {});
           session.autofillFields = (session.autofillFields ?? 0) + 1;
+          session.lastActionTime = Date.now();
           session.autofillError = null;
           filledInThisPass += 1;
 
@@ -2442,9 +2459,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
       // Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên radio buttons hoặc lựa chọn Yes/No/Tuổi/Thu nhập
       try {
-        const answeredSurvey = await handleRadioAndSurveyOptions(frame, record);
+        const answeredSurvey = await handleRadioAndSurveyOptions(frame, record, session);
         if (answeredSurvey > 0) {
           filledInThisPass += answeredSurvey;
+          session.lastActionTime = Date.now();
           session.autofillFields = (session.autofillFields ?? 0) + answeredSurvey;
           session.autofillError = null;
           options.onLog?.({
@@ -2671,6 +2689,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 console.warn('[Autofill] Playwright click lỗi, dùng fallback evaluate click:', clickErr.message);
               }
 
+              session.lastActionTime = Date.now();
+              session.autofillFields = (session.autofillFields ?? 0) + 1;
+
               // Luôn kích hoạt native click và form.requestSubmit() để đảm bảo ăn chắc 100%
               await submitBtn.evaluate((btn) => {
                 try { btn.click(); } catch {}
@@ -2679,6 +2700,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   try { form.requestSubmit(btn); } catch {
                     try { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); } catch {}
                   }
+                }
+                // Đối với thẻ <a> chuyển bước Jump Page (/next), nếu click không điều hướng thì chủ động gán href
+                if (btn.tagName === 'A' && btn.href && !btn.href.startsWith('javascript:')) {
+                  try { window.location.href = btn.href; } catch {}
                 }
               }).catch(() => {});
 
@@ -2800,7 +2825,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               if (inputs.some((el) => isVisible(el) && !el.disabled)) return true;
 
               // 2. Kiểm tra có nút bấm, button submit, hoặc nút chuyển bước nào đang hiển thị không
-              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a.btn, a.button'));
+              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a.btn, a.button, a.cta-button, a.rjp-cta-button, a.sjp-cta-button, .cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], a[aria-label*="Reward" i]'));
               if (buttons.some((el) => isVisible(el) && !el.disabled)) return true;
 
               // 3. Kiểm tra có radio group hoặc câu hỏi khảo sát/quiz nào đang hiển thị không
