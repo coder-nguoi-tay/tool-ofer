@@ -13,6 +13,9 @@ import {
   handleOfferwallCards,
   attachAutofill,
   humanType,
+  DEFAULT_PHONE_AREA_CODES,
+  getPhoneAreaCode,
+  getNormalizedPhone,
 } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
 import { parseActions, pageHasWork, executeAction } from './ai-assist.mjs';
@@ -377,8 +380,8 @@ assert.equal(matchFieldValue(['street_address', 'address1'], leadRecord), '2609 
 assert.equal(matchFieldValue(['city'], leadRecord), 'Edmond');
 assert.equal(matchFieldValue(['state'], leadRecord), 'OK');
 assert.equal(matchFieldValue(['zip', 'postal_code'], leadRecord), '73132');
-assert.equal(matchFieldValue(['phone', 'tel'], leadRecord), '4059335582');
-assert.equal(matchFieldValue(['areacode', 'phone1'], leadRecord), '405');
+assert.ok(/^(814|817)9335582$/.test(matchFieldValue(['phone', 'tel'], leadRecord)), 'Phone phải có đầu số mặc định 814 hoặc 817');
+assert.ok(['814', '817'].includes(matchFieldValue(['areacode', 'phone1'], leadRecord)), 'Areacode phải là 814 hoặc 817');
 assert.equal(matchFieldValue(['prefix', 'phone2'], leadRecord), '933');
 assert.equal(matchFieldValue(['linenumber', 'phone3'], leadRecord), '5582');
 assert.equal(matchFieldValue(['ssn', 'social_security'], leadRecord), '653-24-6710');
@@ -435,7 +438,7 @@ assert.equal(jeremy.address, '723 e 6th st');
 assert.equal(jeremy.city, 'Dewey');
 assert.equal(jeremy.state, 'OK');
 assert.equal(jeremy.zipcode, '74029');
-assert.equal(jeremy.phonenumber, '918-397-5329');
+assert.ok(/^(814|817)-397-5329$/.test(jeremy.phonenumber), 'jeremy.phonenumber phải có đầu số mặc định 814 hoặc 817');
 assert.equal(jeremy.dateofbirth, '8/4/1984');
 
 assert.equal(matchFieldValue(['full_name', 'name'], jeremy), 'Jeremy Adam McNeice');
@@ -445,8 +448,8 @@ assert.equal(matchFieldValue(['street_address', 'address'], jeremy), '723 e 6th 
 assert.equal(matchFieldValue(['city'], jeremy), 'Dewey');
 assert.equal(matchFieldValue(['state'], jeremy), 'OK');
 assert.equal(matchFieldValue(['zip', 'zipcode'], jeremy), '74029');
-assert.equal(matchFieldValue(['phone', 'tel'], jeremy), '918-397-5329');
-assert.equal(matchFieldValue(['areacode'], jeremy), '918');
+assert.ok(/^(814|817)-397-5329$/.test(matchFieldValue(['phone', 'tel'], jeremy)), 'Phone jeremy phải có đầu số 814 hoặc 817');
+assert.ok(['814', '817'].includes(matchFieldValue(['areacode'], jeremy)), 'Areacode jeremy phải là 814 hoặc 817');
 assert.equal(matchFieldValue(['prefix'], jeremy), '397');
 assert.equal(matchFieldValue(['linenumber'], jeremy), '5329');
 assert.equal(matchFieldValue(['dob', 'date_of_birth'], jeremy), '08/04/1984');
@@ -521,8 +524,8 @@ const kendra = kendraParsed[0];
 assert.equal(kendra.firstname, 'Kendra');
 assert.equal(kendra.lastname, 'Wardlaw');
 assert.equal(kendra.fullname, 'Kendra Wardlaw');
-assert.equal(kendra.phone, '3077420430');
-assert.equal(kendra.cellphone, '3077420430');
+assert.ok(/^(814|817)7420430$/.test(kendra.phone), 'kendra.phone phải có đầu số 814 hoặc 817');
+assert.ok(/^(814|817)7420430$/.test(kendra.cellphone), 'kendra.cellphone phải có đầu số 814 hoặc 817');
 assert.equal(kendra.email, 'KendraWardlaw5138274@gmail.com');
 assert.equal(kendra.state, 'AK');
 assert.equal(kendra.stateorprovince, 'AK');
@@ -537,7 +540,7 @@ assert.equal(matchFieldValue(['first_name'], kendra), 'Kendra');
 assert.equal(matchFieldValue(['last_name'], kendra), 'Wardlaw');
 assert.equal(matchFieldValue(['full_name', 'name'], kendra), 'Kendra Wardlaw');
 assert.equal(matchFieldValue(['email'], kendra), 'KendraWardlaw5138274@gmail.com');
-assert.equal(matchFieldValue(['phone', 'tel'], kendra), '3077420430');
+assert.ok(/^(814|817)7420430$/.test(matchFieldValue(['phone', 'tel'], kendra)), 'matchFieldValue phone kendra phải có đầu số 814 hoặc 817');
 assert.equal(matchFieldValue(['address', 'address1', 'street_address'], kendra), '4125 N Inspiration Loop');
 assert.equal(matchFieldValue(['city'], kendra), 'Wasilla');
 assert.equal(matchFieldValue(['state'], kendra, { kind: 'select' }), 'AK');
@@ -563,6 +566,31 @@ assert.equal(
   '100 Main St',
   'Khi record thiếu địa chỉ, phải có fallback địa chỉ mặc định hợp lệ để không bị chặn form'
 );
+
+// Test Phone mặc định đầu số 814 hoặc 817
+assert.deepEqual(DEFAULT_PHONE_AREA_CODES, ['814', '817']);
+assert.ok(['814', '817'].includes(getPhoneAreaCode({})), 'Khi record rỗng, getPhoneAreaCode phải trả về 814 hoặc 817');
+assert.equal(getPhoneAreaCode({ phone: '8141234567' }), '814', 'Số có sẵn đầu 814 phải giữ nguyên');
+assert.equal(getPhoneAreaCode({ phone: '8179998888' }), '817', 'Số có sẵn đầu 817 phải giữ nguyên');
+assert.ok(['814', '817'].includes(getPhoneAreaCode({ phone: '4059335582' })), 'Số đầu khác phải được chuyển về 814 hoặc 817');
+assert.equal(getPhoneAreaCode({ areacode: '814' }), '814', 'Trường areacode = 814 phải được tôn trọng');
+assert.equal(getPhoneAreaCode({ areacode: '817' }), '817', 'Trường areacode = 817 phải được tôn trọng');
+
+// Test getNormalizedPhone sinh đúng 10 số có đầu 814 hoặc 817
+const emptyPhone = getNormalizedPhone({});
+assert.equal(emptyPhone.length, 10, 'Fallback phone phải đủ 10 số');
+assert.ok(/^(814|817)/.test(emptyPhone), 'Fallback phone phải bắt đầu bằng 814 hoặc 817');
+
+const formattedPhone = getNormalizedPhone({ phone: '(405) 933-5582' });
+assert.ok(/^\((814|817)\) 933-5582$/.test(formattedPhone), 'Phải giữ nguyên định dạng ngoặc đơn với đầu 814 hoặc 817');
+
+const dashPhone = getNormalizedPhone({ phone: '405-933-5582' });
+assert.ok(/^(814|817)-933-5582$/.test(dashPhone), 'Phải giữ nguyên định dạng gạch nối với đầu 814 hoặc 817');
+
+// Test matchFieldValue với record rỗng vẫn tự động sinh phone hợp lệ đầu 814/817
+const matchedEmptyPhone = matchFieldValue(['phone', 'tel'], {});
+assert.ok(/^(814|817)\d{7}$/.test(matchedEmptyPhone), 'matchFieldValue cho record rỗng phải trả về 10 số đầu 814/817');
+assert.ok(['814', '817'].includes(matchFieldValue(['areacode', 'phone1'], {})), 'matchFieldValue areacode cho record rỗng phải là 814 hoặc 817');
 
 // Test humanType mô phỏng gõ phím tuần tự có độ trễ từng ký tự (chống bị phát hiện bot autofill)
 const typedChars = [];

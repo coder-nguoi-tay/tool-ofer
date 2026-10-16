@@ -170,10 +170,15 @@ export function parseAutofillRecords(source) {
       normalized.street = resolvedAddress;
     }
 
-    // 5. Số điện thoại (Phone, Home Phone, Cell Phone)
+    // 5. Số điện thoại (Phone, Home Phone, Cell Phone) - mặc định đầu 814 / 817
     if (!normalized.phone) {
       normalized.phone = normalized.cellphone || normalized.homephone || normalized.workphone || '';
     }
+    const normalizedPhoneVal = getNormalizedPhone(normalized);
+    normalized.phone = normalizedPhoneVal;
+    normalized.phonenumber = normalizedPhoneVal;
+    normalized.cellphone = normalizedPhoneVal;
+    normalized.areacode = getPhoneAreaCode(normalized);
 
     // 6. Họ tên gộp
     if (!normalized.fullname && normalized.firstname && normalized.lastname) {
@@ -231,6 +236,105 @@ export function generateFallbackEmail(r = {}) {
   }
   const digits = (r.phonenumber || r.phone || r.cellphone || r.zipcode || r.zip || '77').replace(/\D/g, '').slice(-4) || '77';
   return `${namePart}${digits}@gmail.com`;
+}
+
+/**
+ * Danh sách mã vùng điện thoại mặc định cho lead (đầu 814 và 817).
+ */
+export const DEFAULT_PHONE_AREA_CODES = ['814', '817'];
+
+/**
+ * Lấy mã vùng điện thoại (Area Code - 3 số đầu) mặc định đầu 814 hoặc 817.
+ * Nếu số điện thoại của bản ghi đã có đầu 814 hoặc 817 thì giữ nguyên;
+ * ngược lại (hoặc nếu thiếu), tự động gán mặc định đầu 814 hoặc 817 nhất quán cho từng bản ghi.
+ *
+ * @param {object} record Bản ghi dữ liệu người dùng.
+ * @return {string} Mã vùng '814' hoặc '817'.
+ */
+export function getPhoneAreaCode(record = {}) {
+  if (record && typeof record === 'object') {
+    if (record.__phoneAreaCode && DEFAULT_PHONE_AREA_CODES.includes(String(record.__phoneAreaCode))) {
+      return String(record.__phoneAreaCode);
+    }
+    const explicitArea = String(record.areacode || record.phonearea || record.phone1 || '').replace(/\D/g, '');
+    if (DEFAULT_PHONE_AREA_CODES.includes(explicitArea)) {
+      record.__phoneAreaCode = explicitArea;
+      return explicitArea;
+    }
+  }
+
+  const raw = String(
+    record?.phonenumber ||
+    record?.phone ||
+    record?.cellphone ||
+    record?.homephone ||
+    record?.workphone ||
+    ''
+  ).replace(/\D/g, '');
+
+  if (raw.startsWith('814')) {
+    if (record && typeof record === 'object') record.__phoneAreaCode = '814';
+    return '814';
+  }
+  if (raw.startsWith('817')) {
+    if (record && typeof record === 'object') record.__phoneAreaCode = '817';
+    return '817';
+  }
+
+  const seed = String(record?.id || record?.email || record?.fullname || record?.firstname || record?.lastname || raw || '');
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  const chosen = DEFAULT_PHONE_AREA_CODES[hash % DEFAULT_PHONE_AREA_CODES.length];
+  if (record && typeof record === 'object') {
+    record.__phoneAreaCode = chosen;
+  }
+  return chosen;
+}
+
+/**
+ * Chuẩn hóa số điện thoại 10 chữ số của Hoa Kỳ luôn có mã vùng mặc định là 814 hoặc 817.
+ * Bảo toàn định dạng ban đầu (dấu gạch nối '-', ngoặc đơn '()') nếu số gốc có định dạng.
+ *
+ * @param {object} record Bản ghi dữ liệu người dùng.
+ * @return {string} Số điện thoại đã chuẩn hóa với đầu số 814 hoặc 817.
+ */
+export function getNormalizedPhone(record = {}) {
+  const areaCode = getPhoneAreaCode(record);
+  const raw = String(
+    record?.phonenumber ||
+    record?.phone ||
+    record?.cellphone ||
+    record?.homephone ||
+    record?.workphone ||
+    ''
+  ).trim();
+
+  const digits = raw.replace(/\D/g, '');
+
+  // Nếu thiếu số hoặc số quá ngắn, tự sinh 7 số đuôi hợp lệ (prefix + line)
+  if (digits.length < 7) {
+    const fallbackSuffix = '9335582';
+    return `${areaCode}${fallbackSuffix}`;
+  }
+
+  // Lấy 7 chữ số cuối (3 số prefix + 4 số line number)
+  const last7 = digits.length >= 10 ? digits.slice(-7) : digits.padStart(7, '9').slice(-7);
+
+  // Giữ nguyên kiểu định dạng hiển thị của số gốc
+  if (/^\(\d{3}\)\s*\d{3}-\d{4}$/.test(raw)) {
+    return `(${areaCode}) ${last7.slice(0, 3)}-${last7.slice(3)}`;
+  }
+  if (/^\d{3}-\d{3}-\d{4}$/.test(raw)) {
+    return `${areaCode}-${last7.slice(0, 3)}-${last7.slice(3)}`;
+  }
+  if (/^\d{3}\.\d{3}\.\d{4}$/.test(raw)) {
+    return `${areaCode}.${last7.slice(0, 3)}.${last7.slice(3)}`;
+  }
+
+  // Mặc định 10 chữ số liền nhau
+  return `${areaCode}${last7}`;
 }
 
 /**
@@ -441,25 +545,22 @@ const semanticCategories = [
   {
     type: 'phone_area',
     patterns: [/^(areacode|phone1|tel1|phonearea)$/],
-    resolve: (r) => {
-      const phone = (r.phonenumber || r.phone || r.cellphone || r.homephone || '').replace(/\D/g, '');
-      return phone.length >= 10 ? phone.slice(0, 3) : null;
-    },
+    resolve: (r) => getPhoneAreaCode(r),
   },
   {
     type: 'phone_prefix',
     patterns: [/^(prefix|phone2|tel2|phoneprefix)$/],
     resolve: (r) => {
-      const phone = (r.phonenumber || r.phone || r.cellphone || r.homephone || '').replace(/\D/g, '');
-      return phone.length >= 10 ? phone.slice(3, 6) : null;
+      const phone = getNormalizedPhone(r).replace(/\D/g, '');
+      return phone.length >= 6 ? phone.slice(3, 6) : '555';
     },
   },
   {
     type: 'phone_line',
     patterns: [/^(line|linenumber|phone3|tel3|phoneline)$/],
     resolve: (r) => {
-      const phone = (r.phonenumber || r.phone || r.cellphone || r.homephone || '').replace(/\D/g, '');
-      return phone.length >= 10 ? phone.slice(6, 10) : null;
+      const phone = getNormalizedPhone(r).replace(/\D/g, '');
+      return phone.length >= 10 ? phone.slice(6, 10) : '0199';
     },
   },
   // 3. Chia tách SSN (kiểm tra trước SSN gộp)
@@ -539,7 +640,7 @@ const semanticCategories = [
   {
     type: 'phone',
     patterns: [/phone/, /^tel(ephone)?$/, /mobile/, /cell/, /^sdt$/, /dienthoai/],
-    resolve: (r) => r.phonenumber || r.phone || r.cellphone || r.homephone || r.workphone || r.telephone || r.mobile || r.cell || r.sdt,
+    resolve: (r) => getNormalizedPhone(r),
   },
   // 7. Email
   {
@@ -697,6 +798,31 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
   const assignedEmail = metadata.assignedEmail || record.assignedEmail;
   if (isEmailField && assignedEmail) {
     return formatMatchedValue(assignedEmail, metadata);
+  }
+
+  // Ưu tiên cao: các trường mã vùng hoặc số điện thoại (bảo đảm mặc định đầu 814 / 817)
+  const isPhoneAreaField = normalizedCandidates.some((c) => /^(areacode|phone1|tel1|phonearea)$/i.test(c));
+  if (isPhoneAreaField) {
+    return formatMatchedValue(getPhoneAreaCode(record), metadata);
+  }
+
+  const isPhonePrefixField = normalizedCandidates.some((c) => /^(prefix|phone2|tel2|phoneprefix)$/i.test(c));
+  if (isPhonePrefixField) {
+    const digits = getNormalizedPhone(record).replace(/\D/g, '');
+    const prefixVal = digits.length >= 6 ? digits.slice(3, 6) : '555';
+    return formatMatchedValue(prefixVal, metadata);
+  }
+
+  const isPhoneLineField = normalizedCandidates.some((c) => /^(line|linenumber|phone3|tel3|phoneline)$/i.test(c));
+  if (isPhoneLineField) {
+    const digits = getNormalizedPhone(record).replace(/\D/g, '');
+    const lineVal = digits.length >= 10 ? digits.slice(6, 10) : '0199';
+    return formatMatchedValue(lineVal, metadata);
+  }
+
+  const isFullPhoneField = metadata.type === 'tel' || normalizedCandidates.some((c) => /phone|mobile|cell|^tel(ephone)?$|^sdt$|dienthoai/i.test(c) && !/^(areacode|phone1|tel1|prefix|phone2|tel2|line|phone3|tel3)$/i.test(c) && !/microphone|headphone|earphone/i.test(c));
+  if (isFullPhoneField) {
+    return formatMatchedValue(getNormalizedPhone(record), metadata);
   }
 
   // 1. Kiểm tra khớp chính xác với bất kỳ key nào trong record
