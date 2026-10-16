@@ -56,14 +56,14 @@ export const DEVICE_PROFILES = {
     spoof: { platform: 'Linux armv8l', maxTouchPoints: 5, mobile: true, uaPlatform: 'Android', dpr: 2.625, vendor: 'Google Inc.' },
   },
   ipad: {
-    label: 'iPad',
-    ua: () => 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    label: 'iPad (Chrome)',
+    ua: (v) => `Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`,
     viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
     spoof: { platform: 'iPad', maxTouchPoints: 5, mobile: false, uaPlatform: 'iOS', dpr: 2, vendor: 'Apple Computer, Inc.' },
   },
   ios: {
-    label: 'iPhone (Safari)',
-    ua: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    label: 'iPhone (Chrome)',
+    ua: (v) => `Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`,
     viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
     spoof: { platform: 'iPhone', maxTouchPoints: 5, mobile: true, uaPlatform: 'iOS', dpr: 3, vendor: 'Apple Computer, Inc.' },
   },
@@ -1313,6 +1313,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           deviceProfile: chosenDeviceProfile,
         });
         activeSession = openedBrowser.session;
+        successfulBrowsers += 1;
+        chromeBuildRotationCounter += 1;
         usageHistory.proxies[proxyKey] = {
           status: 'success',
           exitIp: exitIp,
@@ -2453,6 +2455,7 @@ async function openBrowserWithInstalledChrome({
     void relay?.close();
     // Profile dùng xong là xoá cả profile và cache: không giữ lại ~179 MB mỗi proxy đã thử.
     void removeChromeSessionProfile(userDataDirectory);
+    chromeBuildRotationCounter += 1;
     if (!session.suppressAutoRefill) {
       if (!session.closingDueToTrafficBlocked) {
         autoRefill.message = `Slot ${tileIndex + 1} trống; đang tìm proxy thay thế.`;

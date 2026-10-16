@@ -1240,6 +1240,11 @@ assert.equal(getNextDeviceProfile(), 'ios');
 resetDeviceProfileRotation();
 autoRefill.deviceProfiles = ['windows'];
 
+// 10.4 Kiểm tra sinh User-Agent khớp phiên bản Chrome cho Mobile và iOS
+assert.ok(DEVICE_PROFILES.android.ua('150.0.7871.187').includes('Chrome/150.0.7871.187'), 'Android UA phải chứa Chrome/150');
+assert.ok(DEVICE_PROFILES.ios.ua('151.0.7922.174').includes('CriOS/151.0.7922.174'), 'iOS UA phải chứa CriOS/151');
+assert.ok(DEVICE_PROFILES.ipad.ua('152.0.7977.83').includes('CriOS/152.0.7977.83'), 'iPad UA phải chứa CriOS/152');
+
 
 
 
