@@ -1289,6 +1289,9 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
             if (typeof locator.scrollIntoViewIfNeeded === 'function') {
               await locator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
             }
+            if (typeof locator.hover === 'function') {
+              await locator.hover({ timeout: 600 }).catch(() => {});
+            }
             const surveyPause = Math.floor(Math.random() * 200) + 200;
             await new Promise((r) => setTimeout(r, surveyPause));
             await locator.click({ timeout: 1500, force: true }).catch(async () => {
@@ -1413,6 +1416,9 @@ export async function humanType(field, text, page = null) {
   try {
     if (typeof field.scrollIntoViewIfNeeded === 'function') {
       await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+    }
+    if (typeof field.hover === 'function') {
+      await field.hover({ timeout: 600 }).catch(() => {});
     }
     if (typeof field.click === 'function') {
       await field.click({ force: true, timeout: 1500 }).catch(() => {});
@@ -1655,6 +1661,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               if (!metadata.checked) {
                 try {
                   await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+                  if (typeof field.hover === 'function') {
+                    await field.hover({ timeout: 600 }).catch(() => {});
+                  }
                   const consentPause = Math.floor(Math.random() * 120) + 120;
                   if (page && typeof page.waitForTimeout === 'function') {
                     await page.waitForTimeout(consentPause).catch(() => {});
@@ -1742,6 +1751,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
           if (metadata.kind === 'select') {
             await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+            if (typeof field.hover === 'function') {
+              await field.hover({ timeout: 600 }).catch(() => {});
+            }
             await field.click({ force: true, timeout: 1000 }).catch(() => {});
             const selectPause = Math.floor(Math.random() * 100) + 120;
             if (page && typeof page.waitForTimeout === 'function') {
@@ -2049,6 +2061,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
               // Cuộn phần tử vào tầm nhìn
               await submitBtn.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+              if (typeof submitBtn.hover === 'function') {
+                await submitBtn.hover({ timeout: 600 }).catch(() => {});
+              }
               await new Promise((resolve) => { setTimeout(resolve, Math.floor(Math.random() * 200) + 150); });
 
               // Đảm bảo gỡ bỏ hoàn toàn disabled và pointer-events bị khóa
@@ -2204,6 +2219,31 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     page.on('frameattached', scan);
     page.on('popup', (popup) => watchPage(popup));
     page.on('close', () => clearInterval(timer));
+
+    // Tự động xử lý dialog (alert, confirm, prompt) để tránh làm treo trình duyệt
+    if (typeof page.on === 'function') {
+      page.on('dialog', async (dialog) => {
+        try {
+          const msg = dialog.message()?.slice(0, 80) || '';
+          console.log(`[Playwright] Tự động xác nhận dialog (${dialog.type()}): "${msg}"`);
+          options.onLog?.({
+            type: 'dialog_handled',
+            detail: `Đã tự động xác nhận dialog ${dialog.type()}: "${msg}"`,
+          });
+          await dialog.accept().catch(() => {});
+        } catch {}
+      });
+
+      // Lắng nghe crash để ghi nhận log chẩn đoán
+      page.on('crash', () => {
+        console.warn('[Playwright] Cảnh báo: Trang bị crash (OOM hoặc mất kết nối proxy)');
+        options.onLog?.({
+          type: 'page_crash',
+          detail: 'Trang bị crash đột ngột (OOM hoặc mất kết nối proxy).',
+        });
+      });
+    }
+
     void scan();
   }
 
