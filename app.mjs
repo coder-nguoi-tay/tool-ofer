@@ -2244,7 +2244,9 @@ async function startLeadVerification(session, leadConfig) {
         if (activePage) {
           const record = session.currentRecord ?? {};
           console.log(`[LeadCheck] ${label}: thử AI assist trước khi đóng.`);
-          await runAiAssist(activePage, record, session);
+          await runAiAssist(activePage, record, session, {
+            onLog: (entry) => session.addLog?.(entry),
+          });
         }
       } catch {}
     }
@@ -2326,6 +2328,24 @@ async function openBrowserWithInstalledChrome({
     extensions: extensionNames.length > 0
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
+    updateBadge: (text) => {
+      try {
+        if (context?.pages) {
+          for (const p of context.pages()) {
+            if (!p.isClosed()) {
+              p.evaluate((t) => {
+                const b = document.getElementById('__autolead_ip_badge');
+                if (b) b.innerHTML = t;
+              }, text).catch(() => {});
+            }
+          }
+        }
+      } catch {}
+    },
+    addLog: (entry) => {
+      const logs = browserSessionLogs.get(session);
+      if (logs) logs.push(entry);
+    },
   };
   const assignedEmail = dequeueNextEmail();
   if (assignedEmail) {
@@ -2421,29 +2441,36 @@ async function openBrowserWithInstalledChrome({
         currentRecord.mail = session.assignedEmail;
         currentRecord.assignedEmail = session.assignedEmail;
       }
-      void runAiAssist(page, currentRecord, session).then(async () => {
+      void runAiAssist(page, currentRecord, session, {
+        onLog: (entry) => session.addLog?.(entry),
+      }).then(async () => {
         // AI xong → kích autofill quét lại một lần
         session.triggerAutofillScan?.();
         // Chờ 3s để trang ổn định
         await new Promise((r) => setTimeout(r, 3000));
         if (page.isClosed()) return;
         const stillHasWork = await pageHasWork(page);
-        // CHỈ ĐÓNG TRÌNH DUYỆT KHI ĐÃ ĐIỀN ĐƯỢC FORM (autofillFields > 0)
-        // Tuyệt đối không đóng khi autofillFields === 0 vì đó là trang chưa load kịp hoặc đang chuyển hướng
-        if (!stillHasWork && (session.autofillFields ?? 0) > 0) {
-          console.log(`[AI-Assist] Slot ${tileIndex + 1}: hoàn tất (${session.autofillFields} trường), đóng trình duyệt và mở phiên mới.`);
-          const logs = browserSessionLogs.get(session);
-          if (logs) {
-            logs.push({
-              time: new Date().toISOString(),
-              type: 'ai_completed',
-              detail: `AI Assist đã hoàn tất các màn form (${session.autofillFields} trường). Đóng trình duyệt và mở phiên mới.`,
-            });
-          }
+
+        // CHỈ ĐÓNG TRÌNH DUYỆT KHI ĐÃ ĐẠT TRANG HOÀN TẤT (Thank You / Confirmation)
+        const isThankYouPage = await page.evaluate(() => {
+          const text = (document.body?.innerText || '').toLowerCase();
+          const url = (window.location.href || '').toLowerCase();
+          const hasThankYouText = /thank\s*you|congratulations|confirmed|your\s*submission|application\s*received|cảm ơn/i.test(text);
+          const hasThankYouUrl = /thank[-_]?you|confirmation|success|completed|receipt/i.test(url);
+          return hasThankYouText || hasThankYouUrl;
+        }).catch(() => false);
+
+        if (!stillHasWork && isThankYouPage && (session.autofillFields ?? 0) > 0) {
+          console.log(`[AI-Assist] Slot ${tileIndex + 1}: đã đạt trang cảm ơn (${session.autofillFields} trường), đóng trình duyệt và mở phiên mới.`);
+          session.addLog?.({
+            time: new Date().toISOString(),
+            type: 'ai_completed',
+            detail: `AI Assist đã hoàn tất đến trang cảm ơn (${session.autofillFields} trường). Đóng trình duyệt và mở phiên mới.`,
+          });
           session.suppressAutoRefill = false;
           await session.browser?.close?.().catch(() => {});
-        } else if (!stillHasWork) {
-          console.log(`[AI-Assist] Slot ${tileIndex + 1}: trang chưa có form hoặc chưa điền được trường nào, tiếp tục giữ trình duyệt để trang tải.`);
+        } else if (!stillHasWork && !isThankYouPage) {
+          console.log(`[AI-Assist] Slot ${tileIndex + 1}: chưa đạt trang cảm ơn, tiếp tục giữ trình duyệt để người dùng theo dõi hoặc trang tải tiếp.`);
         }
       });
     },

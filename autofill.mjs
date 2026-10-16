@@ -1376,6 +1376,57 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
         }
       }
 
+      // Fallback: Tìm các nhóm radio buttons HTML (<input type="radio">) chưa có lựa chọn nào được chọn
+      const radioGroups = {};
+      const allRadios = Array.from(document.querySelectorAll('input[type="radio"]')).filter((r) => {
+        if (r.disabled) return false;
+        const style = window.getComputedStyle ? window.getComputedStyle(r) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) {
+          const parent = r.closest('label, div, li');
+          if (!parent) return false;
+          const pStyle = window.getComputedStyle(parent);
+          if (pStyle.display === 'none' || pStyle.visibility === 'hidden') return false;
+          return Boolean(parent.offsetWidth || parent.offsetHeight || parent.getClientRects().length);
+        }
+        return Boolean(r.offsetWidth || r.offsetHeight || r.getClientRects().length);
+      });
+
+      allRadios.forEach((r) => {
+        const name = r.name || r.id || 'unnamed_radio_group';
+        if (!radioGroups[name]) radioGroups[name] = [];
+        radioGroups[name].push(r);
+      });
+
+      for (const [groupName, radios] of Object.entries(radioGroups)) {
+        const hasChecked = radios.some((r) => r.checked || r.getAttribute('data-autolead-clicked') === '1');
+        if (hasChecked || radios.length < 2) continue;
+
+        const container = radios[0].closest('fieldset, .form-group, .step-container, .survey-question, form, div');
+        const titleEl = container?.querySelector('legend, h1, h2, h3, h4, label, p, .question-title');
+        const questionTitle = (titleEl?.innerText || titleEl?.textContent || groupName).trim();
+
+        const items = radios.map((r, optIndex) => {
+          const uid = `choice_radio_${groupName}_${optIndex}_${Date.now()}`;
+          r.setAttribute('data-autolead-choice-id', uid);
+          const lbl = document.querySelector(`label[for="${r.id}"]`) || r.closest('label');
+          const text = (lbl?.innerText || lbl?.textContent || r.value || '').trim();
+          return {
+            uid,
+            id: r.id || '',
+            text,
+            value: r.value || '',
+            field: groupName,
+            tagName: 'input',
+            isRadio: true,
+          };
+        });
+
+        results.push({
+          questionTitle,
+          items,
+        });
+      }
+
       return results;
     }).catch(() => []);
 
@@ -1422,15 +1473,28 @@ export async function handleRadioAndSurveyOptions(frame, record = {}) {
             }
             const surveyPause = Math.floor(Math.random() * 200) + 200;
             await new Promise((r) => setTimeout(r, surveyPause));
-            await locator.click({ timeout: 1500, force: true }).catch(async () => {
-              await locator.evaluate((el) => {
-                el.click();
-                el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-              }).catch(() => {});
-            });
+            if (picked.isRadio) {
+              await locator.check({ timeout: 1500, force: true }).catch(async () => {
+                await locator.click({ timeout: 1000, force: true }).catch(async () => {
+                  await locator.evaluate((el) => {
+                    el.checked = true;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                  }).catch(() => {});
+                });
+              });
+            } else {
+              await locator.click({ timeout: 1500, force: true }).catch(async () => {
+                await locator.evaluate((el) => {
+                  el.click();
+                  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                }).catch(() => {});
+              });
+            }
 
             await locator.evaluate((el) => {
               el.setAttribute('data-autolead-clicked', '1');
+              if (el.type === 'radio') el.checked = true;
               el.classList.add('selected', 'active');
               el.dispatchEvent(new Event('input', { bubbles: true }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2462,36 +2526,48 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       if (filled > 0) {
         noProgressRounds = 0;
       } else {
-        // Chỉ đếm vòng không tiến triển khi trang thực sự có form/input chưa điền hoặc khảo sát chưa trả lời
+        // Chỉ đếm vòng không tiến triển khi trang thực sự có form/input, khảo sát hoặc nút bấm cần tương tác
         let hasInteractable = true;
         try {
           if (typeof page.evaluate === 'function' && !page.isClosed()) {
             hasInteractable = await page.evaluate(() => {
+              if (!document.body || document.body.children.length === 0) return false;
+
               const isVisible = (el) => {
                 if (!el) return false;
-                const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
                 return Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
               };
 
-              // 1. Kiểm tra có ô text/email/tel/number nào đang hiển thị và CHƯA ĐIỀN không
-              const textInputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea'));
-              const hasEmptyInput = textInputs.some((el) => isVisible(el) && !el.disabled && !el.readOnly && !el.value?.trim());
-              if (hasEmptyInput) return true;
+              // Kiểm tra xem trang đã hoàn tất (Thank You / Congratulations) hay chưa
+              const pageText = (document.body.innerText || '').toLowerCase();
+              const pageUrl = (window.location.href || '').toLowerCase();
+              const isThankYou = /thank\s*you|congratulations|confirmed|your\s*submission|application\s*received|cảm ơn/i.test(pageText) ||
+                /thank[-_]?you|confirmation|success|completed|receipt/i.test(pageUrl);
+              const anyForm = document.querySelector('form');
+              const anySubmitBtn = document.querySelector('button[type="submit"], input[type="submit"], [data-vector-submit="true"], button.continue-btn, button.submit-btn');
+              if (isThankYou && !anyForm && !anySubmitBtn) {
+                return false;
+              }
 
-              // 2. Kiểm tra có select nào đang hiển thị và chưa chọn giá trị không
-              const selects = Array.from(document.querySelectorAll('select'));
-              const hasEmptySelect = selects.some((el) => isVisible(el) && !el.disabled && (!el.value || el.value === ''));
-              if (hasEmptySelect) return true;
+              // 1. Kiểm tra bất kỳ ô input / textarea / select nào đang hiển thị
+              const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea, select'));
+              if (inputs.some((el) => isVisible(el) && !el.disabled)) return true;
 
-              // 3. Kiểm tra có nhóm khảo sát hoặc nút lựa chọn chưa được trả lời không
-              const optionButtons = Array.from(document.querySelectorAll('button.btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"], button[type="button"]'));
-              const hasUnansweredSurvey = optionButtons.some((el) => {
-                if (!isVisible(el) || el.disabled) return false;
-                if (el.classList.contains('active') || el.classList.contains('selected') || el.getAttribute('data-autolead-clicked') === '1') return false;
-                return el.closest('.step-container, .survey-container, form, [data-step], .question-container, .creative, fieldset') !== null;
-              });
-              if (hasUnansweredSurvey) return true;
+              // 2. Kiểm tra có nút bấm, button submit, hoặc nút chuyển bước nào đang hiển thị không
+              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a.btn, a.button'));
+              if (buttons.some((el) => isVisible(el) && !el.disabled)) return true;
+
+              // 3. Kiểm tra có radio group hoặc câu hỏi khảo sát/quiz nào đang hiển thị không
+              const surveyOptions = Array.from(document.querySelectorAll(
+                'input[type="radio"], [role="radio"], .btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"], .choice-btn, .option-btn, .quiz-btn, .answer-btn, label.btn, .creative-survey-answer'
+              ));
+              if (surveyOptions.some((el) => isVisible(el) && !el.disabled)) return true;
+
+              // 4. Có form hoặc iframe đang hiển thị
+              const forms = Array.from(document.querySelectorAll('form, iframe'));
+              if (forms.some((el) => isVisible(el))) return true;
 
               return false;
             });
@@ -2503,11 +2579,11 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         if (hasInteractable) {
           noProgressRounds += 1;
         } else {
-          // Trang không có trường nào cần điền (đang redirect hoặc đang tải), reset bộ đếm để không trigger AI nhầm
+          // Trang chưa có form hoặc đã hoàn tất, reset bộ đếm
           noProgressRounds = 0;
         }
 
-        // 3 lần scan liên tiếp có trường chưa điền được và không đang chờ lead → nhờ AI Assist
+        // 3 lần scan liên tiếp không tiến triển và không đang chờ lead → nhờ AI Assist
         if (noProgressRounds >= 3 && !session.aiAssistRunning && session.leadCheckStatus !== 'waiting' && !page.isClosed()) {
           noProgressRounds = 0;
           options.onStuck?.(page);

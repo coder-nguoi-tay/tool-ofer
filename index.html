@@ -1007,9 +1007,18 @@
         } else if (entry.type === 'lead_confirmed') {
           typeLabel = '<span style="color:#16a34a;font-weight:700;">✅ Có lead</span>';
           detail = `<span style="color:#16a34a;font-weight:600;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_started') {
+          typeLabel = '<span style="color:#8b5cf6;font-weight:600;">🤖 AI phân tích</span>';
+          detail = `<span style="color:#7c3aed;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_action') {
+          typeLabel = '<span style="color:#6366f1;font-weight:600;">🤖 AI làm</span>';
+          detail = `<span style="color:#4f46e5;">${escHtml(entry.detail || '')}</span>`;
         } else if (entry.type === 'ai_completed') {
           typeLabel = '<span style="color:#0284c7;font-weight:600;">🤖 AI xong</span>';
           detail = `<span style="color:#0284c7;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_error') {
+          typeLabel = '<span style="color:#ef4444;font-weight:600;">⚠️ AI lỗi</span>';
+          detail = `<span style="color:#dc2626;">${escHtml(entry.detail || '')}</span>`;
         } else if (entry.type === 'adtrapper_reload') {
           typeLabel = '<span style="color:#f59e0b;font-weight:600;">🔄 Tải lại</span>';
           detail = `<span style="color:#b45309;">${escHtml(entry.detail || '')}</span>`;

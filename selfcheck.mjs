@@ -1006,13 +1006,15 @@ assert.equal(mockSession.autofillFields, 4);
 assert.ok(executedActionLog.some((e) => e === 'click:#submit'));
 
 // 3. Test pageHasWork
-const mockWorkPage = {
-  isClosed: () => false,
-  evaluate: async (fn) => fn(),
-};
-// Trang đã đóng → trả về false
 assert.equal(await pageHasWork({ isClosed: () => true }), false);
 assert.equal(await pageHasWork(null), false);
+
+// Test pageHasWork với page có evaluation trả về true (có radio, survey, submit)
+const mockWorkPage = {
+  isClosed: () => false,
+  evaluate: async () => true,
+};
+assert.equal(await pageHasWork(mockWorkPage), true);
 
 // 4. Test attachAutofill: Trigger onStuck khi noProgressRounds >= 3
 let stuckTriggered = false;
@@ -1021,6 +1023,7 @@ const mockStuckPage = {
   isClosed: () => false,
   url: () => 'https://example.com/form',
   on: (evt, handler) => { mockStuckPageEvents[evt] = handler; },
+  evaluate: async () => true, // Giả lập trang có form/input interactable
   frames: () => [{
     locator: () => ({ all: async () => [] }),
     evaluateAll: async () => ({}),
@@ -1044,6 +1047,33 @@ await new Promise((r) => setTimeout(r, 20));
 mockSessionStuck.triggerAutofillScan?.();
 await new Promise((r) => setTimeout(r, 20));
 assert.equal(stuckTriggered, true, 'Sau 3 vòng scan không có tiến triển phải kích hoạt callback onStuck');
+
+// Test attachAutofill khi trang trống hoặc cảm ơn (hasInteractable = false) thì KHÔNG trigger onStuck
+let stuckTriggeredBlank = false;
+const mockBlankPage = {
+  isClosed: () => false,
+  url: () => 'https://example.com/thank-you',
+  on: () => {},
+  evaluate: async () => false, // Trang cảm ơn / rỗng không có interactable
+  frames: () => [{
+    locator: () => ({ all: async () => [] }),
+    evaluateAll: async () => ({}),
+    evaluate: async () => [],
+  }],
+};
+const mockBlankContext = {
+  on: () => {},
+  pages: () => [mockBlankPage],
+};
+const mockSessionBlank = { autofillFields: 5, leadCheckStatus: null };
+attachAutofill(mockBlankContext, [{ firstname: 'Jeremy' }], 'https://example.com', mockSessionBlank, {
+  onStuck: () => { stuckTriggeredBlank = true; },
+});
+for (let i = 0; i < 5; i++) {
+  mockSessionBlank.triggerAutofillScan?.();
+  await new Promise((r) => setTimeout(r, 10));
+}
+assert.equal(stuckTriggeredBlank, false, 'Trang cảm ơn / trống không được trigger onStuck nhầm');
 
 // 5. Test watchTrafficBlockedPage: Xử lý kẹt tại adtrapper (tải lại 1-2 lần, nếu không được thì đóng trình duyệt)
 assert.equal(typeof watchTrafficBlockedPage, 'function');
