@@ -932,32 +932,34 @@ export function isConsentCheckbox(metadata) {
   const textContent = names.join(' ');
   const dataAttributes = metadata.dataAttributes || {};
 
-  // 1. Kiểm tra ID hoặc name
-  if (/digitalconsent|consent|disclosure|agree|terms|tcpa|optin|opt_in|privacy|policy|acknowledge/i.test(`${id} ${name}`)) {
+  // 1. Checkbox có thuộc tính required hoặc aria-required
+  if (metadata.required || metadata.ariaRequired === 'true' || metadata.dataAttributes?.['data-required'] === 'true') {
     return true;
   }
 
-  // 2. Kiểm tra data- attributes (ví dụ: data-tf-element-role="consent-opt-in", data-leadid-type="disclosure")
+  // 2. Kiểm tra ID hoặc name
+  if (/digitalconsent|consent|disclosure|agree|terms|tcpa|optin|opt_in|privacy|policy|acknowledge|tos|rules|accept|confirm|legal|disclaimer|certify|authorize|authorization|sms|communication|comm|marketing|partner|offer|lead|resident|citizen|age|subscriber|subscribe/i.test(`${id} ${name}`)) {
+    return true;
+  }
+
+  // 3. Kiểm tra data- attributes (ví dụ: data-tf-element-role="consent-opt-in", data-leadid-type="disclosure")
   for (const [key, val] of Object.entries(dataAttributes)) {
     const keyLower = String(key).toLowerCase();
     const valLower = String(val).toLowerCase();
-    if (keyLower.includes('consent') || keyLower.includes('disclosure') || valLower.includes('consent') || valLower.includes('disclosure')) {
+    if (keyLower.includes('consent') || keyLower.includes('disclosure') || keyLower.includes('agree') || keyLower.includes('tcpa') || keyLower.includes('terms') || valLower.includes('consent') || valLower.includes('disclosure') || valLower.includes('agree') || valLower.includes('tcpa') || valLower.includes('terms')) {
       return true;
     }
   }
 
-  // 3. Kiểm tra class hoặc container class (ví dụ: .consent-box, .consent-row)
-  if (/consent|disclosure|tcpa|terms-and-conditions|privacy-policy/i.test(classes)) {
+  // 4. Kiểm tra class hoặc container class (ví dụ: .consent-box, .consent-row, .terms-check)
+  if (/consent|disclosure|tcpa|terms|privacy|policy|agree|checkbox-terms|legal|required/i.test(classes)) {
     return true;
   }
 
-  // 4. Kiểm tra văn bản nhãn / mô tả đi kèm (ví dụ: "By clicking Continue, I represent that I am 18+ years of age...")
-  if (/by clicking|i represent|18\+|i agree|i consent|terms of service|terms and conditions|privacy policy|marketing partners|express written consent|disclosure|tôi đồng ý|điều khoản/i.test(textContent)) {
+  // 5. Kiểm tra văn bản nhãn / mô tả đi kèm (ví dụ: "By clicking Continue, I represent that I am 18+ years of age...")
+  if (/by clicking|i represent|18\+|i agree|i consent|i confirm|i accept|i certify|i have read|i understand|i authorize|terms of service|terms of use|terms & conditions|terms and conditions|privacy policy|privacy notice|marketing partners|express written consent|consumer disclosure|disclosure|tôi đồng ý|điều khoản|xác nhận|chính sách|automated technology|pre-recorded|text message|sms|communication|receive offers|free quote|electronic signature|e-sign|over 18|18 years|resident/i.test(textContent)) {
     return true;
   }
-
-  // 5. Checkbox có thuộc tính required
-  if (metadata.required) return true;
 
   return false;
 }
@@ -1726,7 +1728,25 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       for (const field of fields) {
         if (session.leadCheckStatus === 'waiting' || session.leadCheckStatus === 'failed') return;
         try {
-          if (!(await field.isVisible()) || !(await field.isEnabled())) continue;
+          const isEnabled = await field.isEnabled().catch(() => true);
+          if (!isEnabled) continue;
+
+          const isCheckbox = await field.evaluate((el) => el.type === 'checkbox').catch(() => false);
+          if (isCheckbox) {
+            // Với checkbox, nhiều trang ẩn thẻ <input> (display:none, opacity:0, sr-only) và hiển thị qua <label> hoặc custom checkmark.
+            // Do đó chỉ bỏ qua nếu CẢ input VÀ label/container bao ngoài đều bị ẩn hoàn toàn
+            const isInputOrLabelVisible = await field.evaluate((el) => {
+              if (el.offsetWidth > 0 || el.offsetHeight > 0 || el.offsetParent !== null) return true;
+              const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+              if (label && (label.offsetWidth > 0 || label.offsetHeight > 0 || label.offsetParent !== null)) return true;
+              const parent = el.parentElement;
+              if (parent && (parent.offsetWidth > 0 || parent.offsetHeight > 0 || parent.offsetParent !== null)) return true;
+              return false;
+            }).catch(() => false);
+            if (!isInputOrLabelVisible) continue;
+          } else {
+            if (!(await field.isVisible())) continue;
+          }
           const isMarkedFilled = (await field.getAttribute('data-autolead-filled')) === '1';
           if (isMarkedFilled) {
             const currentVal = await field.inputValue().catch(() => null);
@@ -1824,33 +1844,54 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             };
           });
 
-          // Xử lý ô checkbox: nếu là ô đồng ý điều khoản/consent thì tự động tích
+          // Xử lý ô checkbox: nếu là ô đồng ý điều khoản/consent hoặc checkbox bắt buộc thì tự động tích
           if (metadata.type === 'checkbox') {
             if (isConsentCheckbox(metadata)) {
               visibleFieldCount += 1;
-              if (!metadata.checked) {
+              const isAlreadyChecked = await field.isChecked().catch(() => metadata.checked);
+              if (!isAlreadyChecked) {
                 try {
                   await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
                   if (typeof field.hover === 'function') {
                     await field.hover({ timeout: 600 }).catch(() => {});
                   }
-                  const consentPause = Math.floor(Math.random() * 120) + 120;
+                  const consentPause = Math.floor(Math.random() * 80) + 80;
                   if (page && typeof page.waitForTimeout === 'function') {
                     await page.waitForTimeout(consentPause).catch(() => {});
                   } else {
                     await new Promise((r) => setTimeout(r, consentPause));
                   }
-                  await field.click({ timeout: 1500 }).catch(() => {});
-                  await field.evaluate((el) => {
-                    if (!el.checked) {
-                      el.checked = true;
-                    }
-                    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                    const label = el.closest('label') || document.querySelector(`label[for="${el.id}"]`);
-                    if (label && !el.checked && !label.querySelector('a')) label.click();
-                  }).catch(() => {});
+
+                  // 1. Dùng Playwright check({ force: true }) - chuẩn nhất, không bao giờ uncheck
+                  await field.check({ force: true, timeout: 1500 }).catch(() => {});
+
+                  // 2. Nếu vẫn chưa checked (do custom styled label/checkmark overlay), click vào label hoặc checkmark
+                  let checkedOk = await field.isChecked().catch(() => false);
+                  if (!checkedOk) {
+                    await field.evaluate((el) => {
+                      const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+                      if (label) {
+                        const target = label.querySelector('.checkmark, .checkbox-custom, .indicator, [class*="check"]') || label;
+                        target.click();
+                      } else {
+                        el.click();
+                      }
+                    }).catch(() => {});
+                    checkedOk = await field.isChecked().catch(() => false);
+                  }
+
+                  // 3. Fallback chắc chắn: đặt trực tiếp el.checked = true và dispatch event (KHÔNG dispatch click vì click sẽ đảo ngược lại false)
+                  if (!checkedOk) {
+                    await field.evaluate((el) => {
+                      if (!el.checked) {
+                        el.checked = true;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                      }
+                    }).catch(() => {});
+                    checkedOk = await field.isChecked().catch(() => false);
+                  }
+
                   await field.dispatchEvent('input').catch(() => {});
                   await field.dispatchEvent('change').catch(() => {});
                   await field.evaluate((el) => { el.dataset.autoleadFilled = '1'; }).catch(() => {});
@@ -1858,7 +1899,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   session.autofillError = null;
                   filledInThisPass += 1;
 
-                  const consentName = metadata.names?.[0] || metadata.id || metadata.name || 'consent';
+                  const consentName = metadata.names?.[0] || metadata.id || metadata.name || 'checkbox';
                   options.onLog?.({
                     type: 'checkbox_checked',
                     tag: 'INPUT',
@@ -2135,6 +2176,53 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             type: 'offerwall_opened',
             detail: `Đã tự động mở ${openedOffers} thẻ ưu đãi (Offerwall).`,
           });
+        }
+      } catch {}
+
+      // Quét thêm một lượt an toàn: Đảm bảo không sót bất kỳ checkbox điều khoản / consent / required nào chưa được tích trên frame
+      try {
+        const uncheckedBoxes = await frame.locator('input[type="checkbox"]:not(:checked)').all();
+        for (const cb of uncheckedBoxes) {
+          const isConsent = await cb.evaluate((el) => {
+            if (el.checked || el.disabled) return false;
+            const meta = `${el.id} ${el.name} ${el.className} ${el.getAttribute('data-tf-element-role') || ''} ${el.getAttribute('data-leadid-type') || ''}`;
+            const isReq = el.required || el.getAttribute('aria-required') === 'true';
+            if (isReq) return true;
+            if (/consent|terms|agree|privacy|policy|disclosure|tcpa|optin|tos|rules|accept|confirm|legal|disclaimer|certify|authorize|sms|resident|age|subscriber/i.test(meta)) return true;
+            const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+            const text = label ? (label.innerText || label.textContent || '').toLowerCase() : '';
+            if (/agree|consent|terms|privacy|policy|disclosure|tcpa|18\+|by clicking|confirm|accept|certify|understand|authorize/i.test(text)) return true;
+            return false;
+          }).catch(() => false);
+
+          if (isConsent) {
+            await cb.check({ force: true, timeout: 1000 }).catch(() => {});
+            let nowChecked = await cb.isChecked().catch(() => false);
+            if (!nowChecked) {
+              await cb.evaluate((el) => {
+                const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+                if (label) {
+                  const target = label.querySelector('.checkmark, .checkbox-custom, .indicator, [class*="check"]') || label;
+                  target.click();
+                }
+                if (!el.checked) {
+                  el.checked = true;
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }).catch(() => {});
+              nowChecked = await cb.isChecked().catch(() => false);
+            }
+            if (nowChecked) {
+              await cb.evaluate((el) => { el.dataset.autoleadFilled = '1'; }).catch(() => {});
+              filledInThisPass += 1;
+              session.autofillFields = (session.autofillFields ?? 0) + 1;
+              options.onLog?.({
+                type: 'checkbox_checked',
+                detail: 'Đã tự động tích ô điều khoản/consent còn sót trước khi submit.',
+              });
+            }
+          }
         }
       } catch {}
 

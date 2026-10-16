@@ -859,6 +859,10 @@ const sampleConsentMeta = {
 assert.equal(isConsentCheckbox(sampleConsentMeta), true);
 assert.equal(isConsentCheckbox({ type: 'checkbox', id: 'agree_terms' }), true);
 assert.equal(isConsentCheckbox({ type: 'checkbox', required: true }), true);
+assert.equal(isConsentCheckbox({ type: 'checkbox', name: 'accept_tos' }), true);
+assert.equal(isConsentCheckbox({ type: 'checkbox', name: 'tcpa_optin' }), true);
+assert.equal(isConsentCheckbox({ type: 'checkbox', names: ['I agree to Privacy Policy'] }), true);
+assert.equal(isConsentCheckbox({ type: 'checkbox', dataAttributes: { 'data-required': 'true' } }), true);
 assert.equal(isConsentCheckbox({ type: 'checkbox', id: 'homeowner_pool' }), false);
 assert.equal(isConsentCheckbox({ type: 'text', id: 'digitalConsent' }), false);
 
