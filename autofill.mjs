@@ -1537,6 +1537,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     const currentUrl = page.url();
     if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:')) return;
 
+    if (!session.initialFormUrl && !session.screen1Completed) {
+      session.initialFormUrl = currentUrl;
+    }
+
 
     const frames = typeof page.frames === 'function' ? page.frames() : [page];
     const unmatchedFieldNames = new Set();
@@ -1679,7 +1683,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     el.dispatchEvent(new Event('change', { bubbles: true }));
                     const label = el.closest('label') || document.querySelector(`label[for="${el.id}"]`);
-                    if (label && !el.checked) label.click();
+                    if (label && !el.checked && !label.querySelector('a')) label.click();
                   }).catch(() => {});
                   await field.dispatchEvent('input').catch(() => {});
                   await field.dispatchEvent('change').catch(() => {});
@@ -2075,6 +2079,15 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 b.style.pointerEvents = 'auto';
               }).catch(() => {});
 
+              const isFirstSubmitOfSession = !session.firstSubmitHandled && !session.screen1Completed;
+              const initialUrl = session.initialFormUrl || page.url();
+
+              let openedPopup = null;
+              const popupHandler = (popup) => { openedPopup = popup; };
+              if (isFirstSubmitOfSession && typeof page.once === 'function') {
+                page.once('popup', popupHandler);
+              }
+
               // Thao tác click Playwright
               try {
                 await submitBtn.click({ force: true, timeout: 2500 });
@@ -2093,7 +2106,55 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 }
               }).catch(() => {});
 
-              // Màn đầu tiên vừa được submit: kích hoạt kiểm tra lead từ API nếu được cấu hình
+              // Xử lý đặc thù màn đầu: Lần đầu bấm submit thường bị trang web đẩy qua trang khác không đúng (quảng cáo/redirect/privacy).
+              // Tắt tab quảng cáo nếu có, hoặc mở lại trang đầu rồi submit cho người dùng (chỉ làm ở lần đầu mở trang).
+              if (isFirstSubmitOfSession) {
+                session.firstSubmitHandled = true;
+                await new Promise((resolve) => setTimeout(resolve, 1800));
+                page.off?.('popup', popupHandler);
+
+                // 1. Tắt tab mới mở không đúng (nếu có)
+                if (openedPopup && !openedPopup.isClosed()) {
+                  console.log(`[Autofill] Phát hiện tab mới bật lên (${openedPopup.url()}) sau submit lần 1. Đang tắt tab này...`);
+                  options.onLog?.({
+                    type: 'first_submit_popup_closed',
+                    detail: `Đã tắt tab mở không đúng (${openedPopup.url()}) sau lần submit đầu.`,
+                  });
+                  await openedPopup.close().catch(() => {});
+                  await page.bringToFront().catch(() => {});
+                }
+
+                // 2. Kiểm tra nếu trang chính bị đẩy sang URL khác không đúng (khác initialUrl)
+                const currentUrl = page.url();
+                const isPushedAway = currentUrl !== initialUrl && !currentUrl.includes('#');
+                if (isPushedAway) {
+                  console.log(`[Autofill] Trang bị đẩy sang URL không đúng: [${currentUrl}]. Đang tắt đi và mở lại trang đầu: [${initialUrl}]...`);
+                  options.onLog?.({
+                    type: 'first_submit_redirect_recovered',
+                    detail: `Trang bị đẩy sang [${currentUrl}]. Đang mở lại trang đầu [${initialUrl}] để submit lại.`,
+                  });
+                  try {
+                    await page.goto(initialUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                    await new Promise((r) => setTimeout(r, 1200));
+                  } catch (gotoErr) {
+                    console.warn('[Autofill] Lỗi khi mở lại trang đầu:', gotoErr.message);
+                  }
+                }
+
+                // Xóa đánh dấu đã submit trên các nút để khi quay lại form có thể click submit lại ngay
+                await page.evaluate(() => {
+                  document.querySelectorAll('[data-autolead-submitted]').forEach((b) => {
+                    delete b.dataset.autoleadSubmitted;
+                    delete b.dataset.autoleadLastSubmitTime;
+                  });
+                }).catch(() => {});
+
+                // Kích hoạt quét và điền lại (nếu cần) rồi tự động submit lại lần 2
+                session.triggerAutofillScan?.();
+                return;
+              }
+
+              // Màn đầu tiên vừa được submit chính thức: kích hoạt kiểm tra lead từ API nếu được cấu hình
               if (options.enableLeadCheck !== false && !session.screen1Completed) {
                 session.screen1Completed = true;
                 session.leadCheckStatus = 'waiting';

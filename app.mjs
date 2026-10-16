@@ -2296,7 +2296,7 @@ async function openBrowserWithInstalledChrome({
       userAgent: dp.ua(build.version),
       isMobile: dp.isMobile,
       hasTouch: dp.hasTouch,
-      deviceScaleFactor: dp.deviceScaleFactor ?? 1,
+      ...(dp.viewport ? { deviceScaleFactor: dp.deviceScaleFactor ?? 1 } : {}),
       proxy: relay?.proxy ?? toPlaywrightProxy(proxy),
       ...(timezoneId && { timezoneId }),
       args: [
