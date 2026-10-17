@@ -275,6 +275,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "AUTOLEADPC_PORT": String(port),
             "AUTOLEADPC_INSTANCE": instanceId
         ]) { _, appValue in appValue }
+
+        let logURL = URL(fileURLWithPath: "/tmp/autoleadpc-\(instanceId).log")
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        if let logHandle = try? FileHandle(forWritingTo: logURL) {
+            process.standardOutput = logHandle
+            process.standardError = logHandle
+        }
         try process.run()
         nodeProcess = process
     }

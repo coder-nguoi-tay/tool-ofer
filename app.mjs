@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { get as requestHttps } from 'node:https';
 import { access, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir, hostname as getHostname, cpus } from 'node:os';
@@ -3530,10 +3531,13 @@ async function startLocalInterface() {
   };
 
   const server = createServer(async (request, response) => {
+    console.log('[HTTP]', request.method, request.url);
     if (request.method === 'GET' && (request.url === '/' || request.url === '/pc' || request.url === '/mac')) {
       const servePc = request.url === '/pc' || (request.url === '/' && instanceId === '2');
+      const targetHtmlPath = servePc ? userInterfacePcPath : userInterfacePath;
+      const htmlContent = await readFile(targetHtmlPath, 'utf8').catch(() => interfaceHtml);
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      response.end(servePc ? interfacePcHtml : interfaceHtml);
+      response.end(htmlContent);
       return;
     }
 
@@ -3551,7 +3555,10 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/script/read') {
       try {
         const body = JSON.parse(await readRequestBody(request));
-        const text = await readFile(body.path, 'utf8');
+        let text = '';
+        if (existsSync(body.path)) {
+          text = readFileSync(body.path, 'utf8');
+        }
         respondWithJson(response, 200, { content: text });
       } catch (err) {
         respondWithJson(response, 400, { error: err.message });
@@ -3562,7 +3569,11 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/script/save') {
       try {
         const body = JSON.parse(await readRequestBody(request));
-        await writeFile(body.path, body.content || '', 'utf8');
+        const dir = dirname(body.path);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(body.path, body.content || '', 'utf8');
         respondWithJson(response, 200, { success: true });
       } catch (err) {
         respondWithJson(response, 400, { error: err.message });
@@ -3574,7 +3585,10 @@ async function startLocalInterface() {
       try {
         const body = JSON.parse(await readRequestBody(request));
         const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Proxy', body.file);
-        const text = await readFile(filePath, 'utf8').catch(() => '');
+        let text = '';
+        if (existsSync(filePath)) {
+          text = readFileSync(filePath, 'utf8');
+        }
         respondWithJson(response, 200, { content: text });
       } catch (err) {
         respondWithJson(response, 400, { error: err.message });
@@ -3586,8 +3600,11 @@ async function startLocalInterface() {
       try {
         const body = JSON.parse(await readRequestBody(request));
         const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Proxy', body.file);
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, body.content || '', 'utf8');
+        const dir = dirname(filePath);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(filePath, body.content || '', 'utf8');
         respondWithJson(response, 200, { success: true });
       } catch (err) {
         respondWithJson(response, 400, { error: err.message });
@@ -3598,7 +3615,11 @@ async function startLocalInterface() {
     if (request.method === 'GET' && request.url === '/pc/offer/read') {
       try {
         const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Offer', 'Offer.ini');
-        const buf = await readFile(filePath);
+        if (!existsSync(filePath)) {
+          respondWithJson(response, 200, {});
+          return;
+        }
+        const buf = readFileSync(filePath);
         let text = '';
         if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
           text = buf.toString('utf16le');
@@ -3629,8 +3650,11 @@ async function startLocalInterface() {
         const body = JSON.parse(await readRequestBody(request));
         const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Offer', 'Offer.ini');
         const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${body.LinkOffer || ''}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\n`;
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, iniContent, 'utf8');
+        const dir = dirname(filePath);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(filePath, iniContent, 'utf8');
         respondWithJson(response, 200, { success: true });
       } catch (err) {
         respondWithJson(response, 400, { error: err.message });
@@ -3641,7 +3665,10 @@ async function startLocalInterface() {
     if (request.method === 'GET' && request.url === '/pc/settings/read') {
       try {
         const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Settings', 'Settings.ini');
-        const text = await readFile(filePath, 'utf8').catch(() => '');
+        let text = '';
+        if (existsSync(filePath)) {
+          text = readFileSync(filePath, 'utf8');
+        }
         const getBool = (key) => {
           const m = text.match(new RegExp(`^${key}=(True|False)`, 'mi'));
           return m ? m[1].toLowerCase() === 'true' : false;
@@ -3653,6 +3680,10 @@ async function startLocalInterface() {
           Fonts: getBool('Fonts'),
           WebRTC: getBool('WebRTC'),
           ApiFakeIP: getBool('ApiFakeIP'),
+          Windows: getBool('Windows'),
+          Mac: getBool('Mac'),
+          Linux: getBool('Linux'),
+          Android: getBool('Android'),
         });
       } catch (err) {
         respondWithJson(response, 200, {});
@@ -3666,8 +3697,99 @@ async function startLocalInterface() {
         const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Settings', 'Settings.ini');
         const b = (val) => val ? 'True' : 'False';
         const content = `[Browser]\nChrome=True\nChromeAdsPower=False\nChromeFirefox=False\nChromeGologin=False\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\n`;
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, content, 'utf8');
+        const dir = dirname(filePath);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(filePath, content, 'utf8');
+        respondWithJson(response, 200, { success: true });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/pc/commands') {
+      try {
+        const cmdPath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Command', 'command.txt');
+        let text = '';
+        if (existsSync(cmdPath)) {
+          text = readFileSync(cmdPath, 'utf8');
+        }
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const commands = lines.map((line, idx) => {
+          let name = line;
+          let template = line;
+          if (line.startsWith('{')) {
+            const m = line.match(/^\{([^}=]+)\}(?:=(.*))?$/);
+            if (m) {
+              name = `{${m[1]}}`;
+              template = line;
+            }
+          } else if (line.startsWith('RandomTextFile')) {
+            name = 'RandomTextFile';
+          }
+          return { id: idx + 1, name, template, raw: line };
+        });
+        respondWithJson(response, 200, { commands });
+      } catch (err) {
+        respondWithJson(response, 200, { commands: [] });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/pc/help') {
+      try {
+        const helpPath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Help', 'Help.rtf');
+        if (!existsSync(helpPath)) {
+          respondWithJson(response, 200, { helpText: 'Không tìm thấy file Help.rtf' });
+          return;
+        }
+        const buf = readFileSync(helpPath);
+        const rtfStr = buf.toString('latin1');
+        const plain = rtfStr
+          .replace(/\\par[d]?/g, '\n')
+          .replace(/\\tab/g, '\t')
+          .replace(/\\[a-z0-9\-]+/gi, ' ')
+          .replace(/[{}]/g, '')
+          .replace(/[ \t]+/g, ' ')
+          .trim();
+        respondWithJson(response, 200, { helpText: plain });
+      } catch {
+        respondWithJson(response, 200, { helpText: 'Không tìm thấy file Help.rtf' });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/pc/browser-config/read') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Browser', body.file);
+        let text = '';
+        if (existsSync(filePath)) {
+          text = readFileSync(filePath, 'utf8');
+        } else {
+          const fallback = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', body.file);
+          if (existsSync(fallback)) {
+            text = readFileSync(fallback, 'utf8');
+          }
+        }
+        respondWithJson(response, 200, { content: text });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/pc/browser-config/save') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Browser', body.file);
+        const dir = dirname(filePath);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(filePath, body.content || '', 'utf8');
         respondWithJson(response, 200, { success: true });
       } catch (err) {
         respondWithJson(response, 400, { error: err.message });

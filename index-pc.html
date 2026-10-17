@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AutoLeadPC - Windows Edition</title>
+  <title>AutoLeadPC - [Phiên bản PC Windows]</title>
   <style>
     :root {
       --win-bg: #f0f0f0;
@@ -20,29 +20,31 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 6px;
+      padding: 4px;
       background: #f0f0f0;
       user-select: none;
+      height: 100vh;
+      overflow: hidden;
     }
     #app-container {
       display: flex;
       flex-direction: column;
-      height: calc(100vh - 12px);
+      height: 100%;
       border: 1px solid #0055ea;
       background: #fff;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
     }
     /* Title bar */
     .win-titlebar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 28px;
+      height: 26px;
       background: linear-gradient(to bottom, #0078d7 0%, #005a9e 100%);
       color: white;
       padding: 0 8px;
       font-weight: 600;
-      font-size: 12px;
+      font-size: 11.5px;
     }
     .win-titlebar-left {
       display: flex;
@@ -76,6 +78,7 @@
       padding: 4px 6px 0 6px;
       border-bottom: 1px solid #999;
       gap: 2px;
+      flex-shrink: 0;
     }
     .win-tab {
       padding: 5px 12px;
@@ -103,7 +106,7 @@
     .win-tab-content {
       flex: 1;
       overflow: auto;
-      padding: 10px;
+      padding: 8px 10px;
       background: #fff;
     }
     .tab-panel {
@@ -141,7 +144,7 @@
       color: #222;
     }
     input.win-input, select.win-select, textarea.win-textarea {
-      padding: 3px 5px;
+      padding: 3px 6px;
       border: 1px solid #7a7a7a;
       border-radius: 2px;
       font-family: inherit;
@@ -150,66 +153,59 @@
       color: #000;
     }
     input.win-input:focus, select.win-select:focus, textarea.win-textarea:focus {
+      outline: 2px solid #0078d7;
       border-color: #0078d7;
-      outline: 1px solid #0078d7;
     }
-    input.win-input[type="number"] {
-      width: 80px;
-    }
-    textarea.win-textarea {
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-      font-size: 11px;
-      resize: vertical;
-    }
-    /* WinForms Buttons */
     button.win-btn {
-      background: linear-gradient(to bottom, #fcfcfc 0%, #e0e0e0 100%);
+      padding: 4px 12px;
+      background: linear-gradient(to bottom, #ffffff 0%, #e1e1e1 100%);
       border: 1px solid #707070;
       border-radius: 2px;
-      padding: 4px 12px;
-      font-size: 11.5px;
       font-family: inherit;
+      font-size: 11.5px;
       cursor: pointer;
-      min-height: 24px;
+      user-select: none;
+      box-shadow: inset 0 1px 0 #fff;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 4px;
-      color: #000;
     }
     button.win-btn:hover {
       background: linear-gradient(to bottom, #eaf6fd 0%, #bee6fd 100%);
       border-color: #3c7fb1;
     }
     button.win-btn:active {
-      background: #bee6fd;
+      background: linear-gradient(to bottom, #c2e4f6 0%, #a7d9f5 100%);
+      border-color: #2c628b;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
     }
     button.win-btn-primary {
-      background: linear-gradient(to bottom, #2d9cf7 0%, #0063b1 100%);
-      border: 1px solid #004e8c;
-      color: white;
+      background: linear-gradient(to bottom, #0085ed 0%, #0066be 100%);
+      border-color: #004c8f;
+      color: #fff;
       font-weight: 600;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
     }
     button.win-btn-primary:hover {
-      background: linear-gradient(to bottom, #42a9fb 0%, #0078d7 100%);
-      border-color: #003a68;
+      background: linear-gradient(to bottom, #1995f9 0%, #0077dd 100%);
+      border-color: #003a6e;
     }
     button.win-btn-danger {
-      background: linear-gradient(to bottom, #f35656 0%, #c41818 100%);
-      border: 1px solid #991010;
-      color: white;
+      background: linear-gradient(to bottom, #ff5959 0%, #d42222 100%);
+      border-color: #a01414;
+      color: #fff;
       font-weight: 600;
     }
     button.win-btn-danger:hover {
-      background: linear-gradient(to bottom, #f76868 0%, #db2828 100%);
+      background: linear-gradient(to bottom, #ff6b6b 0%, #e02828 100%);
     }
-    /* DataGridView */
+    /* DataGridView Table */
     .grid-container {
-      width: 100%;
-      height: 100%;
-      border: 1px solid #868686;
+      border: 1px solid #999;
       background: #fff;
       overflow: auto;
+      height: 100%;
     }
     table.win-grid {
       width: 100%;
@@ -217,82 +213,106 @@
       font-size: 11px;
     }
     table.win-grid th {
-      background: linear-gradient(to bottom, #f9f9f9 0%, #e5e5e5 100%);
+      background: linear-gradient(to bottom, #f7f7f7 0%, #e8e8e8 100%);
       border-right: 1px solid #d0d0d0;
-      border-bottom: 1px solid #a0a0a0;
+      border-bottom: 1px solid #b8b8b8;
       padding: 4px 6px;
-      font-weight: 600;
       text-align: left;
+      font-weight: 600;
       position: sticky;
       top: 0;
       z-index: 1;
       white-space: nowrap;
     }
     table.win-grid td {
-      border-right: 1px solid #e5e5e5;
-      border-bottom: 1px solid #e5e5e5;
-      padding: 4px 6px;
+      border-right: 1px solid #e0e0e0;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 3px 6px;
       white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden;
     }
-    table.win-grid tr:nth-child(even) {
+    table.win-grid tr:nth-child(even) td {
       background: #fbfbfb;
     }
-    table.win-grid tr:hover {
-      background: #e5f1fb;
+    table.win-grid tr:hover td {
+      background: #e5f3ff;
     }
-    /* Status bar */
+    /* Status Bar */
     .win-statusbar {
       display: flex;
       align-items: center;
-      height: 24px;
+      height: 22px;
       background: #f0f0f0;
-      border-top: 1px solid #d0d0d0;
-      padding: 0 4px;
+      border-top: 1px solid #b8b8b8;
       font-size: 11px;
-      gap: 6px;
+      padding: 0 4px;
+      gap: 2px;
+      flex-shrink: 0;
     }
     .status-panel {
-      padding: 2px 8px;
-      border: 1px solid #c0c0c0;
-      border-radius: 2px;
-      background: #fff;
+      border: 1px solid #d0d0d0;
+      border-top-color: #a0a0a0;
+      border-left-color: #a0a0a0;
+      padding: 1px 6px;
+      background: #fcfcfc;
       white-space: nowrap;
-    }
-    .status-panel-flex {
-      flex: 1;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    /* Sub-tabs */
+    .status-panel-flex {
+      flex: 1;
+    }
+    /* Sub Tabs */
     .sub-tabs {
       display: flex;
-      border-bottom: 1px solid #b0b0b0;
       gap: 2px;
-      margin-bottom: 8px;
+      border-bottom: 1px solid #b8b8b8;
+      margin-bottom: 6px;
+      background: #fafafa;
+      padding: 2px 4px 0 4px;
     }
     .sub-tab {
       padding: 4px 10px;
-      border: 1px solid #b0b0b0;
+      border: 1px solid #c0c0c0;
       border-bottom: none;
       background: #e8e8e8;
-      cursor: pointer;
-      font-size: 11px;
       border-top-left-radius: 2px;
       border-top-right-radius: 2px;
+      cursor: pointer;
+      font-size: 11px;
+      margin-bottom: -1px;
+    }
+    .sub-tab:hover {
+      background: #f2f2f2;
     }
     .sub-tab.active {
       background: #fff;
       font-weight: 600;
+      color: #004499;
       border-bottom: 1px solid #fff;
-      margin-bottom: -1px;
     }
     .sub-panel {
       display: none;
+      height: calc(100% - 28px);
     }
     .sub-panel.active {
       display: block;
+    }
+    .cmd-row {
+      padding: 3px 6px;
+      border-bottom: 1px solid #e8e8e8;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      font-family: monospace;
+      font-size: 11px;
+    }
+    .cmd-row:hover {
+      background: #d8e5ff;
+      color: #0033aa;
+    }
+    .cmd-row.active {
+      background: #0078d7;
+      color: white;
     }
   </style>
 </head>
@@ -301,25 +321,24 @@
     <!-- Title Bar -->
     <div class="win-titlebar">
       <div class="win-titlebar-left">
-        <img src="pc-app.png" class="win-titlebar-icon" alt="AutoLeadPC" onerror="this.style.display='none'">
-        <span>AutoLeadPC - v6.0 [Windows Edition]</span>
+        <img src="/pc-app.png" alt="AutoLeadPC" class="win-titlebar-icon" onerror="this.style.display='none'">
+        <span>AutoLeadPC - [Phiên bản PC Windows Edition] - Cổng 3211</span>
       </div>
       <div>
-        <span style="font-size:10px;opacity:0.85;">Cổng 3211</span>
+        <span style="font-size:10px;opacity:0.9;">Bản quyền VĨNH VIỄN</span>
       </div>
     </div>
 
-    <!-- Menu Bar -->
+    <!-- WinForms Menu Bar -->
     <div class="win-menubar">
-      <div class="win-menuitem" onclick="switchTab('Dashboard')">File</div>
+      <div class="win-menuitem" onclick="switchTab('Dashboard')">Hệ thống</div>
+      <div class="win-menuitem" onclick="switchTab('Script')">Công cụ Script</div>
       <div class="win-menuitem" onclick="switchTab('Config')">Cấu hình</div>
-      <div class="win-menuitem" onclick="switchTab('Script')">Kịch bản</div>
-      <div class="win-menuitem" onclick="switchTab('tabRunning')">Tiến trình</div>
-      <div class="win-menuitem" onclick="switchTab('Settings')">Thiết lập</div>
-      <div class="win-menuitem" onclick="openXPathGuide()">Trợ giúp XPath</div>
+      <div class="win-menuitem" onclick="switchTab('Settings')">Thiết lập Fingerprint</div>
+      <div class="win-menuitem" onclick="openXPathGuide()">Trợ giúp &amp; XPath</div>
     </div>
 
-    <!-- Tab Control Headers -->
+    <!-- WinForms Tab Headers (tbcTool) -->
     <div class="win-tab-headers" id="mainTabHeaders">
       <div class="win-tab active" data-tab="Dashboard">📌 Dashboard</div>
       <div class="win-tab" data-tab="tabRunning">⚡ Đang chạy (<span id="tabRunCount">0</span>)</div>
@@ -334,21 +353,33 @@
     <div class="win-tab-content">
       <!-- 1. DASHBOARD -->
       <div class="tab-panel active" id="panel-Dashboard">
-        <fieldset class="win-group">
+        <fieldset class="win-group" id="palActive" style="background:#eaf8ea;border-color:#5cb85c;margin-bottom:6px;padding:4px 8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <b style="color:#2b662b;">✓ TRẠNG THÁI BẢN QUYỀN: ĐÃ KÍCH HOẠT VĨNH VIỄN</b>
+              <span style="margin-left:14px;color:#444;">Key máy: <code id="lbKey">E3ED-076B-6E2E-470C-37AC-E02B-219A-D4D9</code></span>
+            </div>
+            <div>
+              <span style="color:#2b662b;font-weight:600;">Hạn sử dụng: Vĩnh viễn (Lifetime)</span>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="win-group" id="pnlOffer">
           <legend class="win-legend">Offer Cần Chạy</legend>
           <div class="form-row">
             <label class="form-label">Tên Offer:</label>
-            <input type="text" id="txtNameOffer" class="win-input" style="flex:1;" value="demosite|de">
+            <input type="text" id="txtNameOffer" class="win-input" style="flex:1;" value="demosite|de" placeholder="Tên để kiểm tra hoặc tiêu đề trang">
           </div>
           <div class="form-row">
             <label class="form-label">Link Offer (URL 1):</label>
-            <input type="text" id="txtLinkOffer" class="win-input" style="flex:1;" value="https://demoqa.com/automation-practice-form">
+            <input type="text" id="txtLinkOffer" class="win-input" style="flex:1;" value="https://demoqa.com/automation-practice-form" placeholder="https://...">
             <button type="button" class="win-btn" id="btnAddOffer" onclick="saveOfferConfig()">Thêm Offer</button>
             <button type="button" class="win-btn" id="btnResetOffer" onclick="resetOfferConfig()">Reset</button>
           </div>
           <div class="form-row">
             <label class="form-label">Link Offer 2 (Song song):</label>
-            <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;" placeholder="Dán link 2 nếu muốn chạy 2 luồng đồng thời 2 link khác nhau">
+            <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;" placeholder="Link 2 nếu muốn mở luồng song song 2 link khác nhau">
           </div>
         </fieldset>
 
@@ -384,26 +415,24 @@
               </div>
               <div class="form-row">
                 <label class="form-label">Số luồng (Threads):</label>
-                <input type="number" id="nudThread" class="win-input" value="1" min="1" max="20">
+                <input type="number" id="nudThread" class="win-input" value="1" min="1" max="20" style="width:70px;">
                 <label style="margin-left:10px;">Giới hạn phiên:</label>
-                <input type="number" id="nudLimitRun" class="win-input" value="0" min="0" placeholder="0 = vô hạn">
+                <input type="number" id="nudLimitRun" class="win-input" value="0" min="0" placeholder="0 = vô hạn" style="width:70px;">
               </div>
             </div>
 
             <div>
               <div class="form-row">
                 <label class="form-label">Timeout (giây):</label>
-                <input type="number" id="txtTimeLimit" class="win-input" value="0" placeholder="0 = không giới hạn">
+                <input type="number" id="txtTimeLimit" class="win-input" value="0" placeholder="0 = không giới hạn" style="width:70px;">
                 <label style="margin-left:10px;">Delay mở:</label>
-                <input type="number" id="nudDelayStart" class="win-input" value="1" min="0">s
-              </div>
-              <div class="form-row">
-                <label class="form-label">Delay dừng:</label>
-                <input type="number" id="nudDelayStop" class="win-input" value="1" min="0">s
+                <input type="number" id="nudDelayStart" class="win-input" value="1" min="0" style="width:50px;">s
+                <label style="margin-left:8px;">Delay dừng:</label>
+                <input type="number" id="nudDelayStop" class="win-input" value="1" min="0" style="width:50px;">s
               </div>
               <div class="form-row">
                 <label class="form-label">Text hoàn tất:</label>
-                <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" placeholder="Chuỗi xác nhận trang cuối (đóng Chrome)">
+                <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" placeholder="Chuỗi xác nhận trang cuối (ví dụ: thank you, success...)">
               </div>
               <div class="form-row" style="margin-top:6px;">
                 <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
@@ -419,14 +448,14 @@
             </div>
           </div>
 
-          <div style="display:flex;gap:10px;margin-top:14px;padding-top:10px;border-top:1px solid #e0e0e0;">
-            <button type="button" class="win-btn win-btn-primary" id="btnStart" style="padding:8px 24px;font-size:13px;" onclick="handleStart()">
+          <div style="display:flex;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid #e0e0e0;">
+            <button type="button" class="win-btn win-btn-primary" id="btnStart" style="padding:7px 22px;font-size:12.5px;" onclick="handleStart()">
               ▶ Bắt đầu (Start)
             </button>
-            <button type="button" class="win-btn win-btn-danger" id="btnStop" style="padding:8px 20px;font-size:13px;" onclick="handleStop()">
+            <button type="button" class="win-btn win-btn-danger" id="btnStop" style="padding:7px 18px;font-size:12.5px;" onclick="handleStop()">
               ⏹ Dừng lại (Stop)
             </button>
-            <button type="button" class="win-btn" id="btnCloseChrome" style="padding:8px 16px;font-size:13px;" onclick="handleCloseAll()">
+            <button type="button" class="win-btn" id="btnCloseChrome" style="padding:7px 16px;font-size:12.5px;" onclick="handleCloseAll()">
               ✕ Đóng tất cả Chrome
             </button>
           </div>
@@ -442,35 +471,35 @@
               <button type="button" class="win-btn" style="margin-left:8px;" onclick="resetProxyQueue()">Reset Proxy</button>
             </div>
           </div>
-          <textarea id="txtDashboardProxy" class="win-textarea" style="width:100%;height:140px;"></textarea>
+          <textarea id="txtDashboardProxy" class="win-textarea" style="width:100%;height:130px;"></textarea>
         </fieldset>
       </div>
 
       <!-- 2. TAB RUNNING -->
       <div class="tab-panel" id="panel-tabRunning">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <strong>Bảng Theo Dõi Tiến Trình Đang Chạy</strong>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong>Bảng Theo Dõi Tiến Trình Đang Chạy (dgvRunning)</strong>
           <div>
-            <button type="button" class="win-btn" onclick="fetchRunningState()">Làm mới</button>
-            <button type="button" class="win-btn win-btn-danger" onclick="handleCloseAll()">Đóng tất cả</button>
+            <button type="button" class="win-btn" onclick="fetchRunningState()">🔄 Làm mới</button>
+            <button type="button" class="win-btn win-btn-danger" onclick="handleCloseAll()">✕ Đóng tất cả</button>
           </div>
         </div>
         <div class="grid-container" style="height:calc(100% - 35px);">
           <table class="win-grid" id="dgvRunning">
             <thead>
               <tr>
-                <th style="width:36px;">STT</th>
-                <th style="width:110px;">IP Exit</th>
+                <th style="width:40px;">Luồng</th>
+                <th style="width:120px;">IP Exit</th>
                 <th style="width:140px;">Proxy</th>
-                <th style="width:80px;">Bản Chrome</th>
-                <th style="width:100px;">Thiết bị</th>
-                <th style="width:140px;">Email</th>
+                <th style="width:100px;">Bản Chrome</th>
+                <th style="width:100px;">Thiết bị OS</th>
+                <th style="width:150px;">Email</th>
                 <th style="width:90px;">Lead Check</th>
-                <th>URL / Trạng thái</th>
+                <th>URL / Thao tác hiện tại</th>
               </tr>
             </thead>
             <tbody id="dgvRunningBody">
-              <tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">Chưa có trình duyệt nào đang mở. Bấm "Bắt đầu" để chạy.</td></tr>
+              <tr><td colspan="8" style="text-align:center;color:#888;padding:25px;">Chưa có trình duyệt nào đang mở. Bấm "Bắt đầu" để chạy.</td></tr>
             </tbody>
           </table>
         </div>
@@ -483,9 +512,10 @@
           <div class="sub-tab" data-subtab="script-rrs">Script RRS</div>
         </div>
 
-        <div class="sub-panel active" id="subpanel-script-offer" style="height:calc(100% - 35px);">
-          <div style="display:grid;grid-template-columns:220px 1fr 180px;gap:8px;height:100%;">
-            <!-- Left: Script files -->
+        <!-- Subpanel Script Offer -->
+        <div class="sub-panel active" id="subpanel-script-offer">
+          <div style="display:grid;grid-template-columns:220px 1fr 240px;gap:8px;height:100%;">
+            <!-- Left: Script files list (dgvScript) -->
             <div style="display:flex;flex-direction:column;border:1px solid #b8b8b8;padding:6px;background:#f9f9f9;">
               <strong style="margin-bottom:6px;font-size:11px;">Danh Sách File (.txt):</strong>
               <div id="scriptFileList" style="flex:1;overflow:auto;background:#fff;border:1px solid #d0d0d0;font-size:11px;"></div>
@@ -498,35 +528,47 @@
                 <label style="width:70px;font-size:11px;">Tên file:</label>
                 <input type="text" id="txtNameScript" class="win-input" style="flex:1;" placeholder="ten_script.txt">
               </div>
-              <textarea id="txtScript" class="win-textarea" style="flex:1;font-size:12px;line-height:1.4;" placeholder="// Nhập các lệnh kịch bản Windows exe...&#10;{EmailConfig}&#10;{InfoConfig}&#10;{SendById}=firstName|{Fname}&#10;{Delay}=3&#10;{SmartClick}=#submit"></textarea>
+              <textarea id="txtScript" class="win-textarea" style="flex:1;font-size:12px;line-height:1.4;" placeholder="// Nhập các lệnh kịch bản Windows exe...&#10;{EmailConfig}&#10;{InfoConfig}&#10;{SendById}=firstName|{Fname}|10&#10;{Delay}=2|3&#10;{SmartClick}=#submit"></textarea>
               <div style="display:flex;gap:6px;">
                 <button type="button" class="win-btn win-btn-primary" id="btnSaveScript" onclick="saveCurrentScript()">💾 Lưu Script</button>
                 <button type="button" class="win-btn" id="btnResetScript" onclick="newScript()">📄 Tạo mới</button>
+                <button type="button" class="win-btn" onclick="openXPathGuide()">📖 Hướng dẫn XPath</button>
               </div>
             </div>
 
-            <!-- Right: Commands Palette -->
+            <!-- Right: Commands Palette (dgvCommandOffer) -->
             <div style="display:flex;flex-direction:column;border:1px solid #b8b8b8;padding:6px;background:#f9f9f9;">
-              <strong style="margin-bottom:6px;font-size:11px;">Lệnh Mẫu (Bấm để chèn):</strong>
-              <div style="flex:1;overflow:auto;background:#fff;border:1px solid #d0d0d0;padding:4px;font-size:10.5px;">
-                <div class="cmd-pill" onclick="insertCommand('{EmailConfig}\n')"><b>{EmailConfig}</b></div>
-                <div class="cmd-pill" onclick="insertCommand('{InfoConfig}\n')"><b>{InfoConfig}</b></div>
-                <div class="cmd-pill" onclick="insertCommand('{SendByName}=name|{Fname}\n')"><b>{SendByName}</b></div>
-                <div class="cmd-pill" onclick="insertCommand('{SendById}=id|{Lname}\n')"><b>{SendById}</b></div>
-                <div class="cmd-pill" onclick="insertCommand('{SmartClick}=#btnSubmit\n')"><b>{SmartClick}</b></div>
-                <div class="cmd-pill" onclick="insertCommand('{ClickXpath}=//button[@type=\'submit\']\n')"><b>{ClickXpath}</b></div>
-                <div class="cmd-pill" onclick="insertCommand('{ByPassReCaptcha}\n')"><b>{ByPassReCaptcha}</b></div>
-                <div class="cmd-pill" onclick="insertCommand('{Delay}=2|5\n')"><b>{Delay}</b> (2|5s)</div>
-                <div class="cmd-pill" onclick="insertCommand('{RandomText}=5|10\n')"><b>{RandomText}</b></div>
-                <div class="cmd-pill" onclick="insertCommand('{ClearCookie}\n')"><b>{ClearCookie}</b></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <strong style="font-size:11px;">Tập Lệnh PC (76 lệnh):</strong>
+              </div>
+              <input type="text" id="txtSearchCmd" class="win-input" placeholder="Tìm lệnh..." style="margin-bottom:4px;" onkeyup="filterCommands(this.value)">
+              <div id="dgvCommandOffer" style="flex:1;overflow:auto;background:#fff;border:1px solid #d0d0d0;"></div>
+              <div id="cmdHelpBox" style="height:70px;overflow:auto;background:#eef4fb;border:1px solid #b0c8ea;padding:4px;font-size:10px;margin-top:4px;color:#222;">
+                Chọn một lệnh để xem cú pháp và bấm để chèn vào kịch bản.
               </div>
             </div>
           </div>
         </div>
 
+        <!-- Subpanel Script RRS -->
         <div class="sub-panel" id="subpanel-script-rrs">
-          <div style="padding:10px;color:#666;">
-            Quản lý kịch bản cho tính năng RRS (Run Re-Submit).
+          <div style="display:grid;grid-template-columns:220px 1fr;gap:8px;height:100%;">
+            <div style="display:flex;flex-direction:column;border:1px solid #b8b8b8;padding:6px;background:#f9f9f9;">
+              <strong style="margin-bottom:6px;font-size:11px;">Script RRS (.txt):</strong>
+              <div id="scriptRrsFileList" style="flex:1;overflow:auto;background:#fff;border:1px solid #d0d0d0;font-size:11px;"></div>
+              <button type="button" class="win-btn" style="margin-top:6px;" onclick="loadScriptRrsList()">Làm mới danh sách</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div class="form-row">
+                <label style="width:70px;font-size:11px;">Tên file RRS:</label>
+                <input type="text" id="txtScriptRRSName" class="win-input" style="flex:1;" placeholder="RRS1.txt">
+              </div>
+              <textarea id="txtScriptRRS" class="win-textarea" style="flex:1;font-size:12px;line-height:1.4;" placeholder="{Note}=Kịch bản chạy lại RRS..."></textarea>
+              <div style="display:flex;gap:6px;">
+                <button type="button" class="win-btn win-btn-primary" id="btnSaveScriptRRS" onclick="saveCurrentScriptRRS()">💾 Lưu Script RRS</button>
+                <button type="button" class="win-btn" id="btnResetScriptRRS" onclick="newScriptRRS()">📄 Tạo mới</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -534,23 +576,23 @@
       <!-- 4. RRS -->
       <div class="tab-panel" id="panel-RRS">
         <fieldset class="win-group">
-          <legend class="win-legend">Thiết Lập Chạy Lại RRS</legend>
+          <legend class="win-legend">Thiết Lập Chạy Lại RRS (Run Re-Submit)</legend>
           <div class="form-row">
             <label class="form-label">Chọn IP RRS:</label>
-            <select id="cbbIPRRS" class="win-select" style="flex:1;"><option>-- Không có --</option></select>
+            <select id="cbbIPRRS" class="win-select" style="flex:1;"><option>-- Tất cả IP --</option></select>
             <label style="margin-left:12px;">Số luồng:</label>
-            <input type="number" id="nudThreadRRS" class="win-input" value="1" min="1">
+            <input type="number" id="nudThreadRRS" class="win-input" value="1" min="1" style="width:60px;">
             <label style="margin-left:12px;">Timeout (s):</label>
-            <input type="number" id="txtTimeLimitRRS" class="win-input" value="60">
+            <input type="number" id="txtTimeLimitRRS" class="win-input" value="60" style="width:60px;">
           </div>
           <div style="display:flex;gap:8px;margin-top:8px;">
-            <button type="button" class="win-btn win-btn-primary">Bắt đầu RRS</button>
-            <button type="button" class="win-btn win-btn-danger">Dừng RRS</button>
-            <button type="button" class="win-btn">Mở Profile</button>
-            <button type="button" class="win-btn">Xóa Profile RRS</button>
+            <button type="button" class="win-btn win-btn-primary" id="btnStartRRS">▶ Bắt đầu RRS</button>
+            <button type="button" class="win-btn win-btn-danger" id="btnStopRRS">⏹ Dừng RRS</button>
+            <button type="button" class="win-btn" id="btnOpenRRS">📂 Mở Profile</button>
+            <button type="button" class="win-btn" id="btnDeleteRRS">✕ Xóa Profile RRS</button>
           </div>
         </fieldset>
-        <div class="grid-container" style="height:320px;">
+        <div class="grid-container" style="height:calc(100% - 110px);">
           <table class="win-grid" id="dgvRRS">
             <thead>
               <tr>
@@ -561,8 +603,8 @@
                 <th>Số Lần Chạy</th>
               </tr>
             </thead>
-            <tbody>
-              <tr><td colspan="5" style="text-align:center;color:#888;padding:15px;">Chưa có dữ liệu RRS.</td></tr>
+            <tbody id="dgvRRSBody">
+              <tr><td colspan="5" style="text-align:center;color:#888;padding:20px;">Chưa có dữ liệu RRS lưu trữ.</td></tr>
             </tbody>
           </table>
         </div>
@@ -571,7 +613,7 @@
       <!-- 5. CONFIG -->
       <div class="tab-panel" id="panel-Config">
         <div class="sub-tabs" id="configSubTabs">
-          <div class="sub-tab active" data-cfg="proxy">Proxy (SOCKS5)</div>
+          <div class="sub-tab active" data-cfg="proxy">Proxy SOCKS5</div>
           <div class="sub-tab" data-cfg="micro">MicroSocks</div>
           <div class="sub-tab" data-cfg="ssh">SSH</div>
           <div class="sub-tab" data-cfg="tinsoft">TinSoft</div>
@@ -579,6 +621,8 @@
           <div class="sub-tab" data-cfg="proxyHung">ProxyHung</div>
           <div class="sub-tab" data-cfg="useragent">UserAgent</div>
           <div class="sub-tab" data-cfg="size">Kích Thước Màn Hình</div>
+          <div class="sub-tab" data-cfg="refferent">Referrer</div>
+          <div class="sub-tab" data-cfg="bookmarks">Bookmarks</div>
           <div class="sub-tab" data-cfg="more">Cấu Hình Khác</div>
         </div>
 
@@ -591,7 +635,7 @@
               <button type="button" class="win-btn" onclick="loadProxyFile('proxy.txt', 'txtCfgProxy')">🔄 Tải Lại</button>
             </div>
           </div>
-          <textarea id="txtCfgProxy" class="win-textarea" style="width:100%;height:380px;"></textarea>
+          <textarea id="txtCfgProxy" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
         </div>
 
         <!-- MicroSocks -->
@@ -603,7 +647,7 @@
               <button type="button" class="win-btn" onclick="loadProxyFile('micro.txt', 'txtCfgMicro')">🔄 Tải Lại</button>
             </div>
           </div>
-          <textarea id="txtCfgMicro" class="win-textarea" style="width:100%;height:380px;"></textarea>
+          <textarea id="txtCfgMicro" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
         </div>
 
         <!-- SSH -->
@@ -615,19 +659,19 @@
               <button type="button" class="win-btn" onclick="loadProxyFile('ssh.txt', 'txtCfgSsh')">🔄 Tải Lại</button>
             </div>
           </div>
-          <textarea id="txtCfgSsh" class="win-textarea" style="width:100%;height:380px;"></textarea>
+          <textarea id="txtCfgSsh" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
         </div>
 
         <!-- TinSoft -->
         <div class="sub-panel" id="cfgpanel-tinsoft">
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-            <span>File: <code>Config/Proxy/tinsoft.txt</code> (Dán User API Key)</span>
+            <span>File: <code>Config/Proxy/tinsoft.txt</code> (Dán User API Key TinSoft)</span>
             <div>
               <button type="button" class="win-btn win-btn-primary" onclick="saveProxyFile('tinsoft.txt', 'txtCfgTinsoft')">💾 Lưu File</button>
               <button type="button" class="win-btn" onclick="loadProxyFile('tinsoft.txt', 'txtCfgTinsoft')">🔄 Tải Lại</button>
             </div>
           </div>
-          <textarea id="txtCfgTinsoft" class="win-textarea" style="width:100%;height:380px;"></textarea>
+          <textarea id="txtCfgTinsoft" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
         </div>
 
         <!-- Socks4G -->
@@ -639,7 +683,7 @@
               <button type="button" class="win-btn" onclick="loadProxyFile('Socks4G.txt', 'txtCfgSocks4g')">🔄 Tải Lại</button>
             </div>
           </div>
-          <textarea id="txtCfgSocks4g" class="win-textarea" style="width:100%;height:380px;"></textarea>
+          <textarea id="txtCfgSocks4g" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
         </div>
 
         <!-- ProxyHung -->
@@ -651,13 +695,25 @@
               <button type="button" class="win-btn" onclick="loadProxyFile('proxyHung.txt', 'txtCfgProxyHung')">🔄 Tải Lại</button>
             </div>
           </div>
-          <textarea id="txtCfgProxyHung" class="win-textarea" style="width:100%;height:380px;"></textarea>
+          <textarea id="txtCfgProxyHung" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
         </div>
 
         <!-- UserAgent -->
         <div class="sub-panel" id="cfgpanel-useragent">
-          <div style="margin-bottom:8px;">Danh sách User-Agent chuẩn cho các hệ điều hành:</div>
-          <textarea id="txtCfgUserAgent" class="win-textarea" style="width:100%;height:380px;"></textarea>
+          <div class="sub-tabs" style="margin-bottom:6px;">
+            <div class="sub-tab active" data-uatab="win">Windows</div>
+            <div class="sub-tab" data-uatab="mac">macOS</div>
+            <div class="sub-tab" data-uatab="lin">Linux</div>
+            <div class="sub-tab" data-uatab="android">Android</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+            <span id="lbUaTitle">Danh sách UserAgent (mỗi dòng 1 UA):</span>
+            <div>
+              <button type="button" class="win-btn win-btn-primary" onclick="saveActiveUseragent()">💾 Lưu UserAgent</button>
+              <button type="button" class="win-btn" onclick="loadActiveUseragent()">🔄 Tải Lại</button>
+            </div>
+          </div>
+          <textarea id="txtCfgUserAgent" class="win-textarea" style="width:100%;height:calc(100% - 65px);"></textarea>
         </div>
 
         <!-- Size -->
@@ -666,15 +722,43 @@
             <legend class="win-legend">Kích Thước Cửa Sổ Trình Duyệt</legend>
             <div class="form-row">
               <label>Chiều rộng:</label>
-              <input type="number" id="nudMinWidth" class="win-input" value="1200"> đến
-              <input type="number" id="nudMaxWidth" class="win-input" value="1440"> px
+              <input type="number" id="nudMinWidth" class="win-input" value="1200" style="width:80px;"> đến
+              <input type="number" id="nudMaxWidth" class="win-input" value="1440" style="width:80px;"> px
             </div>
             <div class="form-row">
               <label>Chiều cao:</label>
-              <input type="number" id="nudMinHeight" class="win-input" value="700"> đến
-              <input type="number" id="nudMaxHeight" class="win-input" value="900"> px
+              <input type="number" id="nudMinHeight" class="win-input" value="700" style="width:80px;"> đến
+              <input type="number" id="nudMaxHeight" class="win-input" value="900" style="width:80px;"> px
+            </div>
+            <div style="margin-top:10px;">
+              <button type="button" class="win-btn win-btn-primary" onclick="saveSizeConfig()">💾 Lưu Cấu Hình Size</button>
+              <button type="button" class="win-btn" onclick="randomSizeConfig()">🎲 Random Thử</button>
             </div>
           </fieldset>
+        </div>
+
+        <!-- Referrer -->
+        <div class="sub-panel" id="cfgpanel-refferent">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span>Danh sách Referrer (mỗi dòng 1 URL referrer):</span>
+            <div>
+              <button type="button" class="win-btn win-btn-primary" onclick="saveBrowserConfigFile('refferent.txt', 'txtCfgRefferent')">💾 Lưu File</button>
+              <button type="button" class="win-btn" onclick="loadBrowserConfigFile('refferent.txt', 'txtCfgRefferent')">🔄 Tải Lại</button>
+            </div>
+          </div>
+          <textarea id="txtCfgRefferent" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
+        </div>
+
+        <!-- Bookmarks -->
+        <div class="sub-panel" id="cfgpanel-bookmarks">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span>Danh sách Bookmarks mở kèm:</span>
+            <div>
+              <button type="button" class="win-btn win-btn-primary" onclick="saveBrowserConfigFile('bookmarks.txt', 'txtCfgBookmarks')">💾 Lưu File</button>
+              <button type="button" class="win-btn" onclick="loadBrowserConfigFile('bookmarks.txt', 'txtCfgBookmarks')">🔄 Tải Lại</button>
+            </div>
+          </div>
+          <textarea id="txtCfgBookmarks" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
         </div>
 
         <!-- More Config -->
@@ -694,6 +778,9 @@
                 <input type="checkbox" id="cbxWebRTC" checked> Chặn rò rỉ địa chỉ IP thật qua WebRTC
               </label>
             </div>
+            <div style="margin-top:10px;">
+              <button type="button" class="win-btn win-btn-primary" onclick="saveMoreConfig()">💾 Lưu Cấu Hình</button>
+            </div>
           </fieldset>
         </div>
       </div>
@@ -705,25 +792,27 @@
           <div class="sub-tab" data-infotab="lead">Thông Tin Lead (<span id="lbTotalInfo">0</span>)</div>
         </div>
 
+        <!-- Email Tab -->
         <div class="sub-panel active" id="infopanel-email">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <span>Danh sách email mẫu (1 dòng: <code>email|password|recover</code> hoặc chỉ <code>email</code>):</span>
+            <span>Danh sách email (1 dòng: <code>email|password|recover</code> hoặc <code>email</code>):</span>
             <div>
               <button type="button" class="win-btn win-btn-primary" onclick="saveEmailList()">💾 Nạp Email</button>
               <button type="button" class="win-btn" onclick="resetEmailQueue()">🔄 Reset</button>
             </div>
           </div>
-          <textarea id="txtEmailList" class="win-textarea" style="width:100%;height:380px;"></textarea>
+          <textarea id="txtEmailList" class="win-textarea" style="width:100%;height:calc(100% - 35px);"></textarea>
         </div>
 
+        <!-- Info Lead Tab -->
         <div class="sub-panel" id="infopanel-lead">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <span>Danh sách thông tin cá nhân Autofill:</span>
+            <span>Danh sách thông tin cá nhân Autofill (dgvInfo):</span>
             <div>
               <button type="button" class="win-btn" onclick="resetAutofillQueue()">🔄 Reset Danh Sách</button>
             </div>
           </div>
-          <div class="grid-container" style="height:380px;">
+          <div class="grid-container" style="height:calc(100% - 35px);">
             <table class="win-grid" id="dgvInfo">
               <thead>
                 <tr>
@@ -738,7 +827,7 @@
                 </tr>
               </thead>
               <tbody id="dgvInfoBody">
-                <tr><td colspan="8" style="text-align:center;color:#888;padding:15px;">Đang tải danh sách thông tin...</td></tr>
+                <tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">Đang tải danh sách thông tin...</td></tr>
               </tbody>
             </table>
           </div>
@@ -791,40 +880,32 @@
           </div>
         </fieldset>
 
-        <div style="margin-top:14px;">
+        <fieldset class="win-group">
+          <legend class="win-legend">Tài Liệu &amp; Hướng Dẫn Kịch Bản (Help.rtf)</legend>
+          <textarea id="richTextBoxHelp" class="win-textarea" readonly style="width:100%;height:140px;background:#fbfbfb;color:#333;font-size:11px;line-height:1.4;"></textarea>
+        </fieldset>
+
+        <div style="margin-top:10px;">
           <button type="button" class="win-btn win-btn-primary" id="BtnSaveSettings" onclick="saveWindowsSettings()">💾 Lưu Cài Đặt (Settings.ini)</button>
           <span id="settingsSaveStatus" style="margin-left:10px;font-size:11px;color:#0078d7;"></span>
         </div>
       </div>
     </div>
 
-    <!-- Status Bar -->
+    <!-- Bottom Status Bar -->
     <div class="win-statusbar">
       <div class="status-panel status-panel-flex" id="lbStatus">Sẵn sàng.</div>
       <div class="status-panel">Lượt chạy: <b id="lbTotalRun">0</b></div>
       <div class="status-panel">RRS: <b id="lbTotalRRS">0</b></div>
-      <div class="status-panel" id="lbSystemInfo">macOS Engine | Port 3211</div>
+      <div class="status-panel" id="lbSystemInfo">macOS Native Engine | Cổng 3211</div>
     </div>
   </div>
 
-  <style>
-    .cmd-pill {
-      padding: 3px 6px;
-      margin-bottom: 3px;
-      background: #f0f4ff;
-      border: 1px solid #c7d7f8;
-      border-radius: 2px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .cmd-pill:hover {
-      background: #d8e5ff;
-      border-color: #2563eb;
-    }
-  </style>
-
   <script>
-    // Tab switching logic
+    let allCommandsList = [];
+    let currentUaTab = 'win';
+
+    // Tab switching
     function switchTab(tabId) {
       document.querySelectorAll('.win-tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -856,6 +937,7 @@
     }
 
     setupSubTabs('configSubTabs', 'data-cfg', 'cfgpanel-');
+
     document.querySelectorAll('.sub-tab[data-subtab]').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.sub-tab[data-subtab]').forEach(t => t.classList.remove('active'));
@@ -864,6 +946,7 @@
         document.getElementById(`subpanel-${tab.getAttribute('data-subtab')}`)?.classList.add('active');
       });
     });
+
     document.querySelectorAll('.sub-tab[data-infotab]').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.sub-tab[data-infotab]').forEach(t => t.classList.remove('active'));
@@ -873,7 +956,16 @@
       });
     });
 
-    // API Helpers
+    document.querySelectorAll('.sub-tab[data-uatab]').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.sub-tab[data-uatab]').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentUaTab = tab.getAttribute('data-uatab');
+        loadActiveUseragent();
+      });
+    });
+
+    // API Helper
     async function api(path, options = {}) {
       try {
         const res = await fetch(path, {
@@ -886,21 +978,68 @@
       }
     }
 
-    // Load Initial Data
+    // Init
     async function init() {
-      await loadOfferConfig();
-      await loadProxyQueue();
-      await loadScriptList();
-      await loadProxyFile('proxy.txt', 'txtCfgProxy');
-      await loadProxyFile('micro.txt', 'txtCfgMicro');
-      await loadProxyFile('ssh.txt', 'txtCfgSsh');
-      await loadProxyFile('tinsoft.txt', 'txtCfgTinsoft');
-      await loadProxyFile('Socks4G.txt', 'txtCfgSocks4g');
-      await loadProxyFile('proxyHung.txt', 'txtCfgProxyHung');
-      await loadEmailList();
-      await loadAutofillList();
-      await loadWindowsSettings();
+      await Promise.allSettled([
+        loadOfferConfig(),
+        loadProxyQueue(),
+        loadScriptList(),
+        loadScriptRrsList(),
+        loadCommandsPalette(),
+        loadHelpContent(),
+        loadProxyFile('proxy.txt', 'txtCfgProxy'),
+        loadProxyFile('micro.txt', 'txtCfgMicro'),
+        loadProxyFile('ssh.txt', 'txtCfgSsh'),
+        loadProxyFile('tinsoft.txt', 'txtCfgTinsoft'),
+        loadProxyFile('Socks4G.txt', 'txtCfgSocks4g'),
+        loadProxyFile('proxyHung.txt', 'txtCfgProxyHung'),
+        loadActiveUseragent(),
+        loadBrowserConfigFile('refferent.txt', 'txtCfgRefferent'),
+        loadBrowserConfigFile('bookmarks.txt', 'txtCfgBookmarks'),
+        loadEmailList(),
+        loadAutofillList(),
+        loadWindowsSettings(),
+      ]);
       setInterval(fetchRunningState, 1500);
+    }
+
+    // Commands Palette
+    async function loadCommandsPalette() {
+      const data = await api('/pc/commands');
+      const container = document.getElementById('dgvCommandOffer');
+      container.innerHTML = '';
+      allCommandsList = data.commands || [];
+      renderCommandRows(allCommandsList);
+    }
+
+    function renderCommandRows(list) {
+      const container = document.getElementById('dgvCommandOffer');
+      container.innerHTML = '';
+      list.forEach(c => {
+        const row = document.createElement('div');
+        row.className = 'cmd-row';
+        row.innerHTML = `<span style="font-weight:600;">${c.name}</span><span style="color:#888;font-size:10px;">#${c.id}</span>`;
+        row.onclick = () => {
+          document.querySelectorAll('.cmd-row').forEach(r => r.classList.remove('active'));
+          row.classList.add('active');
+          document.getElementById('cmdHelpBox').textContent = `Lệnh: ${c.raw}\nCú pháp: ${c.template}`;
+        };
+        row.ondblclick = () => insertCommand(c.template + '\n');
+        container.appendChild(row);
+      });
+    }
+
+    function filterCommands(query) {
+      const q = String(query || '').toLowerCase();
+      const filtered = allCommandsList.filter(c => c.raw.toLowerCase().includes(q) || c.name.toLowerCase().includes(q));
+      renderCommandRows(filtered);
+    }
+
+    async function loadHelpContent() {
+      const data = await api('/pc/help');
+      if (data && data.helpText) {
+        document.getElementById('richTextBoxHelp').value = data.helpText;
+      }
     }
 
     // Offer Config
@@ -926,7 +1065,7 @@
         delayStop: document.getElementById('nudDelayStop').value,
       };
       await api('/pc/offer/save', { method: 'POST', body: JSON.stringify(payload) });
-      document.getElementById('lbStatus').textContent = 'Đã lưu cấu hình Offer vào Offer.ini';
+      document.getElementById('lbStatus').textContent = 'Đã lưu cấu hình Offer vào Offer.ini thành công.';
     }
 
     function resetOfferConfig() {
@@ -993,7 +1132,54 @@
       alert(res.success ? `Đã lưu thành công ${file}` : `Lỗi: ${res.error}`);
     }
 
-    // Scripts
+    // UserAgent configs
+    async function loadActiveUseragent() {
+      const fileMap = { win: 'useragent_win.txt', mac: 'useragent_mac.txt', lin: 'useragent_lin.txt', android: 'useragent_android.txt' };
+      const fileName = fileMap[currentUaTab] || 'useragent_win.txt';
+      const data = await api('/pc/browser-config/read', { method: 'POST', body: JSON.stringify({ file: fileName }) });
+      document.getElementById('txtCfgUserAgent').value = data.content || '';
+    }
+
+    async function saveActiveUseragent() {
+      const fileMap = { win: 'useragent_win.txt', mac: 'useragent_mac.txt', lin: 'useragent_lin.txt', android: 'useragent_android.txt' };
+      const fileName = fileMap[currentUaTab] || 'useragent_win.txt';
+      const content = document.getElementById('txtCfgUserAgent').value;
+      const res = await api('/pc/browser-config/save', { method: 'POST', body: JSON.stringify({ file: fileName, content }) });
+      alert(res.success ? `Đã lưu UserAgent cho ${currentUaTab.toUpperCase()}` : `Lỗi: ${res.error}`);
+    }
+
+    async function loadBrowserConfigFile(file, textareaId) {
+      const data = await api('/pc/browser-config/read', { method: 'POST', body: JSON.stringify({ file }) });
+      if (data && data.content) {
+        document.getElementById(textareaId).value = data.content;
+      }
+    }
+
+    async function saveBrowserConfigFile(file, textareaId) {
+      const content = document.getElementById(textareaId).value;
+      const res = await api('/pc/browser-config/save', { method: 'POST', body: JSON.stringify({ file, content }) });
+      alert(res.success ? `Đã lưu thành công ${file}` : `Lỗi: ${res.error}`);
+    }
+
+    function saveSizeConfig() {
+      alert("Đã lưu kích thước cửa sổ.");
+    }
+
+    function randomSizeConfig() {
+      const minW = parseInt(document.getElementById('nudMinWidth').value) || 1200;
+      const maxW = parseInt(document.getElementById('nudMaxWidth').value) || 1440;
+      const minH = parseInt(document.getElementById('nudMinHeight').value) || 700;
+      const maxH = parseInt(document.getElementById('nudMaxHeight').value) || 900;
+      const rw = Math.floor(Math.random() * (maxW - minW + 1)) + minW;
+      const rh = Math.floor(Math.random() * (maxH - minH + 1)) + minH;
+      alert(`Random kích thước: ${rw} x ${rh} px`);
+    }
+
+    function saveMoreConfig() {
+      alert("Đã lưu các tùy chọn mở rộng.");
+    }
+
+    // Scripts Offer
     async function loadScriptList() {
       const data = await api('/scripts');
       const container = document.getElementById('scriptFileList');
@@ -1003,7 +1189,6 @@
 
       if (data && data.scripts) {
         data.scripts.forEach(s => {
-          // add to list
           const item = document.createElement('div');
           item.style.padding = '4px 6px';
           item.style.borderBottom = '1px solid #e0e0e0';
@@ -1012,7 +1197,6 @@
           item.onclick = () => openScript(s.path, s.name);
           container.appendChild(item);
 
-          // add to combo
           const opt = document.createElement('option');
           opt.value = s.path;
           opt.textContent = s.name;
@@ -1034,7 +1218,7 @@
     function newScript() {
       currentScriptPath = '';
       document.getElementById('txtNameScript').value = 'script_' + Date.now() + '.txt';
-      document.getElementById('txtScript').value = '{EmailConfig}\n{InfoConfig}\n{Delay}=2\n{SmartClick}=#submit\n';
+      document.getElementById('txtScript').value = '{EmailConfig}\n{InfoConfig}\n{SendById}=firstName|{Fname}|10\n{Delay}=2|3\n{SmartClick}=#submit\n';
     }
 
     async function saveCurrentScript() {
@@ -1049,6 +1233,50 @@
       } else {
         alert('Lỗi khi lưu: ' + res.error);
       }
+    }
+
+    // Scripts RRS
+    async function loadScriptRrsList() {
+      const data = await api('/scripts');
+      const container = document.getElementById('scriptRrsFileList');
+      container.innerHTML = '';
+      if (data && data.scripts) {
+        const rrsScripts = data.scripts.filter(s => s.path.includes('/RRS/') || s.name.startsWith('RRS'));
+        rrsScripts.forEach(s => {
+          const item = document.createElement('div');
+          item.style.padding = '4px 6px';
+          item.style.borderBottom = '1px solid #e0e0e0';
+          item.style.cursor = 'pointer';
+          item.innerHTML = `<b>${s.name}</b>`;
+          item.onclick = async () => {
+            document.getElementById('txtScriptRRSName').value = s.name;
+            const res = await api('/script/read', { method: 'POST', body: JSON.stringify({ path: s.path }) });
+            if (res && res.content !== undefined) {
+              document.getElementById('txtScriptRRS').value = res.content;
+            }
+          };
+          container.appendChild(item);
+        });
+      }
+    }
+
+    async function saveCurrentScriptRRS() {
+      const name = document.getElementById('txtScriptRRSName').value.trim();
+      if (!name) return alert('Vui lòng nhập tên script RRS!');
+      const content = document.getElementById('txtScriptRRS').value;
+      const path = `/Users/codernguoitay/Downloads/AutoLeadPC/Script/RRS/${name}`;
+      const res = await api('/script/save', { method: 'POST', body: JSON.stringify({ path, content }) });
+      if (res.success) {
+        alert('Đã lưu kịch bản RRS thành công!');
+        await loadScriptRrsList();
+      } else {
+        alert('Lỗi khi lưu: ' + res.error);
+      }
+    }
+
+    function newScriptRRS() {
+      document.getElementById('txtScriptRRSName').value = 'RRS_' + Date.now() + '.txt';
+      document.getElementById('txtScriptRRS').value = '{Note}=RRS Task\n{Delay}=3\n';
     }
 
     function insertCommand(cmd) {
@@ -1165,7 +1393,6 @@
       const antiFpWebgl = document.getElementById('CheckBoxWebGLImage').checked;
       const antiFpWebrtc = document.getElementById('CheckBoxWebRTC').checked;
 
-      // Update proxy queue first if textarea changed
       const proxyLines = document.getElementById('txtDashboardProxy').value.trim();
       if (proxyLines) {
         await api('/proxy-queue/import', {
@@ -1256,7 +1483,7 @@
 
       const tbody = document.getElementById('dgvRunningBody');
       if (sessions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">Chưa có trình duyệt nào đang mở.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888;padding:25px;">Chưa có trình duyệt nào đang mở.</td></tr>';
         return;
       }
 
