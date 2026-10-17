@@ -475,15 +475,33 @@ export async function detectSmartFallbackAction(page) {
         }
       }
 
-      // 2. Câu hỏi khảo sát / quiz buttons (btn-option, choice-btn, option-btn)
-      const surveyOptions = Array.from(document.querySelectorAll(
-        '[id="btn-option"]:not(.active):not(.selected), [id^="btn-option"]:not(.active):not(.selected), [id*="btn-option"]:not(.active):not(.selected), .btn-option:not(.active):not(.selected), [data-vector-answer="true"]:not(.active):not(.selected), .choice-btn:not(.active):not(.selected), .option-btn:not(.active):not(.selected), .quiz-btn:not(.active):not(.selected), .answer-btn:not(.active):not(.selected), .creative-survey-answer:not(.selected)'
-      )).filter(isVisible);
+      // 2. Câu hỏi khảo sát / quiz buttons (btn-option, choice-btn, option-btn, quiz-cards, pills)
+      const surveyOptions = Array.from(document.querySelectorAll([
+        '[id="btn-option"]:not(.active):not(.selected)',
+        '[id^="btn-option"]:not(.active):not(.selected)',
+        '[id*="btn-option"]:not(.active):not(.selected)',
+        '.btn-option:not(.active):not(.selected)',
+        '[data-vector-answer="true"]:not(.active):not(.selected)',
+        '.choice-btn:not(.active):not(.selected)',
+        '.option-btn:not(.active):not(.selected)',
+        '.quiz-btn:not(.active):not(.selected)',
+        '.answer-btn:not(.active):not(.selected)',
+        '.creative-survey-answer:not(.selected)',
+        '.choice-card:not(.active):not(.selected)',
+        '.option-card:not(.active):not(.selected)',
+        '.quiz-card:not(.active):not(.selected)',
+        '.survey-card:not(.active):not(.selected)',
+        '.selection-card:not(.active):not(.selected)',
+        '.pill-option:not(.active):not(.selected)',
+        '.bubble-option:not(.active):not(.selected)',
+        '[data-choice]:not(.active):not(.selected)',
+        '[role="radio"]:not([aria-checked="true"])',
+      ].join(', '))).filter(isVisible);
 
       if (surveyOptions.length > 0) {
         const randomOpt = surveyOptions[Math.floor(Math.random() * surveyOptions.length)];
         const sel = randomOpt.id ? `[id="${randomOpt.id}"]` : (randomOpt.className ? `.${randomOpt.className.split(' ')[0]}` : '[id*="btn-option"]');
-        return { action: 'click', selector: sel, detail: 'Tự động chọn ngẫu nhiên phương án khảo sát (btn-option)' };
+        return { action: 'click', selector: sel, detail: 'Tự động chọn ngẫu nhiên phương án khảo sát / choice card' };
       }
 
       // 3. Nút Jump Page / Reward Screen
@@ -496,12 +514,33 @@ export async function detectSmartFallbackAction(page) {
       }
 
       // 4. Nút Submit / Continue / Next
-      const submitBtn = Array.from(document.querySelectorAll(
-        'button[type="submit"], input[type="submit"], [data-vector-submit="true"], button.continue-btn, button.submit-btn, button.next-btn, #btnSubmit, #btnNext, #btnContinue'
-      )).find(isVisible);
+      const submitBtn = Array.from(document.querySelectorAll([
+        'button[type="submit"]',
+        'input[type="submit"]',
+        '[data-vector-submit="true"]',
+        'button.continue-btn',
+        'button.submit-btn',
+        'button.next-btn',
+        '#btnSubmit',
+        '#btnNext',
+        '#btnContinue',
+        'button[id*="submit" i]',
+        'button[id*="continue" i]',
+        'button[id*="next" i]',
+        'button[class*="submit" i]',
+        'button[class*="continue" i]',
+        'button[class*="next" i]',
+      ].join(', '))).find(isVisible);
       if (submitBtn) {
         const sel = submitBtn.id ? `#${submitBtn.id}` : (submitBtn.className ? `.${submitBtn.className.split(' ')[0]}` : 'button[type="submit"]');
         return { action: 'click', selector: sel, detail: 'Tự động click nút Submit / Continue để chuyển màn' };
+      }
+
+      // 5. Fallback Form Submit nếu không có nút riêng
+      const anyForm = Array.from(document.querySelectorAll('form')).find(isVisible);
+      if (anyForm) {
+        const sel = anyForm.id ? `form#${anyForm.id}` : 'form';
+        return { action: 'click', selector: `${sel} button, ${sel} input[type="button"], ${sel}`, detail: 'Tự động kích hoạt gửi form' };
       }
 
       return null;

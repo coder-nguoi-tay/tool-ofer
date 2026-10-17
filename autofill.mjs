@@ -734,6 +734,114 @@ const semanticCategories = [
     patterns: [/accountnumber/, /accountno/, /acctnumber/, /acctno/, /^number$/, /^account$/],
     resolve: (r) => r.number || r.accountnumber || r.accountno || r.account,
   },
+  // 11. Thu nhập & Tài chính (Smart Contextual Defaults)
+  {
+    type: 'income',
+    patterns: [/income/, /salary/, /earnings/, /household.*income/, /annual.*income/, /wage/, /thunhap/],
+    resolve: (r) => r.income || r.salary || r.household_income || r.annual_income || '65000',
+  },
+  {
+    type: 'debt',
+    patterns: [/debt/, /unsecured_debt/, /credit_card_debt/, /tax_debt/, /sotienno/],
+    resolve: (r) => r.debt || r.debt_amount || '15000',
+  },
+  {
+    type: 'credit_score',
+    patterns: [/credit.*score/, /credit.*rating/, /credit_grade/, /diemtindung/],
+    resolve: (r) => r.credit_score || r.credit || '720',
+  },
+  {
+    type: 'loan_amount',
+    patterns: [/loan.*amount/, /borrow_amount/, /desired_loan/, /vay/],
+    resolve: (r) => r.loan_amount || '10000',
+  },
+  // 12. Nhà ở & Công việc (Housing & Employment)
+  {
+    type: 'homeowner',
+    patterns: [/homeowner/, /own.*rent/, /rent.*own/, /housing/, /residence_type/, /nha_o/],
+    resolve: (r) => r.homeowner || r.housing || 'Own',
+  },
+  {
+    type: 'employment_status',
+    patterns: [/employment/, /work_status/, /job_status/, /vieclam/, /nghenghiep/],
+    resolve: (r) => r.employment || r.employment_status || 'Employed Full-Time',
+  },
+  {
+    type: 'employer',
+    patterns: [/employer/, /company_name/, /congty/, /noi_lam_viec/],
+    resolve: (r) => r.employer || r.company || 'Self Employed',
+  },
+  {
+    type: 'job_title',
+    patterns: [/job_title/, /jobtitle/, /occupation/, /chucvu/, /position/],
+    resolve: (r) => r.job_title || r.occupation || 'Manager',
+  },
+  {
+    type: 'education',
+    patterns: [/education/, /degree/, /school_level/, /trinhdo/, /hocvan/],
+    resolve: (r) => r.education || "Bachelor's Degree",
+  },
+  {
+    type: 'years_at_address',
+    patterns: [/years.*address/, /time.*address/, /residence_years/, /sonam_o/],
+    resolve: (r) => r.years_at_address || '3',
+  },
+  {
+    type: 'months_at_address',
+    patterns: [/months.*address/, /residence_months/, /sothang_o/],
+    resolve: (r) => r.months_at_address || '6',
+  },
+  {
+    type: 'monthly_rent',
+    patterns: [/monthly.*rent/, /mortgage.*payment/, /rent_payment/, /tiennha/],
+    resolve: (r) => r.rent || r.monthly_rent || '1200',
+  },
+  // 13. Phương tiện & Cá nhân (Vehicle & Personal)
+  {
+    type: 'vehicle_year',
+    patterns: [/vehicle.*year/, /car.*year/, /auto.*year/, /namsanxuat/],
+    resolve: (r) => r.vehicle_year || r.car_year || '2019',
+  },
+  {
+    type: 'vehicle_make',
+    patterns: [/vehicle.*make/, /car.*make/, /auto.*make/, /hangxe/],
+    resolve: (r) => r.vehicle_make || r.car_make || 'Toyota',
+  },
+  {
+    type: 'vehicle_model',
+    patterns: [/vehicle.*model/, /car.*model/, /auto.*model/, /dongxe/],
+    resolve: (r) => r.vehicle_model || r.car_model || 'Camry',
+  },
+  {
+    type: 'marital_status',
+    patterns: [/marital/, /honnhan/, /married/, /^status$/],
+    resolve: (r) => r.marital_status || 'Married',
+  },
+  {
+    type: 'military',
+    patterns: [/military/, /veteran/, /armed.*forces/, /quandong/],
+    resolve: (r) => r.military || 'No',
+  },
+  {
+    type: 'weight',
+    patterns: [/^weight$/, /weight_lbs/, /body_weight/, /cannang/],
+    resolve: (r) => r.weight || '165',
+  },
+  {
+    type: 'height_feet',
+    patterns: [/height.*feet/, /^feet$/],
+    resolve: (r) => r.height_feet || '5',
+  },
+  {
+    type: 'height_inches',
+    patterns: [/height.*inches/, /^inches$/],
+    resolve: (r) => r.height_inches || '9',
+  },
+  {
+    type: 'height',
+    patterns: [/^height$/, /chieucao/],
+    resolve: (r) => r.height || "5'9\"",
+  },
 ];
 
 /**
@@ -921,6 +1029,28 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
     return '100 Main St';
   }
 
+  // 7. Universal Smart Fallback cho các ô BẮT BUỘC (required): không để ô bắt buộc bị trống khiến form bị nghẽn
+  if (metadata.required || metadata.ariaRequired || metadata.isRequired) {
+    if (metadata.type === 'number' || metadata.type === 'range') {
+      const maxLen = Number(metadata.maxLength);
+      if (maxLen === 4) return '2020';
+      if (maxLen === 2) return '25';
+      if (maxLen === 1) return '1';
+      return '1000';
+    }
+    if (metadata.type === 'tel') {
+      return formatMatchedValue(getNormalizedPhone(record), metadata);
+    }
+    if (metadata.type === 'email') {
+      return generateFallbackEmail(record);
+    }
+    if (metadata.kind === 'textarea') {
+      return 'Interested in learning more information.';
+    }
+    // Trường hợp là text thông thường bắt buộc
+    return 'Yes';
+  }
+
   return null;
 }
 
@@ -1002,9 +1132,11 @@ export async function findSubmitButton(frame) {
     'a[href*="/next"], a[aria-label*="Reward" i], a[aria-label*="Get My" i], a[aria-label*="Continue" i], a[aria-label*="Claim" i], button[aria-label*="Reward" i], button[aria-label*="Get My" i]',
 
     // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt, bao gồm Jump Page Get My Reward)
-    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành"), button:has-text("Get My Reward"), button:has-text("Claim Reward"), button:has-text("Claim My Reward"), button:has-text("Get Reward"), button:has-text("Unlock Reward"), button:has-text("View Deals"), button:has-text("Continue to Deals"), button:has-text("View Offers")',
-    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Explore Plans"), a:has-text("Get My Reward"), a:has-text("Claim Reward"), a:has-text("Claim My Reward"), a:has-text("Get Reward"), a:has-text("Unlock Reward"), a:has-text("View Deals"), a:has-text("Continue to Deals"), a:has-text("View Offers"), a:has-text("See Offers")',
-    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results"), [role="button"]:has-text("Get My Reward"), [role="button"]:has-text("Claim Reward"), [role="button"]:has-text("Get Reward")',
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Complete"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành"), button:has-text("Get My Reward"), button:has-text("Claim Reward"), button:has-text("Claim My Reward"), button:has-text("Get Reward"), button:has-text("Unlock Reward"), button:has-text("View Deals"), button:has-text("Continue to Deals"), button:has-text("View Offers"), button:has-text("See Offers"), button:has-text("Check Eligibility"), button:has-text("See Matches"), button:has-text("Show Matches"), button:has-text("Send")',
+    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Complete"), a:has-text("Explore Plans"), a:has-text("Get My Reward"), a:has-text("Claim Reward"), a:has-text("Claim My Reward"), a:has-text("Get Reward"), a:has-text("Unlock Reward"), a:has-text("View Deals"), a:has-text("Continue to Deals"), a:has-text("View Offers"), a:has-text("See Offers"), a:has-text("Check Eligibility"), a:has-text("See Matches")',
+    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results"), [role="button"]:has-text("Get My Reward"), [role="button"]:has-text("Claim Reward"), [role="button"]:has-text("Get Reward"), [role="button"]:has-text("Check Eligibility")',
+    'button[id*="submit" i], button[id*="continue" i], button[id*="next" i], a[id*="submit" i], a[id*="continue" i], a[id*="next" i]',
+    'button[class*="submit" i], button[class*="continue" i], button[class*="next" i], a[class*="submit" i], a[class*="continue" i], a[class*="next" i]',
     'div[class*="btn"]:has-text("Continue"), div[class*="button"]:has-text("Continue"), div[class*="btn"]:has-text("Next"), div[class*="button"]:has-text("Next"), span[class*="btn"]:has-text("Continue")',
   ];
 
@@ -1184,6 +1316,31 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         '[data-btn-option]',
         'button.btn-option',
         'a.btn-option',
+        // Các loại quiz cards, survey cards, choice cards, option cards:
+        '.choice-card',
+        '.option-card',
+        '.answer-card',
+        '.quiz-card',
+        '.survey-card',
+        '.quiz-option',
+        '.survey-option',
+        '.answer-option',
+        '.choice-option',
+        '.selection-card',
+        '.selection-button',
+        '.selection-item',
+        '.card-choice',
+        '.card-option',
+        '.pill-option',
+        '.bubble-option',
+        '[data-choice]',
+        '[data-answer]',
+        '[data-option]',
+        '[data-vector-answer="true"]',
+        '[data-element-type="survey_answer"]',
+        'button.qualifier-option-button',
+        '.creative-survey-answer',
+        '[role="radio"]',
         // Các nút bấm con nằm BÊN TRONG container btn-option:
         '#btn-option button',
         '#btn-option a',
@@ -1211,6 +1368,13 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         '[id*="btn_option"] a',
         '.btn_option button',
         '.btn_option a',
+        // Các nút trong choice-container hoặc options-container
+        '.choice-container button:not([type="submit"])',
+        '.choice-container a',
+        '.choice-container [role="button"]',
+        '.options-container button:not([type="submit"])',
+        '.options-container a',
+        '.options-container [role="button"]',
       ].join(', ')));
 
       const uniqueElements = Array.from(new Set(rawCandidates));
@@ -1230,7 +1394,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
       const now = Date.now();
 
       allCandidates.forEach((btn, idx) => {
-        const parent = btn.closest('.question, .survey-question, fieldset, .choice-container, .options-container, .quiz-step, .question-container, .survey-step, [role="radiogroup"], .choices, .answers, ul, ol, [id="btn-option"], .btn-option') || btn.parentElement || document.body;
+        const parent = btn.closest('.question, .survey-question, fieldset, .choice-container, .options-container, .quiz-step, .question-container, .survey-step, [role="radiogroup"], [role="group"], .choices, .answers, .quiz-container, .survey-card, .question-wrap, .question-wrapper, .quiz-question, .survey-group, .answers-container, .poll-question, .form-question, .survey-block, .step-content, .survey-slide, ul, ol, [id="btn-option"], .btn-option') || btn.parentElement || document.body;
         if (!groups.has(parent)) {
           groups.set(parent, []);
         }
@@ -1239,9 +1403,14 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
 
         const isSelected = btn.classList.contains('active') ||
           btn.classList.contains('selected') ||
+          btn.classList.contains('checked') ||
+          btn.classList.contains('chosen') ||
           btn.getAttribute('aria-checked') === 'true' ||
+          btn.getAttribute('aria-selected') === 'true' ||
           btn.getAttribute('data-autolead-clicked') === '1' ||
-          (btn.tagName === 'INPUT' && btn.checked);
+          (btn.tagName === 'INPUT' && btn.checked) ||
+          btn.querySelector('input:checked') !== null ||
+          (btn.id ? Boolean(document.querySelector(`input#${btn.id}:checked`)) : false);
 
         const lastClickedTime = Number(btn.getAttribute('data-autolead-btn-clicked-time') || 0);
         const recentlyClicked = (now - lastClickedTime) < 5000;
@@ -2102,6 +2271,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           if (isHoneypot) continue;
 
           const isCheckbox = await field.evaluate((el) => el.type === 'checkbox').catch(() => false);
+          const isSelect = await field.evaluate((el) => el.tagName === 'SELECT').catch(() => false);
           if (isCheckbox) {
             // Với checkbox, nhiều trang ẩn thẻ <input> (display:none, opacity:0, sr-only) và hiển thị qua <label> hoặc custom checkmark.
             // Do đó chỉ bỏ qua nếu CẢ input VÀ label/container bao ngoài đều bị ẩn hoàn toàn
@@ -2114,6 +2284,16 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               return false;
             }).catch(() => false);
             if (!isInputOrLabelVisible) continue;
+          } else if (isSelect) {
+            // Với <select>, nhiều framework (Select2, Choices, React-Select) ẩn thẻ gốc
+            // Chỉ bỏ qua nếu form hoặc container cha của nó bị ẩn hoàn toàn
+            const isSelectContainerVisible = await field.evaluate((el) => {
+              if (el.offsetWidth > 0 || el.offsetHeight > 0 || el.offsetParent !== null) return true;
+              const parent = el.closest('form, .select, .custom-select, .form-group, .field, .input-container, div');
+              if (parent && (parent.offsetWidth > 0 || parent.offsetHeight > 0 || parent.offsetParent !== null)) return true;
+              return false;
+            }).catch(() => false);
+            if (!isSelectContainerVisible) continue;
           } else {
             if (!(await field.isVisible())) continue;
           }
@@ -2179,12 +2359,20 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
             const vectorField = element.getAttribute('data-vector-field') || '';
 
+            const isReq = Boolean(element.required) ||
+              element.getAttribute('aria-required') === 'true' ||
+              element.classList.contains('required') ||
+              element.classList.contains('error') ||
+              labels.some((l) => /(^|\s)\*|\*(\s|$)/.test(l));
+
             return {
               id: element.id || '',
               name: element.getAttribute('name') || '',
               classes: `${element.className || ''} ${container ? container.className || '' : ''}`,
               dataAttributes,
-              required: Boolean(element.required),
+              required: isReq,
+              ariaRequired: element.getAttribute('aria-required') === 'true',
+              isRequired: isReq,
               checked: Boolean(element.checked),
               names: [
                 element.getAttribute('aria-label'),
@@ -2884,6 +3072,56 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               }
 
               // Kích hoạt quét tiếp theo sau 120ms để màn hình thao tác liên tục không nghỉ
+            }
+          } else if (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0) {
+            // FALLBACK NẾU THIẾU NÚT BẤM HOẶC NÚT BẤM KHÔNG ĐƯỢC NHẬN DIỆN:
+            // Chỉ chạy khi đã điền hoặc có dữ liệu form, và không còn ô bắt buộc nào bị bỏ trống
+            const formSubmitted = await frame.evaluate(() => {
+              const forms = Array.from(document.querySelectorAll('form')).filter((f) => {
+                const rect = f.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              });
+              if (!forms.length) return false;
+              for (const form of forms) {
+                const lastSubmit = Number(form.dataset.autoleadLastSubmitTime || 0);
+                const now = Date.now();
+                if (now - lastSubmit < 6000) continue;
+                form.dataset.autoleadLastSubmitTime = String(now);
+                try {
+                  if (typeof form.requestSubmit === 'function') {
+                    form.requestSubmit();
+                    return true;
+                  }
+                  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                  return true;
+                } catch {}
+              }
+              return false;
+            }).catch(() => false);
+
+            if (formSubmitted === true) {
+              console.log('[Autofill] Không có nút submit chuẩn, đã kích hoạt fallback form.requestSubmit() thành công.');
+              options.onLog?.({
+                type: 'submit_fallback',
+                detail: 'Đã tự động gửi form qua form.requestSubmit() dự phòng khi không tìm thấy nút submit.',
+              });
+              session.lastActionTime = Date.now();
+              session.autofillFields = (session.autofillFields ?? 0) + 1;
+              session.completedScreens = (session.completedScreens || 0) + 1;
+              session.currentScreen = session.completedScreens + 1;
+
+              const checkScreenTarget = Number(options.leadCheckScreen) || 5;
+              const isTargetScreenSubmit = screenInfo?.isScreen5 || session.completedScreens >= checkScreenTarget;
+              if (options.enableLeadCheck !== false && isTargetScreenSubmit && !session.screen5LeadVerified) {
+                if (!session.screen5LeadCheckTriggered) {
+                  session.screen5LeadCheckTriggered = true;
+                  session.leadCheckStatus = 'checking';
+                  if (typeof options.onScreen5Reached === 'function') {
+                    options.onScreen5Reached(session, page);
+                  }
+                }
+              }
+
               setTimeout(() => { session.triggerAutofillScan?.(); }, 120);
             }
           }

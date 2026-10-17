@@ -1720,6 +1720,39 @@ const isSingleSeq = Boolean(seqSettingsSingle.websiteUrl && seqSettingsSingle.we
 assert.equal(isSingleSeq, false, 'Khi chỉ có 1 link thì không phải dual stream');
 assert.equal(isSingleSeq ? 2 : 1, 1, 'Chạy tuần tự 1 link phải đặt targetCount = 1');
 
+// 13. Kiểm tra Smart Contextual Fallback cho các trường tài chính / khảo sát
+assert.equal(matchFieldValue(['income'], {}), '65000', 'Income mặc định phải là 65000');
+assert.equal(matchFieldValue(['debt'], {}), '15000', 'Debt mặc định phải là 15000');
+assert.equal(matchFieldValue(['credit_score'], {}), '720', 'Credit score mặc định phải là 720');
+assert.equal(matchFieldValue(['homeowner'], {}), 'Own', 'Homeowner mặc định phải là Own');
+assert.equal(matchFieldValue(['employment_status'], {}), 'Employed Full-Time', 'Employment status mặc định');
+assert.equal(matchFieldValue(['education'], {}), "Bachelor's Degree", 'Education mặc định');
+assert.equal(matchFieldValue(['military'], {}), 'No', 'Military mặc định là No');
+assert.equal(matchFieldValue(['weight'], {}), '165', 'Weight mặc định là 165');
+assert.equal(matchFieldValue(['height_feet'], {}), '5', 'Height feet mặc định là 5');
+assert.equal(matchFieldValue(['height_inches'], {}), '9', 'Height inches mặc định là 9');
+
+// 14. Kiểm tra Universal Smart Fallback cho các ô BẮT BUỘC (required): không để trống
+assert.equal(matchFieldValue(['custom_unknown_number'], {}, { required: true, type: 'number' }), '1000', 'Ô number bắt buộc phải có giá trị an toàn');
+assert.equal(matchFieldValue(['custom_unknown_text'], {}, { required: true, type: 'text' }), 'Yes', 'Ô text bắt buộc phải có giá trị an toàn');
+assert.equal(matchFieldValue(['custom_comments'], {}, { required: true, kind: 'textarea' }), 'Interested in learning more information.', 'Textarea bắt buộc phải có giá trị an toàn');
+assert.ok(matchFieldValue(['required_tel_field'], {}, { required: true, type: 'tel' }).replace(/\D/g, '').length >= 10, 'Ô tel bắt buộc phải có số điện thoại');
+assert.ok(matchFieldValue(['required_email_field'], {}, { required: true, type: 'email' }).includes('@'), 'Ô email bắt buộc phải có email hợp lệ');
+
+// 15. Kiểm tra findSubmitButton nhận diện các biến thể nút submit mới (Check Eligibility, Complete)
+const mockCheckBtn = {
+  isVisible: async () => true,
+  evaluate: async () => ({ valid: true }),
+  isEnabled: async () => true,
+};
+const mockEligibilityFrame = {
+  locator: (sel) => ({
+    all: async () => (sel.includes('Check Eligibility') ? [mockCheckBtn] : []),
+  }),
+};
+const foundEligibility = await findSubmitButton(mockEligibilityFrame);
+assert.equal(foundEligibility, mockCheckBtn, 'findSubmitButton phải nhận diện nút Check Eligibility');
+
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 
 
