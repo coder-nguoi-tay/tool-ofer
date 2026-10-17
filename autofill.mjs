@@ -1021,15 +1021,18 @@ export async function findSubmitButton(frame) {
             return { valid: false, reason: 'container_tag' };
           }
 
-          // Kiểm tra kích thước hình học nếu có: nút bấm không thể quá nhỏ hoặc quá khổng lồ
+          // Kiểm tra kích thước hình học nếu có: nút bấm không thể quá nhỏ hoặc quá khổng lồ (hỗ trợ nút full-width lên đến 1400px trên desktop)
           if (typeof el.getBoundingClientRect === 'function') {
             const rect = el.getBoundingClientRect();
             if (rect.width <= 4 || rect.height <= 4) return { valid: false, reason: 'zero_size' };
-            if (rect.height > 180 || rect.width > 900) return { valid: false, reason: 'too_large' };
+            if (rect.height > 250 || rect.width > 1400) return { valid: false, reason: 'too_large' };
           }
 
-          // Bỏ qua nút nằm trong header / footer / nav (tránh bấm nhầm menu/privacy link)
-          if (typeof el.closest === 'function' && el.closest('header, footer, nav')) {
+          // Bỏ qua nút nằm trong header / site-level footer / nav (tránh bấm nhầm menu/privacy link)
+          // KHÔNG bỏ qua footer nếu là step-footer, form-footer, modal-footer hoặc survey-footer
+          const inSiteHeaderOrNav = typeof el.closest === 'function' ? el.closest('header, nav, #header, #nav, .site-header, .site-nav') : null;
+          const inSiteFooter = typeof el.closest === 'function' ? el.closest('.site-footer, #footer, body > footer:not([class*="form"]):not([class*="step"]):not([class*="survey"]):not([class*="quiz"]):not([class*="modal"]):not([class*="card"])') : null;
+          if (inSiteHeaderOrNav || inSiteFooter) {
             return { valid: false, reason: 'header_footer' };
           }
 
@@ -1157,8 +1160,8 @@ export function matchAgeRange(optionText, age) {
 export async function handleRadioAndSurveyOptions(frame, record = {}, session = null) {
   let answeredCount = 0;
 
-  // 0. ƯU TIÊN CAO NHẤT: Đáp ứng yêu cầu "các phần trả lời đáp án chọn ramdom trong danh sách các id='btn-option' cứ hiện là chọn"
-  // Tự động tìm tất cả đáp án có id="btn-option", id bắt đầu/chứa "btn-option" hoặc class "btn-option", gom nhóm và chọn random ngay khi xuất hiện
+  // 0. ƯU TIÊN CAO NHẤT: Đáp ứng yêu cầu "chủ động bấm nút trong btn-option" và "các phần trả lời đáp án chọn random trong danh sách các id='btn-option' cứ hiện là chọn"
+  // Tự động tìm tất cả đáp án có id="btn-option", id/class chứa "btn-option" HOẶC CÁC NÚT BÊN TRONG btn-option, gom nhóm và chọn ngay khi xuất hiện
   try {
     const btnOptionGroups = await frame.evaluate(() => {
       const isVisible = (el) => {
@@ -1171,22 +1174,63 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         return true;
       };
 
-      const allCandidates = Array.from(document.querySelectorAll(
-        '[id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, [data-btn-option], button.btn-option, a.btn-option'
-      )).filter((el) => {
+      const rawCandidates = Array.from(document.querySelectorAll([
+        '[id="btn-option"]',
+        '[id^="btn-option"]',
+        '[id*="btn-option"]',
+        '[id*="btn_option"]',
+        '.btn-option',
+        '.btn_option',
+        '[data-btn-option]',
+        'button.btn-option',
+        'a.btn-option',
+        // Các nút bấm con nằm BÊN TRONG container btn-option:
+        '#btn-option button',
+        '#btn-option a',
+        '#btn-option [role="button"]',
+        '#btn-option input[type="button"]',
+        '#btn-option input[type="submit"]',
+        '#btn-option > div',
+        '#btn-option > li',
+        '#btn-option label',
+        '[id*="btn-option"] button',
+        '[id*="btn-option"] a',
+        '[id*="btn-option"] [role="button"]',
+        '[id*="btn-option"] input',
+        '[id*="btn-option"] > div',
+        '[id*="btn-option"] > li',
+        '[id*="btn-option"] label',
+        '.btn-option button',
+        '.btn-option a',
+        '.btn-option [role="button"]',
+        '.btn-option input',
+        '.btn-option > div',
+        '.btn-option > li',
+        '.btn-option label',
+        '[id*="btn_option"] button',
+        '[id*="btn_option"] a',
+        '.btn_option button',
+        '.btn_option a',
+      ].join(', ')));
+
+      const uniqueElements = Array.from(new Set(rawCandidates));
+      const allCandidates = uniqueElements.filter((el) => {
         if (!isVisible(el)) return false;
         if (el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) return false;
+        // Bỏ qua container cha nếu bản thân nó chứa các nút con bên trong đã được chọn vào candidates
+        const hasInteractiveChild = uniqueElements.some((child) => child !== el && el.contains(child));
+        if (hasInteractiveChild) return false;
         return true;
       });
 
       if (!allCandidates.length) return [];
 
-      // Gom nhóm theo container câu hỏi gần nhất (TUYỆT ĐỐI không dùng form hoặc body vì sẽ gộp mọi câu hỏi làm 1)
+      // Gom nhóm theo container câu hỏi gần nhất
       const groups = new Map();
       const now = Date.now();
 
       allCandidates.forEach((btn, idx) => {
-        const parent = btn.closest('.question, .survey-question, fieldset, .choice-container, .options-container, .quiz-step, .question-container, .survey-step, [role="radiogroup"], .choices, .answers, ul, ol') || btn.parentElement || document.body;
+        const parent = btn.closest('.question, .survey-question, fieldset, .choice-container, .options-container, .quiz-step, .question-container, .survey-step, [role="radiogroup"], .choices, .answers, ul, ol, [id="btn-option"], .btn-option') || btn.parentElement || document.body;
         if (!groups.has(parent)) {
           groups.set(parent, []);
         }
@@ -1196,10 +1240,11 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         const isSelected = btn.classList.contains('active') ||
           btn.classList.contains('selected') ||
           btn.getAttribute('aria-checked') === 'true' ||
+          btn.getAttribute('data-autolead-clicked') === '1' ||
           (btn.tagName === 'INPUT' && btn.checked);
 
         const lastClickedTime = Number(btn.getAttribute('data-autolead-btn-clicked-time') || 0);
-        const recentlyClicked = (now - lastClickedTime) < 1200;
+        const recentlyClicked = (now - lastClickedTime) < 5000;
 
         groups.get(parent).push({
           uid,
@@ -1214,8 +1259,10 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
       const actionableGroups = [];
       for (const [, items] of groups.entries()) {
         const hasRecentlyClicked = items.some((it) => it.recentlyClicked);
-        // Nếu chưa từng click gần đây (trong 1.2s qua), chọn random đáp án ngay
-        if (!hasRecentlyClicked && items.length > 0) {
+        const hasSelected = items.some((it) => it.isSelected);
+        // QUAN TRỌNG: Chỉ chọn khi nhóm này CHƯA có đáp án nào được chọn (isSelected)
+        // và CHƯA từng được click gần đây, tránh click đi click lại 1 nút mở nhiều link
+        if (!hasRecentlyClicked && !hasSelected && items.length > 0) {
           actionableGroups.push(items);
         }
       }
@@ -1987,14 +2034,31 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
     for (const frame of frames) {
       if (session.leadCheckStatus === 'failed') return;
+
+      let filledInThisPass = 0;
+
+      // 0. ƯU TIÊN HÀNG ĐẦU: Tự động bấm nút khảo sát / btn-option / radio ngay lập tức
+      // để không bị trễ do phải duyệt qua danh sách các input ẩn trên các trang khảo sát
+      try {
+        const answeredSurvey = await handleRadioAndSurveyOptions(frame, record, session);
+        if (answeredSurvey > 0) {
+          filledInThisPass += answeredSurvey;
+          session.lastActionTime = Date.now();
+          session.autofillFields = (session.autofillFields ?? 0) + answeredSurvey;
+          session.autofillError = null;
+          options.onLog?.({
+            type: 'survey_answered',
+            detail: `Đã tự động chọn câu trả lời khảo sát/lựa chọn (${answeredSurvey} câu).`,
+          });
+        }
+      } catch {}
+
       let fields = [];
       try {
         fields = await frame.locator('input, textarea, select').all();
       } catch {
         continue;
       }
-
-      let filledInThisPass = 0;
 
       // Tự động xử lý Phone Modal nếu xuất hiện (đặc trưng trên 16.dlysurge.com & 16.gettngood.com)
       try {
@@ -2582,20 +2646,35 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             }
           }
 
+          // Bỏ qua các trường tùy chọn không bắt buộc (apt, suite, unit, address2, secondary, optional, middle_name, notes, comments)
+          const fieldMeta = `${input.name || ''} ${input.id || ''} ${input.className || ''}`.toLowerCase();
+          const isExplicitOptional = /apt|suite|unit|address2|street2|secondary|middle|comments|notes|ext\b|optional/i.test(fieldMeta);
+          if (isExplicitOptional) continue;
+
+          // Checkbox chỉ bắt buộc khi có required attribute
+          if (input.type === 'checkbox' && !input.required && input.getAttribute('aria-required') !== 'true') {
+            continue;
+          }
+
           const isRequiredAttr = input.required || input.getAttribute('aria-required') === 'true';
           const hasErrorClass = input.classList.contains('error') || input.getAttribute('aria-invalid') === 'true';
-          // Chỉ kiểm tra lỗi trong group gần nhất (input-group, form-group, field, loco-group), KHÔNG dùng step-container
+
+          // Chỉ coi là lỗi thực sự nếu phần tử thông báo lỗi ĐANG HIỂN THỊ và CÓ CHỮ THỰC TẾ
           const parentGroup = input.closest('.input-group, .form-group, .field, .loco-group');
-          const hasParentError = parentGroup ? Boolean(parentGroup.querySelector('.error:not(input):not(select), .error-message, .invalid-feedback')) : false;
+          const hasParentError = parentGroup ? Array.from(parentGroup.querySelectorAll('.error:not(input):not(select), .error-message, .invalid-feedback')).some((errEl) => {
+            if (!isVisible(errEl)) return false;
+            const errText = (errEl.innerText || errEl.textContent || '').trim();
+            return errText.length > 0;
+          }) : false;
 
           let labelIsRequired = false;
           if (input.id) {
             const lbl = document.querySelector(`label[for="${input.id}"]`);
-            if (lbl && (lbl.innerText || lbl.textContent || '').includes('*')) labelIsRequired = true;
+            if (lbl && /(^|\s)\*|\*(\s|$)/.test(lbl.innerText || lbl.textContent || '')) labelIsRequired = true;
           }
-          if (!labelIsRequired && parentGroup) {
+          if (!labelIsRequired && parentGroup && parentGroup.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select').length === 1) {
             const lbl = parentGroup.querySelector('label');
-            if (lbl && (lbl.innerText || lbl.textContent || '').includes('*')) labelIsRequired = true;
+            if (lbl && /(^|\s)\*|\*(\s|$)/.test(lbl.innerText || lbl.textContent || '')) labelIsRequired = true;
           }
 
           if ((isRequiredAttr || labelIsRequired || hasErrorClass || hasParentError) && (!val || !isChecked)) {
@@ -2666,10 +2745,26 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               const id = btn.id || null;
               const now = Date.now();
               const lastClick = Number(btn.dataset.autoleadLastSubmitTime || 0);
-              // Giảm thời gian khóa chống duplicate submit xuống 800ms để kiểm tra và bấm liên tục
-              if (now - lastClick < 800) return { shouldClick: false, text, tag, id };
+              const clickCount = Number(btn.dataset.autoleadSubmitCount || 0);
+
+              // 1. Thẻ <a> chuyển link / popup: chỉ bấm 1 lần duy nhất cho mỗi trang URL để không mở hàng loạt tab/popup!
+              if (tag === 'A' && btn.dataset.autoleadSubmitted === '1') {
+                return { shouldClick: false, text, tag, id, reason: 'a_already_clicked' };
+              }
+
+              // 2. Chống duplicate submit dồn dập: thời gian cooldown 5000ms (5 giây)
+              if (now - lastClick < 5000) {
+                return { shouldClick: false, text, tag, id, reason: 'cooldown' };
+              }
+
+              // 3. Giới hạn tối đa bấm 2 lần cho cùng một nút submit trên cùng 1 trang
+              if (clickCount >= 2) {
+                return { shouldClick: false, text, tag, id, reason: 'max_clicks_reached' };
+              }
+
               btn.dataset.autoleadLastSubmitTime = String(now);
               btn.dataset.autoleadSubmitted = '1';
+              btn.dataset.autoleadSubmitCount = String(clickCount + 1);
               return { shouldClick: true, text, tag, id };
             }).catch(() => null);
 
@@ -2807,6 +2902,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     }
   }
 
+  const isSpamAdUrl = (url = '') => {
+    return /galaxystore\.samsung\.com|play\.google\.com\/store|apps\.apple\.com|ppntrk\.com|adswapper|popads|propellerads|clickadu|trafficjunky|zeroredirect|doubleclick\.net|syndication\.exoclick/i.test(url);
+  };
+
   /**
    * Gắn lịch quét cho một tab để nhận cả form tải chậm và form mở động.
    *
@@ -2815,6 +2914,14 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
    */
   function watchPage(page) {
     if (trackedPages.has(page)) return;
+
+    const currentUrl = typeof page.url === 'function' ? page.url() : '';
+    if (isSpamAdUrl(currentUrl)) {
+      console.log(`[Autofill] Phát hiện tab quảng cáo/app store rác (${currentUrl}), tự động đóng.`);
+      page.close?.().catch(() => {});
+      return;
+    }
+
     trackedPages.add(page);
     let filling = false;
     let noProgressRounds = 0;
@@ -2912,10 +3019,24 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     page.on('domcontentloaded', scan);
     page.on('load', scan);
     page.on('framenavigated', () => {
+      const u = typeof page.url === 'function' ? page.url() : '';
+      if (isSpamAdUrl(u)) {
+        console.log(`[Autofill] Điều hướng đến link rác (${u}), tự động đóng.`);
+        page.close?.().catch(() => {});
+        return;
+      }
       void scan();
     });
     page.on('frameattached', scan);
-    page.on('popup', (popup) => watchPage(popup));
+    page.on('popup', (popup) => {
+      const pu = typeof popup?.url === 'function' ? popup.url() : '';
+      if (isSpamAdUrl(pu)) {
+        console.log(`[Autofill] Phát hiện popup rác (${pu}), đóng ngay lập tức.`);
+        popup.close?.().catch(() => {});
+        return;
+      }
+      watchPage(popup);
+    });
     page.on('close', () => clearInterval(timer));
 
     // Tự động xử lý dialog (alert, confirm, prompt) để tránh làm treo trình duyệt

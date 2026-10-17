@@ -1610,6 +1610,38 @@ assert.equal(surveyResult, 1, 'handleRadioAndSurveyOptions phải chọn đượ
 assert.ok(mockSessionForSurvey.lastActionTime > 0, 'session.lastActionTime phải được cập nhật');
 assert.equal(mockSessionForSurvey.autofillFields, 1, 'session.autofillFields phải được tăng lên');
 
+// 11.9 Test attachAutofill tự động đóng tab/popup quảng cáo rác (galaxystore.samsung.com)
+let spamPopupClosed = false;
+let popupListener = null;
+const mockSpamPage = {
+  url: () => 'https://galaxystore.samsung.com/detail/com.sec.android.app.samsungapps',
+  close: async () => { spamPopupClosed = true; },
+  isClosed: () => false,
+  on: () => {},
+  evaluate: async () => false,
+  locator: () => ({ all: async () => [] }),
+};
+const mockMainPage = {
+  url: () => 'https://survey.example.com',
+  isClosed: () => false,
+  on: (evt, handler) => {
+    if (evt === 'popup') popupListener = handler;
+  },
+  evaluate: async () => false,
+  locator: () => ({ all: async () => [] }),
+};
+const mockSpamContext = {
+  pages: () => [mockMainPage],
+  on: () => {},
+};
+
+attachAutofill(mockSpamContext, [{ firstname: 'John' }], 'https://survey.example.com', {});
+assert.ok(typeof popupListener === 'function', 'Phải đăng ký lắng nghe popup trên trang');
+if (popupListener) {
+  popupListener(mockSpamPage);
+  assert.equal(spamPopupClosed, true, 'Popup galaxystore.samsung.com phải tự động bị đóng ngay lập tức');
+}
+
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 
 
