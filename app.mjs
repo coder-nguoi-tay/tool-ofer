@@ -167,6 +167,7 @@ const remoteAgents = new Map();
 // Tasks dequeued from proxy/autofill queue, waiting for a remote agent to pick up
 const pendingAgentTasks = [];
 const userInterfacePath = new URL('./index.html', import.meta.url);
+const userInterfacePcPath = new URL('./index-pc.html', import.meta.url);
 const userAgentListPath = new URL('./useragents.txt', import.meta.url);
 export const interactionLogDirectory = join(appDataDirectory, 'logs');
 export const interactionHtmlDirectory = join(interactionLogDirectory, 'html');
@@ -3516,6 +3517,7 @@ async function startLocalInterface() {
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
   const interfaceHtml = await readFile(userInterfacePath, 'utf8');
+  const interfacePcHtml = await readFile(userInterfacePcPath, 'utf8').catch(() => interfaceHtml);
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
     '/check': checkRequestedProxies,
@@ -3528,9 +3530,148 @@ async function startLocalInterface() {
   };
 
   const server = createServer(async (request, response) => {
-    if (request.method === 'GET' && request.url === '/') {
+    if (request.method === 'GET' && (request.url === '/' || request.url === '/pc' || request.url === '/mac')) {
+      const servePc = request.url === '/pc' || (request.url === '/' && instanceId === '2');
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      response.end(interfaceHtml);
+      response.end(servePc ? interfacePcHtml : interfaceHtml);
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/pc-app.png') {
+      try {
+        const iconBuf = await readFile(new URL('./pc-app.png', import.meta.url));
+        response.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=86400' });
+        response.end(iconBuf);
+      } catch {
+        response.writeHead(404); response.end();
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/script/read') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const text = await readFile(body.path, 'utf8');
+        respondWithJson(response, 200, { content: text });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/script/save') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        await writeFile(body.path, body.content || '', 'utf8');
+        respondWithJson(response, 200, { success: true });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/pc/config/read') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Proxy', body.file);
+        const text = await readFile(filePath, 'utf8').catch(() => '');
+        respondWithJson(response, 200, { content: text });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/pc/config/save') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Proxy', body.file);
+        await mkdir(dirname(filePath), { recursive: true });
+        await writeFile(filePath, body.content || '', 'utf8');
+        respondWithJson(response, 200, { success: true });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/pc/offer/read') {
+      try {
+        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Offer', 'Offer.ini');
+        const buf = await readFile(filePath);
+        let text = '';
+        if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+          text = buf.toString('utf16le');
+        } else {
+          text = buf.toString('utf8');
+        }
+        const getVal = (key) => {
+          const m = text.match(new RegExp(`^${key}=(.*)$`, 'm'));
+          return m ? m[1].trim() : '';
+        };
+        respondWithJson(response, 200, {
+          NameOffer: getVal('NameOffer'),
+          LinkOffer: getVal('LinkOffer'),
+          Script: getVal('Script'),
+          Complete: getVal('Complete'),
+          TimeLimit: getVal('Timeload1') || '30',
+          delayStart: getVal('delayStart') || '1',
+          delayStop: getVal('delayStop') || '1',
+        });
+      } catch (err) {
+        respondWithJson(response, 200, {});
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/pc/offer/save') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Offer', 'Offer.ini');
+        const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${body.LinkOffer || ''}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\n`;
+        await mkdir(dirname(filePath), { recursive: true });
+        await writeFile(filePath, iniContent, 'utf8');
+        respondWithJson(response, 200, { success: true });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/pc/settings/read') {
+      try {
+        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Settings', 'Settings.ini');
+        const text = await readFile(filePath, 'utf8').catch(() => '');
+        const getBool = (key) => {
+          const m = text.match(new RegExp(`^${key}=(True|False)`, 'mi'));
+          return m ? m[1].toLowerCase() === 'true' : false;
+        };
+        respondWithJson(response, 200, {
+          Canvas: getBool('Canvas'),
+          ClientRects: getBool('ClientRects'),
+          WebGLImage: getBool('WebGLImage'),
+          Fonts: getBool('Fonts'),
+          WebRTC: getBool('WebRTC'),
+          ApiFakeIP: getBool('ApiFakeIP'),
+        });
+      } catch (err) {
+        respondWithJson(response, 200, {});
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/pc/settings/save') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Settings', 'Settings.ini');
+        const b = (val) => val ? 'True' : 'False';
+        const content = `[Browser]\nChrome=True\nChromeAdsPower=False\nChromeFirefox=False\nChromeGologin=False\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\n`;
+        await mkdir(dirname(filePath), { recursive: true });
+        await writeFile(filePath, content, 'utf8');
+        respondWithJson(response, 200, { success: true });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
       return;
     }
 

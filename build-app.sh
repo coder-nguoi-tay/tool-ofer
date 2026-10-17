@@ -27,6 +27,12 @@ build_app_bundle() {
   cp -p "$TMP_BIN" "$MACOS_DIR/AutoLeadPCMac"
   chmod +x "$MACOS_DIR/AutoLeadPCMac"
 
+  local ICON_FILE="AutoLeadPC"
+  if [ "$INSTANCE_ID" = "2" ] && [ -f "AutoLeadPC2.icns" ]; then
+    ICON_FILE="AutoLeadPC2"
+    cp -p "AutoLeadPC2.icns" "$RESOURCES_DIR/AutoLeadPC2.icns"
+  fi
+
   # Generate customized Info.plist
   cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -42,7 +48,7 @@ build_app_bundle() {
 	<key>CFBundleExecutable</key>
 	<string>AutoLeadPCMac</string>
 	<key>CFBundleIconFile</key>
-	<string>AutoLeadPC</string>
+	<string>${ICON_FILE}</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -81,7 +87,7 @@ EOF
   fi
 
   # Sync launcher files
-  cp -p app.mjs autofill.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs index.html package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md "$LAUNCHER_DIR/"
   if [ -f "script.mjs" ]; then
     cp -p script.mjs "$LAUNCHER_DIR/"
   fi
@@ -102,8 +108,8 @@ EOF
 # 1. Build Bản 1 (Port 3210)
 build_app_bundle "AutoLeadPC Mac 1.app" "1" 3210 "com.autoleadpc.mac.1" "AutoLeadPC Mac 1"
 
-# 2. Build Bản 2 (Port 3211)
-build_app_bundle "AutoLeadPC Mac 2.app" "2" 3211 "com.autoleadpc.mac.2" "AutoLeadPC Mac 2"
+# 2. Build Bản 2 (Port 3211 - Giao diện Windows PC)
+build_app_bundle "AutoLeadPC Mac 2.app" "2" 3211 "com.autoleadpc.mac.2" "AutoLeadPC (PC Edition)"
 
 # 3. Build default bundle "AutoLeadPC Mac.app" (Port 3210)
 # (Tránh lỗi Text file busy nếu bản hiện tại đang mở bằng cách rm binary trước)

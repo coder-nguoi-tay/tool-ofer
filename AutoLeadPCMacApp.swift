@@ -36,7 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// - Since: 2026-10-10
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
-        if let iconURL = Bundle.main.url(forResource: "AutoLeadPC", withExtension: "icns"),
+        let iconName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String) ?? "AutoLeadPC"
+        if let iconURL = Bundle.main.url(forResource: iconName, withExtension: "icns"),
            let applicationIcon = NSImage(contentsOf: iconURL) {
             NSApplication.shared.applicationIconImage = applicationIcon
         }
@@ -46,13 +47,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let webView = WKWebView(frame: .zero, configuration: webViewConfiguration)
         self.webView = webView
 
+        let windowWidth: CGFloat = instanceId == "2" ? 960 : 620
+        let windowHeight: CGFloat = instanceId == "2" ? 720 : 660
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.minSize = NSSize(width: 560, height: 610)
+        window.minSize = NSSize(width: instanceId == "2" ? 880 : 560, height: instanceId == "2" ? 640 : 610)
         window.title = "\(appTitle) - Cổng \(port)"
         window.center()
         window.contentView = webView
