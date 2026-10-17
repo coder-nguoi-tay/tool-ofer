@@ -3537,11 +3537,12 @@ export function watchTrafficBlockedPage(session) {
  * @since 2026-10-08
  */
 function exitWhenParentExits() {
+  if (process.env.AUTOLEADPC_NO_WATCHDOG === '1') return;
   const parentPid = process.ppid;
   if (parentPid <= 1) return;
 
   const watchdog = setInterval(() => {
-    if (process.ppid === parentPid) return;
+    if (process.ppid === parentPid || process.ppid <= 1) return;
     console.error('Tiến trình cha đã thoát, đóng máy chủ giao diện.');
     process.exit(0);
   }, 2000);
@@ -3602,6 +3603,12 @@ async function startLocalInterface() {
         // ignore
       }
       response.writeHead(404); response.end();
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/favicon.ico') {
+      response.writeHead(204);
+      response.end();
       return;
     }
 

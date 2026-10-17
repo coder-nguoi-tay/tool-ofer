@@ -537,15 +537,15 @@
 
     <!-- WinForms Tab Headers (tbcTool) -->
     <div class="win-tab-headers" id="mainTabHeaders">
-      <div class="win-tab active" data-tab="Dashboard">Dashboard</div>
-      <div class="win-tab" data-tab="tabRunning">tabRunning (<span id="tabRunCount">0</span>)</div>
-      <div class="win-tab" data-tab="Script">Script</div>
-      <div class="win-tab" data-tab="RRS">RRS</div>
-      <div class="win-tab" data-tab="Config">Config</div>
-      <div class="win-tab" data-tab="Info">Info</div>
-      <div class="win-tab" data-tab="Settings">Settings</div>
-      <div class="win-tab" data-tab="Logs">Logs (<span id="tabLogCount">0</span>)</div>
-      <div class="win-tab" data-tab="AI">AI Assist</div>
+      <div class="win-tab active" data-tab="Dashboard" onclick="switchTab('Dashboard')">Dashboard</div>
+      <div class="win-tab" data-tab="tabRunning" onclick="switchTab('tabRunning')">tabRunning (<span id="tabRunCount">0</span>)</div>
+      <div class="win-tab" data-tab="Script" onclick="switchTab('Script')">Script</div>
+      <div class="win-tab" data-tab="RRS" onclick="switchTab('RRS')">RRS</div>
+      <div class="win-tab" data-tab="Config" onclick="switchTab('Config')">Config</div>
+      <div class="win-tab" data-tab="Info" onclick="switchTab('Info')">Info</div>
+      <div class="win-tab" data-tab="Settings" onclick="switchTab('Settings')">Settings</div>
+      <div class="win-tab" data-tab="Logs" onclick="switchTab('Logs')">Logs (<span id="tabLogCount">0</span>)</div>
+      <div class="win-tab" data-tab="AI" onclick="switchTab('AI')">AI Assist</div>
     </div>
 
     <!-- Tab Content -->
@@ -1324,6 +1324,7 @@
         stopLogRefresh();
       }
     }
+    window.switchTab = switchTab;
 
     document.querySelectorAll('.win-tab').forEach(tab => {
       tab.addEventListener('click', () => switchTab(tab.getAttribute('data-tab')));
