@@ -661,7 +661,7 @@
               </div>
               <div class="form-row">
                 <span class="form-label">Complete:</span>
-                <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" value="id">
+                <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" value="" placeholder="Ví dụ: thank you (để trống nếu không dùng)">
               </div>
               <div class="form-row" style="margin-top:6px;">
                 <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
@@ -1528,7 +1528,11 @@
         if (data.LinkOffer3 !== undefined && data.LinkOffer3 !== '') document.getElementById('txtLinkOffer3').value = data.LinkOffer3;
         if (data.LinkOffer4 !== undefined && data.LinkOffer4 !== '') document.getElementById('txtLinkOffer4').value = data.LinkOffer4;
         if (data.TimeLimit) document.getElementById('txtTimeLimit').value = data.TimeLimit;
-        if (data.Complete) document.getElementById('txtTextComplete').value = data.Complete;
+        if (data.Complete && data.Complete !== 'id') {
+          document.getElementById('txtTextComplete').value = data.Complete;
+        } else {
+          document.getElementById('txtTextComplete').value = '';
+        }
         if (data.delayStart) document.getElementById('nudDelayStart').value = data.delayStart;
         if (data.delayStop) document.getElementById('nudDelayStop').value = data.delayStop;
 
@@ -1597,7 +1601,11 @@
         document.getElementById('txtLinkOffer3').value = found.LinkOffer3 || '';
         document.getElementById('txtLinkOffer4').value = found.LinkOffer4 || '';
         if (found.TimeLimit) document.getElementById('txtTimeLimit').value = found.TimeLimit;
-        if (found.Complete) document.getElementById('txtTextComplete').value = found.Complete;
+        if (found.Complete && found.Complete !== 'id') {
+          document.getElementById('txtTextComplete').value = found.Complete;
+        } else {
+          document.getElementById('txtTextComplete').value = '';
+        }
         if (found.delayStart) document.getElementById('nudDelayStart').value = found.delayStart;
         if (found.delayStop) document.getElementById('nudDelayStop').value = found.delayStop;
 
