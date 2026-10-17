@@ -14,6 +14,24 @@ import { humanType } from './autofill.mjs';
 const MAX_ROUNDS = 20;
 const AGT_TIMEOUT_MS = 90_000;
 
+export let globalAiConfig = {
+  enabled: true,
+  mode: 'auto_on_stuck', // 'auto_on_stuck' | 'continuous' | 'heuristic_only' | 'disabled'
+  cliBinary: 'agy',
+  maxRounds: 20,
+  timeoutSeconds: 90,
+  solveBotQuiz: true,
+  solveSurveyCards: true,
+  clickJumpPage: true,
+  multiStepSubmit: true,
+  syncAutofill: true,
+  customInstructions: '',
+};
+
+export function setGlobalAiConfig(cfg = {}) {
+  globalAiConfig = { ...globalAiConfig, ...cfg };
+}
+
 /**
  * Rút gọn và làm sạch HTML chỉ giữ lại cấu trúc tương tác (form, input, button, label, text)
  * Loại bỏ toàn bộ script, style, svg, noscript, comments và inline base64 để AI phân tích
@@ -52,8 +70,8 @@ export function extractCleanPageStructure(html) {
  * Đường dẫn hoặc tên binary của codex / agy CLI.
  * Tự động mở rộng PATH để nhận diện ~/.local/bin, /opt/homebrew/bin, /usr/local/bin.
  */
-function getAgtSpawnConfig() {
-  const codexBin = process.env.CODEX_BIN || 'codex';
+function getAgtSpawnConfig(customBin = null) {
+  const codexBin = customBin || globalAiConfig.cliBinary || process.env.CODEX_BIN || 'agy';
   const augmentedPath = [
     join(homedir(), '.local', 'bin'),
     join(homedir(), '.gemini', 'antigravity-cli', 'bin'),
@@ -72,11 +90,13 @@ function getAgtSpawnConfig() {
  * Gọi `codex` hoặc `agy` CLI với prompt, trả về text output.
  *
  * @param {string} prompt Nội dung truyền vào stdin của codex/agy.
+ * @param {object} [options={}] Tùy chọn CLI và timeout.
  * @return {Promise<string>} Output từ AI CLI.
  */
-export function callAgt(prompt) {
+export function callAgt(prompt, options = {}) {
   return new Promise((resolve, reject) => {
-    const { bin, env } = getAgtSpawnConfig();
+    const timeoutMs = (options.timeoutSeconds || globalAiConfig.timeoutSeconds || 90) * 1000;
+    const { bin, env } = getAgtSpawnConfig(options.cliBinary);
     const isCodex = bin.includes('codex');
     const args = isCodex
       ? ['exec', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--ephemeral', '--json', '-']
@@ -91,8 +111,8 @@ export function callAgt(prompt) {
     let err = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error(`${bin} timeout (quá ${AGT_TIMEOUT_MS / 1000}s)`));
-    }, AGT_TIMEOUT_MS);
+      reject(new Error(`${bin} timeout (quá ${timeoutMs / 1000}s)`));
+    }, timeoutMs);
 
     child.stdout.on('data', (d) => { out += d.toString(); });
     child.stderr.on('data', (d) => { err += d.toString(); });
@@ -427,7 +447,6 @@ export async function executeAction(page, act, session = null) {
 }
 
 /**
-/**
  * Phát hiện action cứu hộ tự động trên trang khi AI trả về [] hoặc từ chối thực hiện.
  * Quét theo thứ tự ưu tiên:
  * 1. Câu hỏi trắc nghiệm logic / bot-detection (chó sủa "Woof", mèo kêu "Meow", phép tính, v.v.)
@@ -436,12 +455,14 @@ export async function executeAction(page, act, session = null) {
  * 4. Nút bấm tiếp tục / submit (button[type="submit"], button.continue-btn, #btnNext, #btnSubmit)
  *
  * @param {object} page Playwright page.
+ * @param {object} [config=null] Cấu hình AI tuỳ biến.
  * @return {Promise<{action:string,selector:string,detail?:string}|null>}
  */
-export async function detectSmartFallbackAction(page) {
+export async function detectSmartFallbackAction(page, config = null) {
+  const cfg = config || globalAiConfig;
   try {
     if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return null;
-    return await page.evaluate(() => {
+    return await page.evaluate((opts) => {
       const isVisible = (el) => {
         if (!el || el.disabled) return false;
         const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
@@ -450,100 +471,113 @@ export async function detectSmartFallbackAction(page) {
       };
 
       // 1. Câu hỏi trắc nghiệm / bot verification (ví dụ "What sound does a dog make?")
-      const botButtons = Array.from(document.querySelectorAll('.bot-detection-answer-list button, button[name="selected_answer"], [data-element-type="survey_answer"] button')).filter(isVisible);
-      if (botButtons.length > 0) {
-        const pageText = (document.body.innerText || '').toLowerCase();
-        let targetBtn = null;
-        if (/dog|puppy|chó/i.test(pageText)) {
-          targetBtn = botButtons.find((b) => /woof|bark|gâu/i.test((b.value || b.innerText || '').toLowerCase()));
-        } else if (/cat|kitten|mèo/i.test(pageText)) {
-          targetBtn = botButtons.find((b) => /meow|purr|meo/i.test((b.value || b.innerText || '').toLowerCase()));
-        } else if (/cow|cattle|bò/i.test(pageText)) {
-          targetBtn = botButtons.find((b) => /moo/i.test((b.value || b.innerText || '').toLowerCase()));
-        } else if (/duck|vịt/i.test(pageText)) {
-          targetBtn = botButtons.find((b) => /quack/i.test((b.value || b.innerText || '').toLowerCase()));
-        }
-        if (!targetBtn) {
-          targetBtn = botButtons[Math.floor(Math.random() * botButtons.length)];
-        }
-        if (targetBtn) {
-          const val = targetBtn.value || (targetBtn.innerText || '').trim();
-          const selector = targetBtn.name
-            ? `button[name="${targetBtn.name}"][value="${val}"]`
-            : (targetBtn.id ? `#${targetBtn.id}` : '.bot-detection-answer-list button');
-          return { action: 'click', selector, detail: `Tự động trả lời câu hỏi trắc nghiệm: "${val}"` };
+      if (opts.solveBotQuiz !== false) {
+        const botButtons = Array.from(document.querySelectorAll('.bot-detection-answer-list button, button[name="selected_answer"], [data-element-type="survey_answer"] button')).filter(isVisible);
+        if (botButtons.length > 0) {
+          const pageText = (document.body.innerText || '').toLowerCase();
+          let targetBtn = null;
+          if (/dog|puppy|chó/i.test(pageText)) {
+            targetBtn = botButtons.find((b) => /woof|bark|gâu/i.test((b.value || b.innerText || '').toLowerCase()));
+          } else if (/cat|kitten|mèo/i.test(pageText)) {
+            targetBtn = botButtons.find((b) => /meow|purr|meo/i.test((b.value || b.innerText || '').toLowerCase()));
+          } else if (/cow|cattle|bò/i.test(pageText)) {
+            targetBtn = botButtons.find((b) => /moo/i.test((b.value || b.innerText || '').toLowerCase()));
+          } else if (/duck|vịt/i.test(pageText)) {
+            targetBtn = botButtons.find((b) => /quack/i.test((b.value || b.innerText || '').toLowerCase()));
+          }
+          if (!targetBtn) {
+            targetBtn = botButtons[Math.floor(Math.random() * botButtons.length)];
+          }
+          if (targetBtn) {
+            const val = targetBtn.value || (targetBtn.innerText || '').trim();
+            const selector = targetBtn.name
+              ? `button[name="${targetBtn.name}"][value="${val}"]`
+              : (targetBtn.id ? `#${targetBtn.id}` : '.bot-detection-answer-list button');
+            return { action: 'click', selector, detail: `Tự động trả lời câu hỏi trắc nghiệm: "${val}"` };
+          }
         }
       }
 
       // 2. Câu hỏi khảo sát / quiz buttons (btn-option, choice-btn, option-btn, quiz-cards, pills)
-      const surveyOptions = Array.from(document.querySelectorAll([
-        '[id="btn-option"]:not(.active):not(.selected)',
-        '[id^="btn-option"]:not(.active):not(.selected)',
-        '[id*="btn-option"]:not(.active):not(.selected)',
-        '.btn-option:not(.active):not(.selected)',
-        '[data-vector-answer="true"]:not(.active):not(.selected)',
-        '.choice-btn:not(.active):not(.selected)',
-        '.option-btn:not(.active):not(.selected)',
-        '.quiz-btn:not(.active):not(.selected)',
-        '.answer-btn:not(.active):not(.selected)',
-        '.creative-survey-answer:not(.selected)',
-        '.choice-card:not(.active):not(.selected)',
-        '.option-card:not(.active):not(.selected)',
-        '.quiz-card:not(.active):not(.selected)',
-        '.survey-card:not(.active):not(.selected)',
-        '.selection-card:not(.active):not(.selected)',
-        '.pill-option:not(.active):not(.selected)',
-        '.bubble-option:not(.active):not(.selected)',
-        '[data-choice]:not(.active):not(.selected)',
-        '[role="radio"]:not([aria-checked="true"])',
-      ].join(', '))).filter(isVisible);
+      if (opts.solveSurveyCards !== false) {
+        const surveyOptions = Array.from(document.querySelectorAll([
+          '[id="btn-option"]:not(.active):not(.selected)',
+          '[id^="btn-option"]:not(.active):not(.selected)',
+          '[id*="btn-option"]:not(.active):not(.selected)',
+          '.btn-option:not(.active):not(.selected)',
+          '[data-vector-answer="true"]:not(.active):not(.selected)',
+          '.choice-btn:not(.active):not(.selected)',
+          '.option-btn:not(.active):not(.selected)',
+          '.quiz-btn:not(.active):not(.selected)',
+          '.answer-btn:not(.active):not(.selected)',
+          '.creative-survey-answer:not(.selected)',
+          '.choice-card:not(.active):not(.selected)',
+          '.option-card:not(.active):not(.selected)',
+          '.quiz-card:not(.active):not(.selected)',
+          '.survey-card:not(.active):not(.selected)',
+          '.selection-card:not(.active):not(.selected)',
+          '.pill-option:not(.active):not(.selected)',
+          '.bubble-option:not(.active):not(.selected)',
+          '[data-choice]:not(.active):not(.selected)',
+          '[role="radio"]:not([aria-checked="true"])',
+        ].join(', '))).filter(isVisible);
 
-      if (surveyOptions.length > 0) {
-        const randomOpt = surveyOptions[Math.floor(Math.random() * surveyOptions.length)];
-        const sel = randomOpt.id ? `[id="${randomOpt.id}"]` : (randomOpt.className ? `.${randomOpt.className.split(' ')[0]}` : '[id*="btn-option"]');
-        return { action: 'click', selector: sel, detail: 'Tự động chọn ngẫu nhiên phương án khảo sát / choice card' };
+        if (surveyOptions.length > 0) {
+          const randomOpt = surveyOptions[Math.floor(Math.random() * surveyOptions.length)];
+          const sel = randomOpt.id ? `[id="${randomOpt.id}"]` : (randomOpt.className ? `.${randomOpt.className.split(' ')[0]}` : '[id*="btn-option"]');
+          return { action: 'click', selector: sel, detail: 'Tự động chọn ngẫu nhiên phương án khảo sát / choice card' };
+        }
       }
 
       // 3. Nút Jump Page / Reward Screen
-      const jumpCta = Array.from(document.querySelectorAll(
-        '.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i], [aria-label*="Get My" i]'
-      )).find(isVisible);
-      if (jumpCta) {
-        const sel = jumpCta.className ? `.${jumpCta.className.split(' ')[0]}` : 'a[href*="/next"]';
-        return { action: 'click', selector: sel, detail: 'Tự động click nút Jump Page / Reward (.cta-button)' };
+      if (opts.clickJumpPage !== false) {
+        const jumpCta = Array.from(document.querySelectorAll(
+          '.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i], [aria-label*="Get My" i]'
+        )).find(isVisible);
+        if (jumpCta) {
+          const sel = jumpCta.className ? `.${jumpCta.className.split(' ')[0]}` : 'a[href*="/next"]';
+          return { action: 'click', selector: sel, detail: 'Tự động click nút Jump Page / Reward (.cta-button)' };
+        }
       }
 
       // 4. Nút Submit / Continue / Next
-      const submitBtn = Array.from(document.querySelectorAll([
-        'button[type="submit"]',
-        'input[type="submit"]',
-        '[data-vector-submit="true"]',
-        'button.continue-btn',
-        'button.submit-btn',
-        'button.next-btn',
-        '#btnSubmit',
-        '#btnNext',
-        '#btnContinue',
-        'button[id*="submit" i]',
-        'button[id*="continue" i]',
-        'button[id*="next" i]',
-        'button[class*="submit" i]',
-        'button[class*="continue" i]',
-        'button[class*="next" i]',
-      ].join(', '))).find(isVisible);
-      if (submitBtn) {
-        const sel = submitBtn.id ? `#${submitBtn.id}` : (submitBtn.className ? `.${submitBtn.className.split(' ')[0]}` : 'button[type="submit"]');
-        return { action: 'click', selector: sel, detail: 'Tự động click nút Submit / Continue để chuyển màn' };
-      }
+      if (opts.multiStepSubmit !== false) {
+        const submitBtn = Array.from(document.querySelectorAll([
+          'button[type="submit"]',
+          'input[type="submit"]',
+          '[data-vector-submit="true"]',
+          'button.continue-btn',
+          'button.submit-btn',
+          'button.next-btn',
+          '#btnSubmit',
+          '#btnNext',
+          '#btnContinue',
+          'button[id*="submit" i]',
+          'button[id*="continue" i]',
+          'button[id*="next" i]',
+          'button[class*="submit" i]',
+          'button[class*="continue" i]',
+          'button[class*="next" i]',
+        ].join(', '))).find(isVisible);
+        if (submitBtn) {
+          const sel = submitBtn.id ? `#${submitBtn.id}` : (submitBtn.className ? `.${submitBtn.className.split(' ')[0]}` : 'button[type="submit"]');
+          return { action: 'click', selector: sel, detail: 'Tự động click nút Submit / Continue để chuyển màn' };
+        }
 
-      // 5. Fallback Form Submit nếu không có nút riêng
-      const anyForm = Array.from(document.querySelectorAll('form')).find(isVisible);
-      if (anyForm) {
-        const sel = anyForm.id ? `form#${anyForm.id}` : 'form';
-        return { action: 'click', selector: `${sel} button, ${sel} input[type="button"], ${sel}`, detail: 'Tự động kích hoạt gửi form' };
+        // 5. Fallback Form Submit nếu không có nút riêng
+        const anyForm = Array.from(document.querySelectorAll('form')).find(isVisible);
+        if (anyForm) {
+          const sel = anyForm.id ? `form#${anyForm.id}` : 'form';
+          return { action: 'click', selector: `${sel} button, ${sel} input[type="button"], ${sel}`, detail: 'Tự động kích hoạt gửi form' };
+        }
       }
 
       return null;
+    }, {
+      solveBotQuiz: cfg.solveBotQuiz !== false,
+      solveSurveyCards: cfg.solveSurveyCards !== false,
+      clickJumpPage: cfg.clickJumpPage !== false,
+      multiStepSubmit: cfg.multiStepSubmit !== false,
     });
   } catch {
     return null;
@@ -560,6 +594,13 @@ export async function detectSmartFallbackAction(page) {
  * @return {Promise<void>}
  */
 export async function runAiAssist(page, record, session = {}, options = {}) {
+  const cfg = { ...globalAiConfig, ...(options.aiConfig || {}) };
+  if (!cfg.enabled || cfg.mode === 'disabled') {
+    const slotNum = (session.tileIndex ?? 0) + 1;
+    console.log(`[AI-Assist] Slot ${slotNum}: AI Assist đang tắt theo cấu hình.`);
+    return;
+  }
+
   if (!session.aiRunningPages) session.aiRunningPages = new Set();
   if (session.aiRunningPages.has(page)) return; // tab này đang chạy AI rồi
   session.aiRunningPages.add(page);
@@ -576,7 +617,7 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
     return;
   }
 
-  console.log(`[AI-Assist] Slot ${slotNum} [IP: ${ip}]: bắt đầu hỗ trợ AI cho trang ${currentUrl}`);
+  console.log(`[AI-Assist] Slot ${slotNum} [IP: ${ip}]: bắt đầu hỗ trợ AI cho trang ${currentUrl} (Chế độ: ${cfg.mode})`);
 
   const updateBadge = (text) => {
     try {
@@ -602,9 +643,10 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
   };
 
   let totalActionsExecuted = 0;
+  const maxRounds = cfg.maxRounds || MAX_ROUNDS;
 
   try {
-    for (let round = 1; round <= MAX_ROUNDS; round++) {
+    for (let round = 1; round <= maxRounds; round++) {
       if (page.isClosed()) break;
 
       // Vòng 1 luôn chạy AI vì onStuck đã xác nhận trang bị kẹt.
@@ -617,12 +659,12 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
         }
       }
 
-      updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#a78bfa;font-weight:600;">🤖 AI Assist đang phân tích (vòng ${round}/${MAX_ROUNDS})...</span>`);
+      updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#a78bfa;font-weight:600;">🤖 AI Assist đang phân tích (vòng ${round}/${maxRounds})...</span>`);
       addLog({
         time: new Date().toISOString(),
         type: 'ai_started',
         url: page.url(),
-        detail: `[AI Assist] Đang phân tích trang ${page.url()} (vòng ${round}/${MAX_ROUNDS})...`,
+        detail: `[AI Assist] Đang phân tích trang ${page.url()} (vòng ${round}/${maxRounds})...`,
       });
 
       // Lấy toàn bộ HTML của top frame và tất cả các iframes trên trang
@@ -645,11 +687,11 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
 
       if (!html) break;
 
-      // Rút gọn và làm sạch HTML chỉ giữ lại cấu trúc tương tác (loại bỏ script, style, svg, comments)
+      // Rút gọn và làm sạch HTML chỉ giữ lại cấu trúc tương tác
       const cleanedHtml = extractCleanPageStructure(html);
 
       const recordJson = JSON.stringify(record ?? {}, null, 2);
-      const prompt = `Phân tích cấu trúc HTML giao diện người dùng bên dưới và chuyển đổi thành các thao tác Playwright UI tương ứng.
+      let prompt = `Phân tích cấu trúc HTML giao diện người dùng bên dưới và chuyển đổi thành các thao tác Playwright UI tương ứng.
 URL: ${page.url()}
 Dữ liệu người dùng cung cấp:
 ${recordJson}
@@ -666,56 +708,63 @@ Format các action được hỗ trợ:
 - Điền input/textarea: {"action":"fill","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"}
 - Chọn dropdown: {"action":"select","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"}
 - Tích checkbox: {"action":"check","selector":"CSS_SELECTOR"}
-- Chọn radio hoặc bấm nút / thẻ lựa chọn / nút Tiếp tục: {"action":"click","selector":"CSS_SELECTOR"}
+- Chọn radio hoặc bấm nút / thẻ lựa chọn / nút Tiếp tục: {"action":"click","selector":"CSS_SELECTOR"}`;
 
-HTML GIAO DIỆN:
-${cleanedHtml}`;
+      if (cfg.customInstructions && typeof cfg.customInstructions === 'string' && cfg.customInstructions.trim()) {
+        prompt += `\n\nHƯỚNG DẪN BỔ SUNG CỦA NGƯỜI DÙNG:\n${cfg.customInstructions.trim()}`;
+      }
+
+      prompt += `\n\nHTML GIAO DIỆN:\n${cleanedHtml}`;
 
       let actions = [];
       const t0 = Date.now();
-      addLog({
-        time: new Date().toISOString(),
-        type: 'ai_waiting_codex',
-        detail: `[AI Assist] ⏳ Đang chờ AI phản hồi (vòng ${round}/${MAX_ROUNDS})… URL: ${page.url()}`,
-      });
-      try {
-        const raw = await callAgt(prompt);
-        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-        actions = parseActions(raw);
-        console.log(`[AI-Assist] Slot ${slotNum} round ${round}: AI trả ${actions.length} action(s) (${elapsed}s)`);
+
+      if (cfg.mode === 'heuristic_only') {
+        console.log(`[AI-Assist] Slot ${slotNum} round ${round}: Chế độ Heuristic Fallback Only, bỏ qua gọi CLI.`);
+      } else {
         addLog({
           time: new Date().toISOString(),
-          type: 'ai_codex_reply',
-          detail: `[AI Assist] ✅ AI phản hồi sau ${elapsed}s — ${actions.length} action(s)`,
+          type: 'ai_waiting_codex',
+          detail: `[AI Assist] ⏳ Đang chờ AI phản hồi (vòng ${round}/${maxRounds})… URL: ${page.url()}`,
         });
-      } catch (err) {
-        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-        console.warn(`[AI-Assist] Slot ${slotNum} round ${round}: cảnh báo AI sau ${elapsed}s — ${err.message}`);
-        addLog({
-          time: new Date().toISOString(),
-          type: 'ai_error',
-          detail: `[AI Assist] ❌ Lỗi gọi AI sau ${elapsed}s: ${err.message}`,
-        });
-        break;
+        try {
+          const raw = await callAgt(prompt, { cliBinary: cfg.cliBinary, timeoutSeconds: cfg.timeoutSeconds });
+          const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+          actions = parseActions(raw);
+          console.log(`[AI-Assist] Slot ${slotNum} round ${round}: AI trả ${actions.length} action(s) (${elapsed}s)`);
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_codex_reply',
+            detail: `[AI Assist] ✅ AI phản hồi sau ${elapsed}s — ${actions.length} action(s)`,
+          });
+        } catch (err) {
+          const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+          console.warn(`[AI-Assist] Slot ${slotNum} round ${round}: cảnh báo AI sau ${elapsed}s — ${err.message}`);
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_error',
+            detail: `[AI Assist] ❌ Lỗi gọi AI sau ${elapsed}s: ${err.message}`,
+          });
+        }
       }
 
       if (actions.length === 0) {
         // Fallback tự động thông minh: nếu AI trả về [] nhưng trang thực tế có câu hỏi trắc nghiệm, survey, nút Jump Page, hoặc Submit
-        const smartFallback = await detectSmartFallbackAction(page);
+        const smartFallback = await detectSmartFallbackAction(page, cfg);
         if (smartFallback) {
           actions = [{ action: smartFallback.action, selector: smartFallback.selector }];
-          console.log(`[AI-Assist] Slot ${slotNum}: AI trả [], kích hoạt fallback: ${smartFallback.detail}`);
+          console.log(`[AI-Assist] Slot ${slotNum}: kích hoạt fallback: ${smartFallback.detail}`);
           addLog({
             time: new Date().toISOString(),
             type: 'ai_smart_fallback',
             detail: `[AI Assist] 🛡️ Fallback: ${smartFallback.detail}`,
           });
         } else {
-          console.log(`[AI-Assist] Slot ${slotNum}: AI báo không còn việc cần làm ([] trả về).`);
+          console.log(`[AI-Assist] Slot ${slotNum}: không còn việc cần làm ([] trả về).`);
           addLog({
             time: new Date().toISOString(),
             type: 'ai_no_actions',
-            detail: `[AI Assist] AI trả [] — không còn form/câu hỏi cần xử lý.`,
+            detail: `[AI Assist] Không còn form/câu hỏi cần xử lý.`,
           });
           break;
         }
@@ -739,12 +788,14 @@ ${cleanedHtml}`;
       }
 
       // Sync: kích autofill quét lại ngay sau khi AI thực thi xong actions
-      session.triggerAutofillScan?.();
-      addLog({
-        time: new Date().toISOString(),
-        type: 'ai_sync_scan',
-        detail: `[AI Assist] 🔄 Sync: kích autofill quét lại sau ${actions.length} action(s) của AI.`,
-      });
+      if (cfg.syncAutofill !== false) {
+        session.triggerAutofillScan?.();
+        addLog({
+          time: new Date().toISOString(),
+          type: 'ai_sync_scan',
+          detail: `[AI Assist] 🔄 Sync: kích autofill quét lại sau ${actions.length} action(s) của AI.`,
+        });
+      }
 
       // Chờ trang load ổn định hoặc chuyển màn (1.2s)
       await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});

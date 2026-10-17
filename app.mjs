@@ -15,7 +15,38 @@ import {
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
-import { runAiAssist, pageHasWork } from './ai-assist.mjs';
+import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig } from './ai-assist.mjs';
+
+export function getAiConfigFilePath() {
+  return join(getAutoLeadPCDir(), 'Config', 'ai-config.json');
+}
+
+export function loadAiConfig() {
+  try {
+    const filePath = getAiConfigFilePath();
+    if (existsSync(filePath)) {
+      const data = JSON.parse(readFileSync(filePath, 'utf8'));
+      setGlobalAiConfig(data);
+      return data;
+    }
+  } catch {}
+  return globalAiConfig;
+}
+
+export function saveAiConfigFile(cfg) {
+  try {
+    const filePath = getAiConfigFilePath();
+    const dir = dirname(filePath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    setGlobalAiConfig(cfg);
+    writeFileSync(filePath, JSON.stringify(cfg, null, 2), 'utf8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
 import { loadScript, runScript } from './script.mjs';
 import {
   DEFAULT_LEAD_CONFIG,
@@ -1772,6 +1803,8 @@ function getAutoRefillStatus() {
         exitIp: session.exitIp,
         proxy: session.proxyServer ?? session.proxyKey ?? null,
         assignedEmail: session.assignedEmail ?? null,
+        assignedPass: session.assignedPass ?? (session.currentRecord?.pass || session.currentRecord?.password || '******'),
+        assignedRecover: session.assignedRecover ?? (session.currentRecord?.recover || session.currentRecord?.recoveryEmail || '--'),
         autofillRecord: session.autofillRecord ?? null,
         autofillFields: session.autofillFields ?? 0,
         autofillError: session.autofillError ?? null,
@@ -1781,6 +1814,12 @@ function getAutoRefillStatus() {
         streamRole: session.streamRole ?? 1,
         streamLabel: session.streamLabel ?? '',
         websiteUrl: session.websiteUrl ?? null,
+        aiRunning: Boolean(session.aiAssistRunning),
+        aiStatus: session.aiAssistRunning ? 'Đang phân tích form bằng AI...' : (session.autofillFields ? `Đã điền ${session.autofillFields} trường` : 'Sẵn sàng'),
+        action: session.aiAssistRunning
+          ? '🤖 AI đang phân tích & điền form'
+          : (session.lastActionText || (session.autofillFields ? `Đã điền ${session.autofillFields} ô` : (session.websiteUrl ? 'Đang duyệt' : 'Running'))),
+        lastLog: (session.logs && session.logs.length > 0) ? session.logs[session.logs.length - 1] : null,
       }))
       .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
   };
@@ -3050,6 +3089,8 @@ function attachBrowserLogger(context, session) {
     queueSaveBrowserLogs();
   }
   session.addBrowserLog = addLog;
+  session.addLog = addLog;
+  session.logs = sessionItem.logs;
 
   // Tiêm listener click vào mọi trang (kể cả trang mở sau)
   context.exposeFunction('__alpc_log', addLog).catch(() => {});
@@ -3523,6 +3564,7 @@ async function startLocalInterface() {
   await initializeEmailQueue();
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
+  loadAiConfig();
   const interfaceHtml = readFileSync(userInterfacePath, 'utf8');
   const interfacePcHtml = existsSync(userInterfacePcPath) ? readFileSync(userInterfacePcPath, 'utf8') : interfaceHtml;
   const handlers = {
@@ -4080,6 +4122,83 @@ async function startLocalInterface() {
         response.end(`\uFEFF${csv}`);
       } catch (error) {
         respondWithJson(response, 500, { error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/ai/config') {
+      const cfg = loadAiConfig();
+      respondWithJson(response, 200, cfg);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/ai/config') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const res = saveAiConfigFile(body);
+        respondWithJson(response, 200, res);
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/ai/test') {
+      try {
+        const body = JSON.parse(await readRequestBody(request) || '{}');
+        const binName = body.binary || globalAiConfig.cliBinary || 'agy';
+        const augmentedPath = [
+          join(homedir(), '.local', 'bin'),
+          join(homedir(), '.gemini', 'antigravity-cli', 'bin'),
+          '/opt/homebrew/bin',
+          '/usr/local/bin',
+          process.env.PATH || '',
+        ].filter(Boolean).join(':');
+
+        const { stdout } = await executeFile(binName, ['--version'], {
+          env: { ...process.env, PATH: augmentedPath },
+          timeout: 5000,
+        });
+        respondWithJson(response, 200, {
+          success: true,
+          binary: binName,
+          version: stdout.trim(),
+          message: `Đã kết nối thành công: ${binName} (${stdout.trim()})`,
+        });
+      } catch (err) {
+        respondWithJson(response, 200, {
+          success: false,
+          error: err.message,
+          message: `Không thể gọi binary: ${err.message}`,
+        });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/ai/trigger') {
+      try {
+        const body = JSON.parse(await readRequestBody(request) || '{}');
+        const targetSlot = Number(body.slot) || 1;
+        const foundSession = [...activeBrowsers].find((s) => s.tileIndex + 1 === targetSlot);
+        if (!foundSession) {
+          respondWithJson(response, 404, { error: `Không tìm thấy trình duyệt ở Slot ${targetSlot}.` });
+          return;
+        }
+        const page = foundSession.mainPage || (foundSession.browserContext?.pages().find((p) => !p.isClosed()));
+        if (!page) {
+          respondWithJson(response, 400, { error: `Slot ${targetSlot} không có tab nào đang mở.` });
+          return;
+        }
+        const record = foundSession.currentRecord || (autofillQueue.available[0] ?? {});
+        void runAiAssist(page, record, foundSession, {
+          onLog: (entry) => foundSession.addLog?.(entry),
+        });
+        respondWithJson(response, 200, {
+          success: true,
+          message: `Đã kích hoạt AI Assist cho Slot ${targetSlot} trên trang ${page.url()}.`,
+        });
+      } catch (err) {
+        respondWithJson(response, 500, { error: err.message });
       }
       return;
     }

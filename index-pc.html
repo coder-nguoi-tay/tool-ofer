@@ -473,6 +473,51 @@
     ::-webkit-scrollbar-thumb:hover {
       background: #a6a6a6;
     }
+
+    /* Windows Form Dialog Overlay & Box */
+    .win-dialog-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .win-dialog-box {
+      background: #f0f0f0;
+      border: 1px solid #1883d7;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+      border-radius: 2px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      animation: winDialogPop 0.15s ease-out;
+    }
+    @keyframes winDialogPop {
+      from { transform: scale(0.97); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    /* Log Badges */
+    .badge-log {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 2px;
+      font-size: 10px;
+      font-weight: bold;
+    }
+    .badge-navigate { background: #e0f2fe; color: #0369a1; }
+    .badge-submit { background: #dcfce7; color: #15803d; }
+    .badge-checkbox { background: #e0e7ff; color: #4338ca; }
+    .badge-field { background: #f1f5f9; color: #334155; }
+    .badge-click { background: #f3f4f6; color: #4b5563; }
+    .badge-ai { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+    .badge-ai-action { background: #ede9fe; color: #5b21b6; }
+    .badge-ai-completed { background: #dcfce7; color: #166534; font-weight: bold; }
+    .badge-ai-error { background: #fee2e2; color: #b91c1c; }
+    .badge-lead { background: #dcfce7; color: #15803d; font-weight: bold; }
+    .badge-blocked { background: #fee2e2; color: #b91c1c; }
   </style>
 </head>
 <body>
@@ -499,6 +544,8 @@
       <div class="win-tab" data-tab="Config">Config</div>
       <div class="win-tab" data-tab="Info">Info</div>
       <div class="win-tab" data-tab="Settings">Settings</div>
+      <div class="win-tab" data-tab="Logs">Logs (<span id="tabLogCount">0</span>)</div>
+      <div class="win-tab" data-tab="AI">AI Assist</div>
     </div>
 
     <!-- Tab Content -->
@@ -602,6 +649,9 @@
                 </label>
                 <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;">
                   <input type="checkbox" id="cbxRRS"> Save RRS
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;">
+                  <input type="checkbox" id="cbxAiAssist" checked onchange="toggleAiAssistDashboard(this.checked)"> AI Assist
                 </label>
               </div>
             </div>
@@ -1060,6 +1110,189 @@
           <span id="settingsSaveStatus" style="margin-left:10px;font-size:11px;color:#0078d7;"></span>
         </div>
       </div>
+
+      <!-- 8. LOGS -->
+      <div class="tab-panel" id="panel-Logs">
+        <!-- Filter Toolbar -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-weight:bold;color:#003399;">Filter Slot:</span>
+            <select id="logFilterSlot" class="win-select" style="width:110px;" onchange="renderLogs()">
+              <option value="">Tất cả slot</option>
+            </select>
+            <span style="font-weight:bold;color:#003399;margin-left:4px;">Type:</span>
+            <select id="logFilterType" class="win-select" style="width:145px;" onchange="renderLogs()">
+              <option value="">Tất cả loại</option>
+              <option value="navigate">🔗 Điều hướng</option>
+              <option value="submit_clicked">🚀 Submit</option>
+              <option value="checkbox_checked">☑️ Checkbox</option>
+              <option value="field_filled">✍️ Điền form</option>
+              <option value="click">🖱 Click chuột</option>
+              <option value="ai_started">🤖 AI phân tích</option>
+              <option value="ai_action">🤖 AI thực thi</option>
+              <option value="ai_completed">🤖 AI hoàn tất</option>
+              <option value="ai_smart_fallback">🤖 AI Fallback</option>
+              <option value="ai_error">⚠️ AI lỗi</option>
+              <option value="lead_confirmed">✅ Có lead</option>
+              <option value="traffic_blocked">🚫 Bị chặn</option>
+              <option value="adtrapper_reload">🔄 Tải lại</option>
+            </select>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:6px;">
+              <input type="checkbox" id="chkLogAutoRefresh" checked> Auto refresh (2s)
+            </label>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="win-btn" onclick="openLogHtmlFolder()">Open HTML Folder</button>
+            <button type="button" class="win-btn" onclick="clearLogFilters()">Clear Filter</button>
+            <button type="button" class="win-btn win-btn-danger" onclick="promptClearAllLogs()">Clear All Logs & HTML</button>
+          </div>
+        </div>
+
+        <!-- Confirm bar for clearing logs -->
+        <div id="logClearConfirmBar" style="display:none;align-items:center;justify-content:space-between;background:#fef2f2;border:1px solid #fca5a5;padding:4px 8px;margin-bottom:6px;font-size:11px;color:#991b1b;">
+          <span>⚠️ Bạn có chắc muốn xoá toàn bộ log tương tác và tất cả các file HTML đã lưu? Không thể hoàn tác.</span>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="win-btn win-btn-danger" onclick="confirmClearAllLogs()">Xoá vĩnh viễn</button>
+            <button type="button" class="win-btn" onclick="cancelClearAllLogs()">Huỷ</button>
+          </div>
+        </div>
+
+        <!-- Storage info bar -->
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#f5f8fc;border:1px solid #b8cbe0;padding:3px 6px;margin-bottom:6px;font-size:11px;">
+          <span id="logStorageInfo">Storage: <code id="logHtmlDir" style="background:#e8f0fe;padding:1px 4px;">...</code> (<b id="logHtmlCount" style="color:#003399;">0</b> file HTML đã lưu)</span>
+          <button type="button" class="win-btn" style="padding:1px 8px;" onclick="copyLogHtmlDir()">Copy Path</button>
+        </div>
+
+        <!-- DataGridView Logs -->
+        <div class="grid-container" style="height:calc(100% - 75px);">
+          <table class="win-grid" id="dgvLogs">
+            <thead>
+              <tr>
+                <th class="col-header-selector"></th>
+                <th style="width:70px;">Time</th>
+                <th style="width:130px;">Slot / IP</th>
+                <th style="width:140px;">Type</th>
+                <th>Detail & HTML Snapshot</th>
+              </tr>
+            </thead>
+            <tbody id="dgvLogsBody">
+              <tr>
+                <td class="cell-selector">►</td>
+                <td colspan="4" style="text-align:center;color:#888888;padding:30px;">Chưa có log thao tác trình duyệt. Mở trình duyệt để bắt đầu ghi.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 9. AI ASSIST -->
+      <div class="tab-panel" id="panel-AI">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <!-- Group 1: AI Engine & Connection -->
+          <fieldset class="win-group">
+            <legend class="win-legend">AI Engine & Connection</legend>
+            <div class="form-row">
+              <span class="form-label">Trạng thái:</span>
+              <span id="aiEngineStatusBadge" style="color:#008000;font-weight:bold;">● Sẵn sàng (agy CLI 1.4.0)</span>
+            </div>
+            <div class="form-row">
+              <span class="form-label">Chế độ AI:</span>
+              <select id="cbbAiMode" class="win-select" style="flex:1;">
+                <option value="auto_on_stuck">Auto on Stuck (Tự động gỡ kẹt khi form kẹt - Khuyên dùng)</option>
+                <option value="continuous">Continuous (Hỗ trợ liên tục từ màn 1)</option>
+                <option value="heuristic_only">Heuristic Fallback Only (Chỉ dùng Smart Fallback, không tốn token)</option>
+                <option value="disabled">Disabled (Tắt hoàn toàn AI)</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <span class="form-label">CLI Binary:</span>
+              <select id="cbbAiBinary" class="win-select" style="flex:1;">
+                <option value="agy">agy (~/.local/bin/agy - Google Antigravity)</option>
+                <option value="codex">codex (/opt/homebrew/bin/codex)</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <span class="form-label">Max Rounds:</span>
+              <input type="number" id="nudAiMaxRounds" class="win-input" value="20" min="1" max="50" style="width:65px;">
+              <span style="margin-left:12px;">Timeout (s):</span>
+              <input type="number" id="nudAiTimeout" class="win-input" value="90" min="10" max="300" style="width:65px;">
+            </div>
+            <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
+              <button type="button" class="win-btn win-btn-primary" id="btnTestAiConnection" onclick="testAiConnection()">Kiểm tra kết nối AI CLI</button>
+              <span id="aiTestResult" style="font-size:11px;color:#0044aa;font-weight:bold;"></span>
+            </div>
+          </fieldset>
+
+          <!-- Group 2: Smart Fallback & Anti-Bot Heuristics -->
+          <fieldset class="win-group">
+            <legend class="win-legend">Smart Fallback & Anti-Bot Heuristics</legend>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                <input type="checkbox" id="chkSolveBotQuiz" checked> Tự giải câu hỏi Bot Verification (tiếng chó "Woof", mèo "Meow", toán)
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                <input type="checkbox" id="chkSolveSurveyCards" checked> Tự chọn câu hỏi khảo sát / Choice cards / Pills / Bubbles
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                <input type="checkbox" id="chkClickJumpPage" checked> Tự click nút nhận thưởng Jump Page (.cta-button, /next)
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                <input type="checkbox" id="chkMultiStepSubmit" checked> Tự click Submit / Next / Continue ở form nhiều bước
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                <input type="checkbox" id="chkSyncAutofill" checked> Tự động kích hoạt lại Autofill ngay sau mỗi hành động AI
+              </label>
+            </div>
+          </fieldset>
+        </div>
+
+        <!-- Group 3: Custom Instructions & Manual Trigger -->
+        <fieldset class="win-group" style="margin-bottom:8px;">
+          <legend class="win-legend">Custom AI Instructions (Prompt Rules)</legend>
+          <div style="margin-bottom:4px;color:#555555;">
+            Quy tắc riêng truyền vào AI khi phân tích trang (ví dụ: "Ưu tiên chọn Yes cho câu hỏi khảo sát...", "Nếu form đòi phone hãy dùng số 10 chữ số..."):
+          </div>
+          <textarea id="txtAiCustomInstructions" class="win-textarea" style="width:100%;height:75px;" placeholder="Ví dụ: Ưu tiên chọn các phương án có chữ 'Agree' hoặc 'Yes' trong khảo sát..."></textarea>
+          <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;gap:6px;">
+              <button type="button" class="win-btn win-btn-primary" onclick="saveAiConfig()">Save AI Config</button>
+              <button type="button" class="win-btn" onclick="resetAiConfig()">Reset Default</button>
+              <span id="aiConfigSaveStatus" style="margin-left:8px;font-size:11px;color:#008000;font-weight:bold;"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-weight:bold;color:#003399;">Kích hoạt AI thủ công cho:</span>
+              <select id="cbbAiManualSlot" class="win-select" style="width:90px;">
+                <option value="1">Slot 1</option>
+              </select>
+              <button type="button" class="win-btn win-btn-primary" onclick="triggerManualAi()">Chạy AI ngay</button>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Group 4: Live AI Activity Monitor -->
+        <fieldset class="win-group" style="height:calc(100% - 315px);display:flex;flex-direction:column;">
+          <legend class="win-legend">Live AI Activity</legend>
+          <div class="grid-container" style="flex:1;">
+            <table class="win-grid" id="dgvAiActivity">
+              <thead>
+                <tr>
+                  <th class="col-header-selector"></th>
+                  <th style="width:70px;">Time</th>
+                  <th style="width:80px;">Slot</th>
+                  <th style="width:130px;">AI Action</th>
+                  <th>Activity Detail</th>
+                </tr>
+              </thead>
+              <tbody id="dgvAiActivityBody">
+                <tr>
+                  <td class="cell-selector">►</td>
+                  <td colspan="4" style="text-align:center;color:#888888;padding:20px;">Chưa có hoạt động AI nào được ghi nhận.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </fieldset>
+      </div>
     </div>
 
     <!-- WinForms StatusStrip -->
@@ -1085,6 +1318,11 @@
       const targetPanel = document.getElementById(`panel-${tabId}`);
       if (targetHeader) targetHeader.classList.add('active');
       if (targetPanel) targetPanel.classList.add('active');
+      if (tabId === 'Logs') {
+        startLogRefresh();
+      } else {
+        stopLogRefresh();
+      }
     }
 
     document.querySelectorAll('.win-tab').forEach(tab => {
@@ -1171,6 +1409,8 @@
         loadEmailList(),
         loadAutofillList(),
         loadWindowsSettings(),
+        loadAiConfigUi(),
+        fetchLogs(),
       ]);
       setInterval(fetchRunningState, 1500);
     }
@@ -1692,6 +1932,17 @@
       document.getElementById('tabRunCount').textContent = sessions.length;
       document.getElementById('lbTotalRun').textContent = state.limitRun?.count || 0;
 
+      // Populate manual AI trigger dropdown
+      const aiSlotSelect = document.getElementById('cbbAiManualSlot');
+      if (aiSlotSelect) {
+        const curVal = aiSlotSelect.value;
+        if (sessions.length > 0) {
+          aiSlotSelect.innerHTML = sessions.map(s => `<option value="${s.slot}"${String(s.slot) === curVal ? ' selected' : ''}>Slot ${s.slot}</option>`).join('');
+        } else {
+          aiSlotSelect.innerHTML = '<option value="1">Slot 1</option>';
+        }
+      }
+
       const tbody = document.getElementById('dgvRunningBody');
       if (sessions.length === 0) {
         tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="8" style="text-align:center;color:#888888;padding:30px;">Không có luồng trình duyệt nào đang chạy.</td></tr>';
@@ -1707,19 +1958,415 @@
           ? '<span style="color:#cc7a00;">Checking...</span>'
           : '--';
 
+        const actionText = s.aiRunning
+          ? `<span style="color:#6a0dad;font-weight:bold;">🤖 [AI]</span> ${escHtml(s.action || 'Đang hỗ trợ điền form')}`
+          : escHtml(s.action || s.websiteUrl || 'Running');
+
         tr.innerHTML = `
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
           <td style="font-weight:bold;text-align:center;">${s.slot}</td>
-          <td><b>${s.exitIp || 'Direct'}</b></td>
-          <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;" title="${s.websiteUrl || ''}">${s.action || s.websiteUrl || 'Running'}</td>
+          <td><b>${escHtml(s.exitIp || 'Direct')}</b></td>
+          <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(s.websiteUrl || '')}">${actionText}</td>
           <td>${leadBadge}</td>
-          <td>${s.deviceProfile || 'Windows'} - ${s.version || 'Chrome'}</td>
-          <td style="color:#0044aa;">${s.assignedEmail || '--'}</td>
-          <td>${s.assignedPass || '******'}</td>
-          <td>${s.assignedRecover || '--'}</td>
+          <td>${escHtml(s.deviceProfile || 'Windows')} - ${escHtml(s.version || 'Chrome')}</td>
+          <td style="color:#0044aa;">${escHtml(s.assignedEmail || '--')}</td>
+          <td>${escHtml(s.assignedPass || '******')}</td>
+          <td>${escHtml(s.assignedRecover || '--')}</td>
         `;
         tbody.appendChild(tr);
       });
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // LOGS & HTML VIEWER MODULE
+    // ══════════════════════════════════════════════════════════════════════════
+    let logData = [];
+    let logRefreshTimer = null;
+    let logStorageDir = '';
+
+    function escHtml(str) {
+      return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function fmtTime(iso) {
+      try {
+        const d = new Date(iso);
+        return d.toLocaleTimeString('vi-VN', { hour12: false });
+      } catch {
+        return iso || '--';
+      }
+    }
+
+    async function fetchLogs() {
+      try {
+        const res = await api('/browser-logs');
+        if (res && res.sessions) {
+          logData = res.sessions;
+          logStorageDir = res.htmlDir || '';
+          const dirEl = document.getElementById('logHtmlDir');
+          const countEl = document.getElementById('logHtmlCount');
+          if (dirEl) dirEl.textContent = logStorageDir || '...';
+          if (countEl) countEl.textContent = res.htmlCount ?? 0;
+        } else if (Array.isArray(res)) {
+          logData = res;
+        }
+        renderLogs();
+        renderAiActivityGrid();
+      } catch {}
+    }
+
+    function renderLogs() {
+      const slotFilterEl = document.getElementById('logFilterSlot');
+      const typeFilterEl = document.getElementById('logFilterType');
+      if (!slotFilterEl || !typeFilterEl) return;
+
+      const slotFilter = slotFilterEl.value;
+      const typeFilter = typeFilterEl.value;
+      const slots = new Set(logData.map((s) => String(s.slot)));
+
+      const curSlot = slotFilterEl.value;
+      slotFilterEl.innerHTML = '<option value="">Tất cả slot</option>'
+        + [...slots].sort((a,b)=>Number(a)-Number(b)).map((s) => `<option value="${s}"${s === curSlot ? ' selected' : ''}>Slot ${s}</option>`).join('');
+
+      const rows = [];
+      for (const session of logData) {
+        if (slotFilter && String(session.slot) !== slotFilter) continue;
+        for (const entry of [...session.logs].reverse()) {
+          if (typeFilter && entry.type !== typeFilter) continue;
+          rows.push({ session, entry });
+        }
+      }
+
+      const badgeEl = document.getElementById('tabLogCount');
+      if (badgeEl) badgeEl.textContent = rows.length;
+
+      const tbody = document.getElementById('dgvLogsBody');
+      if (!tbody) return;
+
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="4" style="text-align:center;color:#888888;padding:30px;">Chưa có log thao tác trình duyệt. Mở trình duyệt để bắt đầu ghi.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = rows.map(({ session, entry }, idx) => {
+        let typeBadge = '<span class="badge-log badge-click">🖱 click</span>';
+        let detail = `${escHtml(entry.tag ?? '')} ${escHtml(entry.text ?? '')}`.trim();
+        const hasHtml = Boolean(entry.html);
+
+        if (entry.type === 'navigate') {
+          typeBadge = '<span class="badge-log badge-navigate">🔗 Điều hướng</span>';
+          detail = escHtml(entry.url || '');
+        } else if (entry.type === 'submit_clicked') {
+          typeBadge = '<span class="badge-log badge-submit">🚀 Submit</span>';
+          detail = `<strong style="color:#15803d;">${escHtml(entry.text || 'Submit')}</strong> ${entry.tag ? `&lt;${escHtml(entry.tag)}&gt;` : ''} ${entry.id ? `#${escHtml(entry.id)}` : ''}`.trim();
+        } else if (entry.type === 'checkbox_checked') {
+          typeBadge = '<span class="badge-log badge-checkbox">☑️ Checkbox</span>';
+          detail = `Đã tích ô điều khoản: <strong style="color:#1d4ed8;">${escHtml(entry.id || entry.name || 'consent')}</strong> (${escHtml(entry.text || '')})`;
+        } else if (entry.type === 'field_filled') {
+          typeBadge = '<span class="badge-log badge-field">✍️ Điền ô</span>';
+          detail = `[${escHtml(entry.id || entry.name || '')}] = <strong>${escHtml(entry.text || entry.value || '')}</strong>`;
+        } else if (entry.type === 'traffic_blocked') {
+          typeBadge = '<span class="badge-log badge-blocked">🚫 Bị chặn</span>';
+          detail = `<span style="color:#dc2626;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'lead_confirmed') {
+          typeBadge = '<span class="badge-log badge-lead">✅ Có lead</span>';
+          detail = `<span style="color:#16a34a;font-weight:600;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_started') {
+          typeBadge = '<span class="badge-log badge-ai">🤖 AI phân tích</span>';
+          detail = `<span style="color:#7c3aed;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_waiting_codex') {
+          typeBadge = '<span class="badge-log badge-ai">🤖 AI chờ CLI</span>';
+          detail = `<span style="color:#6d28d9;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_codex_reply') {
+          typeBadge = '<span class="badge-log badge-ai">🤖 AI phản hồi</span>';
+          detail = `<span style="color:#059669;font-weight:bold;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_action') {
+          typeBadge = '<span class="badge-log badge-ai-action">🤖 AI thực thi</span>';
+          detail = `<span style="color:#4f46e5;font-weight:600;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_smart_fallback') {
+          typeBadge = '<span class="badge-log badge-ai">🛡️ Fallback</span>';
+          detail = `<span style="color:#d97706;font-weight:600;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_completed') {
+          typeBadge = '<span class="badge-log badge-ai-completed">🤖 AI xong</span>';
+          detail = `<span style="color:#0284c7;font-weight:bold;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_error') {
+          typeBadge = '<span class="badge-log badge-ai-error">⚠️ AI lỗi</span>';
+          detail = `<span style="color:#dc2626;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'ai_sync_scan') {
+          typeBadge = '<span class="badge-log badge-ai">🔄 AI Sync</span>';
+          detail = `<span style="color:#6366f1;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'adtrapper_reload') {
+          typeBadge = '<span class="badge-log" style="background:#fef3c7;color:#b45309;">🔄 Tải lại</span>';
+          detail = `<span style="color:#b45309;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.detail) {
+          detail = escHtml(entry.detail);
+        }
+
+        const fileTag = entry.htmlFilename
+          ? ` <span style="display:inline-block;margin-left:4px;font-size:10px;color:#0369a1;background:#e0f2fe;padding:1px 4px;border:1px solid #bae6fd;font-family:Consolas,monospace;" title="${escHtml(entry.htmlPath || '')}">📄 ${escHtml(entry.htmlFilename)}</span>`
+          : '';
+
+        const viewHtmlBtn = hasHtml
+          ? ` <button type="button" class="win-btn" style="padding:1px 6px;margin-left:6px;font-size:10px;" onclick="event.stopPropagation();openLogHtmlModal(${idx})">Xem HTML</button>`
+          : '';
+
+        return `<tr onclick="if(${hasHtml})openLogHtmlModal(${idx})">
+          <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
+          <td>${fmtTime(entry.time)}</td>
+          <td>Slot ${session.slot} · <b>${escHtml(session.ip || '?')}</b></td>
+          <td>${typeBadge}</td>
+          <td>${detail}${fileTag}${viewHtmlBtn}</td>
+        </tr>`;
+      }).join('');
+
+      window.__currentLogRows = rows;
+    }
+
+    function renderAiActivityGrid() {
+      const tbody = document.getElementById('dgvAiActivityBody');
+      if (!tbody) return;
+
+      const aiRows = [];
+      for (const session of logData) {
+        for (const entry of [...session.logs].reverse()) {
+          if (entry.type && (entry.type.startsWith('ai_') || entry.type === 'lead_confirmed' || entry.type === 'traffic_blocked')) {
+            aiRows.push({ session, entry });
+          }
+        }
+      }
+
+      if (aiRows.length === 0) {
+        tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="4" style="text-align:center;color:#888888;padding:20px;">Chưa có hoạt động AI nào được ghi nhận.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = aiRows.slice(0, 50).map(({ session, entry }, idx) => {
+        let actionBadge = `<span class="badge-log badge-ai">${escHtml(entry.type)}</span>`;
+        if (entry.type === 'ai_action') actionBadge = '<span class="badge-log badge-ai-action">Thực thi action</span>';
+        else if (entry.type === 'ai_completed') actionBadge = '<span class="badge-log badge-ai-completed">Hoàn tất</span>';
+        else if (entry.type === 'ai_started') actionBadge = '<span class="badge-log badge-ai">Bắt đầu quét</span>';
+        else if (entry.type === 'ai_error') actionBadge = '<span class="badge-log badge-ai-error">Lỗi AI</span>';
+        else if (entry.type === 'ai_smart_fallback') actionBadge = '<span class="badge-log badge-ai">Fallback Heuristic</span>';
+
+        return `<tr>
+          <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
+          <td>${fmtTime(entry.time)}</td>
+          <td style="font-weight:bold;text-align:center;">Slot ${session.slot}</td>
+          <td>${actionBadge}</td>
+          <td>${escHtml(entry.detail || entry.url || '')}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function startLogRefresh() {
+      stopLogRefresh();
+      fetchLogs();
+      logRefreshTimer = setInterval(() => {
+        const auto = document.getElementById('chkLogAutoRefresh')?.checked;
+        if (auto) fetchLogs();
+      }, 2000);
+    }
+
+    function stopLogRefresh() {
+      if (logRefreshTimer) {
+        clearInterval(logRefreshTimer);
+        logRefreshTimer = null;
+      }
+    }
+
+    function clearLogFilters() {
+      document.getElementById('logFilterSlot').value = '';
+      document.getElementById('logFilterType').value = '';
+      renderLogs();
+    }
+
+    async function openLogHtmlFolder() {
+      const res = await api('/browser-logs/open-folder', { method: 'POST' });
+      document.getElementById('lbStatus').textContent = res.message || 'Đã mở thư mục HTML trong Finder.';
+    }
+
+    function promptClearAllLogs() {
+      const bar = document.getElementById('logClearConfirmBar');
+      if (bar) bar.style.display = 'flex';
+    }
+
+    function cancelClearAllLogs() {
+      const bar = document.getElementById('logClearConfirmBar');
+      if (bar) bar.style.display = 'none';
+    }
+
+    async function confirmClearAllLogs() {
+      cancelClearAllLogs();
+      const res = await api('/browser-logs/clear', { method: 'POST' });
+      document.getElementById('lbStatus').textContent = res.message || 'Đã xoá toàn bộ log & file HTML.';
+      await fetchLogs();
+    }
+
+    function copyLogHtmlDir() {
+      if (logStorageDir) {
+        navigator.clipboard.writeText(logStorageDir);
+        document.getElementById('lbStatus').textContent = 'Đã sao chép đường dẫn thư mục HTML vào clipboard.';
+      }
+    }
+
+    function openLogHtmlModal(rowIndex) {
+      const rowItem = window.__currentLogRows?.[rowIndex];
+      if (!rowItem) return;
+      const { entry } = rowItem;
+      document.getElementById('logModalTitle').textContent = `HTML Snapshot - ${entry.url || 'Page Source'}`;
+      document.getElementById('logModalUrl').textContent = entry.url || '';
+      document.getElementById('logModalPre').textContent = entry.html || '<!-- Không có nội dung HTML -->';
+
+      const fileBar = document.getElementById('logModalFileBar');
+      const filePathEl = document.getElementById('logModalFilePath');
+      if (entry.htmlPath) {
+        filePathEl.textContent = `📁 File: ${entry.htmlPath}`;
+        fileBar.style.display = 'block';
+        window.__currentLogModalFilePath = entry.htmlPath;
+      } else {
+        fileBar.style.display = 'none';
+        window.__currentLogModalFilePath = '';
+      }
+
+      document.getElementById('logHtmlModalWin').style.display = 'flex';
+    }
+
+    function closeLogHtmlModal() {
+      document.getElementById('logHtmlModalWin').style.display = 'none';
+    }
+
+    function copyLogHtmlContent() {
+      const text = document.getElementById('logModalPre').textContent;
+      navigator.clipboard.writeText(text);
+      document.getElementById('lbStatus').textContent = 'Đã sao chép toàn bộ HTML vào clipboard.';
+    }
+
+    function copyLogHtmlFilePath() {
+      if (window.__currentLogModalFilePath) {
+        navigator.clipboard.writeText(window.__currentLogModalFilePath);
+        document.getElementById('lbStatus').textContent = 'Đã sao chép đường dẫn file HTML vào clipboard.';
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // AI ASSIST CONFIGURATION & TRIGGER MODULE
+    // ══════════════════════════════════════════════════════════════════════════
+    async function loadAiConfigUi() {
+      const cfg = await api('/ai/config');
+      if (!cfg || cfg.error) return;
+
+      if (document.getElementById('cbbAiMode')) document.getElementById('cbbAiMode').value = cfg.mode || 'auto_on_stuck';
+      if (document.getElementById('cbbAiBinary')) document.getElementById('cbbAiBinary').value = cfg.cliBinary || 'agy';
+      if (document.getElementById('nudAiMaxRounds')) document.getElementById('nudAiMaxRounds').value = cfg.maxRounds || 20;
+      if (document.getElementById('nudAiTimeout')) document.getElementById('nudAiTimeout').value = cfg.timeoutSeconds || 90;
+
+      if (document.getElementById('chkSolveBotQuiz')) document.getElementById('chkSolveBotQuiz').checked = cfg.solveBotQuiz !== false;
+      if (document.getElementById('chkSolveSurveyCards')) document.getElementById('chkSolveSurveyCards').checked = cfg.solveSurveyCards !== false;
+      if (document.getElementById('chkClickJumpPage')) document.getElementById('chkClickJumpPage').checked = cfg.clickJumpPage !== false;
+      if (document.getElementById('chkMultiStepSubmit')) document.getElementById('chkMultiStepSubmit').checked = cfg.multiStepSubmit !== false;
+      if (document.getElementById('chkSyncAutofill')) document.getElementById('chkSyncAutofill').checked = cfg.syncAutofill !== false;
+
+      if (document.getElementById('txtAiCustomInstructions')) document.getElementById('txtAiCustomInstructions').value = cfg.customInstructions || '';
+      if (document.getElementById('cbxAiAssist')) document.getElementById('cbxAiAssist').checked = cfg.enabled !== false && cfg.mode !== 'disabled';
+    }
+
+    async function saveAiConfig() {
+      const cfg = {
+        enabled: document.getElementById('cbxAiAssist') ? document.getElementById('cbxAiAssist').checked : true,
+        mode: document.getElementById('cbbAiMode').value,
+        cliBinary: document.getElementById('cbbAiBinary').value,
+        maxRounds: parseInt(document.getElementById('nudAiMaxRounds').value) || 20,
+        timeoutSeconds: parseInt(document.getElementById('nudAiTimeout').value) || 90,
+        solveBotQuiz: document.getElementById('chkSolveBotQuiz').checked,
+        solveSurveyCards: document.getElementById('chkSolveSurveyCards').checked,
+        clickJumpPage: document.getElementById('chkClickJumpPage').checked,
+        multiStepSubmit: document.getElementById('chkMultiStepSubmit').checked,
+        syncAutofill: document.getElementById('chkSyncAutofill').checked,
+        customInstructions: document.getElementById('txtAiCustomInstructions').value,
+      };
+
+      const res = await api('/ai/config', {
+        method: 'POST',
+        body: JSON.stringify(cfg),
+      });
+
+      const statusEl = document.getElementById('aiConfigSaveStatus');
+      if (res && res.success) {
+        statusEl.textContent = 'Đã lưu cấu hình AI thành công!';
+        setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      } else {
+        statusEl.textContent = 'Lỗi lưu cấu hình: ' + (res.error || 'Thất bại');
+      }
+    }
+
+    async function resetAiConfig() {
+      const defaultCfg = {
+        enabled: true,
+        mode: 'auto_on_stuck',
+        cliBinary: 'agy',
+        maxRounds: 20,
+        timeoutSeconds: 90,
+        solveBotQuiz: true,
+        solveSurveyCards: true,
+        clickJumpPage: true,
+        multiStepSubmit: true,
+        syncAutofill: true,
+        customInstructions: '',
+      };
+      await api('/ai/config', {
+        method: 'POST',
+        body: JSON.stringify(defaultCfg),
+      });
+      await loadAiConfigUi();
+      const statusEl = document.getElementById('aiConfigSaveStatus');
+      statusEl.textContent = 'Đã khôi phục cài đặt AI mặc định!';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    }
+
+    async function testAiConnection() {
+      const resultEl = document.getElementById('aiTestResult');
+      resultEl.textContent = 'Đang kiểm tra kết nối...';
+      const binary = document.getElementById('cbbAiBinary').value;
+
+      const res = await api('/ai/test', {
+        method: 'POST',
+        body: JSON.stringify({ binary }),
+      });
+
+      if (res && res.success) {
+        resultEl.style.color = '#008000';
+        resultEl.textContent = `✓ Kết nối thành công! ${res.binary} (${res.version})`;
+        document.getElementById('aiEngineStatusBadge').innerHTML = `● Sẵn sàng (${escHtml(res.binary)} ${escHtml(res.version)})`;
+      } else {
+        resultEl.style.color = '#b91c1c';
+        resultEl.textContent = `✗ ${res.message || res.error || 'Không kết nối được'}`;
+      }
+    }
+
+    async function triggerManualAi() {
+      const slot = document.getElementById('cbbAiManualSlot').value;
+      document.getElementById('lbStatus').textContent = `Đang kích hoạt AI cho Slot ${slot}...`;
+
+      const res = await api('/ai/trigger', {
+        method: 'POST',
+        body: JSON.stringify({ slot: Number(slot) }),
+      });
+
+      if (res && res.success) {
+        document.getElementById('lbStatus').textContent = res.message;
+        alert(res.message);
+        switchTab('tabRunning');
+      } else {
+        alert(res.error || 'Lỗi khi kích hoạt AI');
+      }
+    }
+
+    async function toggleAiAssistDashboard(checked) {
+      const modeSelect = document.getElementById('cbbAiMode');
+      if (modeSelect) {
+        modeSelect.value = checked ? 'auto_on_stuck' : 'disabled';
+      }
+      await saveAiConfig();
     }
 
     function openXPathGuide() {
@@ -1728,5 +2375,34 @@
 
     window.addEventListener('DOMContentLoaded', init);
   </script>
+
+  <!-- Windows Form Dialog for HTML Snapshot View -->
+  <div id="logHtmlModalWin" class="win-dialog-overlay" style="display:none;" onclick="if(event.target===this)closeLogHtmlModal()">
+    <div class="win-dialog-box" style="width:820px;height:560px;">
+      <div class="win-titlebar">
+        <div class="win-titlebar-left">
+          <img src="/pc-app.png" alt="Icon" class="win-titlebar-icon" onerror="this.style.display='none'">
+          <span class="win-titlebar-title" id="logModalTitle">HTML Snapshot Viewer</span>
+        </div>
+        <div class="win-window-controls">
+          <button type="button" class="win-window-btn close" title="Close" onclick="closeLogHtmlModal()">✕</button>
+        </div>
+      </div>
+      <div style="padding:8px;flex:1;display:flex;flex-direction:column;gap:6px;background:#f0f0f0;overflow:hidden;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span id="logModalUrl" style="font-weight:bold;color:#003399;max-width:540px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="win-btn win-btn-primary" onclick="copyLogHtmlContent()">Copy HTML</button>
+            <button type="button" class="win-btn" id="btnLogModalCopyPath" onclick="copyLogHtmlFilePath()">Copy File Path</button>
+            <button type="button" class="win-btn" onclick="closeLogHtmlModal()">Close</button>
+          </div>
+        </div>
+        <div id="logModalFileBar" style="background:#eaf2fb;border:1px solid #b8cbe0;padding:3px 6px;font-size:11px;color:#333333;display:none;">
+          <span id="logModalFilePath"></span>
+        </div>
+        <pre id="logModalPre" class="win-textarea" style="flex:1;background:#ffffff;border:1px solid #abadb3;padding:8px;font-family:Consolas,Menlo,monospace;font-size:11px;overflow:auto;white-space:pre-wrap;word-break:break-all;user-select:text;-webkit-user-select:text;"></pre>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

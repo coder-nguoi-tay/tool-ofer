@@ -233,6 +233,29 @@
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-webgl" name="antiFpWebgl"> Giả mạo WebGL vendor/renderer</label>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="anti-fp-webrtc" name="antiFpWebrtc"> Chặn rò IP qua WebRTC</label>
             </div>
+
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eef1f6;">
+              <p class="hint" style="margin:0 0 6px;font-weight:600;color:#6d28d9;">🤖 AI Assist & Tự động gỡ kẹt form:</p>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="ai-assist-enabled" checked> Bật AI Assist (Tự động gỡ kẹt khi form không nhận ô nhập)</label>
+              <div class="row" style="gap:8px;margin-top:4px;">
+                <div style="flex:1;">
+                  <label for="ai-cli-select" style="font-size:11px;">CLI Engine</label>
+                  <select id="ai-cli-select" style="height:32px;font-size:11px;">
+                    <option value="agy">agy (Google Antigravity CLI)</option>
+                    <option value="codex">codex CLI</option>
+                  </select>
+                </div>
+                <div style="flex:1;">
+                  <label for="ai-mode-select" style="font-size:11px;">Chế độ</label>
+                  <select id="ai-mode-select" style="height:32px;font-size:11px;">
+                    <option value="auto_on_stuck">Tự động khi kẹt</option>
+                    <option value="continuous">Hỗ trợ liên tục</option>
+                    <option value="heuristic_only">Heuristic (không token)</option>
+                    <option value="disabled">Tắt AI</option>
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
         </details>
 
@@ -646,6 +669,11 @@
               leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fee2e2;color:#991b1b;">❌ Không lead (đang đổi)</span>';
             }
 
+            let aiTag = '';
+            if (session.aiRunning) {
+              aiTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#f3e8ff;color:#6b21a8;">🤖 AI Assist</span>';
+            }
+
             const extra = [
               session.autofillRecord ? `Lead #${session.autofillRecord} (${session.autofillFields} trường)` : '',
               session.assignedEmail ? `📧 ${session.assignedEmail}` : '',
@@ -683,6 +711,7 @@
                       <span>🌐</span> ${session.exitIp}
                     </div>
                     ${leadTag}
+                    ${aiTag}
                   </div>
                   ${session.websiteUrl ? `<div style="font-size:10px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${session.websiteUrl}">🔗 ${session.websiteUrl}</div>` : ''}
                   ${extra ? `<div class="chrome-card-extra" title="${extra}">${extra}</div>` : ''}
@@ -859,7 +888,23 @@
         return [fieldName, values[fieldName] ?? ''];
       }));
       preferencesBridge.postMessage({ action: 'save', settings });
+      fetch('/ai/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: document.querySelector('#ai-assist-enabled')?.checked ?? true,
+          cliBinary: document.querySelector('#ai-cli-select')?.value ?? 'agy',
+          mode: document.querySelector('#ai-mode-select')?.value ?? 'auto_on_stuck',
+        }),
+      }).catch(() => {});
     });
+
+    fetch('/ai/config').then(r => r.json()).then(cfg => {
+      if (!cfg) return;
+      if (document.querySelector('#ai-assist-enabled')) document.querySelector('#ai-assist-enabled').checked = cfg.enabled !== false && cfg.mode !== 'disabled';
+      if (document.querySelector('#ai-cli-select')) document.querySelector('#ai-cli-select').value = cfg.cliBinary || 'agy';
+      if (document.querySelector('#ai-mode-select')) document.querySelector('#ai-mode-select').value = cfg.mode || 'auto_on_stuck';
+    }).catch(() => {});
 
     function buildRequestBody(overrides = {}) {
       const autoSubmitEl = form.elements.namedItem('autoSubmitForm');
