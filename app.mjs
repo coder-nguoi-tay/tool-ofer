@@ -91,6 +91,65 @@ export function getNextDeviceProfile() {
 export function resetDeviceProfileRotation() {
   deviceProfileRotationCounter = 0;
 }
+
+/**
+ * Quản lý trạng thái chia 2 luồng song song:
+ * - Luồng 1: Trang đích 1, duyệt proxy từ đầu đến cuối (0 -> N-1).
+ * - Luồng 2: Trang đích 2, duyệt proxy từ cuối ra đầu (N-1 -> 0).
+ * - 1 IP mở được 2 trang đích đồng thời.
+ */
+export const dualStreamState = {
+  enabled: false,
+  websiteUrl1: '',
+  websiteUrl2: '',
+  stream1Index: 0,
+  stream2Index: -1,
+  stream1Used: new Set(),
+  stream2Used: new Set(),
+};
+
+/**
+ * Lấy proxy tiếp theo cho luồng tương ứng theo quy luật:
+ * - Luồng 1 (streamRole 1): duyệt từ đầu danh sách đến cuối (0 -> N-1)
+ * - Luồng 2 (streamRole 2): duyệt từ cuối danh sách ra đầu (N-1 -> 0)
+ * 1 IP mở được 2 trang đích đồng thời (stream1Used và stream2Used độc lập nhau).
+ *
+ * @param {number} streamRole 1 (xuôi: đầu->cuối) hoặc 2 (ngược: cuối->đầu).
+ * @param {Array<object>} proxies Danh sách proxy khả dụng.
+ * @return {object|null} Proxy được chọn hoặc null nếu đã duyệt hết chiều của luồng.
+ */
+export function getNextProxyForStream(streamRole, proxies = []) {
+  if (!proxies.length) return null;
+  if (streamRole === 1) {
+    while (dualStreamState.stream1Index < proxies.length) {
+      const idx = dualStreamState.stream1Index;
+      dualStreamState.stream1Index += 1;
+      const proxy = proxies[idx];
+      const pKey = proxy?.server || proxy?._queueLine || String(idx);
+      if (proxy && !dualStreamState.stream1Used.has(pKey)) {
+        dualStreamState.stream1Used.add(pKey);
+        return proxy;
+      }
+    }
+    return null;
+  } else {
+    if (dualStreamState.stream2Index < 0 || dualStreamState.stream2Index >= proxies.length) {
+      dualStreamState.stream2Index = proxies.length - 1;
+    }
+    while (dualStreamState.stream2Index >= 0) {
+      const idx = dualStreamState.stream2Index;
+      dualStreamState.stream2Index -= 1;
+      const proxy = proxies[idx];
+      const pKey = proxy?.server || proxy?._queueLine || String(idx);
+      if (proxy && !dualStreamState.stream2Used.has(pKey)) {
+        dualStreamState.stream2Used.add(pKey);
+        return proxy;
+      }
+    }
+    return null;
+  }
+}
+
 let proxyHistoryWriteQueue = Promise.resolve();
 
 // ─── Remote Agent Registry ────────────────────────────────────────────────────
@@ -619,12 +678,13 @@ async function openBrowserThroughProxy({
  * @param {object} browser Phiên Playwright có phương thức newPage().
  * @param {Set<string>} usedExitIps Những IP đã ghi trong lịch sử và lượt hiện tại.
  * @param {(ip: string) => Promise<void>} onExitIp Lưu IP vào lịch sử trước khi dùng.
+ * @param {string} [websiteUrl=''] URL trang đích để phân tách phạm vi IP đã dùng.
  * @return {Promise<string>} IP thoát đã xác minh.
- * @throws {IpVerificationError|Error} Khi dịch vụ IP lỗi hoặc IP đã dùng.
+ * @throws {IpVerificationError|Error} Khi dịch vụ IP lỗi hoặc IP đã dùng cho trang đích này.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-async function verifyBrowserExitIp(browser, usedExitIps, onExitIp) {
+async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = '') {
   const ipPage = await browser.newPage();
   let exitIp;
   const failures = [];
@@ -662,8 +722,12 @@ async function verifyBrowserExitIp(browser, usedExitIps, onExitIp) {
     await ipPage.close().catch(() => {});
   }
   await onExitIp(exitIp);
-  if (usedExitIps.has(exitIp)) throw new Error(`IP ${exitIp} đã được dùng trước đây`);
-  usedExitIps.add(exitIp);
+  const normUrl = websiteUrl ? normalizeUrl(websiteUrl) : '';
+  const keyWithUrl = normUrl ? `${exitIp}::${normUrl}` : exitIp;
+  if (usedExitIps.has(keyWithUrl)) {
+    throw new Error(`IP ${exitIp} đã được dùng trước đây cho trang đích này`);
+  }
+  usedExitIps.add(keyWithUrl);
   return exitIp;
 }
 
@@ -672,12 +736,15 @@ async function verifyBrowserExitIp(browser, usedExitIps, onExitIp) {
  *
  * @param {object} proxy Cấu hình proxy đã phân tích.
  * @param {number} occurrence Thứ tự xuất hiện của cấu hình giống hệt trong danh sách.
+ * @param {string} [websiteUrl=''] URL trang đích tương ứng nếu có.
  * @return {string} Khóa băm không chứa thông tin đăng nhập dạng rõ.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-export function createProxyUsageKey(proxy, occurrence) {
-  const proxyHash = createHash('sha256').update(proxyIdentity(proxy)).digest('hex');
+export function createProxyUsageKey(proxy, occurrence, websiteUrl = '') {
+  const normUrl = websiteUrl ? normalizeUrl(websiteUrl) : '';
+  const identity = normUrl ? `${proxyIdentity(proxy)}|${normUrl}` : proxyIdentity(proxy);
+  const proxyHash = createHash('sha256').update(identity).digest('hex');
   return `${proxyHash}:${occurrence}`;
 }
 
@@ -1116,7 +1183,7 @@ const runExclusively = (handler) => (requestBody) => enqueueExclusively(handler,
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}) {
+async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assignedStreamRoles = null } = {}) {
   const body = JSON.parse(requestBody);
   if (templateProfileContext) {
     throw new Error('Hãy đóng cửa sổ profile mẫu RoboForm trước khi tạo profile Chrome mới.');
@@ -1150,8 +1217,31 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
     const added = importEmailLines((body.emailList ?? '').split(/\r?\n/));
     if (added > 0) await saveEmailQueue();
   }
+
+  // 1. Phân tích 2 trang đích và xác định chế độ Dual Stream (2 luồng song song)
+  let websiteUrl = normalizeUrl(body.websiteUrl);
+  let websiteUrl2 = body.websiteUrl2 ? normalizeUrl(body.websiteUrl2) : '';
+  if (!websiteUrl2 && body.websiteUrl && /[\r\n,]/.test(body.websiteUrl)) {
+    const splitUrls = body.websiteUrl.split(/[\r\n,]+/).map((u) => u.trim()).filter(Boolean);
+    if (splitUrls.length >= 2) {
+      websiteUrl = normalizeUrl(splitUrls[0]);
+      websiteUrl2 = normalizeUrl(splitUrls[1]);
+    }
+  }
+  const isDualStream = Boolean(websiteUrl2 && websiteUrl2 !== websiteUrl);
+
   const usageHistory = await readProxyUsageHistory();
-  const usedExitIps = new Set(Object.values(usageHistory.proxies).map((entry) => entry.exitIp).filter(Boolean));
+  // IP được ghi nhận theo từng trang đích (exitIp::websiteUrl) để 1 IP mở được 2 trang đích đồng thời
+  const usedExitIps = new Set(
+    Object.values(usageHistory.proxies)
+      .map((entry) => {
+        if (!entry.exitIp) return null;
+        if (entry.status !== 'success' && entry.status !== 'attempting') return null;
+        return entry.websiteUrl ? `${entry.exitIp}::${normalizeUrl(entry.websiteUrl)}` : entry.exitIp;
+      })
+      .filter(Boolean)
+  );
+
   // Queue là nguồn chính — parse available thành proxy objects, dedup theo server
   const seenServers = new Set();
   const availableProxies = proxyQueue.available.map((line) => {
@@ -1162,17 +1252,36 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
     seenServers.add(proxy.server);
     return true;
   });
-  const requestedCount = body.requestedCount === undefined || body.requestedCount === ''
-    ? availableProxies.length
+
+  // Khởi tạo trạng thái Dual Stream khi bắt đầu phiên mới
+  if (isDualStream) {
+    if (!dualStreamState.enabled || dualStreamState.websiteUrl1 !== websiteUrl || dualStreamState.websiteUrl2 !== websiteUrl2 || activeBrowsers.size === 0) {
+      dualStreamState.enabled = true;
+      dualStreamState.websiteUrl1 = websiteUrl;
+      dualStreamState.websiteUrl2 = websiteUrl2;
+      dualStreamState.stream1Index = 0;
+      dualStreamState.stream2Index = availableProxies.length - 1;
+      dualStreamState.stream1Used = new Set();
+      dualStreamState.stream2Used = new Set();
+    }
+  } else {
+    dualStreamState.enabled = false;
+  }
+
+  let requestedCount = body.requestedCount === undefined || body.requestedCount === ''
+    ? (isDualStream ? 2 : availableProxies.length)
     : Number(body.requestedCount);
   if (!Number.isInteger(requestedCount) || requestedCount < 1) {
     throw new Error('Số trình duyệt cần mở phải là số nguyên lớn hơn 0.');
   }
+  if (isDualStream && requestedCount < 2) {
+    requestedCount = 2; // Chạy 2 luồng yêu cầu tối thiểu 2 cửa sổ
+  }
   if (requestedCount > maxAliveBrowsers) {
     throw new Error('Chỉ được mở tối đa ' + maxAliveBrowsers + ' cửa sổ trình duyệt cùng lúc.');
   }
-  const targetSuccessCount = Math.min(requestedCount, availableProxies.length);
-  if (targetSuccessCount === 0) {
+  const targetSuccessCount = Math.min(requestedCount, isDualStream ? Math.max(availableProxies.length, requestedCount) : availableProxies.length);
+  if (targetSuccessCount === 0 || availableProxies.length === 0) {
     return {
       results: [],
       warnings: [availableProxies.length === 0
@@ -1194,7 +1303,6 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
     );
   }
 
-  const websiteUrl = normalizeUrl(body.websiteUrl);
   const screen = await readScreenSize();
   const layoutCount = layoutTarget ?? Math.min(maxAliveBrowsers, alreadyAlive + targetSuccessCount);
   const occupiedTileIndexes = new Set([...activeBrowsers].map((session) => session.tileIndex));
@@ -1221,6 +1329,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
       proxyList: body.proxyList,
       proxyType: proxyType,
       websiteUrl: body.websiteUrl,
+      websiteUrl2: websiteUrl2 || body.websiteUrl2,
       autofillData: body.autofillData,
       emailList: body.emailList,
       autoSubmitForm: body.autoSubmitForm !== false,
@@ -1247,18 +1356,44 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
    * @since 2026-10-15
    */
   const attemptProxy = async (workerIndex) => {
-    while (successfulBrowsers < targetSuccessCount
-      && nextProxyIndex < availableProxies.length) {
-      const proxy = availableProxies[nextProxyIndex];
-      nextProxyIndex += 1;
-      // Dequeue ngay: dù thành công hay thất bại, proxy này không được dùng lại
-      const queueIdx = proxyQueue.available.indexOf(proxy._queueLine);
-      if (queueIdx !== -1) {
-        proxyQueue.available.splice(queueIdx, 1);
-        proxyQueue.used.push(proxy._queueLine);
-        void saveProxyQueue();
+    const streamRole = assignedStreamRoles?.[workerIndex]
+      ?? (isDualStream ? ((workerIndex % 2 === 0) ? 1 : 2) : 1);
+    const targetUrl = (streamRole === 2 && websiteUrl2) ? websiteUrl2 : websiteUrl;
+    const streamLabel = isDualStream ? (streamRole === 1 ? 'Luồng 1 (Xuôi)' : 'Luồng 2 (Ngược)') : '';
+
+    while (successfulBrowsers < targetSuccessCount) {
+      let proxy;
+      if (isDualStream) {
+        proxy = getNextProxyForStream(streamRole, availableProxies);
+      } else {
+        if (nextProxyIndex >= availableProxies.length) break;
+        proxy = availableProxies[nextProxyIndex];
+        nextProxyIndex += 1;
       }
-      const proxyKey = createProxyUsageKey(proxy, 1);
+      if (!proxy) break;
+
+      // Quản lý hàng đợi proxyQueue:
+      if (!isDualStream) {
+        const queueIdx = proxyQueue.available.indexOf(proxy._queueLine);
+        if (queueIdx !== -1) {
+          proxyQueue.available.splice(queueIdx, 1);
+          proxyQueue.used.push(proxy._queueLine);
+          void saveProxyQueue();
+        }
+      } else {
+        // Trong chế độ dual stream: chỉ chuyển proxy vào proxyQueue.used khi cả 2 luồng đều đã dùng
+        const pKey = proxy.server || proxy._queueLine;
+        if (dualStreamState.stream1Used.has(pKey) && dualStreamState.stream2Used.has(pKey)) {
+          const queueIdx = proxyQueue.available.indexOf(proxy._queueLine);
+          if (queueIdx !== -1) {
+            proxyQueue.available.splice(queueIdx, 1);
+            proxyQueue.used.push(proxy._queueLine);
+            void saveProxyQueue();
+          }
+        }
+      }
+
+      const proxyKey = createProxyUsageKey(proxy, 1, targetUrl);
       const installedChrome = availableChromeBuilds[workerIndex];
       const browserProfileId = 'chrome-' + installedChrome.channel + '-' + installedChrome.major;
       let exitIp;
@@ -1273,7 +1408,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           exitIp: null,
           proxy: proxy.server,
           username: proxy.username ?? '',
-          websiteUrl: websiteUrl,
+          websiteUrl: targetUrl,
+          streamRole: streamRole,
           attemptedAt: attemptStartedAt,
         };
         await persistProxyUsageHistory(usageHistory);
@@ -1285,7 +1421,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
             exitIp: exitIp,
             proxy: proxy.server,
             username: proxy.username ?? '',
-            websiteUrl: websiteUrl,
+            websiteUrl: targetUrl,
+            streamRole: streamRole,
             attemptedAt: attemptStartedAt,
           };
           await persistProxyUsageHistory(usageHistory);
@@ -1304,7 +1441,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           build: installedChrome,
           proxy: proxy,
           proxyKey: proxyKey,
-          websiteUrl: websiteUrl,
+          websiteUrl: targetUrl,
           usedExitIps: usedExitIps,
           onExitIp: recordExitIp,
           tile: tileAt(tileIndex, layoutCount, screen),
@@ -1313,6 +1450,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           autoSubmit: body.autoSubmitForm !== false,
           leadConfig,
           deviceProfile: chosenDeviceProfile,
+          streamRole: streamRole,
+          streamLabel: streamLabel,
         });
         activeSession = openedBrowser.session;
         successfulBrowsers += 1;
@@ -1322,7 +1461,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           exitIp: exitIp,
           proxy: proxy.server,
           username: proxy.username ?? '',
-          websiteUrl: websiteUrl,
+          websiteUrl: targetUrl,
+          streamRole: streamRole,
           finalUrl: openedBrowser.finalUrl,
           profileId: browserProfileId,
           attemptedAt: attemptStartedAt,
@@ -1330,10 +1470,9 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
         };
         await persistProxyUsageHistory(usageHistory);
         watchTrafficBlockedPage(activeSession);
-        successfulBrowsers += 1;
         results.push('Trình duyệt ' + successfulBrowsers + ' [Google Chrome '
-          + installedChrome.version + ']: mở đúng trang đích qua IP ' + exitIp
-          + ' (' + proxy.server + ').');
+          + installedChrome.version + (streamLabel ? ` - ${streamLabel}` : '') + ']: mở đúng trang đích '
+          + targetUrl + ' qua IP ' + exitIp + ' (' + proxy.server + ').');
         return;
       } catch (error) {
         failureReason = error.message.split('\n')[0];
@@ -1347,7 +1486,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           exitIp: exitIp ?? null,
           proxy: proxy.server,
           username: proxy.username ?? '',
-          websiteUrl: websiteUrl,
+          websiteUrl: targetUrl,
+          streamRole: streamRole,
           reason: failureReason,
           attemptedAt: attemptStartedAt,
           completedAt: new Date().toISOString(),
@@ -1398,6 +1538,7 @@ async function launchUserRequestedBrowsers(requestBody) {
       proxyList: body.proxyList,
       proxyType: body.proxyType ?? 'socks5',
       websiteUrl: body.websiteUrl,
+      websiteUrl2: body.websiteUrl2,
       autofillData: body.autofillData,
       autoSubmitForm: body.autoSubmitForm !== false,
       enableLeadCheck: body.enableLeadCheck !== false,
@@ -1443,6 +1584,7 @@ function queueAutomaticRefill(delayMs = 0) {
     if (neededSlots <= 0) return;
 
     const activeSettings = autoRefill.settings;
+    const isDual = Boolean(activeSettings.websiteUrl2 && activeSettings.websiteUrl2 !== activeSettings.websiteUrl);
     autoRefill.message = autoRefill.sequential
       ? 'Chế độ tuần tự: đang mở phiên tiếp theo…'
       : `Đang tìm proxy mới để bù ${neededSlots} slot trống…`;
@@ -1461,10 +1603,25 @@ function queueAutomaticRefill(delayMs = 0) {
       return;
     }
 
+    if (isDual) {
+      assignedStreamRoles = [];
+      let curStream1 = [...activeBrowsers].filter((s) => s.streamRole === 1).length;
+      let curStream2 = [...activeBrowsers].filter((s) => s.streamRole === 2).length;
+      for (let i = 0; i < localNeeded; i++) {
+        if (curStream1 <= curStream2) {
+          assignedStreamRoles.push(1);
+          curStream1++;
+        } else {
+          assignedStreamRoles.push(2);
+          curStream2++;
+        }
+      }
+    }
+
     const result = await launchRequestedBrowsers(JSON.stringify({
       ...activeSettings,
       requestedCount: localNeeded,
-    }), { layoutTarget: autoRefill.targetCount });
+    }), { layoutTarget: autoRefill.targetCount, assignedStreamRoles });
     autoRefill.message = activeBrowsers.size >= autoRefill.targetCount
       ? `Đã bù đủ ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`
       : result.warnings.at(-1) ?? `Hiện mở ${activeBrowsers.size}/${autoRefill.targetCount}; không còn proxy phù hợp để bù.`;
@@ -1523,6 +1680,9 @@ function getAutoRefillStatus() {
         leadCheckStatus: session.leadCheckStatus ?? null,
         leadCheckMessage: session.leadCheckMessage ?? null,
         extensions: session.extensions ?? null,
+        streamRole: session.streamRole ?? 1,
+        streamLabel: session.streamLabel ?? '',
+        websiteUrl: session.websiteUrl ?? null,
       }))
       .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
   };
@@ -1709,6 +1869,10 @@ async function clearUsedProxyHistory() {
   const usageHistory = await readProxyUsageHistory();
   const count = Object.keys(usageHistory.proxies).length;
   await persistProxyUsageHistory({ version: 1, proxies: {} });
+  dualStreamState.stream1Index = 0;
+  dualStreamState.stream2Index = -1;
+  dualStreamState.stream1Used.clear();
+  dualStreamState.stream2Used.clear();
   try {
     const profilesDir = join(chromeProfileDirectory, 'stable');
     await rm(profilesDir, { recursive: true, force: true });
@@ -2257,7 +2421,7 @@ async function startLeadVerification(session, leadConfig) {
  * @since 2026-10-15
  */
 async function openBrowserWithInstalledChrome({
-  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows',
+  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows', streamRole = 1, streamLabel = '',
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
@@ -2491,7 +2655,7 @@ async function openBrowserWithInstalledChrome({
     chromeBuildRotationCounter += 1;
     if (!session.suppressAutoRefill) {
       if (!session.closingDueToTrafficBlocked) {
-        autoRefill.message = `Slot ${tileIndex + 1} trống; đang tìm proxy thay thế.`;
+        autoRefill.message = `Slot ${tileIndex + 1} (${streamLabel || 'Trình duyệt'}) trống; đang tìm proxy thay thế.`;
       }
       // 5s delay chỉ khi không có lead; các trường hợp khác (IP lỗi, bị chặn) mở ngay
       queueAutomaticRefill(session.closingDueToNoLead ? 5000 : 0);
@@ -2499,8 +2663,11 @@ async function openBrowserWithInstalledChrome({
   });
   try {
     const page = context.pages()[0] ?? await context.newPage();
-    const exitIp = await verifyBrowserExitIp(context, usedExitIps, onExitIp);
+    const exitIp = await verifyBrowserExitIp(context, usedExitIps, onExitIp, websiteUrl);
     session.exitIp = exitIp;
+    session.streamRole = streamRole;
+    session.streamLabel = streamLabel;
+    session.websiteUrl = websiteUrl;
     const response = await page.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
     const finalUrl = page.url();
     if (!response || response.status() >= 400) {
@@ -2513,11 +2680,12 @@ async function openBrowserWithInstalledChrome({
     session.mainPage = page; // dùng để phân biệt tab chính vs tab phụ
     await page.bringToFront().catch(() => {});
 
-    // Đặt tiền tố IP và thiết bị vào tiêu đề trang và gắn badge để khi xem đều thấy rõ IP và loại thiết bị
-    await page.evaluate(({ ip, deviceLabel, deviceProfile }) => {
+    // Đặt tiền tố IP, thiết bị và luồng vào tiêu đề trang và gắn badge để khi xem đều thấy rõ IP, loại thiết bị và luồng
+    await page.evaluate(({ ip, deviceLabel, deviceProfile, streamLabel }) => {
       const deviceIcons = { windows: '🪟', macos: '🍎', linux: '🐧', android: '🤖', ipad: '📟', ios: '📱' };
       const icon = deviceIcons[deviceProfile] || '🖥';
-      const prefix = `[${icon} IP: ${ip}] `;
+      const streamTag = streamLabel ? `[${streamLabel}] ` : '';
+      const prefix = `${streamTag}[${icon} IP: ${ip}] `;
       if (document.title && !document.title.startsWith(prefix)) {
         document.title = prefix + document.title;
       } else if (!document.title) {
@@ -2527,8 +2695,9 @@ async function openBrowserWithInstalledChrome({
         if (!document.getElementById('__autolead_ip_badge')) {
           const badge = document.createElement('div');
           badge.id = '__autolead_ip_badge';
-          badge.innerHTML = `🌐 <strong>IP:</strong> ${ip} · ${icon} ${deviceLabel}`;
-          badge.title = `Chrome Session IP: ${ip}\nThiết bị: ${deviceLabel}\nAutoLeadPC`;
+          const streamHtml = streamLabel ? `<span style="background:${streamLabel.includes('2') ? '#8b5cf6' : '#2563eb'};color:#fff;padding:1px 6px;border-radius:6px;font-weight:600;margin-right:4px;">${streamLabel}</span> ` : '';
+          badge.innerHTML = `${streamHtml}🌐 <strong>IP:</strong> ${ip} · ${icon} ${deviceLabel}`;
+          badge.title = `${streamLabel ? streamLabel + '\n' : ''}Chrome Session IP: ${ip}\nThiết bị: ${deviceLabel}\nAutoLeadPC`;
           badge.style.cssText = 'position:fixed;top:8px;right:12px;z-index:2147483647;'
             + 'background:rgba(26,38,57,0.92);color:#fff;padding:4px 10px;border-radius:14px;'
             + 'font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;line-height:1.4;'
@@ -2540,18 +2709,19 @@ async function openBrowserWithInstalledChrome({
           document.documentElement.appendChild(badge);
         }
       } catch {}
-    }, { ip: exitIp, deviceLabel: dp.label, deviceProfile }).catch(() => {});
+    }, { ip: exitIp, deviceLabel: dp.label, deviceProfile, streamLabel }).catch(() => {});
 
     context.on('page', (newPage) => {
       newPage.on('domcontentloaded', () => {
-        newPage.evaluate(({ ip, deviceProfile }) => {
+        newPage.evaluate(({ ip, deviceProfile, streamLabel }) => {
           const deviceIcons = { windows: '🪟', macos: '🍎', linux: '🐧', android: '🤖', ipad: '📟', ios: '📱' };
           const icon = deviceIcons[deviceProfile] || '🖥';
-          const prefix = `[${icon} IP: ${ip}] `;
+          const streamTag = streamLabel ? `[${streamLabel}] ` : '';
+          const prefix = `${streamTag}[${icon} IP: ${ip}] `;
           if (document.title && !document.title.startsWith(prefix)) {
             document.title = prefix + document.title;
           }
-        }, { ip: exitIp, deviceProfile }).catch(() => {});
+        }, { ip: exitIp, deviceProfile, streamLabel }).catch(() => {});
       });
 
       // Guard cho tab phụ: load quá 15s không xong → đóng tab, quay về tab chính
@@ -3221,6 +3391,10 @@ async function startLocalInterface() {
         proxyQueue.available.push(...proxyQueue.used.splice(0));
       }
       await saveProxyQueue();
+      dualStreamState.stream1Index = 0;
+      dualStreamState.stream2Index = -1;
+      dualStreamState.stream1Used.clear();
+      dualStreamState.stream2Used.clear();
       respondWithJson(response, 200, {
         available: proxyQueue.available.length,
         used: proxyQueue.used.length,

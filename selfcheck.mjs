@@ -52,6 +52,8 @@ import {
   deviceProfilesPath,
   loadSavedDeviceProfiles,
   saveSavedDeviceProfiles,
+  dualStreamState,
+  getNextProxyForStream,
 } from './app.mjs';
 
 const parse = (line, type = 'socks5') => parseProxyLine(line, 1, type);
@@ -1641,6 +1643,54 @@ if (popupListener) {
   popupListener(mockSpamPage);
   assert.equal(spamPopupClosed, true, 'Popup galaxystore.samsung.com phải tự động bị đóng ngay lập tức');
 }
+
+// 12. Kiểm tra chế độ chạy 2 luồng song song (Dual Stream)
+// 12.1 Quy luật duyệt proxy: Luồng 1 từ đầu đến cuối (0 -> N-1), Luồng 2 từ cuối ra đầu (N-1 -> 0)
+dualStreamState.enabled = true;
+dualStreamState.websiteUrl1 = 'https://link1.com';
+dualStreamState.websiteUrl2 = 'https://link2.com';
+dualStreamState.stream1Index = 0;
+dualStreamState.stream2Index = -1;
+dualStreamState.stream1Used.clear();
+dualStreamState.stream2Used.clear();
+
+const testProxies = [
+  { server: 'socks5://1.1.1.1:1080', _queueLine: '1.1.1.1:1080' },
+  { server: 'socks5://2.2.2.2:1080', _queueLine: '2.2.2.2:1080' },
+  { server: 'socks5://3.3.3.3:1080', _queueLine: '3.3.3.3:1080' },
+  { server: 'socks5://4.4.4.4:1080', _queueLine: '4.4.4.4:1080' },
+];
+
+// Lần 1: Luồng 1 lấy từ đầu (1.1.1.1), Luồng 2 lấy từ cuối (4.4.4.4)
+const p1_0 = getNextProxyForStream(1, testProxies);
+const p2_0 = getNextProxyForStream(2, testProxies);
+assert.equal(p1_0.server, 'socks5://1.1.1.1:1080', 'Luồng 1 phải lấy proxy đầu tiên');
+assert.equal(p2_0.server, 'socks5://4.4.4.4:1080', 'Luồng 2 phải lấy proxy cuối cùng');
+
+// Lần 2: Luồng 1 lấy tiếp theo (2.2.2.2), Luồng 2 lấy từ cuối lùi về (3.3.3.3)
+const p1_1 = getNextProxyForStream(1, testProxies);
+const p2_1 = getNextProxyForStream(2, testProxies);
+assert.equal(p1_1.server, 'socks5://2.2.2.2:1080', 'Luồng 1 phải tiến lên lấy proxy thứ 2');
+assert.equal(p2_1.server, 'socks5://3.3.3.3:1080', 'Luồng 2 phải lùi lại lấy proxy thứ 3');
+
+// 12.2 Quy luật: 1 IP mở được 2 trang đích đồng thời
+// Giả sử danh sách chỉ có 1 proxy duy nhất
+dualStreamState.stream1Index = 0;
+dualStreamState.stream2Index = -1;
+dualStreamState.stream1Used.clear();
+dualStreamState.stream2Used.clear();
+
+const singleProxyList = [{ server: 'socks5://9.9.9.9:1080', _queueLine: '9.9.9.9:1080' }];
+const p1_single = getNextProxyForStream(1, singleProxyList);
+const p2_single = getNextProxyForStream(2, singleProxyList);
+assert.ok(p1_single !== null, 'Luồng 1 phải lấy được proxy duy nhất');
+assert.ok(p2_single !== null, 'Luồng 2 cũng phải lấy được cùng proxy đó để mở 2 trang đồng thời');
+assert.equal(p1_single.server, p2_single.server, 'Cả 2 luồng đều mở được cùng 1 proxy');
+
+// 12.3 createProxyUsageKey tạo khóa riêng cho từng websiteUrl để ghi nhận lịch sử độc lập
+const key1 = createProxyUsageKey(singleProxyList[0], 1, 'https://link1.com');
+const key2 = createProxyUsageKey(singleProxyList[0], 1, 'https://link2.com');
+assert.notEqual(key1, key2, 'Hai trang đích khác nhau phải có proxyUsageKey khác nhau để không ghi đè');
 
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 
