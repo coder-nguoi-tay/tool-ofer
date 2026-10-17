@@ -12,6 +12,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private let keychainService = "com.autoleadpc.mac.preferences.v2"
     private let keychainAccount = "launcher-settings"
 
+    private var port: Int {
+        if let portVal = Bundle.main.object(forInfoDictionaryKey: "AutoLeadPCPort") as? Int {
+            return portVal
+        }
+        if let portStr = Bundle.main.object(forInfoDictionaryKey: "AutoLeadPCPort") as? String, let p = Int(portStr) {
+            return p
+        }
+        return 3210
+    }
+
+    private var instanceId: String {
+        return (Bundle.main.object(forInfoDictionaryKey: "AutoLeadPCInstance") as? String) ?? "1"
+    }
+
+    private var appTitle: String {
+        return (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? "AutoLeadPC Mac"
+    }
+
     /// Creates the main window, starts the local launcher server, and loads its interface.
     /// - Parameter notification: The application launch notification.
     /// - Author: ductv <ductv@getflycrm.com>
@@ -35,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             defer: false
         )
         window.minSize = NSSize(width: 560, height: 610)
-        window.title = "AutoLeadPC Mac"
+        window.title = "\(appTitle) - Cổng \(port)"
         window.center()
         window.contentView = webView
         window.makeKeyAndOrderFront(nil)
@@ -153,14 +171,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
-        let applicationDirectory = supportDirectory.appendingPathComponent("AutoLeadPC", isDirectory: true)
+        let folderName = instanceId == "1" ? "AutoLeadPC" : "AutoLeadPC-\(instanceId)"
+        let applicationDirectory = supportDirectory.appendingPathComponent(folderName, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: applicationDirectory, withIntermediateDirectories: true)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: applicationDirectory.path)
         } catch {
             return nil
         }
-        return applicationDirectory.appendingPathComponent("preferences.sqlite")
+        let targetDB = applicationDirectory.appendingPathComponent("preferences.sqlite")
+        if instanceId != "1" && !FileManager.default.fileExists(atPath: targetDB.path) {
+            let baseDB = supportDirectory.appendingPathComponent("AutoLeadPC/preferences.sqlite")
+            if FileManager.default.fileExists(atPath: baseDB.path) {
+                try? FileManager.default.copyItem(at: baseDB, to: targetDB)
+            }
+        }
+        return targetDB
     }
 
     /// Opens the local settings database and ensures the settings table exists.
@@ -241,7 +267,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         process.executableURL = URL(fileURLWithPath: nodePath)
         process.arguments = ["app.mjs"]
         process.currentDirectoryURL = launcherDirectory
-        process.environment = ProcessInfo.processInfo.environment.merging(["AUTOLEADPC_NO_OPEN": "1"]) { _, appValue in appValue }
+        process.environment = ProcessInfo.processInfo.environment.merging([
+            "AUTOLEADPC_NO_OPEN": "1",
+            "AUTOLEADPC_PORT": String(port),
+            "AUTOLEADPC_INSTANCE": instanceId
+        ]) { _, appValue in appValue }
         try process.run()
         nodeProcess = process
     }
@@ -250,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// - Author: ductv <ductv@getflycrm.com>
     /// - Since: 2026-10-08
     private func loadInterfaceWhenReady() {
-        let interfaceURL = URL(string: "http://127.0.0.1:3210")!
+        let interfaceURL = URL(string: "http://127.0.0.1:\(port)")!
         Task { @MainActor in
             for _ in 0..<60 {
                 do {
@@ -264,7 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 }
                 try? await Task.sleep(nanoseconds: 250_000_000)
             }
-            showError("Không kết nối được máy chủ giao diện ở cổng 3210.")
+            showError("Không kết nối được máy chủ giao diện ở cổng \(port).")
         }
     }
 

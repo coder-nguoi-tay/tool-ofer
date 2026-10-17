@@ -187,6 +187,55 @@
             </div>
           </details>
         </div>
+
+        <details id="script-config-panel" style="margin-top:14px;border:1px solid #d8dfeb;border-radius:8px;padding:10px 12px;background:#fff;">
+          <summary style="cursor:pointer;font-weight:700;font-size:13px;color:#25334b;user-select:none;">
+            🤖 Script &amp; Giới hạn chạy <span style="font-size:11px;font-weight:400;color:#768197;">(từ Windows exe)</span>
+          </summary>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:4px;">
+            <label for="script-path" style="margin-top:6px;">File script (.txt)</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="script-path" name="scriptPath" type="text" placeholder="/Users/…/AutoLeadPC/Script/Offers/offer.txt" style="flex:1;">
+              <button id="scripts-browse-btn" class="secondary" type="button" style="white-space:nowrap;min-height:38px;padding:0 12px;flex-shrink:0;">Duyệt</button>
+            </div>
+            <div id="scripts-list" style="display:none;margin-top:6px;max-height:160px;overflow:auto;border:1px solid #e7ebf2;border-radius:6px;background:#f7f9fc;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;"></div>
+            <p class="hint">Đường dẫn tuyệt đối đến file .txt script định dạng lệnh exe ({SendByName}, {SmartClick}, {ByPassReCaptcha}…). Để trống = dùng autofill tự động như cũ.</p>
+
+            <label for="captcha-api-key" style="margin-top:6px;">API key 2captcha</label>
+            <input id="captcha-api-key" name="captchaApiKey" type="text" placeholder="Dán API key từ 2captcha.com">
+            <p class="hint">Cần khi script có lệnh {ByPassReCaptcha}. Để trống nếu không dùng captcha.</p>
+
+            <label for="complete-text" style="margin-top:6px;">Text hoàn tất (đóng Chrome khi tìm thấy)</label>
+            <input id="complete-text" name="completeText" type="text" placeholder="Thank you for submitting">
+            <p class="hint">Khi phát hiện chuỗi này trong nội dung trang (không phân biệt hoa thường), Chrome tự đóng và tăng bộ đếm. Để trống = không dùng.</p>
+
+            <div class="row" style="margin-top:8px;">
+              <div><label for="time-limit">Timeout phiên (giây)</label><input id="time-limit" name="timeLimit" type="number" min="0" value="0" placeholder="0 = không giới hạn"></div>
+              <div><label for="delay-start">Delay trước mở (giây)</label><input id="delay-start" name="delayStart" type="number" min="0" value="0" placeholder="0"></div>
+              <div><label for="delay-stop">Delay trước refill (giây)</label><input id="delay-stop" name="delayStop" type="number" min="0" value="0" placeholder="0"></div>
+            </div>
+
+            <div class="row" style="margin-top:4px;align-items:flex-end;">
+              <div style="flex:2;"><label for="limit-run">Giới hạn số phiên hoàn tất (limitRun)</label><input id="limit-run" name="limitRun" type="number" min="0" value="0" placeholder="0 = không giới hạn"></div>
+              <div style="flex:1;"><label>&nbsp;</label><button id="limit-run-reset-btn" class="secondary" type="button" style="width:100%;min-height:38px;">Đặt lại bộ đếm</button></div>
+            </div>
+            <div id="limit-run-counter" style="margin-top:8px;padding:7px 10px;border-radius:6px;background:#f0f4ff;border:1px solid #c7d7f8;font-size:12px;display:flex;align-items:center;gap:8px;">
+              <span>Đã hoàn tất:</span>
+              <strong id="lr-count" style="color:#2563eb;font-size:15px;">0</strong>
+              <span>/</span>
+              <span id="lr-max" style="color:#768197;">0 (không giới hạn)</span>
+            </div>
+
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eef1f6;">
+              <p class="hint" style="margin:0 0 6px;">Chống fingerprint (tương đương Canvas/ClientRects/WebGL/WebRTC trong bản Windows):</p>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-canvas" name="antiFpCanvas"> Giả mạo Canvas (chống nhận diện qua canvas fingerprint)</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-clientrects" name="antiFpClientRects"> Rung ClientRects (chống đo layout fingerprint)</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-webgl" name="antiFpWebgl"> Giả mạo WebGL vendor/renderer</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="anti-fp-webrtc" name="antiFpWebrtc"> Chặn rò IP qua WebRTC</label>
+            </div>
+          </div>
+        </details>
+
         <div class="actions">
           <button id="save-button" class="secondary" type="button">Lưu cấu hình</button>
         </div>
@@ -452,6 +501,8 @@
     const savedFieldNames = [
       'proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'websiteUrl2', 'autofillData', 'emailList', 'autoSubmitForm',
       'enableLeadCheck', 'leadCheckScreen', 'leadCheckApiUrl', 'leadCheckCookie', 'leadCheckDatas', 'leadCheckInterval', 'leadCheckMaxAttempts',
+      'scriptPath', 'captchaApiKey', 'completeText', 'timeLimit', 'delayStart', 'delayStop', 'limitRun',
+      'antiFpCanvas', 'antiFpClientRects', 'antiFpWebgl', 'antiFpWebrtc',
     ];
     const tabButtons = [...document.querySelectorAll('[role="tab"]')];
     const tabPanels = [...document.querySelectorAll('[role="tabpanel"]')];
@@ -549,6 +600,13 @@
       autoRefillEnabled = state.enabled;
       autoRefillButton.textContent = `Tự bù: Đang ${autoRefillEnabled ? 'bật' : 'tắt'}`;
       autoRefillButton.setAttribute('aria-pressed', String(autoRefillEnabled));
+      if (state.limitRun) {
+        const lrCount = state.limitRun.count ?? 0;
+        const lrMax   = state.limitRun.max   ?? 0;
+        document.getElementById('lr-count').textContent = lrCount;
+        document.getElementById('lr-max').textContent   = lrMax > 0 ? lrMax : '0 (không giới hạn)';
+        document.getElementById('lr-max').style.color   = lrMax > 0 && lrCount >= lrMax ? '#dc2626' : '#768197';
+      }
       // Sequential mode buttons
       const seqRunning = state.sequential;
       document.querySelector('#sequential-start-btn').style.display = seqRunning ? 'none' : '';
@@ -1320,6 +1378,54 @@
     // Refresh khi vào tab Proxy
     document.querySelector('#tab-proxies').addEventListener('click', refreshProxyQueue);
     refreshProxyQueue();
+
+    // ── Script browser ───────────────────────────────────────────────────
+    document.getElementById('scripts-browse-btn').addEventListener('click', async () => {
+      const listEl = document.getElementById('scripts-list');
+      listEl.style.display = 'block';
+      listEl.textContent = 'Đang tìm script…';
+      try {
+        const data = await fetch('/scripts').then((r) => r.json());
+        if (!data.scripts?.length) {
+          listEl.innerHTML = '<p style="padding:10px;margin:0;color:#768197;">Không tìm thấy file .txt nào trong thư mục AutoLeadPC/Script/.</p>';
+          return;
+        }
+        listEl.innerHTML = data.scripts.map((s) => `
+          <div style="padding:6px 10px;border-bottom:1px solid #e7ebf2;cursor:pointer;"
+               onclick="document.getElementById('script-path').value='${s.path.replace(/'/g, "\\'")}';document.getElementById('scripts-list').style.display='none';">
+            <span style="color:#2563eb;font-weight:600;">${s.name}</span>
+            <span style="color:#94a3b8;font-size:10px;margin-left:6px;">${s.dir}</span>
+          </div>
+        `).join('');
+      } catch (e) {
+        listEl.innerHTML = `<p style="padding:10px;margin:0;color:#dc2626;">Lỗi: ${e.message}</p>`;
+      }
+    });
+
+    // ── limitRun reset ───────────────────────────────────────────────────
+    document.getElementById('limit-run-reset-btn').addEventListener('click', async () => {
+      try {
+        const res = await fetch('/limit-run/reset', { method: 'POST' }).then((r) => r.json());
+        document.getElementById('lr-count').textContent = '0';
+        document.getElementById('lr-max').textContent = '0 (không giới hạn)';
+        status.textContent = res.message ?? 'Đã đặt lại bộ đếm.';
+      } catch (e) {
+        status.textContent = 'Lỗi đặt lại: ' + e.message;
+      }
+    // Cập nhật tiêu đề hiển thị theo Cổng/Bản thực tế
+    const currentPort = window.location.port || '3210';
+    if (currentPort !== '3210') {
+      const h1 = document.querySelector('h1');
+      if (h1 && !h1.textContent.includes('Bản')) {
+        const instanceNum = currentPort === '3211' ? '2' : currentPort;
+        h1.textContent = `AutoLeadPC Mac (Bản ${instanceNum})`;
+      }
+      const eyebrow = document.querySelector('.eyebrow');
+      if (eyebrow) {
+        eyebrow.textContent = `Chrome proxy launcher (Cổng ${currentPort})`;
+      }
+      document.title = `AutoLeadPC Mac (Bản ${currentPort === '3211' ? '2' : currentPort})`;
+    }
 
   </script>
 </body>

@@ -15,6 +15,7 @@ import {
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 import { runAiAssist, pageHasWork } from './ai-assist.mjs';
+import { loadScript, runScript } from './script.mjs';
 import {
   DEFAULT_LEAD_CONFIG,
   fetchLeadDatas,
@@ -27,6 +28,9 @@ const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
 let chromeBuildRotationCounter = 0;
 let deviceProfileRotationCounter = 0;
+// limitRun: đếm số phiên hoàn tất (completeText khớp), dừng mở thêm khi đạt giới hạn (0 = không giới hạn)
+let limitRunCount = 0;
+let limitRunMax = 0;
 
 /** @type {Map<object, Array<{time:string,type:string,[key:string]:any}>>} */
 export const DEVICE_PROFILES = {
@@ -153,12 +157,18 @@ let proxyHistoryWriteQueue = Promise.resolve();
 
 // ─── Remote Agent Registry ────────────────────────────────────────────────────
 // agentId → { platform, hostname, maxSlots, freeSlots, activeTasks, lastSeen, enabled }
+const instanceId = process.env.AUTOLEADPC_INSTANCE || '1';
+const instanceSuffix = instanceId !== '1' ? `-${instanceId}` : '';
+export const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${instanceSuffix}`;
+const baseDataDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC');
+export const appDataDirectory = join(homedir(), 'Library', 'Application Support', dataDirName);
+
 const remoteAgents = new Map();
 // Tasks dequeued from proxy/autofill queue, waiting for a remote agent to pick up
 const pendingAgentTasks = [];
 const userInterfacePath = new URL('./index.html', import.meta.url);
 const userAgentListPath = new URL('./useragents.txt', import.meta.url);
-export const interactionLogDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'logs');
+export const interactionLogDirectory = join(appDataDirectory, 'logs');
 export const interactionHtmlDirectory = join(interactionLogDirectory, 'html');
 export const interactionLogFilePath = join(interactionLogDirectory, 'browser-logs.json');
 
@@ -230,13 +240,13 @@ export async function clearAllLogsAndHtml() {
     return { success: false, error: error.message };
   }
 }
-const chromeProfileDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-profiles');
-const chromeProfileCacheDirectory = join(homedir(), 'Library', 'Caches', 'AutoLeadPC', 'chrome-profiles');
+const chromeProfileDirectory = join(appDataDirectory, 'chrome-profiles');
+const chromeProfileCacheDirectory = join(homedir(), 'Library', 'Caches', dataDirName, 'chrome-profiles');
 const installedChromeAppPath = process.env.AUTOLEADPC_CHROME_APP || '/Applications/Google Chrome.app';
-const chromeChannelDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-channels');
-const chromeRegularBuildDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-regular-builds');
+const chromeChannelDirectory = join(baseDataDirectory, 'chrome-channels');
+const chromeRegularBuildDirectory = join(baseDataDirectory, 'chrome-regular-builds');
 const roboFormExtensionId = 'pnlccmojcmeohlpggmfnbbiapkmbliob';
-const chromeTemplateProfileDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-template-profile');
+const chromeTemplateProfileDirectory = join(baseDataDirectory, 'chrome-template-profile');
 const chromeTemplateMetadataName = 'autoleadpc-template.json';
 // Khóa tiến trình, cache và phiên tab của profile mẫu không được chép sang profile mới.
 const chromeTemplateSkippedNames = new Set([
@@ -245,23 +255,40 @@ const chromeTemplateSkippedNames = new Set([
   'DawnGraphiteCache', 'DawnWebGPUCache', 'Crashpad', 'Sessions',
 ]);
 let templateProfileContext = null;
-const proxyUsageHistoryPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'proxy-usage.json');
-const autofillUsedPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'autofill-used.json');
+const proxyUsageHistoryPath = join(appDataDirectory, 'proxy-usage.json');
+const autofillUsedPath = join(appDataDirectory, 'autofill-used.json');
 /** @type {Set<string>} fingerprint = JSON của record đã dùng */
 let autofillUsedKeys = new Set();
-const autofillQueuePath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'autofill-queue.json');
+const autofillQueuePath = join(appDataDirectory, 'autofill-queue.json');
 /** Hàng đợi thông tin autofill: available = chưa dùng, used = đã dùng. */
 const autofillQueue = { available: /** @type {object[]} */ ([]), used: /** @type {object[]} */ ([]) };
-const proxyQueuePath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'proxy-queue.json');
+const proxyQueuePath = join(appDataDirectory, 'proxy-queue.json');
 /** Hàng đợi proxy: available = chưa dùng, used = đã dùng (raw lines gốc). */
 const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
-export const emailQueuePath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'email-queue.json');
+export const emailQueuePath = join(appDataDirectory, 'email-queue.json');
 /** Hàng đợi email mẫu: available = chưa dùng, used = đã dùng. */
 export const emailQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
-export const deviceProfilesPath = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'device-profiles.json');
+export const deviceProfilesPath = join(appDataDirectory, 'device-profiles.json');
+
+/** Nếu đang ở instance phụ (vd Bản 2) và file dữ liệu chưa có, sao chép file từ Bản 1 sang để dùng sẵn cấu hình. */
+async function seedFileIfMissing(targetPath, sourceFileName) {
+  if (dataDirName === 'AutoLeadPC') return;
+  try {
+    await access(targetPath);
+  } catch {
+    try {
+      const sourcePath = join(baseDataDirectory, sourceFileName);
+      await access(sourcePath);
+      await mkdir(dirname(targetPath), { recursive: true });
+      await cp(sourcePath, targetPath);
+      console.log(`[Bản ${instanceId}] Đã khởi tạo dữ liệu mẫu từ ${sourceFileName}`);
+    } catch {}
+  }
+}
 
 /** Đọc cấu hình các profile thiết bị đã chọn từ đĩa. */
 export async function loadSavedDeviceProfiles() {
+  await seedFileIfMissing(deviceProfilesPath, 'device-profiles.json');
   try {
     const raw = await readFile(deviceProfilesPath, 'utf8');
     const saved = JSON.parse(raw);
@@ -919,6 +946,7 @@ async function markAutofillRecordUsed(record) {
 
 /** Nạp hàng đợi autofill từ file. */
 async function loadAutofillQueue() {
+  await seedFileIfMissing(autofillQueuePath, 'autofill-queue.json');
   try {
     const data = JSON.parse(await readFile(autofillQueuePath, 'utf8'));
     autofillQueue.available = Array.isArray(data.available) ? data.available : [];
@@ -955,6 +983,7 @@ function importAutofillRecords(records) {
 
 /** Nạp hàng đợi proxy từ file. */
 async function loadProxyQueue() {
+  await seedFileIfMissing(proxyQueuePath, 'proxy-queue.json');
   try {
     const data = JSON.parse(await readFile(proxyQueuePath, 'utf8'));
     proxyQueue.available = Array.isArray(data.available) ? data.available : [];
@@ -1033,6 +1062,7 @@ function importProxyLines(rawLines, proxyType) {
 
 /** Nạp hàng đợi email mẫu từ file. */
 export async function loadEmailQueue() {
+  await seedFileIfMissing(emailQueuePath, 'email-queue.json');
   try {
     const data = JSON.parse(await readFile(emailQueuePath, 'utf8'));
     emailQueue.available = Array.isArray(data.available) ? data.available : [];
@@ -1187,6 +1217,30 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
   if (templateProfileContext) {
     throw new Error('Hãy đóng cửa sổ profile mẫu RoboForm trước khi tạo profile Chrome mới.');
   }
+
+  const scriptPath    = body.scriptPath    ?? '';
+  const captchaApiKey = body.captchaApiKey ?? '';
+  const completeText  = body.completeText  ?? '';
+  const timeLimit     = Math.max(0, Number(body.timeLimit)  || 0); // giây
+  const delayStart    = Math.max(0, Number(body.delayStart) || 0); // giây
+  const delayStop     = Math.max(0, Number(body.delayStop)  || 0); // giây
+  const newLimitRun   = Math.max(0, Number(body.limitRun)   || 0);
+  if (newLimitRun > 0) limitRunMax = newLimitRun;
+  const antiFingerprint = {
+    canvas: Boolean(body.antiFpCanvas),
+    clientRects: Boolean(body.antiFpClientRects),
+    webgl: Boolean(body.antiFpWebgl),
+    webrtc: Boolean(body.antiFpWebrtc),
+  };
+
+  let scriptSteps = null;
+  if (scriptPath) {
+    try {
+      scriptSteps = await loadScript(scriptPath);
+    } catch (e) {
+      console.warn(`[Script] Không đọc được script "${scriptPath}": ${e.message}`);
+    }
+  }
   const autofillRecords = parseAutofillRecords(body.autofillData);
   // Nạp autofill mới vào queue nếu queue trống
   if (autofillRecords.length > 0 && autofillQueue.available.length === 0 && autofillQueue.used.length === 0) {
@@ -1338,6 +1392,9 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
       leadCheckDatas: body.leadCheckDatas,
       leadCheckInterval: body.leadCheckInterval,
       leadCheckMaxAttempts: body.leadCheckMaxAttempts,
+      scriptPath, captchaApiKey, completeText, timeLimit, delayStart, delayStop, limitRun: newLimitRun,
+      antiFpCanvas: antiFingerprint.canvas, antiFpClientRects: antiFingerprint.clientRects,
+      antiFpWebgl: antiFingerprint.webgl, antiFpWebrtc: antiFingerprint.webrtc,
     };
     if (autoRefill.targetCount < 1) autoRefill.targetCount = targetSuccessCount;
   }
@@ -1361,6 +1418,11 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
     const streamLabel = isDualStream ? (streamRole === 1 ? 'Luồng 1 (Xuôi)' : 'Luồng 2 (Ngược)') : '';
 
     while (successfulBrowsers < targetSuccessCount) {
+      // Dừng khi đã đạt giới hạn limitRun (số phiên hoàn tất)
+      if (limitRunMax > 0 && limitRunCount >= limitRunMax) {
+        console.log(`[limitRun] Đã đạt giới hạn ${limitRunMax} phiên hoàn tất, dừng mở thêm.`);
+        break;
+      }
       let proxy;
       if (isDualStream) {
         proxy = getNextProxyForStream(streamRole, availableProxies);
@@ -1436,6 +1498,9 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 5,
         };
         const chosenDeviceProfile = getNextDeviceProfile();
+        if (delayStart > 0) {
+          await new Promise((r) => setTimeout(r, delayStart * 1000));
+        }
         const openedBrowser = await openBrowserWithInstalledChrome({
           build: installedChrome,
           proxy: proxy,
@@ -1451,6 +1516,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           deviceProfile: chosenDeviceProfile,
           streamRole: streamRole,
           streamLabel: streamLabel,
+          scriptSteps, captchaApiKey, completeText, timeLimit, delayStop, scriptPath,
+          antiFingerprint,
         });
         activeSession = openedBrowser.session;
         successfulBrowsers += 1;
@@ -1546,6 +1613,17 @@ async function launchUserRequestedBrowsers(requestBody) {
       leadCheckDatas: body.leadCheckDatas,
       leadCheckInterval: body.leadCheckInterval,
       leadCheckMaxAttempts: body.leadCheckMaxAttempts,
+      scriptPath: body.scriptPath ?? '',
+      captchaApiKey: body.captchaApiKey ?? '',
+      completeText: body.completeText ?? '',
+      timeLimit: Math.max(0, Number(body.timeLimit) || 0),
+      delayStart: Math.max(0, Number(body.delayStart) || 0),
+      delayStop: Math.max(0, Number(body.delayStop) || 0),
+      limitRun: Math.max(0, Number(body.limitRun) || 0),
+      antiFpCanvas: Boolean(body.antiFpCanvas),
+      antiFpClientRects: Boolean(body.antiFpClientRects),
+      antiFpWebgl: Boolean(body.antiFpWebgl),
+      antiFpWebrtc: Boolean(body.antiFpWebrtc),
     };
     autoRefill.targetCount = Math.min(
       maxAliveBrowsers,
@@ -2430,6 +2508,8 @@ async function startLeadVerification(session, leadConfig) {
  */
 async function openBrowserWithInstalledChrome({
   build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows', streamRole = 1, streamLabel = '',
+  scriptSteps = null, captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
+  antiFingerprint = {},
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
@@ -2563,6 +2643,73 @@ async function openBrowserWithInstalledChrome({
     }
   }, dp.spoof);
 
+  // Chống fingerprint theo tuỳ chọn (tương đương Canvas/ClientRects/WebGLImage/WebRTC trong Settings.ini bản Windows)
+  if (antiFingerprint.canvas || antiFingerprint.clientRects || antiFingerprint.webgl || antiFingerprint.webrtc) {
+    await context.addInitScript(({ canvas, clientRects, webgl, webrtc, seed }) => {
+      // Nhiễu nhỏ ổn định theo seed của phiên để cùng 1 phiên luôn ra cùng kết quả, nhưng khác giữa các phiên
+      let s = seed;
+      const rand = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+
+      if (canvas) {
+        const addNoise = (imageData) => {
+          const d = imageData.data;
+          for (let i = 0; i < d.length; i += 97) d[i] = d[i] ^ (rand() < 0.5 ? 0 : 1);
+          return imageData;
+        };
+        const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+        CanvasRenderingContext2D.prototype.getImageData = function (...args) {
+          return addNoise(origGetImageData.apply(this, args));
+        };
+        const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function (...args) {
+          const ctx = this.getContext('2d');
+          if (ctx) addNoise(ctx.getImageData(0, 0, this.width, this.height));
+          return origToDataURL.apply(this, args);
+        };
+      }
+
+      if (clientRects) {
+        const jitter = (rect) => {
+          const j = (rand() - 0.5) * 0.02;
+          const DOMRectCtor = window.DOMRect || Object;
+          return new DOMRectCtor(rect.x + j, rect.y + j, rect.width, rect.height);
+        };
+        const origGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+        Element.prototype.getBoundingClientRect = function () {
+          return jitter(origGetBoundingClientRect.apply(this));
+        };
+      }
+
+      if (webgl) {
+        const spoofParam = (getParameter) => function (param) {
+          if (param === 37445) return 'Intel Inc.'; // UNMASKED_VENDOR_WEBGL
+          if (param === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+          return getParameter.apply(this, [param]);
+        };
+        if (window.WebGLRenderingContext) {
+          WebGLRenderingContext.prototype.getParameter = spoofParam(WebGLRenderingContext.prototype.getParameter);
+        }
+        if (window.WebGL2RenderingContext) {
+          WebGL2RenderingContext.prototype.getParameter = spoofParam(WebGL2RenderingContext.prototype.getParameter);
+        }
+      }
+
+      if (webrtc) {
+        // Chặn rò IP thật qua WebRTC ICE candidate (tương đương WebRTC=True trong bản Windows)
+        try { delete window.RTCPeerConnection; } catch {}
+        try { delete window.webkitRTCPeerConnection; } catch {}
+        window.RTCPeerConnection = undefined;
+        window.webkitRTCPeerConnection = undefined;
+      }
+    }, {
+      canvas: Boolean(antiFingerprint.canvas),
+      clientRects: Boolean(antiFingerprint.clientRects),
+      webgl: Boolean(antiFingerprint.webgl),
+      webrtc: Boolean(antiFingerprint.webrtc),
+      seed: Math.floor(Math.random() * 0x7fffffff) || 1,
+    });
+  }
+
   // Lấy từ queue available (đã kiểm tra ở launchRequestedBrowsers)
   const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
   attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
@@ -2662,8 +2809,9 @@ async function openBrowserWithInstalledChrome({
       if (!session.closingDueToTrafficBlocked) {
         autoRefill.message = `Slot ${tileIndex + 1} (${streamLabel || 'Trình duyệt'}) trống; đang tìm proxy thay thế.`;
       }
-      // 5s delay khi chạy tuần tự hoặc khi không có lead; các trường hợp khác mở ngay
-      queueAutomaticRefill(autoRefill.sequential || session.closingDueToNoLead ? 5000 : 0);
+      // 5s delay khi chạy tuần tự hoặc khi không có lead; delayStop cộng thêm theo cấu hình script exe
+      const baseDelay = (autoRefill.sequential || session.closingDueToNoLead) ? 5000 : 0;
+      queueAutomaticRefill(baseDelay + delayStop * 1000);
     }
   });
   try {
@@ -2763,6 +2911,46 @@ async function openBrowserWithInstalledChrome({
 
     closeChromeWhenLastTabCloses(session);
     watchTrafficBlockedPage(session);
+
+    // completeText: đóng Chrome + tăng bộ đếm limitRun khi phát hiện chuỗi hoàn tất trong nội dung trang
+    if (completeText) {
+      const needle = completeText.toLowerCase();
+      const completeTimer = setInterval(async () => {
+        if (page.isClosed()) { clearInterval(completeTimer); return; }
+        const found = await page.evaluate((n) => (document.body?.innerText || '').toLowerCase().includes(n), needle).catch(() => false);
+        if (found) {
+          clearInterval(completeTimer);
+          limitRunCount += 1;
+          session.addLog?.({ time: new Date().toISOString(), type: 'complete_text', detail: `Đã tìm thấy text hoàn tất "${completeText}" (${limitRunCount}${limitRunMax > 0 ? '/' + limitRunMax : ''}).` });
+          session.suppressAutoRefill = false;
+          await session.browser?.close?.().catch(() => {});
+        }
+      }, 2000);
+      context.on('close', () => clearInterval(completeTimer));
+    }
+
+    // timeLimit: đóng phiên sau N giây bất kể đang ở trạng thái nào
+    if (timeLimit > 0) {
+      const timeLimitTimer = setTimeout(async () => {
+        session.addLog?.({ time: new Date().toISOString(), type: 'time_limit', detail: `Hết timeout phiên (${timeLimit}s), đóng trình duyệt.` });
+        await session.browser?.close?.().catch(() => {});
+      }, timeLimit * 1000);
+      context.on('close', () => clearTimeout(timeLimitTimer));
+    }
+
+    // Chạy script lệnh exe (SendByName/ClickXpath/ByPassReCaptcha/...) thay cho autofill tự động nếu có cấu hình
+    if (scriptSteps?.length > 0) {
+      void (async () => {
+        await page.waitForLoadState('domcontentloaded', { timeout: navigationTimeout }).catch(() => {});
+        const record = session.currentRecord ?? autofillRecords[0] ?? {};
+        await runScript(page, scriptSteps, record, {
+          captchaApiKey,
+          scriptDir: scriptPath ? dirname(scriptPath) : '',
+          logger: (entry) => session.addLog?.({ time: new Date().toISOString(), ...entry }),
+        });
+      })();
+    }
+
     return { exitIp, finalUrl, session };
   } catch (error) {
     session.suppressAutoRefill = true;
@@ -3347,7 +3535,37 @@ async function startLocalInterface() {
     }
 
     if (request.method === 'GET' && request.url === '/state') {
-      respondWithJson(response, 200, getAutoRefillStatus());
+      respondWithJson(response, 200, {
+        ...getAutoRefillStatus(),
+        limitRun: { count: limitRunCount, max: limitRunMax },
+      });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/scripts') {
+      const candidates = [
+        join(homedir(), 'Downloads', 'AutoLeadPC', 'Script', 'Offers'),
+        join(homedir(), 'Downloads', 'AutoLeadPC', 'Script', 'RRS'),
+        join(homedir(), 'Downloads', 'AutoLeadPC', 'Script'),
+        join(homedir(), 'Desktop', 'AutoLeadPC', 'Script'),
+      ];
+      const scriptEntries = [];
+      for (const dir of candidates) {
+        try {
+          const names = await readdir(dir);
+          for (const name of names) {
+            if (name.endsWith('.txt')) scriptEntries.push({ dir, name, path: join(dir, name) });
+          }
+        } catch {}
+      }
+      respondWithJson(response, 200, { scripts: scriptEntries });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/limit-run/reset') {
+      limitRunCount = 0;
+      limitRunMax = 0;
+      respondWithJson(response, 200, { message: 'Đã đặt lại bộ đếm limitRun về 0.' });
       return;
     }
 
@@ -3695,7 +3913,7 @@ async function startLocalInterface() {
   const listenHost = process.argv.includes('--public') ? '0.0.0.0' : '127.0.0.1';
   server.listen(port, listenHost, async () => {
     const interfaceUrl = `http://127.0.0.1:${port}`;
-    console.log(`AutoLeadPC Mac đang chạy tại ${interfaceUrl}`);
+    console.log(`AutoLeadPC Mac [Bản ${instanceId}] đang chạy tại ${interfaceUrl}`);
     if (listenHost === '0.0.0.0') console.log(`[Hub] Lắng nghe trên tất cả giao diện mạng — agent có thể kết nối qua IP LAN:${port}`);
     exitWhenParentExits();
     if (process.env.AUTOLEADPC_NO_OPEN === '1') return;
