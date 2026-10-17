@@ -145,13 +145,13 @@
         <div style="margin-top: 10px; margin-bottom: 12px; border: 1px solid #d8dfeb; border-radius: 8px; padding: 10px 12px; background: #ffffff;">
           <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;">
             <input type="checkbox" id="enable-lead-check" name="enableLeadCheck" checked style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
-            <span>Kiểm tra lead sau màn 1 (chờ 2 lần x 30s, đúng IP mới fill tiếp, không có thì đóng đổi sock)</span>
+            <span>Kiểm tra lead khi đến màn số 5 (gọi API toffers.top, trùng IP mới làm tiếp, không thì tắt Chrome đổi sock)</span>
           </label>
           <p class="hint" style="margin-top: 5px; margin-bottom: 6px;">
-            Khi điền xong màn 1, autofill sẽ dừng chờ và gọi API toffers.top mỗi 30s (tối đa 2 lần). Nếu IP sock xuất hiện trong lead, app tiếp tục điền các màn sau; nếu không có lead, app sẽ đóng Chrome để mở sock tiếp theo cho đến khi hết sock.
+            Điền tự động các màn 1-4 bình thường. Khi làm đến màn 5 (DOB/Gender), hệ thống tạm dừng và gọi API toffers.top kiểm tra lead trùng với IP sock. Nếu lead về mới làm tiếp các bước sau; nếu không có lead sau thời gian chờ thì tắt Chrome và mở sock tiếp theo.
           </p>
           <details id="lead-check-advanced" style="margin-top: 6px; font-size: 11px;">
-            <summary style="cursor: pointer; color: #2866e8; font-weight: 500;">Tùy chỉnh API kiểm tra lead (URL, Cookie, datas, chu kỳ)</summary>
+            <summary style="cursor: pointer; color: #2866e8; font-weight: 500;">Tùy chỉnh API kiểm tra lead (URL, Cookie, datas, chu kỳ, màn kích hoạt)</summary>
             <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
               <div>
                 <label for="lead-check-api-url" style="font-size: 11px; margin-bottom: 2px;">URL API kiểm tra lead</label>
@@ -162,6 +162,10 @@
                 <input id="lead-check-cookie" name="leadCheckCookie" type="text" value="qcodes_=7p0d1pg081d433i45giksp7k5fvm386o; qcodes_sound=1" style="font-size: 11px; padding: 6px;">
               </div>
               <div class="row">
+                <div>
+                  <label for="lead-check-screen" style="font-size: 11px; margin-bottom: 2px;">Màn kích hoạt check</label>
+                  <input id="lead-check-screen" name="leadCheckScreen" type="number" min="1" max="20" value="5" style="font-size: 11px; padding: 6px;">
+                </div>
                 <div>
                   <label for="lead-check-datas" style="font-size: 11px; margin-bottom: 2px;">Tham số datas (POST)</label>
                   <input id="lead-check-datas" name="leadCheckDatas" type="text" value="1504" style="font-size: 11px; padding: 6px;">
@@ -442,7 +446,7 @@
     let isRefreshingAutoRefillState = false;
     const savedFieldNames = [
       'proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'autofillData', 'emailList', 'autoSubmitForm',
-      'enableLeadCheck', 'leadCheckApiUrl', 'leadCheckCookie', 'leadCheckDatas', 'leadCheckInterval', 'leadCheckMaxAttempts',
+      'enableLeadCheck', 'leadCheckScreen', 'leadCheckApiUrl', 'leadCheckCookie', 'leadCheckDatas', 'leadCheckInterval', 'leadCheckMaxAttempts',
     ];
     const tabButtons = [...document.querySelectorAll('[role="tab"]')];
     const tabPanels = [...document.querySelectorAll('[role="tabpanel"]')];
@@ -683,6 +687,7 @@
           proxyType: full.proxyType,
           autoSubmitForm: full.autoSubmitForm,
           enableLeadCheck: full.enableLeadCheck,
+          leadCheckScreen: full.leadCheckScreen || 5,
           leadCheckApiUrl: full.leadCheckApiUrl,
           leadCheckCookie: full.leadCheckCookie,
           leadCheckDatas: full.leadCheckDatas,

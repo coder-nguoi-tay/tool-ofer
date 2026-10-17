@@ -935,11 +935,12 @@ function dispatchOneTaskToAgent(agent, settings) {
     deviceProfile: chosenProfile,
     leadConfig: {
       enabled: settings.enableLeadCheck !== false,
-      apiUrl: settings.leadCheckApiUrl,
-      cookie: settings.leadCheckCookie,
-      datas: settings.leadCheckDatas,
-      intervalSeconds: settings.leadCheckInterval,
-      maxAttempts: settings.leadCheckMaxAttempts,
+      checkScreen: Number(settings.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 5,
+      apiUrl: settings.leadCheckApiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
+      cookie: settings.leadCheckCookie || DEFAULT_LEAD_CONFIG.cookie,
+      datas: settings.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
+      intervalSeconds: Number(settings.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
+      maxAttempts: Number(settings.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
     },
     createdAt: Date.now(),
   });
@@ -1296,6 +1297,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null } = {}
           datas: body.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
           intervalSeconds: Number(body.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
           maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
+          checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 5,
         };
         const chosenDeviceProfile = getNextDeviceProfile();
         const openedBrowser = await openBrowserWithInstalledChrome({
@@ -2077,10 +2079,11 @@ async function openTemplateProfile() {
 }
 
 /**
- * Bắt đầu quy trình kiểm tra lead sau khi autofill hoàn thành màn đầu tiên.
- * Chờ mỗi 30s gọi API toffers.top kiểm tra IP sock, tối đa 2 lần.
- * Nếu IP xuất hiện: cho phép autofill tiếp tục các màn sau.
- * Nếu không xuất hiện sau 2 lần: đóng Chrome và chuyển proxy tiếp theo cho đến khi hết sock.
+ * Bắt đầu quy trình kiểm tra lead khi đến/hoàn thành màn đích (mặc định màn 5: DOB/Gender).
+ * Gọi API toffers.top kiểm tra IP sock theo chu kỳ cấu hình (mặc định mỗi 30s, tối đa 2 lần).
+ * Nếu IP xuất hiện: cho phép autofill tiếp tục các bước sau (Jump Page, Reward, Offerwall).
+ * Nếu không xuất hiện sau maxAttempts: đóng Chrome và chuyển sang proxy/sock tiếp theo.
+ * Nếu API gặp lỗi (hết hạn Cookie): giữ nguyên Chrome để bảo vệ sock và cảnh báo người dùng.
  *
  * @param {object} session Phiên Chrome đang chạy.
  * @param {object} leadConfig Cấu hình API và thời gian chờ.
@@ -2091,15 +2094,16 @@ async function openTemplateProfile() {
 async function startLeadVerification(session, leadConfig) {
   if (session.leadCheckRunning || leadConfig.enabled === false) return;
   session.leadCheckRunning = true;
-  session.leadCheckStatus = 'waiting';
+  session.leadCheckStatus = 'checking';
 
   const exitIp = session.exitIp;
   const proxyHost = session.proxyServer ? normalizeIpAddress(session.proxyServer) : null;
   const targetIps = [exitIp, proxyHost].filter(Boolean);
   const slotNum = (session.tileIndex ?? 0) + 1;
+  const targetScreen = leadConfig.checkScreen || 5;
   const label = `Slot ${slotNum} [IP: ${exitIp}]`;
 
-  console.log(`[LeadCheck] ${label}: Đã xong màn 1. Bắt đầu kiểm tra lead chạy ngầm từ toffers.top...`);
+  console.log(`[LeadCheck] ${label}: Đã đến màn ${targetScreen}. Bắt đầu kiểm tra lead từ toffers.top...`);
 
   const updateBadge = (text) => {
     try {
@@ -2117,12 +2121,11 @@ async function startLeadVerification(session, leadConfig) {
   };
 
   const intervalSeconds = leadConfig.intervalSeconds || DEFAULT_LEAD_CONFIG.intervalSeconds;
-  let maxAttempts = leadConfig.maxAttempts || DEFAULT_LEAD_CONFIG.maxAttempts;
-  const intervalMs = intervalSeconds * 1000;
+  const maxAttempts = leadConfig.maxAttempts || DEFAULT_LEAD_CONFIG.maxAttempts;
   const initialWaitSeconds = Math.min(5, intervalSeconds);
 
-  session.leadCheckMessage = `Đã xong màn 1; đang chạy ngầm kiểm tra lead lần 1...`;
-  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chạy ngầm kiểm tra lead (1/${maxAttempts})...</span>`);
+  session.leadCheckMessage = `Đã đến màn ${targetScreen}; đang kiểm tra lead lần 1...`;
+  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang kiểm tra lead màn ${targetScreen} (1/${maxAttempts})...</span>`);
 
   let leadFound = false;
   let attempt = 0;
@@ -2152,7 +2155,7 @@ async function startLeadVerification(session, leadConfig) {
       if (isPresent) {
         leadFound = true;
         hasApiError = false;
-        console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead cho IP ${exitIp} ở lần ${attempt}! Tiếp tục fill màn sau.`);
+        console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead cho IP ${exitIp} ở lần ${attempt}! Tiếp tục làm tiếp.`);
         break;
       } else {
         hasApiError = false;
@@ -2165,23 +2168,13 @@ async function startLeadVerification(session, leadConfig) {
       session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}`;
       updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#dc2626;">⚠️ Lỗi API (${err.code || 'ERR'})</span>`);
     }
-
-    // Nếu chưa thấy lead nhưng phiên đang thao tác tích cực (vừa bấm/điền form trong 60s qua)
-    // thì tự động gia hạn thêm lượt kiểm tra để không gián đoạn quá trình
-    if (!leadFound && attempt >= maxAttempts) {
-      const timeSinceLastAction = Date.now() - (session.lastActionTime || 0);
-      const isActivelyProgressing = (session.lastActionTime && timeSinceLastAction < 60000) || session.autofillRunning || session.aiAssistRunning;
-      if (isActivelyProgressing && attempt < 8) {
-        maxAttempts += 1;
-        console.log(`[LeadCheck] ${label}: Trình duyệt vẫn đang thao tác (${(timeSinceLastAction / 1000).toFixed(0)}s trước), gia hạn kiểm tra lead lần ${attempt + 1}...`);
-      }
-    }
   }
 
   if (leadFound) {
     session.leadCheckStatus = 'confirmed';
-    session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp}! Đang tiếp tục tự điền các màn sau.`;
-    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead về!</span>`);
+    session.screen5LeadVerified = true;
+    session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp}! Đang tiếp tục tự điền các bước tiếp theo.`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead về! Làm tiếp...</span>`);
 
     const logs = browserSessionLogs.get(session);
     if (logs) {
@@ -2189,17 +2182,17 @@ async function startLeadVerification(session, leadConfig) {
         time: new Date().toISOString(),
         type: 'lead_confirmed',
         ip: exitIp,
-        detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt}.`,
+        detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt} (Màn ${targetScreen}).`,
       });
     }
 
-    // Kích hoạt ngay lượt quét autofill tiếp theo để điền màn 2 tức thì
+    // Kích hoạt ngay lượt quét autofill tiếp theo để tiếp tục Jump Page / Rewards / Offerwall
     try {
       session.triggerAutofillScan?.();
     } catch {}
   } else if (hasApiError) {
-    // API BỊ LỖI (Cookie hết hạn, link chết, Cloudflare chặn hoặc mất mạng):
-    // TUYỆT ĐỐI KHÔNG TẮT TRÌNH DUYỆT ĐỂ TRÁNH MẤT LEAD HOẶC PHÍ PROXY!
+    // API BỊ LỖI (Cookie hết hạn, Cloudflare chặn hoặc mất mạng):
+    // GIỮ NGUYÊN TRÌNH DUYỆT ĐỂ BẢO VỆ LEAD VÀ SOCK
     session.leadCheckStatus = 'api_error';
     session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}. Đã giữ nguyên trình duyệt để bạn kiểm tra hoặc cập nhật Cookie!`;
     updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">⚠️ Giữ browser: Lỗi API</span>`);
@@ -2220,66 +2213,33 @@ async function startLeadVerification(session, leadConfig) {
       session.triggerAutofillScan?.();
     } catch {}
   } else {
-    // BỎ THỜI GIAN KILL TRÌNH DUYỆT: Giữ nguyên trình duyệt để chờ kết quả từ AI và autofill tiếp tục xử lý các màn
-    session.leadCheckStatus = 'waiting_lead';
-    session.leadCheckMessage = `⏳ Chưa thấy lead sau ${attempt} lần kiểm tra. Đang giữ trình duyệt và kích hoạt AI/Autofill hỗ trợ...`;
-    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#a78bfa;">🤖 Giữ browser: Chờ AI...</span>`);
+    // KHÔNG CÓ LEAD VỀ SAU KHI KIỂM TRA MÀN 5:
+    // "nếu không thì tắt trình duyệt" -> Tắt trình duyệt và xoay sock mới
+    session.leadCheckStatus = 'failed';
+    session.closingDueToNoLead = true;
+    session.leadCheckMessage = `❌ Không có lead về cho IP ${exitIp} sau ${attempt} lần kiểm tra màn ${targetScreen}. Đang tắt trình duyệt để đổi sock mới...`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead. Đóng Chrome...</span>`);
 
-    console.log(`[LeadCheck] ${label}: Chưa thấy lead sau ${attempt} lần kiểm tra. Giữ nguyên trình duyệt để AI/Autofill tiếp tục xử lý các màn.`);
+    console.log(`[LeadCheck] ${label}: ❌ Không có lead về sau ${attempt} lần kiểm tra màn ${targetScreen}. Tắt trình duyệt và xoay sock.`);
 
     const logs = browserSessionLogs.get(session);
     if (logs) {
       logs.push({
         time: new Date().toISOString(),
-        type: 'lead_waiting_ai',
+        type: 'lead_failed',
         ip: exitIp,
-        detail: `Chưa thấy lead sau ${attempt} lần kiểm tra. Giữ nguyên trình duyệt để AI & Autofill tiếp tục xử lý.`,
+        detail: `Không có lead về sau ${attempt} lần kiểm tra màn ${targetScreen}. Đóng trình duyệt để chuyển proxy tiếp theo.`,
       });
     }
 
-    // Thử AI assist giải cứu form / btn-option / jump page nếu đang kẹt
-    if (!session.aiAssistRunning) {
-      try {
-        const pages = await session.browser?.pages?.().catch(() => []) ?? [];
-        const activePage = pages.find((p) => !p.isClosed?.());
-        if (activePage) {
-          const record = session.currentRecord ?? {};
-          console.log(`[LeadCheck] ${label}: kích hoạt AI assist hỗ trợ...`);
-          await runAiAssist(activePage, record, session, {
-            onLog: (entry) => session.addLog?.(entry),
-          });
-        }
-      } catch (err) {
-        console.warn(`[LeadCheck] ${label}: AI assist hoàn tất:`, err.message);
-      }
-    }
-
     try {
-      session.triggerAutofillScan?.();
-    } catch {}
-
-    // Tiếp tục kiểm tra lead chạy ngầm định kỳ (mỗi intervalSeconds), KHÔNG BAO GIỜ đóng trình duyệt đột ngột
-    let bgAttempts = 0;
-    const bgChecker = setInterval(async () => {
-      if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
-        clearInterval(bgChecker);
-        return;
+      if (session.browser && !session.browser.isClosed?.()) {
+        session.suppressAutoRefill = false;
+        await session.browser.close().catch(() => {});
       }
-      bgAttempts += 1;
-      try {
-        const bgLeadData = await fetchLeadDatas(leadConfig);
-        if (isLeadPresent(bgLeadData, targetIps)) {
-          clearInterval(bgChecker);
-          session.leadCheckStatus = 'confirmed';
-          session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp} (sau khi AI hỗ trợ)!`;
-          updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead về!</span>`);
-          console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead chạy ngầm cho IP ${exitIp}!`);
-          session.triggerAutofillScan?.();
-        }
-      } catch {}
-      if (bgAttempts > 20) clearInterval(bgChecker);
-    }, intervalMs);
-    bgChecker.unref?.();
+    } catch (closeErr) {
+      console.warn(`[LeadCheck] ${label}: Lỗi khi đóng trình duyệt:`, closeErr.message);
+    }
   }
 }
 
@@ -2436,6 +2396,7 @@ async function openBrowserWithInstalledChrome({
   attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
     autoSubmit,
     enableLeadCheck: leadConfig.enabled !== false,
+    leadCheckScreen: leadConfig.checkScreen || 5,
     onLog: (entry) => {
       session.addBrowserLog?.(entry);
     },
@@ -2455,6 +2416,9 @@ async function openBrowserWithInstalledChrome({
         void saveAutofillQueue();
       }
       void markAutofillRecordUsed(record);
+    },
+    onScreen5Reached: (sess, page) => {
+      void startLeadVerification(sess, leadConfig);
     },
     onFirstScreenCompleted: () => {
       void startLeadVerification(session, leadConfig);

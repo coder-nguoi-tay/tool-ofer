@@ -8,6 +8,7 @@ import { URL } from 'node:url';
  */
 export const DEFAULT_LEAD_CONFIG = {
   enabled: true,
+  checkScreen: 5,
   apiUrl: 'https://toffers.top/partner/chat_leading/get_lead_datas',
   cookie: 'qcodes_=7p0d1pg081d433i45giksp7k5fvm386o; qcodes_sound=1',
   datas: '1504',

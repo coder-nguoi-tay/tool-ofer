@@ -888,6 +888,7 @@ assert.equal(normalizeIpAddress('socks5://1.2.3.4:1080'), '1.2.3.4');
 assert.equal(normalizeIpAddress('http://5.6.7.8:8080'), '5.6.7.8');
 assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 30);
 assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 2);
+assert.equal(DEFAULT_LEAD_CONFIG.checkScreen, 5);
 
 const sampleApiResponse = {
   results: [
@@ -922,6 +923,19 @@ assert.equal(isLeadPresent(null, '99.145.85.141'), false);
 // Hỗ trợ dạng JSON string
 assert.equal(isLeadPresent(JSON.stringify(sampleApiResponse), '99.145.85.141'), true);
 assert.equal(isLeadPresent(JSON.stringify(sampleApiResponse), '1.2.3.4'), false);
+
+// Test dữ liệu thực tế toffers.top cung cấp từ người dùng (ID: 29805, IP: 138.89.53.3)
+const userApiResponse = {
+  results: [
+    { id: '29805', typeoffer: '1', device_num: '', clickid: 'U7XsDA03s212F2hxBo', idmem: '55', offerid: '2420', point: '0.4', ip: '138.89.53.3', geo: 'US', timeclick: '1792197621', timelead: '1792197657', network2: '45', nameoff: 'Personal Financial Guide - US - Finance ', username: 'Haicrv', fullname: 'Haicrv', idgroup: '0' },
+    { id: '29804', typeoffer: '1', device_num: '', clickid: 'MYysocn1ohJOeHnIo4', idmem: '55', offerid: '2420', point: '0.4', ip: '138.43.154.239', geo: 'US', timeclick: '1792197260', timelead: '1792197313', network2: '45', nameoff: 'Personal Financial Guide - US - Finance ', username: 'Haicrv', fullname: 'Haicrv', idgroup: '0' },
+  ],
+  check: '29805',
+};
+assert.equal(isLeadPresent(userApiResponse, '138.89.53.3'), true);
+assert.equal(isLeadPresent(userApiResponse, '138.43.154.239'), true);
+assert.equal(isLeadPresent(userApiResponse, '138.89.53.3:1080'), true);
+assert.equal(isLeadPresent(userApiResponse, '10.0.0.1'), false);
 
 const testAuthErr = new LeadApiError('Hết hạn', 'AUTH_EXPIRED', { status: 302 });
 assert.equal(testAuthErr.code, 'AUTH_EXPIRED');

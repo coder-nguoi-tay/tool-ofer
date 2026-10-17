@@ -1972,10 +1972,11 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
   async function fillVisibleForms(page) {
     if (page.isClosed()) return;
     if (session.leadCheckStatus === 'failed') return;
+    if (session.leadCheckStatus === 'checking') return;
     const currentUrl = page.url();
     if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:')) return;
 
-    if (!session.initialFormUrl && !session.screen1Completed) {
+    if (!session.initialFormUrl) {
       session.initialFormUrl = currentUrl;
     }
 
@@ -2608,6 +2609,38 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         return { unfilled: false };
       }).catch(() => ({ unfilled: false }));
 
+      // Nhận diện loại màn hình hiện tại (Màn 5 DOB/Gender, Jump Page, v.v.)
+      const screenInfo = await frame.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea, [id="btn-option"], .btn-option'));
+        const text = inputs.map((el) => `${el.name || ''} ${el.id || ''} ${el.className || ''} ${el.getAttribute('data-tf-element-role') || ''}`).join(' ').toLowerCase();
+        const hasDob = /dob|birth|bday|month.*year|year.*month|birth_month|dob_month/i.test(text);
+        const hasGender = /gender|male|female/i.test(text);
+        const isScreen5 = (hasDob && hasGender) || hasDob || (hasGender && !/phone|address|street|email|firstname/i.test(text));
+
+        const hasJumpCta = Boolean(document.querySelector('.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i]'));
+        const isJumpPage = inputs.length === 0 && hasJumpCta;
+
+        return { isScreen5, isJumpPage, hasDob, hasGender };
+      }).catch(() => null);
+
+      if (screenInfo?.isScreen5) {
+        session.currentScreen = 5;
+        session.isAtScreen5 = true;
+      }
+
+      // Nếu đang ở Jump Page (sau Màn 5) và chưa kiểm tra lead:
+      // TẠM DỪNG, KHÔNG CLICK NÚT NHẬN THƯỞNG, GỌI KIỂM TRA LEAD TRÙNG IP!
+      if (screenInfo?.isJumpPage && options.enableLeadCheck !== false && !session.screen5LeadVerified) {
+        if (!session.screen5LeadCheckTriggered) {
+          session.screen5LeadCheckTriggered = true;
+          session.leadCheckStatus = 'checking';
+          if (typeof options.onScreen5Reached === 'function') {
+            options.onScreen5Reached(session, page);
+          }
+        }
+        return; // Dừng lại ở Jump Page, đợi kết quả kiểm tra lead!
+      }
+
       // Kiểm tra và bấm nút submit liên tục: nếu không còn trường bắt buộc nào còn trống
       if (!hasUnfilledRequiredOrErrorField?.unfilled && options.autoSubmit !== false) {
         try {
@@ -2738,14 +2771,21 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 }
               }
 
-              // Màn đầu tiên vừa được submit chính thức: kích hoạt kiểm tra lead chạy ngầm từ API
-              if (options.enableLeadCheck !== false && !session.screen1Completed) {
-                session.screen1Completed = true;
-                session.leadCheckStatus = 'checking';
-                if (typeof options.onFirstScreenCompleted === 'function') {
-                  options.onFirstScreenCompleted(session, page);
+              session.completedScreens = (session.completedScreens || 0) + 1;
+              session.currentScreen = session.completedScreens + 1;
+
+              // Kiểm tra xem màn vừa submit có phải là Màn 5 (DOB/Gender) hoặc đạt màn đích kiểm tra lead hay không
+              const checkScreenTarget = Number(options.leadCheckScreen) || 5;
+              const isTargetScreenSubmit = screenInfo?.isScreen5 || session.completedScreens >= checkScreenTarget;
+
+              if (options.enableLeadCheck !== false && isTargetScreenSubmit && !session.screen5LeadVerified) {
+                if (!session.screen5LeadCheckTriggered) {
+                  session.screen5LeadCheckTriggered = true;
+                  session.leadCheckStatus = 'checking';
+                  if (typeof options.onScreen5Reached === 'function') {
+                    options.onScreen5Reached(session, page);
+                  }
                 }
-                // Tiếp tục chu trình để màn 2 được xử lý ngay lập tức, KHÔNG return
               }
 
               // Kích hoạt quét tiếp theo sau 120ms để màn hình thao tác liên tục không nghỉ
@@ -2845,6 +2885,12 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           hasInteractable = true;
         }
 
+        if (session.leadCheckStatus === 'checking') {
+          // Đang đợi kiểm tra lead màn 5, không tính là bị kẹt để tránh gọi AI nhầm
+          noProgressRounds = 0;
+          return;
+        }
+
         if (hasInteractable) {
           noProgressRounds += 1;
         } else {
@@ -2865,16 +2911,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     timer.unref?.();
     page.on('domcontentloaded', scan);
     page.on('load', scan);
-    page.on('framenavigated', (frame) => {
-      if (options.enableLeadCheck !== false && !session.screen1Completed && (session.autofillFields ?? 0) > 0) {
-        if (typeof page.mainFrame === 'function' && frame === page.mainFrame()) {
-          session.screen1Completed = true;
-          session.leadCheckStatus = 'checking';
-          if (typeof options.onFirstScreenCompleted === 'function') {
-            options.onFirstScreenCompleted(session, page);
-          }
-        }
-      }
+    page.on('framenavigated', () => {
       void scan();
     });
     page.on('frameattached', scan);
