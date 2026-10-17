@@ -11,7 +11,6 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import {
   installChromeVersions,
-  listInstalledChromeVersions,
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
@@ -1971,6 +1970,9 @@ async function readInstalledChromeChannel(appPath, channel) {
   if (!executablePath) {
     throw new Error(`Không tìm thấy binary Chrome trong ${appPath}.`);
   }
+  if (appPath.includes('Chrome for Testing') || executablePath.includes('Chrome for Testing')) {
+    throw new Error(`Bỏ qua Chrome for Testing tại ${appPath}.`);
+  }
   const infoPath = join(appPath, 'Contents', 'Info.plist');
   const { stdout } = await executeFile('/usr/libexec/PlistBuddy', [
     '-c', 'Print :CFBundleShortVersionString', infoPath,
@@ -2009,13 +2011,6 @@ export async function listInstalledChromeChannels() {
     ['beta', join(chromeChannelDirectory, 'Google Chrome Beta.app')],
     ['dev', join(chromeChannelDirectory, 'Google Chrome Dev.app')],
     ['canary', join(chromeChannelDirectory, 'Google Chrome Canary.app')],
-    // Kho Chrome for Testing xếp cuối: chỉ dùng khi cần thêm major, và không áp sàn 150
-    // vì đây là nguồn duy nhất còn các bản cũ hơn.
-    ...(await listInstalledChromeVersions()).map((build) => [
-      build.version,
-      join(build.executablePath, '..', '..', '..'),
-      1,
-    ]),
   ];
   const builds = [];
   const seenMajors = new Set();
@@ -3720,7 +3715,7 @@ async function runAgentTask(task) {
   const proxy = parseProxyLine(proxyLine.trim(), 1, proxyType);
   const proxyKey = createProxyUsageKey(proxy, 0);
   const builds = await listInstalledChromeChannels();
-  if (builds.length === 0) throw new Error('Không có Chrome for Testing trên máy này');
+  if (builds.length === 0) throw new Error('Không có Google Chrome trên máy này');
   const build = builds[chromeBuildRotationCounter % builds.length];
   chromeBuildRotationCounter++;
   const screen = await readScreenSize();

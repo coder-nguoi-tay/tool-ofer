@@ -24,6 +24,7 @@ import {
   buildProxyCheckReport,
   buildUsedExitIpList,
   chromeExecutableNames,
+  listInstalledChromeChannels,
   isManagedChromeProfilePath,
   createProxyUsageKey,
   hasTrafficBlocked,
@@ -845,6 +846,15 @@ assert.deepEqual(chromeExecutableNames('stable'), ['Google Chrome', 'Google Chro
 assert.deepEqual(chromeExecutableNames('145.0.7632.117'), ['Google Chrome', 'Google Chrome for Testing']);
 assert.deepEqual(chromeExecutableNames('beta'), ['Google Chrome Beta']);
 assert.deepEqual(chromeExecutableNames('canary'), ['Google Chrome Canary']);
+
+// Đảm bảo không chứa bất kỳ bản Chrome for Testing nào trong danh sách Chrome khả dụng
+const activeChromeBuilds = await listInstalledChromeChannels();
+assert.ok(activeChromeBuilds.length > 0, 'Phải tìm thấy ít nhất 1 bản Chrome thường');
+for (const b of activeChromeBuilds) {
+  assert.ok(!b.executablePath.includes('Chrome for Testing'), `Bản ${b.version} không được là Chrome for Testing`);
+  assert.ok(!b.executablePath.includes('chrome-builds'), `Bản ${b.version} không được nằm trong kho chrome-builds`);
+  assert.ok(b.major >= 150, `Bản ${b.version} phải từ major 150 trở lên`);
+}
 
 // Test isConsentCheckbox nhận diện chính xác ô digitalConsent / consent-box của form
 const sampleConsentMeta = {
