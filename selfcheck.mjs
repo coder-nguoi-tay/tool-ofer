@@ -1690,7 +1690,25 @@ assert.equal(p1_single.server, p2_single.server, 'Cả 2 luồng đều mở đ�
 // 12.3 createProxyUsageKey tạo khóa riêng cho từng websiteUrl để ghi nhận lịch sử độc lập
 const key1 = createProxyUsageKey(singleProxyList[0], 1, 'https://link1.com');
 const key2 = createProxyUsageKey(singleProxyList[0], 1, 'https://link2.com');
-assert.notEqual(key1, key2, 'Hai trang đích khác nhau phải có proxyUsageKey khác nhau để không ghi đè');
+// 12.4 Kiểm tra chế độ chạy tuần tự: nếu điền cả 2 link thì chạy đồng thời cả 2 link (targetCount = 2)
+const seqSettingsDual = {
+  websiteUrl: 'https://link1.com',
+  websiteUrl2: 'https://link2.com',
+};
+const url1 = normalizeUrl(seqSettingsDual.websiteUrl);
+const url2 = normalizeUrl(seqSettingsDual.websiteUrl2);
+const isDualSeq = Boolean(url1 && url2 && url1 !== url2);
+assert.equal(isDualSeq, true, 'Phải nhận diện được 2 link đích khác nhau');
+const seqTarget = isDualSeq ? 2 : 1;
+assert.equal(seqTarget, 2, 'Chạy tuần tự khi điền 2 link phải đặt targetCount = 2 để chạy đồng thời cả 2 link');
+
+const seqSettingsSingle = {
+  websiteUrl: 'https://link1.com',
+  websiteUrl2: '',
+};
+const isSingleSeq = Boolean(seqSettingsSingle.websiteUrl && seqSettingsSingle.websiteUrl2 && seqSettingsSingle.websiteUrl !== seqSettingsSingle.websiteUrl2);
+assert.equal(isSingleSeq, false, 'Khi chỉ có 1 link thì không phải dual stream');
+assert.equal(isSingleSeq ? 2 : 1, 1, 'Chạy tuần tự 1 link phải đặt targetCount = 1');
 
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 

@@ -1573,20 +1573,30 @@ function queueAutomaticRefill(delayMs = 0) {
     autoRefill.queued = false;
     if (!autoRefill.enabled || !autoRefill.settings) return;
 
-    const waitMs = autoRefill.sequential && activeBrowsers.size === 0 ? delayMs : 0;
+    const waitMs = (autoRefill.sequential || activeBrowsers.size === 0) ? delayMs : 0;
     if (waitMs > 0) {
       autoRefill.message = `Chế độ tuần tự: chờ ${waitMs / 1000}s trước khi mở phiên tiếp theo…`;
       await new Promise((resolve) => setTimeout(resolve, waitMs));
       if (!autoRefill.enabled || !autoRefill.settings) return;
     }
 
-    const neededSlots = Math.min(autoRefill.sequential ? 1 : autoRefill.targetCount, maxAliveBrowsers) - activeBrowsers.size;
+    const activeSettings = autoRefill.settings;
+    let url1 = activeSettings.websiteUrl ? normalizeUrl(activeSettings.websiteUrl) : '';
+    let url2 = activeSettings.websiteUrl2 ? normalizeUrl(activeSettings.websiteUrl2) : '';
+    if (!url2 && url1 && /[\r\n,]/.test(activeSettings.websiteUrl)) {
+      const parts = activeSettings.websiteUrl.split(/[\r\n,]+/).map((u) => u.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        url1 = normalizeUrl(parts[0]);
+        url2 = normalizeUrl(parts[1]);
+      }
+    }
+    const isDual = Boolean(url1 && url2 && url1 !== url2);
+    const seqTarget = autoRefill.sequential ? (isDual ? 2 : 1) : autoRefill.targetCount;
+    const neededSlots = Math.min(seqTarget, maxAliveBrowsers) - activeBrowsers.size;
     if (neededSlots <= 0) return;
 
-    const activeSettings = autoRefill.settings;
-    const isDual = Boolean(activeSettings.websiteUrl2 && activeSettings.websiteUrl2 !== activeSettings.websiteUrl);
     autoRefill.message = autoRefill.sequential
-      ? 'Chế độ tuần tự: đang mở phiên tiếp theo…'
+      ? (isDual ? 'Chế độ tuần tự 2 luồng: đang mở phiên tiếp theo…' : 'Chế độ tuần tự: đang mở phiên tiếp theo…')
       : `Đang tìm proxy mới để bù ${neededSlots} slot trống…`;
 
     // Dispatch đến remote agents có enabled + còn slot + còn sống
@@ -1603,6 +1613,7 @@ function queueAutomaticRefill(delayMs = 0) {
       return;
     }
 
+    let assignedStreamRoles = null;
     if (isDual) {
       assignedStreamRoles = [];
       let curStream1 = [...activeBrowsers].filter((s) => s.streamRole === 1).length;
@@ -1620,11 +1631,13 @@ function queueAutomaticRefill(delayMs = 0) {
 
     const result = await launchRequestedBrowsers(JSON.stringify({
       ...activeSettings,
+      websiteUrl: url1 || activeSettings.websiteUrl,
+      websiteUrl2: url2 || activeSettings.websiteUrl2,
       requestedCount: localNeeded,
-    }), { layoutTarget: autoRefill.targetCount, assignedStreamRoles });
-    autoRefill.message = activeBrowsers.size >= autoRefill.targetCount
-      ? `Đã bù đủ ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`
-      : result.warnings.at(-1) ?? `Hiện mở ${activeBrowsers.size}/${autoRefill.targetCount}; không còn proxy phù hợp để bù.`;
+    }), { layoutTarget: seqTarget, assignedStreamRoles });
+    autoRefill.message = activeBrowsers.size >= seqTarget
+      ? `Đã bù đủ ${activeBrowsers.size}/${seqTarget} trình duyệt.`
+      : result.warnings.at(-1) ?? `Hiện mở ${activeBrowsers.size}/${seqTarget}; không còn proxy phù hợp để bù.`;
   }).catch((error) => {
     autoRefill.queued = false;
     autoRefill.message = `Tự bù gặp lỗi: ${error.message.split('\n')[0]}`;
@@ -3408,15 +3421,32 @@ async function startLocalInterface() {
       autoRefill.sequential = body.enabled !== false;
       if (autoRefill.sequential) {
         autoRefill.enabled = true;
-        autoRefill.targetCount = 1;
-        autoRefill.settings = body.settings ?? autoRefill.settings;
-        autoRefill.message = 'Chế độ tuần tự đã bật: mở 1 tab mỗi lần, delay 5s giữa các phiên.';
-        if (body.settings) queueAutomaticRefill();
+        const s = body.settings ?? autoRefill.settings ?? {};
+        let url1 = s.websiteUrl ? normalizeUrl(s.websiteUrl) : '';
+        let url2 = s.websiteUrl2 ? normalizeUrl(s.websiteUrl2) : '';
+        if (!url2 && url1 && /[\r\n,]/.test(s.websiteUrl)) {
+          const parts = s.websiteUrl.split(/[\r\n,]+/).map((u) => u.trim()).filter(Boolean);
+          if (parts.length >= 2) {
+            url1 = normalizeUrl(parts[0]);
+            url2 = normalizeUrl(parts[1]);
+          }
+        }
+        const isDual = Boolean(url1 && url2 && url1 !== url2);
+        autoRefill.targetCount = isDual ? 2 : 1;
+        autoRefill.settings = {
+          ...s,
+          websiteUrl: url1 || s.websiteUrl,
+          websiteUrl2: url2 || s.websiteUrl2,
+        };
+        autoRefill.message = isDual
+          ? 'Chế độ tuần tự 2 luồng đã bật: chạy đồng thời cả 2 link (Luồng 1 từ đầu, Luồng 2 từ cuối), delay 5s giữa các phiên.'
+          : 'Chế độ tuần tự đã bật: mở 1 tab mỗi lần, delay 5s giữa các phiên.';
+        if (body.settings) queueAutomaticRefill(0);
       } else {
         autoRefill.sequential = false;
         autoRefill.message = 'Chế độ tuần tự đã tắt.';
       }
-      respondWithJson(response, 200, { sequential: autoRefill.sequential, message: autoRefill.message });
+      respondWithJson(response, 200, { sequential: autoRefill.sequential, message: autoRefill.message, targetCount: autoRefill.targetCount });
       return;
     }
 
