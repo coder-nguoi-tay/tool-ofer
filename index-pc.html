@@ -1829,9 +1829,12 @@
     async function handleStart() {
       const websiteUrl = document.getElementById('txtLinkOffer').value.trim();
       const websiteUrl2 = document.getElementById('txtLinkOffer2').value.trim();
-      if (!websiteUrl) return alert('Vui lòng nhập Link Offer!');
+      if (!websiteUrl) {
+        showWinAlert('Vui lòng nhập Link Offer!');
+        return;
+      }
 
-      const concurrency = parseInt(document.getElementById('nudThread').value) || 1;
+      const concurrency = Math.min(10, Math.max(1, parseInt(document.getElementById('nudThread').value) || 1));
       const scriptPath = document.getElementById('cbbScript').value;
       const timeLimit = parseInt(document.getElementById('txtTimeLimit').value) || 0;
       const delayStart = parseInt(document.getElementById('nudDelayStart').value) || 0;
@@ -1854,6 +1857,8 @@
       }
 
       document.getElementById('lbStatus').textContent = 'Starting Chrome...';
+      switchTab('tabRunning');
+      fetchRunningState();
 
       if (mode === 'sequential') {
         const res = await api('/auto-refill/sequential', {
@@ -1864,6 +1869,7 @@
               websiteUrl,
               websiteUrl2,
               concurrency: websiteUrl2 ? 2 : 1,
+              requestedCount: websiteUrl2 ? 2 : 1,
               scriptPath,
               timeLimit,
               delayStart,
@@ -1884,6 +1890,7 @@
           body: JSON.stringify({
             websiteUrl,
             websiteUrl2,
+            requestedCount: concurrency,
             concurrency,
             proxyList: proxyLines,
             proxyType: 'socks5',
@@ -1900,14 +1907,16 @@
           })
         });
         if (res.error) {
-          alert('Error: ' + res.error);
+          showWinAlert('Lỗi mở trình duyệt: ' + res.error);
           document.getElementById('lbStatus').textContent = 'Launch error: ' + res.error;
+        } else if (res.warnings && res.warnings.length > 0 && (!res.results || res.results.length === 0)) {
+          showWinAlert('Thông báo: ' + res.warnings.join('\n'));
+          document.getElementById('lbStatus').textContent = res.warnings[0];
         } else {
           document.getElementById('lbStatus').textContent = res.message || 'Chrome launched successfully.';
         }
       }
 
-      switchTab('tabRunning');
       fetchRunningState();
     }
 
@@ -2371,7 +2380,23 @@
     }
 
     function openXPathGuide() {
-      alert("Hướng dẫn lấy XPath:\n1. Bấm F12 mở DevTools trên Chrome\n2. Bấm Ctrl+Shift+C (hoặc Cmd+Shift+C trên Mac)\n3. Click vào ô nhập hoặc nút bấm cần thao tác\n4. Chuột phải vào phần tử trong tab Elements -> Copy -> Copy XPath\n5. Dán vào script dạng: {ClickXpath}=xpath_vua_copy");
+      showWinAlert("Hướng dẫn lấy XPath:\n1. Bấm F12 mở DevTools trên Chrome\n2. Bấm Ctrl+Shift+C (hoặc Cmd+Shift+C trên Mac)\n3. Click vào ô nhập hoặc nút bấm cần thao tác\n4. Chuột phải vào phần tử trong tab Elements -> Copy -> Copy XPath\n5. Dán vào script dạng: {ClickXpath}=xpath_vua_copy", "XPath Guide");
+    }
+
+    function showWinAlert(message, title = 'AutoLeadPC') {
+      const overlay = document.getElementById('winMsgBoxOverlay');
+      if (overlay) {
+        document.getElementById('winMsgBoxTitle').textContent = title;
+        document.getElementById('winMsgBoxContent').textContent = message;
+        overlay.style.display = 'flex';
+      } else {
+        alert(message);
+      }
+    }
+
+    function closeWinAlert() {
+      const overlay = document.getElementById('winMsgBoxOverlay');
+      if (overlay) overlay.style.display = 'none';
     }
 
     window.addEventListener('DOMContentLoaded', init);
@@ -2402,6 +2427,27 @@
           <span id="logModalFilePath"></span>
         </div>
         <pre id="logModalPre" class="win-textarea" style="flex:1;background:#ffffff;border:1px solid #abadb3;padding:8px;font-family:Consolas,Menlo,monospace;font-size:11px;overflow:auto;white-space:pre-wrap;word-break:break-all;user-select:text;-webkit-user-select:text;"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Windows Form Message Box Dialog -->
+  <div id="winMsgBoxOverlay" class="win-dialog-overlay" style="display:none;" onclick="if(event.target===this)closeWinAlert()">
+    <div class="win-dialog-box" style="width:400px;min-height:140px;">
+      <div class="win-titlebar">
+        <div class="win-titlebar-left">
+          <img src="/pc-app.png" alt="Icon" class="win-titlebar-icon" onerror="this.style.display='none'">
+          <span class="win-titlebar-title" id="winMsgBoxTitle">AutoLeadPC</span>
+        </div>
+        <div class="win-window-controls">
+          <button type="button" class="win-window-btn close" title="Close" onclick="closeWinAlert()">✕</button>
+        </div>
+      </div>
+      <div style="padding:14px;display:flex;flex-direction:column;gap:12px;background:#f0f0f0;">
+        <div id="winMsgBoxContent" style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.4;"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+          <button type="button" class="win-btn win-btn-primary" style="padding:3px 24px;" onclick="closeWinAlert()">OK</button>
+        </div>
       </div>
     </div>
   </div>

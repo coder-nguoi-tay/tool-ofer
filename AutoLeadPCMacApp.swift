@@ -5,7 +5,7 @@ import LocalAuthentication
 import SQLite3
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDelegate {
     private var window: NSWindow?
     private var webView: WKWebView?
     private var nodeProcess: Process?
@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let webViewConfiguration = WKWebViewConfiguration()
         webViewConfiguration.userContentController.add(self, name: "autoleadPreferences")
         let webView = WKWebView(frame: .zero, configuration: webViewConfiguration)
+        webView.uiDelegate = self
         self.webView = webView
 
         let windowWidth: CGFloat = instanceId == "2" ? 960 : 620
@@ -366,6 +367,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.runModal()
+    }
+
+    /// Handles JavaScript alert(...) calls from WebKit interface.
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = appTitle
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        if let window = self.window {
+            alert.beginSheetModal(for: window) { _ in
+                completionHandler()
+            }
+        } else {
+            alert.runModal()
+            completionHandler()
+        }
+    }
+
+    /// Handles JavaScript confirm(...) calls from WebKit interface.
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = appTitle
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Hủy")
+        if let window = self.window {
+            alert.beginSheetModal(for: window) { response in
+                completionHandler(response == .alertFirstButtonReturn)
+            }
+        } else {
+            let response = alert.runModal()
+            completionHandler(response == .alertFirstButtonReturn)
+        }
     }
 }
 

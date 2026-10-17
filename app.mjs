@@ -1360,9 +1360,12 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
     dualStreamState.enabled = false;
   }
 
-  let requestedCount = body.requestedCount === undefined || body.requestedCount === ''
-    ? (isDualStream ? 2 : availableProxies.length)
-    : Number(body.requestedCount);
+  const countParam = (body.requestedCount !== undefined && body.requestedCount !== '')
+    ? body.requestedCount
+    : body.concurrency;
+  let requestedCount = (countParam !== undefined && countParam !== '')
+    ? Number(countParam)
+    : (isDualStream ? 2 : Math.min(maxAliveBrowsers, availableProxies.length || 1));
   if (!Number.isInteger(requestedCount) || requestedCount < 1) {
     throw new Error('Số trình duyệt cần mở phải là số nguyên lớn hơn 0.');
   }
@@ -1634,9 +1637,12 @@ async function launchUserRequestedBrowsers(requestBody) {
   const body = JSON.parse(requestBody);
   const activeBeforeLaunch = activeBrowsers.size;
   const result = await launchRequestedBrowsers(requestBody);
-  const requestedCount = body.requestedCount === undefined || body.requestedCount === ''
-    ? selectProxies(body.proxyList, body.proxyType ?? 'socks5', '').length
-    : Number(body.requestedCount);
+  const countParam = (body.requestedCount !== undefined && body.requestedCount !== '')
+    ? body.requestedCount
+    : body.concurrency;
+  const requestedCount = (countParam === undefined || countParam === '')
+    ? Math.min(maxAliveBrowsers, selectProxies(body.proxyList, body.proxyType ?? 'socks5', '').length)
+    : Number(countParam);
 
   if (activeBrowsers.size > 0) {
     autoRefill.settings = {
