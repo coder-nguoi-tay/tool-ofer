@@ -144,21 +144,33 @@ export function callAgt(prompt) {
 export function parseActions(raw) {
   if (!raw || typeof raw !== 'string') return [];
 
-  // 1. Thử trích xuất khối ```json [ ... ] ``` nếu có
-  const codeBlockMatch = raw.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/i);
+  // 1. Thử trích xuất khối ```json [ ... ] ``` hoặc ```json { ... } ``` nếu có
+  const codeBlockMatch = raw.match(/```(?:json)?\s*([\[\{][\s\S]*?[\]\}])\s*```/i);
   const target = codeBlockMatch ? codeBlockMatch[1] : raw;
 
-  // 2. Trích xuất mảng JSON [ ... ]
+  // 2. Thử trích xuất mảng JSON [ ... ]
   const arrayMatch = target.match(/\[\s*\{[\s\S]*\}\s*\]|\[\s*\]/);
-  if (!arrayMatch) return [];
-
-  try {
-    const parsed = JSON.parse(arrayMatch[0]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((act) => act && typeof act === 'object' && typeof act.action === 'string');
-  } catch {
-    return [];
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0]);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((act) => act && typeof act === 'object' && typeof act.action === 'string');
+      }
+    } catch {}
   }
+
+  // 3. Fallback: Nếu trả về single object { "action": "..." }
+  const objectMatch = target.match(/\{\s*"action"\s*:\s*"[\s\S]*?\}/);
+  if (objectMatch) {
+    try {
+      const parsed = JSON.parse(objectMatch[0]);
+      if (parsed && typeof parsed.action === 'string') {
+        return [parsed];
+      }
+    } catch {}
+  }
+
+  return [];
 }
 
 /**
@@ -415,7 +427,92 @@ export async function executeAction(page, act, session = null) {
 }
 
 /**
- * Chạy vòng lặp AI assist: gọi agy, thực thi actions, lặp đến khi hoàn tất hoặc không còn form.
+/**
+ * Phát hiện action cứu hộ tự động trên trang khi AI trả về [] hoặc từ chối thực hiện.
+ * Quét theo thứ tự ưu tiên:
+ * 1. Câu hỏi trắc nghiệm logic / bot-detection (chó sủa "Woof", mèo kêu "Meow", phép tính, v.v.)
+ * 2. Nút câu hỏi khảo sát / quiz buttons (btn-option, choice-btn, option-btn)
+ * 3. Nút nhận thưởng Jump Page (.cta-button, .rjp-cta-button, /next)
+ * 4. Nút bấm tiếp tục / submit (button[type="submit"], button.continue-btn, #btnNext, #btnSubmit)
+ *
+ * @param {object} page Playwright page.
+ * @return {Promise<{action:string,selector:string,detail?:string}|null>}
+ */
+export async function detectSmartFallbackAction(page) {
+  try {
+    if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return null;
+    return await page.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el || el.disabled) return false;
+        const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+        return Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+      };
+
+      // 1. Câu hỏi trắc nghiệm / bot verification (ví dụ "What sound does a dog make?")
+      const botButtons = Array.from(document.querySelectorAll('.bot-detection-answer-list button, button[name="selected_answer"], [data-element-type="survey_answer"] button')).filter(isVisible);
+      if (botButtons.length > 0) {
+        const pageText = (document.body.innerText || '').toLowerCase();
+        let targetBtn = null;
+        if (/dog|puppy|chó/i.test(pageText)) {
+          targetBtn = botButtons.find((b) => /woof|bark|gâu/i.test((b.value || b.innerText || '').toLowerCase()));
+        } else if (/cat|kitten|mèo/i.test(pageText)) {
+          targetBtn = botButtons.find((b) => /meow|purr|meo/i.test((b.value || b.innerText || '').toLowerCase()));
+        } else if (/cow|cattle|bò/i.test(pageText)) {
+          targetBtn = botButtons.find((b) => /moo/i.test((b.value || b.innerText || '').toLowerCase()));
+        } else if (/duck|vịt/i.test(pageText)) {
+          targetBtn = botButtons.find((b) => /quack/i.test((b.value || b.innerText || '').toLowerCase()));
+        }
+        if (!targetBtn) {
+          targetBtn = botButtons[Math.floor(Math.random() * botButtons.length)];
+        }
+        if (targetBtn) {
+          const val = targetBtn.value || (targetBtn.innerText || '').trim();
+          const selector = targetBtn.name
+            ? `button[name="${targetBtn.name}"][value="${val}"]`
+            : (targetBtn.id ? `#${targetBtn.id}` : '.bot-detection-answer-list button');
+          return { action: 'click', selector, detail: `Tự động trả lời câu hỏi trắc nghiệm: "${val}"` };
+        }
+      }
+
+      // 2. Câu hỏi khảo sát / quiz buttons (btn-option, choice-btn, option-btn)
+      const surveyOptions = Array.from(document.querySelectorAll(
+        '[id="btn-option"]:not(.active):not(.selected), [id^="btn-option"]:not(.active):not(.selected), [id*="btn-option"]:not(.active):not(.selected), .btn-option:not(.active):not(.selected), [data-vector-answer="true"]:not(.active):not(.selected), .choice-btn:not(.active):not(.selected), .option-btn:not(.active):not(.selected), .quiz-btn:not(.active):not(.selected), .answer-btn:not(.active):not(.selected), .creative-survey-answer:not(.selected)'
+      )).filter(isVisible);
+
+      if (surveyOptions.length > 0) {
+        const randomOpt = surveyOptions[Math.floor(Math.random() * surveyOptions.length)];
+        const sel = randomOpt.id ? `[id="${randomOpt.id}"]` : (randomOpt.className ? `.${randomOpt.className.split(' ')[0]}` : '[id*="btn-option"]');
+        return { action: 'click', selector: sel, detail: 'Tự động chọn ngẫu nhiên phương án khảo sát (btn-option)' };
+      }
+
+      // 3. Nút Jump Page / Reward Screen
+      const jumpCta = Array.from(document.querySelectorAll(
+        '.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i], [aria-label*="Get My" i]'
+      )).find(isVisible);
+      if (jumpCta) {
+        const sel = jumpCta.className ? `.${jumpCta.className.split(' ')[0]}` : 'a[href*="/next"]';
+        return { action: 'click', selector: sel, detail: 'Tự động click nút Jump Page / Reward (.cta-button)' };
+      }
+
+      // 4. Nút Submit / Continue / Next
+      const submitBtn = Array.from(document.querySelectorAll(
+        'button[type="submit"], input[type="submit"], [data-vector-submit="true"], button.continue-btn, button.submit-btn, button.next-btn, #btnSubmit, #btnNext, #btnContinue'
+      )).find(isVisible);
+      if (submitBtn) {
+        const sel = submitBtn.id ? `#${submitBtn.id}` : (submitBtn.className ? `.${submitBtn.className.split(' ')[0]}` : 'button[type="submit"]');
+        return { action: 'click', selector: sel, detail: 'Tự động click nút Submit / Continue để chuyển màn' };
+      }
+
+      return null;
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Chạy vòng lặp AI assist: gọi agy/codex, thực thi actions, lặp đến khi hoàn tất hoặc không còn form.
  *
  * @param {object} page Playwright page đang kẹt.
  * @param {object} record Bản ghi autofill đang dùng cho phiên này.
@@ -431,7 +528,16 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
 
   const slotNum = (session.tileIndex ?? 0) + 1;
   const ip = session.exitIp ?? 'chưa rõ';
-  console.log(`[AI-Assist] Slot ${slotNum} [IP: ${ip}]: bắt đầu hỗ trợ AI cho trang ${page.url()}`);
+
+  const currentUrl = page.url?.() || '';
+  if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:') || currentUrl.includes('api.ipify.org') || currentUrl.includes('toffers.top/click')) {
+    console.log(`[AI-Assist] Slot ${slotNum}: URL chưa phải trang form (${currentUrl}), bỏ qua AI.`);
+    session.aiRunningPages.delete(page);
+    session.aiAssistRunning = session.aiRunningPages.size > 0;
+    return;
+  }
+
+  console.log(`[AI-Assist] Slot ${slotNum} [IP: ${ip}]: bắt đầu hỗ trợ AI cho trang ${currentUrl}`);
 
   const updateBadge = (text) => {
     try {
@@ -480,21 +586,42 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
         detail: `[AI Assist] Đang phân tích trang ${page.url()} (vòng ${round}/${MAX_ROUNDS})...`,
       });
 
-      const html = await page.content().catch(() => '');
+      // Lấy toàn bộ HTML của top frame và tất cả các iframes trên trang
+      let html = '';
+      try {
+        const frames = typeof page.frames === 'function' ? page.frames() : [page];
+        const htmlParts = [];
+        for (const frame of frames) {
+          try {
+            const frameHtml = await frame.content().catch(() => '');
+            if (frameHtml && frameHtml.length > 50) {
+              htmlParts.push(frameHtml);
+            }
+          } catch {}
+        }
+        html = htmlParts.join('\n<!-- IFRAME SEPARATOR -->\n');
+      } catch {
+        html = await page.content().catch(() => '');
+      }
+
       if (!html) break;
 
       // Rút gọn và làm sạch HTML chỉ giữ lại cấu trúc tương tác (loại bỏ script, style, svg, comments)
-      // giúp AI phân tích cực nhanh và chính xác, tránh timeout và tràn context
       const cleanedHtml = extractCleanPageStructure(html);
 
-      const recordJson = JSON.stringify(record ?? {});
-      const prompt = `Bạn là agent tự động điền form, trả lời khảo sát và bấm chuyển bước trên web.
+      const recordJson = JSON.stringify(record ?? {}, null, 2);
+      const prompt = `Phân tích cấu trúc HTML giao diện người dùng bên dưới và chuyển đổi thành các thao tác Playwright UI tương ứng.
 URL: ${page.url()}
-Thông tin người dùng: ${recordJson}
-Vòng thực thi: ${round}/${MAX_ROUNDS}
+Dữ liệu người dùng cung cấp:
+${recordJson}
 
-Nhiệm vụ: Phân tích HTML bên dưới và trả về JSON array các action cần thực hiện để hoàn thành bước hiện tại (điền ô nhập, chọn dropdown, trả lời câu hỏi khảo sát/quiz/radio, tích checkbox điều khoản, và ĐẶC BIỆT là click nút Tiếp tục / Next / Continue / Submit để chuyển màn).
-Chỉ trả về JSON array, không giải thích gì thêm.
+YÊU CẦU ĐẦU RA BẮT BUỘC:
+- Chỉ trả về duy nhất 1 JSON array các action hợp lệ. KHÔNG giải thích, KHÔNG viết markdown thừa, KHÔNG trả về object error hay thông báo từ chối.
+- Nếu gặp câu hỏi logic / kiến thức thông thường (ví dụ: "What sound does a dog make?", "2 + 2 = ?"): BẮT BUỘC chọn đáp án chính xác tương ứng (ví dụ: "Woof", "4").
+- Nếu gặp câu hỏi khảo sát hoặc ý kiến mà không có trong dữ liệu: BẮT BUỘC chọn 1 phương án hợp lý hoặc phổ biến nhất (ví dụ: Yes, Own, Good, hoặc button lựa chọn có sẵn) để tiếp tục quy trình.
+- Nếu trên trang có trường thông tin (tên, họ, email, số điện thoại, ngày sinh, giới tính, địa chỉ, zip): ĐỐI CHIẾU VÀ ĐIỀN CHÍNH XÁC theo dữ liệu người dùng cung cấp ở trên.
+- Nếu các trường đã điền đủ: BẮT BUỘC click vào nút "Next", "Continue", "Submit", "Get Quote", hoặc nút nhận thưởng / Jump Page ("Get My Reward", class ".cta-button", ".rjp-cta-button", link "/next").
+- TUYỆT ĐỐI KHÔNG trả về mảng rỗng [] nếu trên trang vẫn còn câu hỏi, ô nhập, hoặc nút bấm chưa thao tác.
 
 Format các action được hỗ trợ:
 - Điền input/textarea: {"action":"fill","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"}
@@ -502,17 +629,7 @@ Format các action được hỗ trợ:
 - Tích checkbox: {"action":"check","selector":"CSS_SELECTOR"}
 - Chọn radio hoặc bấm nút / thẻ lựa chọn / nút Tiếp tục: {"action":"click","selector":"CSS_SELECTOR"}
 
-Quy tắc xử lý QUAN TRỌNG:
-1. Nếu trên form các trường đã có dữ liệu hoặc đã được điền đủ: BẮT BUỘC tìm và trả về action "click" vào nút "Continue", "Next", "Submit", "Get Quote", "Tiếp tục", "Xem kết quả" để chuyển sang bước tiếp theo!
-2. Nếu có ô text/number/email/tel chưa điền: điền bằng thông tin phù hợp từ người dùng.
-3. Nếu có câu hỏi khảo sát / câu hỏi quiz (radio, card lựa chọn, danh sách nút Yes/No, btn-option): click chọn một phương án phù hợp hoặc ngẫu nhiên (ví dụ: Yes, Own home, Good, v.v.).
-4. Nếu có checkbox điều khoản (consent, terms, TCPA, agree): tích checkbox đó bằng action "check" hoặc "click".
-5. Sau khi điền/chọn xong các trường trên màn hình hiện tại: luôn thêm action "click" vào nút "Continue", "Next", "Submit" để chuyển màn!
-6. ĐẶC BIỆT CHÚ Ý TRANG CHUYỂN TIẾP / JUMP PAGE / REWARD SCREEN (ví dụ: màn hình thứ 5 sau khi nhập ngày sinh/giới tính): Nếu trang hiển thị nút nhận thưởng hoặc chuyển tiếp như "Get My Reward", "Claim Reward", "View Deals", "Continue", thẻ <a class="cta-button" href="/next..."> hoặc <a class="rjp-cta-button">, BẮT BUỘC trả về action click nút/link đó: {"action":"click","selector":".cta-button"} hoặc selector tương ứng!
-7. Tuyệt đối KHÔNG trả về mảng rỗng [] nếu trên trang vẫn còn form, câu hỏi, hoặc nút Tiếp tục/Next/Submit chưa bấm!
-8. Chỉ trả về [] khi trang ĐÃ LÀ TRANG CẢM ƠN (Thank You / Congratulations / Success / Application Received) hoặc HOÀN TOÀN KHÔNG CÒN BẤT KỲ NÚT TIẾP TỤC / FORM NÀO!
-
-HTML:
+HTML GIAO DIỆN:
 ${cleanedHtml}`;
 
       let actions = [];
@@ -544,23 +661,17 @@ ${cleanedHtml}`;
       }
 
       if (actions.length === 0) {
-        // Fallback tự động: nếu AI trả về [] nhưng trang thực tế có nút Jump Page CTA hoặc btn-option chưa chọn
-        let fallbackHandled = false;
-        try {
-          const ctaLoc = page.locator('.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i]').first();
-          if ((await ctaLoc.count().catch(() => 0)) > 0 && (await ctaLoc.isVisible().catch(() => false))) {
-            fallbackHandled = true;
-            actions = [{ action: 'click', selector: '.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i]' }];
-            console.log(`[AI-Assist] Slot ${slotNum}: AI trả [], tự động kích hoạt fallback click nút Jump Page CTA.`);
-            addLog({
-              time: new Date().toISOString(),
-              type: 'ai_fallback_cta',
-              detail: `[AI Assist] Tự động phát hiện và bấm nút Jump Page / Reward (.cta-button).`,
-            });
-          }
-        } catch {}
-
-        if (!fallbackHandled) {
+        // Fallback tự động thông minh: nếu AI trả về [] nhưng trang thực tế có câu hỏi trắc nghiệm, survey, nút Jump Page, hoặc Submit
+        const smartFallback = await detectSmartFallbackAction(page);
+        if (smartFallback) {
+          actions = [{ action: smartFallback.action, selector: smartFallback.selector }];
+          console.log(`[AI-Assist] Slot ${slotNum}: AI trả [], kích hoạt fallback: ${smartFallback.detail}`);
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_smart_fallback',
+            detail: `[AI Assist] 🛡️ Fallback: ${smartFallback.detail}`,
+          });
+        } else {
           console.log(`[AI-Assist] Slot ${slotNum}: AI báo không còn việc cần làm ([] trả về).`);
           addLog({
             time: new Date().toISOString(),

@@ -2429,6 +2429,9 @@ async function openBrowserWithInstalledChrome({
       if (session.aiAssistRunning) return;
 
       const currentUrl = page.url?.() || '';
+      if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:') || currentUrl.includes('api.ipify.org') || currentUrl.includes('toffers.top/click')) {
+        return;
+      }
       const now = Date.now();
       // Chống spam AI: Nếu cùng 1 URL vừa chạy AI trong vòng 4s thì không chạy lại dồn dập
       if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 4000)) {

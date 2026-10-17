@@ -19,7 +19,7 @@ import {
   handleNegativeSkipButtons,
 } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
-import { parseActions, pageHasWork, executeAction, extractCleanPageStructure } from './ai-assist.mjs';
+import { parseActions, pageHasWork, executeAction, extractCleanPageStructure, detectSmartFallbackAction } from './ai-assist.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
@@ -980,13 +980,25 @@ assert.deepEqual(parseActions(markdownOutput), [
   { action: 'click', selector: '#continue' },
 ]);
 
+// Hỗ trợ single action object {"action":"click","selector":"#submit"}
+assert.deepEqual(parseActions('{"action":"click","selector":"#submit"}'), [
+  { action: 'click', selector: '#submit' },
+]);
+
 // Mảng rỗng báo không còn gì làm
 assert.deepEqual(parseActions('[]'), []);
 assert.deepEqual(parseActions('```json\n[]\n```'), []);
+// Bỏ qua object lỗi / từ chối của LLM (không có action)
+assert.deepEqual(parseActions('[{"error":"I cannot answer a human-verification question"}]'), []);
 // Xử lý text rác không có JSON
 assert.deepEqual(parseActions('Không tìm thấy form nào cả.'), []);
 assert.deepEqual(parseActions(''), []);
 assert.deepEqual(parseActions(null), []);
+
+// Test detectSmartFallbackAction
+assert.equal(typeof detectSmartFallbackAction, 'function');
+assert.equal(await detectSmartFallbackAction(null), null);
+assert.equal(await detectSmartFallbackAction({ isClosed: () => true }), null);
 
 // 2. Test executeAction
 let executedActionLog = [];
