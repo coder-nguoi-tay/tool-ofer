@@ -17,6 +17,11 @@ import {
   getPhoneAreaCode,
   getNormalizedPhone,
   handleNegativeSkipButtons,
+  humanMouseMove,
+  humanWheelScroll,
+  humanClick,
+  naturalMouseDrift,
+  ADJACENT_KEYS,
 } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
 import { parseActions, pageHasWork, executeAction, extractCleanPageStructure, detectSmartFallbackAction } from './ai-assist.mjs';
@@ -55,6 +60,13 @@ import {
   saveSavedDeviceProfiles,
   dualStreamState,
   getNextProxyForStream,
+  getNextCollisionFreeProxy,
+  resetMultiOfferState,
+  releaseProxyLock,
+  acquireProxyLock,
+  isProxyCurrentlyActive,
+  isProxyUsedByAllOffers,
+  buildProxyUsageHistoryCsv,
 } from './app.mjs';
 
 const parse = (line, type = 'socks5') => parseProxyLine(line, 1, type);
@@ -963,6 +975,27 @@ const htmlCount = await countSavedHtmlFiles();
 assert.equal(typeof htmlCount, 'number');
 assert.ok(htmlCount >= 0);
 
+// Test CSV history chứa cột offer_so
+const sampleHistory = {
+  version: 1,
+  proxies: {
+    'p1': {
+      proxy: '127.0.0.1:1080',
+      status: 'success',
+      exitIp: '1.2.3.4',
+      offerNumber: 3,
+      websiteUrl: 'https://example.com/offer3',
+      finalUrl: 'https://example.com/offer3/done',
+      profileId: 'chrome-stable-150',
+      attemptedAt: '2026-10-17T12:00:00Z',
+      completedAt: '2026-10-17T12:01:00Z',
+    }
+  }
+};
+const csvResult = buildProxyUsageHistoryCsv(sampleHistory);
+assert.ok(csvResult.includes('"offer_so"'));
+assert.ok(csvResult.includes('"3"'));
+
 // ── Test AI Assist (ai-assist.mjs) ──────────────────────────────────────────
 // 1. Test parseActions với các định dạng output khác nhau
 const sampleJsonActions = JSON.stringify([
@@ -1683,19 +1716,31 @@ const p2_1 = getNextProxyForStream(2, testProxies);
 assert.equal(p1_1.server, 'socks5://2.2.2.2:1080', 'Luồng 1 phải tiến lên lấy proxy thứ 2');
 assert.equal(p2_1.server, 'socks5://3.3.3.3:1080', 'Luồng 2 phải lùi lại lấy proxy thứ 3');
 
-// 12.2 Quy luật: 1 IP mở được 2 trang đích đồng thời
-// Giả sử danh sách chỉ có 1 proxy duy nhất
-dualStreamState.stream1Index = 0;
-dualStreamState.stream2Index = -1;
-dualStreamState.stream1Used.clear();
-dualStreamState.stream2Used.clear();
-
+// 12.2 Thuật toán phân bổ tránh nhau & tái sử dụng proxy tuần tự:
+// Không mở trùng 1 IP cho 2 offer cùng nhau khi đang chạy đồng thời, nhưng tái sử dụng được sau khi giải phóng
+resetMultiOfferState();
 const singleProxyList = [{ server: 'socks5://9.9.9.9:1080', _queueLine: '9.9.9.9:1080' }];
+
+// Luồng 1 lấy proxy 9.9.9.9 và đang mở (giữ khóa)
 const p1_single = getNextProxyForStream(1, singleProxyList);
-const p2_single = getNextProxyForStream(2, singleProxyList);
-assert.ok(p1_single !== null, 'Luồng 1 phải lấy được proxy duy nhất');
-assert.ok(p2_single !== null, 'Luồng 2 cũng phải lấy được cùng proxy đó để mở 2 trang đồng thời');
-assert.equal(p1_single.server, p2_single.server, 'Cả 2 luồng đều mở được cùng 1 proxy');
+assert.ok(p1_single !== null, 'Luồng 1 phải lấy được proxy');
+assert.equal(p1_single.server, 'socks5://9.9.9.9:1080');
+
+// Trong lúc Luồng 1 đang mở 9.9.9.9 (chưa đóng): Luồng 2 yêu cầu proxy -> Phải tránh nhau, KHÔNG được mở trùng 9.9.9.9 đồng thời
+const p2_concurrent = getNextProxyForStream(2, singleProxyList);
+assert.equal(p2_concurrent, null, 'Luồng 2 KHÔNG được mở trùng IP 9.9.9.9 cùng lúc khi Luồng 1 đang chạy');
+
+// Luồng 1 hoàn thành và đóng phiên -> giải phóng khóa
+releaseProxyLock(p1_single);
+
+// Giờ Luồng 2 được phép tái sử dụng lại proxy 9.9.9.9 cho Offer 2 (chạy tuần tự)
+const p2_after_release = getNextProxyForStream(2, singleProxyList);
+assert.ok(p2_after_release !== null, 'Luồng 2 tái sử dụng được proxy 9.9.9.9 sau khi Luồng 1 đã giải phóng');
+assert.equal(p2_after_release.server, 'socks5://9.9.9.9:1080');
+
+// Khi cả 2 offer đều đã chạy qua 9.9.9.9 -> isProxyUsedByAllOffers trả về true
+assert.equal(isProxyUsedByAllOffers(p1_single, 2), true, 'Proxy 9.9.9.9 đã được dùng bởi cả 2 offer');
+releaseProxyLock(p2_after_release);
 
 // 12.3 createProxyUsageKey tạo khóa riêng cho từng websiteUrl để ghi nhận lịch sử độc lập
 const key1 = createProxyUsageKey(singleProxyList[0], 1, 'https://link1.com');
@@ -1719,6 +1764,65 @@ const seqSettingsSingle = {
 const isSingleSeq = Boolean(seqSettingsSingle.websiteUrl && seqSettingsSingle.websiteUrl2 && seqSettingsSingle.websiteUrl !== seqSettingsSingle.websiteUrl2);
 assert.equal(isSingleSeq, false, 'Khi chỉ có 1 link thì không phải dual stream');
 assert.equal(isSingleSeq ? 2 : 1, 1, 'Chạy tuần tự 1 link phải đặt targetCount = 1');
+
+// 12.5 Phân bổ 3 offer trên 6 proxy với độ lệch tránh nhau (Collision-free stride)
+resetMultiOfferState();
+const multiProxies = [
+  { server: 'socks5://10.0.0.1:1080', _queueLine: '10.0.0.1:1080' },
+  { server: 'socks5://10.0.0.2:1080', _queueLine: '10.0.0.2:1080' },
+  { server: 'socks5://10.0.0.3:1080', _queueLine: '10.0.0.3:1080' },
+  { server: 'socks5://10.0.0.4:1080', _queueLine: '10.0.0.4:1080' },
+  { server: 'socks5://10.0.0.5:1080', _queueLine: '10.0.0.5:1080' },
+  { server: 'socks5://10.0.0.6:1080', _queueLine: '10.0.0.6:1080' },
+];
+
+// Offer 1, Offer 2, Offer 3 lấy proxy đồng thời
+const o1_p = getNextCollisionFreeProxy(1, multiProxies, 3);
+const o2_p = getNextCollisionFreeProxy(2, multiProxies, 3);
+const o3_p = getNextCollisionFreeProxy(3, multiProxies, 3);
+
+// 3 offer phải lấy 3 proxy hoàn toàn khác nhau (độ lệch 0, 2, 4)
+assert.equal(o1_p.server, 'socks5://10.0.0.1:1080', 'Offer 1 bắt đầu từ proxy index 0');
+assert.equal(o2_p.server, 'socks5://10.0.0.3:1080', 'Offer 2 phân bổ bắt đầu từ proxy index 2 (stride)');
+assert.equal(o3_p.server, 'socks5://10.0.0.5:1080', 'Offer 3 phân bổ bắt đầu từ proxy index 4 (stride)');
+
+// Không proxy nào trùng nhau giữa 3 offer
+const activeServers = new Set([o1_p.server, o2_p.server, o3_p.server]);
+assert.equal(activeServers.size, 3, 'Cả 3 offer đang chạy đồng thời 3 IP khác nhau, không xung đột');
+
+// Giải phóng proxy của Offer 1
+releaseProxyLock(o1_p);
+assert.equal(isProxyCurrentlyActive(o1_p), false, 'Proxy đã được giải phóng');
+
+// 12.6 Tái sử dụng tuần tự qua toàn bộ 3 offer và chỉ hoàn tất khi tất cả offer đã chạy:
+resetMultiOfferState();
+const singleSharedProxy = [{ server: 'socks5://77.77.77.77:1080', _queueLine: '77.77.77.77:1080' }];
+
+// Lần 1: Offer 1 chạy
+const run1 = getNextCollisionFreeProxy(1, singleSharedProxy, 3);
+assert.equal(run1.server, 'socks5://77.77.77.77:1080');
+assert.equal(isProxyUsedByAllOffers(run1, 3), false, 'Chưa xong vì mới chỉ offer 1 dùng');
+
+// Khi Offer 1 đang chạy, Offer 2 và Offer 3 không thể lấy vì đang bị lock
+assert.equal(getNextCollisionFreeProxy(2, singleSharedProxy, 3), null, 'Offer 2 bị chặn vì proxy đang bận');
+assert.equal(getNextCollisionFreeProxy(3, singleSharedProxy, 3), null, 'Offer 3 bị chặn vì proxy đang bận');
+
+// Offer 1 đóng trình duyệt -> giải phóng lock
+releaseProxyLock(run1);
+
+// Lần 2: Giờ Offer 2 lấy được proxy này
+const run2 = getNextCollisionFreeProxy(2, singleSharedProxy, 3);
+assert.equal(run2.server, 'socks5://77.77.77.77:1080');
+assert.equal(isProxyUsedByAllOffers(run2, 3), false, 'Chưa xong vì mới 2/3 offer dùng');
+releaseProxyLock(run2);
+
+// Lần 3: Giờ Offer 3 lấy được proxy này
+const run3 = getNextCollisionFreeProxy(3, singleSharedProxy, 3);
+assert.equal(run3.server, 'socks5://77.77.77.77:1080');
+
+// Giờ cả 3 offer đều đã chạy qua proxy này -> isProxyUsedByAllOffers trả về true để chuyển sang used
+assert.equal(isProxyUsedByAllOffers(run3, 3), true, 'Hoàn tất cả 3 offer, đủ điều kiện chuyển sang proxyQueue.used');
+releaseProxyLock(run3);
 
 // 13. Kiểm tra Smart Contextual Fallback cho các trường tài chính / khảo sát
 assert.equal(matchFieldValue(['income'], {}), '65000', 'Income mặc định phải là 65000');
@@ -1752,6 +1856,286 @@ const mockEligibilityFrame = {
 };
 const foundEligibility = await findSubmitButton(mockEligibilityFrame);
 assert.equal(foundEligibility, mockCheckBtn, 'findSubmitButton phải nhận diện nút Check Eligibility');
+
+// 16. Kiểm tra form submit chủ động bấm ngay cả khi có trường unfilled
+let activeSubmitClicked = false;
+const mockActiveSubmitBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  scrollIntoViewIfNeeded: async () => {},
+  hover: async () => {},
+  click: async () => { activeSubmitClicked = true; },
+  evaluate: async (fn, arg) => fn({
+    tagName: 'BUTTON',
+    id: 'submitBtnActive',
+    innerText: 'Submit Form',
+    dataset: {},
+  }, arg),
+};
+let mockActivePageClosed = false;
+const mockActivePage = {
+  isClosed: () => mockActivePageClosed,
+  url: () => 'https://example.com/form',
+  on: () => {},
+  frames: () => [{
+    locator: (sel) => ({
+      all: async () => {
+        if (sel.includes('button') || sel.includes('Submit')) {
+          return [mockActiveSubmitBtn];
+        }
+        return [];
+      },
+    }),
+    evaluate: async () => ({ unfilled: true, id: 'optional_notes' }), // Giả lập trường chưa điền
+  }],
+};
+const mockActiveEvents = {};
+const mockActiveContext = {
+  on: (evt, handler) => { mockActiveEvents[evt] = handler; },
+  pages: () => [mockActivePage],
+};
+const mockActiveSession = {
+  autofillFields: 3,
+};
+attachAutofill(mockActiveContext, [{ firstname: 'Alice' }], 'https://example.com', mockActiveSession, {
+  autoSubmit: true,
+});
+mockActiveSession.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 200));
+mockActivePageClosed = true;
+console.log('Test 16 OK');
+
+// 17. Kiểm tra luồng check lead sau khi nộp màn điền email
+let emailSubmitTriggered = false;
+let emailFieldFilled = false;
+let emailSubmitBtnClicked = false;
+
+const mockEmailSubmitBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  scrollIntoViewIfNeeded: async () => {},
+  hover: async () => {},
+  click: async () => { emailSubmitBtnClicked = true; },
+  evaluate: async (fn, arg) => fn({
+    tagName: 'BUTTON',
+    id: 'btnNextEmail',
+    innerText: 'Continue to Next Step',
+    dataset: {},
+  }, arg),
+};
+
+const mockEmailInput = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  getAttribute: async () => null,
+  scrollIntoViewIfNeeded: async () => {},
+  hover: async () => {},
+  click: async () => {},
+  press: async () => {},
+  inputValue: async () => 'test@gmail.com',
+  evaluate: async (fn, arg) => {
+    emailFieldFilled = true;
+    return fn({
+      id: 'user_email',
+      name: 'email',
+      className: 'input-email',
+      type: 'email',
+      tagName: 'INPUT',
+      required: true,
+      value: 'test@gmail.com',
+      attributes: [{ name: 'type', value: 'email' }, { name: 'name', value: 'email' }],
+      getAttribute: (a) => (a === 'type' ? 'email' : (a === 'name' ? 'email' : null)),
+      closest: () => null,
+      classList: { remove: () => {}, add: () => {}, contains: () => false },
+      dispatchEvent: () => {},
+      dataset: {},
+      getBoundingClientRect: () => ({ left: 10, top: 10, width: 100, height: 30 }),
+    }, arg);
+  },
+  dispatchEvent: async () => {},
+};
+
+let mockEmailPageClosed = false;
+const mockEmailPage = {
+  isClosed: () => mockEmailPageClosed,
+  url: () => 'https://example.com/step-email',
+  on: () => {},
+  off: () => {},
+  frames: () => [{
+    locator: (sel) => ({
+      all: async () => {
+        if (sel === 'input, textarea, select') {
+          return [mockEmailInput];
+        }
+        if (sel.includes('button') || sel.includes('Continue') || sel.includes('submit')) {
+          return [mockEmailSubmitBtn];
+        }
+        return [];
+      },
+      count: async () => 0,
+      first: () => ({ count: async () => 0, isVisible: async () => false }),
+    }),
+    evaluate: async () => ({ isScreen5: false, isJumpPage: false, hasEmailInput: true }),
+  }],
+};
+
+const mockEmailContext = {
+  on: () => {},
+  pages: () => [mockEmailPage],
+};
+
+const mockEmailSession = {
+  autofillFields: 0,
+};
+
+attachAutofill(mockEmailContext, [{ email: 'test@gmail.com' }], 'https://example.com', mockEmailSession, {
+  autoSubmit: true,
+  enableLeadCheck: true,
+  onEmailSubmitted: (sess) => {
+    emailSubmitTriggered = true;
+  },
+  onScreen5Reached: (sess) => {
+    emailSubmitTriggered = true;
+  },
+});
+
+mockEmailSession.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 600));
+
+assert.ok(mockEmailSession.emailFilled, 'Session phải đánh dấu emailFilled khi điền ô email');
+assert.ok(emailSubmitBtnClicked, 'Autofill phải click submit màn chứa email');
+assert.ok(mockEmailSession.emailScreenSubmitted, 'Session phải đánh dấu emailScreenSubmitted');
+assert.ok(mockEmailSession.leadCheckTriggered, 'Session phải kích hoạt leadCheckTriggered sau khi nộp email');
+assert.equal(mockEmailSession.leadCheckStatus, 'checking', 'Trạng thái lead check phải là checking');
+assert.ok(emailSubmitTriggered, 'Callback onEmailSubmitted/onScreen5Reached phải được gọi');
+
+// Thử quét lại trong khi đang chờ lead: không được bấm thêm submit nào khác
+let secondSubmitAttempted = false;
+mockEmailSubmitBtn.click = async () => { secondSubmitAttempted = true; };
+mockEmailSession.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 200));
+assert.strictEqual(secondSubmitAttempted, false, 'Autofill không được thực hiện thêm click khi đang chờ lead');
+
+// Khi lead được xác nhận, hệ thống cho phép quét tiếp
+mockEmailSession.screen5LeadVerified = true;
+mockEmailSession.leadCheckStatus = 'confirmed';
+
+mockEmailPageClosed = true;
+
+// ─── 18. KIỂM TRA TƯƠNG TÁC TRÌNH DUYỆT TỰ NHIÊN (HUMAN INTERACTION PHYSICS) ───
+// 18.1 Bảng phím kế cận ADJACENT_KEYS
+assert.ok(ADJACENT_KEYS && typeof ADJACENT_KEYS === 'object');
+assert.ok(Array.isArray(ADJACENT_KEYS.a) && ADJACENT_KEYS.a.includes('s'));
+assert.ok(Array.isArray(ADJACENT_KEYS.e) && ADJACENT_KEYS.e.includes('w'));
+
+// 18.2 Di chuyển chuột Bézier (humanMouseMove)
+const mouseMoves = [];
+const mockMousePage = {
+  mouse: {
+    move: async (x, y) => { mouseMoves.push({ x, y }); },
+    down: async () => {},
+    up: async () => {},
+    wheel: async (dx, dy) => {},
+  },
+};
+await humanMouseMove(mockMousePage, 500, 400);
+assert.ok(mouseMoves.length >= 7, 'humanMouseMove phải sinh ít nhất 7 bước di chuyển Bézier mượt');
+const lastMove = mouseMoves[mouseMoves.length - 1];
+assert.equal(lastMove.x, 500, 'Điểm đến cuối cùng phải chính xác là 500');
+assert.equal(lastMove.y, 400, 'Điểm đến cuối cùng phải chính xác là 400');
+
+// 18.3 Cuộn chuột tự nhiên (humanWheelScroll)
+const wheelDeltas = [];
+mockMousePage.mouse.wheel = async (dx, dy) => { wheelDeltas.push(dy); };
+await humanWheelScroll(mockMousePage, 240);
+assert.ok(wheelDeltas.length >= 3, 'humanWheelScroll phải chia thành nhiều đợt cuộn lăn bánh xe tự nhiên');
+const totalScrolled = wheelDeltas.reduce((acc, v) => acc + v, 0);
+assert.ok(Math.abs(totalScrolled - 240) < 50, 'Tổng quãng đường cuộn phải xấp xỉ 240px');
+
+// 18.4 Click tự nhiên (humanClick) với Playwright CDP events
+let mouseDownCalled = false;
+let mouseUpCalled = false;
+mockMousePage.mouse.down = async () => { mouseDownCalled = true; };
+mockMousePage.mouse.up = async () => { mouseUpCalled = true; };
+
+const mockElementWithBox = {
+  boundingBox: async () => ({ x: 100, y: 100, width: 200, height: 40 }),
+  scrollIntoViewIfNeeded: async () => {},
+  focus: async () => {},
+};
+const clickRes = await humanClick(mockMousePage, mockElementWithBox);
+assert.equal(clickRes, true, 'humanClick phải trả về true khi click thành công');
+assert.equal(mouseDownCalled, true, 'mouse.down phải được gọi');
+assert.equal(mouseUpCalled, true, 'mouse.up phải được gọi');
+
+// 18.5 humanClick fallback an toàn khi boundingBox trả về null
+let fallbackClicked = false;
+const mockElementFallback = {
+  boundingBox: async () => null,
+  click: async () => { fallbackClicked = true; },
+};
+const fallbackRes = await humanClick(mockMousePage, mockElementFallback);
+assert.equal(fallbackRes, true);
+assert.equal(fallbackClicked, true, 'humanClick phải fallback sang click() khi boundingBox rỗng');
+
+// 18.6 Kiểm tra WebGL Vendor / Renderer trong tất cả 6 Device Profiles
+for (const profileKey of ['windows', 'macos', 'linux', 'android', 'ipad', 'ios']) {
+  const profile = DEVICE_PROFILES[profileKey];
+  assert.ok(profile.spoof.webglVendor, `Thiếu webglVendor cho ${profileKey}`);
+  assert.ok(profile.spoof.webglRenderer, `Thiếu webglRenderer cho ${profileKey}`);
+}
+
+// 18.7 Kiểm tra giả lập gõ nhầm (Typo Simulation) có sửa lại bằng Backspace
+const typoTracked = [];
+let backspaceCalled = false;
+const mockTypoPage = {
+  keyboard: {
+    type: async (c) => { typoTracked.push(c); },
+    press: async (k) => {
+      if (k === 'Backspace') {
+        backspaceCalled = true;
+        typoTracked.pop();
+      }
+    },
+  },
+  waitForTimeout: async () => {},
+};
+const mockTypoField = {
+  scrollIntoViewIfNeeded: async () => {},
+  click: async () => {},
+  focus: async () => {},
+  inputValue: async () => typoTracked.join(''),
+};
+await humanType(mockTypoField, 'California', mockTypoPage, { simulateTypo: true, forceTypo: true });
+assert.equal(backspaceCalled, true, 'Typo simulation phải bấm Backspace để sửa ký tự gõ sai');
+assert.equal(typoTracked.join(''), 'California', 'Sau khi sửa sai chuỗi kết quả phải khớp hoàn toàn với chuỗi gốc');
+
+// 18.8 Kiểm tra vi chuyển động chuột tự nhiên (naturalMouseDrift)
+const driftMoves = [];
+const mockDriftPage = {
+  mouse: {
+    move: async (x, y) => { driftMoves.push({ x, y }); },
+  },
+};
+// 18.9 Kiểm tra thuật toán phân bổ tránh nhau xoay vòng (Cyclic Collision-Free Multi-Offer):
+resetMultiOfferState();
+const cycleProxies = [
+  { server: 'socks5://192.168.1.1:1080', _queueLine: '192.168.1.1:1080' },
+  { server: 'socks5://192.168.1.2:1080', _queueLine: '192.168.1.2:1080' },
+];
+// Lượt 1: Offer 1 dùng cả 2 proxy tuần tự
+const c1 = getNextCollisionFreeProxy(1, cycleProxies, 2);
+assert.equal(c1.server, 'socks5://192.168.1.1:1080');
+releaseProxyLock(c1);
+const c2 = getNextCollisionFreeProxy(1, cycleProxies, 2);
+assert.equal(c2.server, 'socks5://192.168.1.2:1080');
+releaseProxyLock(c2);
+
+// Lượt 2: Offer 1 đã dùng hết 2/2 proxy -> Phải tự động xoay vòng lấy lại proxy mà không bị trả về null
+const c3 = getNextCollisionFreeProxy(1, cycleProxies, 2);
+assert.ok(c3, 'Offer 1 phải xoay vòng lấy được proxy khi đã qua hết danh sách');
+assert.equal(c3.server, 'socks5://192.168.1.1:1080', 'Offer 1 xoay vòng về proxy đầu tiên');
+releaseProxyLock(c3);
 
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 

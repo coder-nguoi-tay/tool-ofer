@@ -518,6 +518,7 @@
     .badge-ai-error { background: #fee2e2; color: #b91c1c; }
     .badge-lead { background: #dcfce7; color: #15803d; font-weight: bold; }
     .badge-blocked { background: #fee2e2; color: #b91c1c; }
+    .badge-offer { background: #e0e7ff; color: #1e40af; border: 1px solid #c7d2fe; }
   </style>
 </head>
 <body>
@@ -571,20 +572,31 @@
 
         <!-- pnlOffer Panel -->
         <fieldset class="win-group" id="pnlOffer">
-          <legend class="win-legend">Offer</legend>
+          <legend class="win-legend">Offer (Chạy nhiều luồng & nhiều Offer)</legend>
           <div class="form-row">
             <span class="form-label">Name:</span>
             <input type="text" id="txtNameOffer" class="win-input" style="flex:1;" value="demosite|de">
           </div>
           <div class="form-row">
-            <span class="form-label">Link Offer:</span>
-            <input type="text" id="txtLinkOffer" class="win-input" style="flex:1;" value="https://demoqa.com/automation-practice-form">
+            <span class="form-label">Link Offer 1:</span>
+            <input type="text" id="txtLinkOffer" class="win-input" style="flex:1;" value="https://demoqa.com/automation-practice-form" placeholder="URL Offer 1 (hoặc dán danh sách nhiều link, mỗi dòng 1 link)">
             <button type="button" class="win-btn" id="btnAddOffer" onclick="saveOfferConfig()">Add</button>
             <button type="button" class="win-btn" id="btnResetOffer" onclick="resetOfferConfig()">Reset</button>
           </div>
           <div class="form-row">
             <span class="form-label">Link Offer 2:</span>
-            <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;" placeholder="URL luồng 2 song song (tùy chọn)">
+            <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;" placeholder="URL Offer 2 (tùy chọn)">
+          </div>
+          <div class="form-row">
+            <span class="form-label">Link Offer 3:</span>
+            <input type="text" id="txtLinkOffer3" class="win-input" style="flex:1;" placeholder="URL Offer 3 (tùy chọn)">
+          </div>
+          <div class="form-row">
+            <span class="form-label">Link Offer 4:</span>
+            <input type="text" id="txtLinkOffer4" class="win-input" style="flex:1;" placeholder="URL Offer 4 (tùy chọn)">
+          </div>
+          <div style="font-size:10px;color:#555555;margin-top:2px;">
+            💡 <em>Mẹo: Bạn có thể nhập Offer 1..4 hoặc dán nhiều link vào Link Offer 1 (mỗi dòng 1 link). Khi chạy nhiều luồng, hệ thống sẽ tự động luân phiên phân bổ Offer 1, 2, 3, 4... cho từng luồng.</em>
           </div>
         </fieldset>
 
@@ -652,6 +664,9 @@
                 </label>
                 <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;">
                   <input type="checkbox" id="cbxAiAssist" checked onchange="toggleAiAssistDashboard(this.checked)"> AI Assist
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;" title="Kiểm tra lead sau khi nộp màn email: 2 lần x 30s, có lead mới làm tiếp, không thì tự tắt Chrome">
+                  <input type="checkbox" id="cbxCheckLead" checked> Check Lead (2x30s)
                 </label>
               </div>
             </div>
@@ -1117,8 +1132,12 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-weight:bold;color:#003399;">Filter Slot:</span>
-            <select id="logFilterSlot" class="win-select" style="width:110px;" onchange="renderLogs()">
+            <select id="logFilterSlot" class="win-select" style="width:95px;" onchange="renderLogs()">
               <option value="">Tất cả slot</option>
+            </select>
+            <span style="font-weight:bold;color:#003399;margin-left:4px;">Offer:</span>
+            <select id="logFilterOffer" class="win-select" style="width:105px;" onchange="renderLogs()">
+              <option value="">Tất cả offer</option>
             </select>
             <span style="font-weight:bold;color:#003399;margin-left:4px;">Type:</span>
             <select id="logFilterType" class="win-select" style="width:145px;" onchange="renderLogs()">
@@ -1142,6 +1161,7 @@
             </label>
           </div>
           <div style="display:flex;gap:6px;">
+            <button type="button" class="win-btn" onclick="exportLogsCsv()">Export CSV</button>
             <button type="button" class="win-btn" onclick="openLogHtmlFolder()">Open HTML Folder</button>
             <button type="button" class="win-btn" onclick="clearLogFilters()">Clear Filter</button>
             <button type="button" class="win-btn win-btn-danger" onclick="promptClearAllLogs()">Clear All Logs & HTML</button>
@@ -1170,6 +1190,7 @@
               <tr>
                 <th class="col-header-selector"></th>
                 <th style="width:70px;">Time</th>
+                <th style="width:75px;">Offer</th>
                 <th style="width:130px;">Slot / IP</th>
                 <th style="width:140px;">Type</th>
                 <th>Detail & HTML Snapshot</th>
@@ -1178,10 +1199,11 @@
             <tbody id="dgvLogsBody">
               <tr>
                 <td class="cell-selector">►</td>
-                <td colspan="4" style="text-align:center;color:#888888;padding:30px;">Chưa có log thao tác trình duyệt. Mở trình duyệt để bắt đầu ghi.</td>
+                <td colspan="5" style="text-align:center;color:#888888;padding:30px;">Chưa có log thao tác trình duyệt. Mở trình duyệt để bắt đầu ghi.</td>
               </tr>
             </tbody>
           </table>
+        </div>
         </div>
       </div>
 
@@ -1483,6 +1505,8 @@
       document.getElementById('txtNameOffer').value = '';
       document.getElementById('txtLinkOffer').value = '';
       document.getElementById('txtLinkOffer2').value = '';
+      if (document.getElementById('txtLinkOffer3')) document.getElementById('txtLinkOffer3').value = '';
+      if (document.getElementById('txtLinkOffer4')) document.getElementById('txtLinkOffer4').value = '';
       document.getElementById('txtTextComplete').value = '';
     }
 
@@ -1827,8 +1851,26 @@
 
     // Launch & Stop Engine
     async function handleStart() {
-      const websiteUrl = document.getElementById('txtLinkOffer').value.trim();
-      const websiteUrl2 = document.getElementById('txtLinkOffer2').value.trim();
+      const offerUrls = [];
+      const raw1 = document.getElementById('txtLinkOffer')?.value.trim() || '';
+      const raw2 = document.getElementById('txtLinkOffer2')?.value.trim() || '';
+      const raw3 = document.getElementById('txtLinkOffer3')?.value.trim() || '';
+      const raw4 = document.getElementById('txtLinkOffer4')?.value.trim() || '';
+
+      if (raw1) {
+        for (const line of raw1.split(/[\r\n,;]+/)) {
+          const u = line.trim();
+          if (u && !offerUrls.includes(u)) offerUrls.push(u);
+        }
+      }
+      if (raw2 && !offerUrls.includes(raw2)) offerUrls.push(raw2);
+      if (raw3 && !offerUrls.includes(raw3)) offerUrls.push(raw3);
+      if (raw4 && !offerUrls.includes(raw4)) offerUrls.push(raw4);
+
+      const websiteUrl = offerUrls[0] || raw1;
+      const websiteUrl2 = offerUrls[1] || raw2;
+      const websiteUrl3 = offerUrls[2] || raw3;
+      const websiteUrl4 = offerUrls[3] || raw4;
       if (!websiteUrl) {
         showWinAlert('Vui lòng nhập Link Offer!');
         return;
@@ -1860,6 +1902,11 @@
       switchTab('tabRunning');
       fetchRunningState();
 
+      const checkDuplicate = document.getElementById('cbxCheckDuplicateIP') ? document.getElementById('cbxCheckDuplicateIP').checked : true;
+      const enableLeadCheck = document.getElementById('cbxCheckLead') ? document.getElementById('cbxCheckLead').checked : true;
+
+      const streamCount = Math.max(concurrency, offerUrls.length >= 2 ? offerUrls.length : 1);
+
       if (mode === 'sequential') {
         const res = await api('/auto-refill/sequential', {
           method: 'POST',
@@ -1868,8 +1915,14 @@
             settings: {
               websiteUrl,
               websiteUrl2,
-              concurrency: websiteUrl2 ? 2 : 1,
-              requestedCount: websiteUrl2 ? 2 : 1,
+              websiteUrl3,
+              websiteUrl4,
+              offerUrls,
+              offerList: offerUrls,
+              concurrency: streamCount,
+              requestedCount: streamCount,
+              proxyList: proxyLines,
+              proxyType: 'socks5',
               scriptPath,
               timeLimit,
               delayStart,
@@ -1880,6 +1933,12 @@
               antiFpClientRects,
               antiFpWebgl,
               antiFpWebrtc,
+              checkDuplicate,
+              autoSubmitForm: true,
+              enableLeadCheck,
+              leadCheckInterval: 30,
+              leadCheckMaxAttempts: 2,
+              leadCheckScreen: 5,
             }
           })
         });
@@ -1890,6 +1949,10 @@
           body: JSON.stringify({
             websiteUrl,
             websiteUrl2,
+            websiteUrl3,
+            websiteUrl4,
+            offerUrls,
+            offerList: offerUrls,
             requestedCount: concurrency,
             concurrency,
             proxyList: proxyLines,
@@ -1904,6 +1967,12 @@
             antiFpClientRects,
             antiFpWebgl,
             antiFpWebrtc,
+            checkDuplicate,
+            autoSubmitForm: true,
+            enableLeadCheck,
+            leadCheckInterval: 30,
+            leadCheckMaxAttempts: 2,
+            leadCheckScreen: 5,
           })
         });
         if (res.error) {
@@ -1972,9 +2041,12 @@
           ? `<span style="color:#6a0dad;font-weight:bold;">🤖 [AI]</span> ${escHtml(s.action || 'Đang hỗ trợ điền form')}`
           : escHtml(s.action || s.websiteUrl || 'Running');
 
+        const offerNum = s.offerNumber || s.streamRole || 1;
+        const threadBadge = `<span style="font-weight:bold;">${s.slot}</span> <span class="badge-log badge-offer" style="font-size:9px;margin-left:2px;">Offer ${offerNum}</span>`;
+
         tr.innerHTML = `
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
-          <td style="font-weight:bold;text-align:center;">${s.slot}</td>
+          <td style="text-align:center;white-space:nowrap;">${threadBadge}</td>
           <td><b>${escHtml(s.exitIp || 'Direct')}</b></td>
           <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(s.websiteUrl || '')}">${actionText}</td>
           <td>${leadBadge}</td>
@@ -2027,21 +2099,38 @@
 
     function renderLogs() {
       const slotFilterEl = document.getElementById('logFilterSlot');
+      const offerFilterEl = document.getElementById('logFilterOffer');
       const typeFilterEl = document.getElementById('logFilterType');
       if (!slotFilterEl || !typeFilterEl) return;
 
       const slotFilter = slotFilterEl.value;
+      const offerFilter = offerFilterEl ? offerFilterEl.value : '';
       const typeFilter = typeFilterEl.value;
       const slots = new Set(logData.map((s) => String(s.slot)));
+      const offers = new Set();
+      for (const s of logData) {
+        if (s.offer) offers.add(String(s.offer));
+        for (const e of s.logs || []) {
+          if (e.offer) offers.add(String(e.offer));
+        }
+      }
 
       const curSlot = slotFilterEl.value;
       slotFilterEl.innerHTML = '<option value="">Tất cả slot</option>'
         + [...slots].sort((a,b)=>Number(a)-Number(b)).map((s) => `<option value="${s}"${s === curSlot ? ' selected' : ''}>Slot ${s}</option>`).join('');
 
+      if (offerFilterEl) {
+        const curOffer = offerFilterEl.value;
+        offerFilterEl.innerHTML = '<option value="">Tất cả offer</option>'
+          + [...offers].sort((a,b)=>Number(a)-Number(b)).map((o) => `<option value="${o}"${o === curOffer ? ' selected' : ''}>Offer ${o}</option>`).join('');
+      }
+
       const rows = [];
       for (const session of logData) {
         if (slotFilter && String(session.slot) !== slotFilter) continue;
         for (const entry of [...session.logs].reverse()) {
+          const entryOffer = String(entry.offer ?? session.offer ?? 1);
+          if (offerFilter && entryOffer !== offerFilter) continue;
           if (typeFilter && entry.type !== typeFilter) continue;
           rows.push({ session, entry });
         }
@@ -2054,7 +2143,7 @@
       if (!tbody) return;
 
       if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="4" style="text-align:center;color:#888888;padding:30px;">Chưa có log thao tác trình duyệt. Mở trình duyệt để bắt đầu ghi.</td></tr>';
+        tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="6" style="text-align:center;color:#888888;padding:30px;">Chưa có log thao tác trình duyệt. Mở trình duyệt để bắt đầu ghi.</td></tr>';
         return;
       }
 
@@ -2120,9 +2209,13 @@
           ? ` <button type="button" class="win-btn" style="padding:1px 6px;margin-left:6px;font-size:10px;" onclick="event.stopPropagation();openLogHtmlModal(${idx})">Xem HTML</button>`
           : '';
 
+        const offerNum = entry.offer ?? session.offer ?? 1;
+        const offerBadge = `<span class="badge-log badge-offer">Offer ${offerNum}</span>`;
+
         return `<tr onclick="if(${hasHtml})openLogHtmlModal(${idx})">
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
           <td>${fmtTime(entry.time)}</td>
+          <td>${offerBadge}</td>
           <td>Slot ${session.slot} · <b>${escHtml(session.ip || '?')}</b></td>
           <td>${typeBadge}</td>
           <td>${detail}${fileTag}${viewHtmlBtn}</td>
@@ -2184,8 +2277,13 @@
       }
     }
 
+    function exportLogsCsv() {
+      window.open('/browser-logs/export-csv', '_blank');
+    }
+
     function clearLogFilters() {
       document.getElementById('logFilterSlot').value = '';
+      if (document.getElementById('logFilterOffer')) document.getElementById('logFilterOffer').value = '';
       document.getElementById('logFilterType').value = '';
       renderLogs();
     }

@@ -56,6 +56,13 @@ import {
   LeadApiError,
 } from './lead-check.mjs';
 
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled rejection:', reason);
+});
+
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
 let chromeBuildRotationCounter = 0;
@@ -70,37 +77,61 @@ export const DEVICE_PROFILES = {
     label: 'Windows Desktop',
     ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
-    spoof: { platform: 'Win32', maxTouchPoints: 0, mobile: false, uaPlatform: 'Windows', dpr: 1, vendor: 'Google Inc.' },
+    spoof: {
+      platform: 'Win32', maxTouchPoints: 0, mobile: false, uaPlatform: 'Windows', dpr: 1, vendor: 'Google Inc.',
+      webglVendor: 'Google Inc. (NVIDIA)',
+      webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    },
   },
   macos: {
     label: 'macOS Desktop',
     ua: (v) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 2,
-    spoof: { platform: 'MacIntel', maxTouchPoints: 0, mobile: false, uaPlatform: 'macOS', dpr: 2, vendor: 'Google Inc.' },
+    spoof: {
+      platform: 'MacIntel', maxTouchPoints: 0, mobile: false, uaPlatform: 'macOS', dpr: 2, vendor: 'Google Inc.',
+      webglVendor: 'Apple Inc.',
+      webglRenderer: 'Apple M1',
+    },
   },
   linux: {
     label: 'Linux Desktop',
     ua: (v) => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
-    spoof: { platform: 'Linux x86_64', maxTouchPoints: 0, mobile: false, uaPlatform: 'Linux', dpr: 1, vendor: 'Google Inc.' },
+    spoof: {
+      platform: 'Linux x86_64', maxTouchPoints: 0, mobile: false, uaPlatform: 'Linux', dpr: 1, vendor: 'Google Inc.',
+      webglVendor: 'Google Inc. (Intel)',
+      webglRenderer: 'ANGLE (Intel, Intel(R) UHD Graphics 630, OpenGL 4.5)',
+    },
   },
   android: {
     label: 'Android (Chrome)',
     ua: (v) => `Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Mobile Safari/537.36`,
     viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2.625,
-    spoof: { platform: 'Linux armv8l', maxTouchPoints: 5, mobile: true, uaPlatform: 'Android', dpr: 2.625, vendor: 'Google Inc.' },
+    spoof: {
+      platform: 'Linux armv8l', maxTouchPoints: 5, mobile: true, uaPlatform: 'Android', dpr: 2.625, vendor: 'Google Inc.',
+      webglVendor: 'Qualcomm',
+      webglRenderer: 'Adreno (TM) 640',
+    },
   },
   ipad: {
     label: 'iPad (Chrome)',
     ua: (v) => `Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`,
     viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
-    spoof: { platform: 'iPad', maxTouchPoints: 5, mobile: false, uaPlatform: 'iOS', dpr: 2, vendor: 'Apple Computer, Inc.' },
+    spoof: {
+      platform: 'iPad', maxTouchPoints: 5, mobile: false, uaPlatform: 'iOS', dpr: 2, vendor: 'Apple Computer, Inc.',
+      webglVendor: 'Apple Inc.',
+      webglRenderer: 'Apple GPU',
+    },
   },
   ios: {
     label: 'iPhone (Chrome)',
     ua: (v) => `Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`,
     viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
-    spoof: { platform: 'iPhone', maxTouchPoints: 5, mobile: true, uaPlatform: 'iOS', dpr: 3, vendor: 'Apple Computer, Inc.' },
+    spoof: {
+      platform: 'iPhone', maxTouchPoints: 5, mobile: true, uaPlatform: 'iOS', dpr: 3, vendor: 'Apple Computer, Inc.',
+      webglVendor: 'Apple Inc.',
+      webglRenderer: 'Apple GPU',
+    },
   },
 };
 
@@ -128,10 +159,88 @@ export function resetDeviceProfileRotation() {
 }
 
 /**
- * Quản lý trạng thái chia 2 luồng song song:
- * - Luồng 1: Trang đích 1, duyệt proxy từ đầu đến cuối (0 -> N-1).
- * - Luồng 2: Trang đích 2, duyệt proxy từ cuối ra đầu (N-1 -> 0).
- * - 1 IP mở được 2 trang đích đồng thời.
+ * Danh sách các proxy server / line đang được mở hoặc đang trong tiến trình mở.
+ * Khóa này đảm bảo 2 luồng / 2 offer không bao giờ mở cùng 1 IP đồng thời.
+ */
+export const activeProxyLocks = new Set();
+
+/**
+ * Danh sách các IP exit đang hoạt động đồng thời trên bất kỳ trình duyệt nào.
+ */
+export const activeExitIpLocks = new Set();
+
+/**
+ * Kiểm tra xem một proxy có đang được sử dụng ở bất kỳ cửa sổ nào không.
+ *
+ * @param {object|null} proxy Đối tượng proxy cần kiểm tra.
+ * @return {boolean} True nếu proxy đang bận.
+ */
+export function isProxyCurrentlyActive(proxy) {
+  if (!proxy) return false;
+  const pKey = proxy.server || proxy._queueLine;
+  if (!pKey) return false;
+  if (activeProxyLocks.has(pKey)) return true;
+  for (const session of activeBrowsers) {
+    if (session.proxyServer === pKey) return true;
+    if (session.proxyKey && session.proxyKey.includes(pKey)) return true;
+  }
+  return false;
+}
+
+/**
+ * Kiểm tra xem một IP exit có đang chạy đồng thời ở bất kỳ cửa sổ nào không.
+ *
+ * @param {string|null} exitIp Địa chỉ IP exit.
+ * @return {boolean} True nếu IP đang bận.
+ */
+export function isExitIpCurrentlyInUse(exitIp) {
+  if (!exitIp) return false;
+  if (activeExitIpLocks.has(exitIp)) return true;
+  for (const session of activeBrowsers) {
+    if (session.exitIp === exitIp) return true;
+  }
+  return false;
+}
+
+/**
+ * Đặt khóa độc quyền cho proxy trước khi khởi chạy trình duyệt.
+ *
+ * @param {object|null} proxy Đối tượng proxy.
+ */
+export function acquireProxyLock(proxy) {
+  const pKey = proxy?.server || proxy?._queueLine;
+  if (pKey) activeProxyLocks.add(pKey);
+}
+
+/**
+ * Giải phóng khóa độc quyền cho proxy và IP khi phiên kết thúc hoặc lỗi.
+ *
+ * @param {object|null} proxy Đối tượng proxy.
+ * @param {string|null} exitIp Địa chỉ IP exit (nếu có).
+ */
+export function releaseProxyLock(proxy, exitIp = null) {
+  const pKey = proxy?.server || proxy?._queueLine;
+  if (pKey) activeProxyLocks.delete(pKey);
+  if (exitIp) activeExitIpLocks.delete(exitIp);
+}
+
+/**
+ * Quản lý trạng thái đa luồng nhiều offer:
+ * - 1 proxy có thể dùng lại tuần tự cho tất cả các offer (Offer 1, Offer 2, ...)
+ * - Phân bổ tránh nhau: các luồng duyệt proxy với độ lệch (stride) hoặc hướng đi ngược nhau
+ * - Tuyệt đối không mở trùng 1 IP cho 2 offer cùng lúc
+ */
+export const multiOfferState = {
+  enabled: false,
+  offerCount: 1,
+  offerUrls: [],
+  offerUsed: new Map(), // offerNumber -> Set(pKey)
+  offerCursors: new Map(), // offerNumber -> current index
+  offerDirections: new Map(), // offerNumber -> 1 (forward) | -1 (reverse)
+};
+
+/**
+ * Quản lý trạng thái chia 2 luồng song song (giữ tương thích ngược với API cũ).
  */
 export const dualStreamState = {
   enabled: false,
@@ -144,45 +253,214 @@ export const dualStreamState = {
 };
 
 /**
- * Lấy proxy tiếp theo cho luồng tương ứng theo quy luật:
- * - Luồng 1 (streamRole 1): duyệt từ đầu danh sách đến cuối (0 -> N-1)
- * - Luồng 2 (streamRole 2): duyệt từ cuối danh sách ra đầu (N-1 -> 0)
- * 1 IP mở được 2 trang đích đồng thời (stream1Used và stream2Used độc lập nhau).
+ * Đặt lại toàn bộ trạng thái đa offer và khóa proxy.
+ */
+export function resetMultiOfferState() {
+  activeProxyLocks.clear();
+  activeExitIpLocks.clear();
+  multiOfferState.enabled = false;
+  multiOfferState.offerCount = 1;
+  multiOfferState.offerUrls = [];
+  multiOfferState.offerUsed.clear();
+  multiOfferState.offerCursors.clear();
+  multiOfferState.offerDirections.clear();
+  dualStreamState.stream1Index = 0;
+  dualStreamState.stream2Index = -1;
+  dualStreamState.stream1Used.clear();
+  dualStreamState.stream2Used.clear();
+}
+
+/**
+ * Đồng bộ giữa multiOfferState và dualStreamState để giữ tính tương thích.
+ */
+export function syncDualStreamState(offerCount = 2) {
+  dualStreamState.enabled = offerCount >= 2;
+  dualStreamState.stream1Used = multiOfferState.offerUsed.get(1) || new Set();
+  dualStreamState.stream2Used = multiOfferState.offerUsed.get(2) || new Set();
+  dualStreamState.stream1Index = multiOfferState.offerCursors.get(1) ?? 0;
+  dualStreamState.stream2Index = multiOfferState.offerCursors.get(2) ?? -1;
+}
+
+/**
+ * Khởi tạo độ lệch phân bổ cho K offer trên M proxy để các luồng tránh nhau tối đa.
  *
- * @param {number} streamRole 1 (xuôi: đầu->cuối) hoặc 2 (ngược: cuối->đầu).
+ * @param {number} offerCount Tổng số offer đang cấu hình.
+ * @param {number} totalProxies Tổng số proxy trong danh sách.
+ */
+export function initMultiOfferCursors(offerCount, totalProxies) {
+  const M = Math.max(1, totalProxies);
+  const count = Math.max(1, offerCount);
+  multiOfferState.offerCount = count;
+  for (let k = 1; k <= count; k++) {
+    if (!multiOfferState.offerUsed.has(k)) {
+      multiOfferState.offerUsed.set(k, new Set());
+    }
+    if (count === 2) {
+      multiOfferState.offerCursors.set(k, k === 1 ? 0 : Math.max(0, M - 1));
+      multiOfferState.offerDirections.set(k, k === 1 ? 1 : -1);
+    } else {
+      const offset = Math.floor(((k - 1) * M) / count) % M;
+      multiOfferState.offerCursors.set(k, offset);
+      multiOfferState.offerDirections.set(k, 1);
+    }
+  }
+}
+
+/**
+ * Kiểm tra xem một proxy đã được hoàn tất bởi TẤT CẢ các offer đang cấu hình chưa.
+ *
+ * @param {object} proxy Đối tượng proxy.
+ * @param {number} offerCount Tổng số offer.
+ * @return {boolean} True nếu tất cả offer đều đã dùng proxy này.
+ */
+export function isProxyUsedByAllOffers(proxy, offerCount = 1) {
+  if (!proxy) return false;
+  const pKey = proxy.server || proxy._queueLine;
+  if (!pKey) return false;
+  const count = Math.max(1, offerCount);
+  for (let k = 1; k <= count; k++) {
+    const usedSet = multiOfferState.offerUsed.get(k);
+    if (!usedSet || !usedSet.has(pKey)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Thuật toán phân bổ proxy tránh nhau đa luồng (Collision-Free Multi-Offer Allocator):
+ * - 1 proxy dùng được lại cho tất cả offer (khi offer trước đã hoàn tất và đóng trình duyệt).
+ * - Tránh mở 1 IP cho 2 offer cùng nhau: bỏ qua các proxy đang active ở bất kỳ cửa sổ nào khác.
+ * - Phân bổ lệch pha (stride / reversed) theo từng offer để các luồng không va chạm.
+ *
+ * @param {number} offerNumber Số thứ tự của offer (1, 2, ...).
  * @param {Array<object>} proxies Danh sách proxy khả dụng.
- * @return {object|null} Proxy được chọn hoặc null nếu đã duyệt hết chiều của luồng.
+ * @param {number} offerCount Tổng số offer cấu hình.
+ * @return {object|null} Proxy được chọn và khóa độc quyền, hoặc null nếu không còn proxy rảnh.
+ */
+export function getNextCollisionFreeProxy(offerNumber = 1, proxies = [], offerCount = 1) {
+  if (!proxies.length) return null;
+  const M = proxies.length;
+  const totalOffers = Math.max(offerCount, offerNumber, 1);
+
+  // Đồng bộ từ dualStreamState nếu có cập nhật bên ngoài
+  if (dualStreamState.stream1Used) {
+    if (!multiOfferState.offerUsed.has(1)) multiOfferState.offerUsed.set(1, dualStreamState.stream1Used);
+    else if (dualStreamState.stream1Used.size === 0 && multiOfferState.offerUsed.get(1).size > 0) {
+      multiOfferState.offerUsed.get(1).clear();
+    }
+  }
+  if (dualStreamState.stream2Used) {
+    if (!multiOfferState.offerUsed.has(2)) multiOfferState.offerUsed.set(2, dualStreamState.stream2Used);
+    else if (dualStreamState.stream2Used.size === 0 && multiOfferState.offerUsed.get(2).size > 0) {
+      multiOfferState.offerUsed.get(2).clear();
+    }
+  }
+
+  if (!multiOfferState.offerUsed.has(offerNumber)) {
+    multiOfferState.offerUsed.set(offerNumber, new Set());
+  }
+  const usedSet = multiOfferState.offerUsed.get(offerNumber);
+
+  // Nếu offer này đã dùng qua tất cả proxy trong danh sách, tự động xoá usedSet để bắt đầu vòng mới
+  if (usedSet.size >= M) {
+    usedSet.clear();
+  }
+
+  // Khởi tạo cursor nếu chưa có
+  if (!multiOfferState.offerCursors.has(offerNumber)) {
+    if (totalOffers === 2) {
+      const startIdx = offerNumber === 1 ? (dualStreamState.stream1Index || 0) : (dualStreamState.stream2Index >= 0 ? dualStreamState.stream2Index : Math.max(0, M - 1));
+      const direction = offerNumber === 1 ? 1 : -1;
+      multiOfferState.offerCursors.set(offerNumber, startIdx);
+      multiOfferState.offerDirections.set(offerNumber, direction);
+    } else {
+      const startIdx = Math.floor(((offerNumber - 1) * M) / totalOffers) % M;
+      multiOfferState.offerCursors.set(offerNumber, startIdx);
+      multiOfferState.offerDirections.set(offerNumber, 1);
+    }
+  } else {
+    if (offerNumber === 1 && Number.isInteger(dualStreamState.stream1Index) && dualStreamState.stream1Index !== multiOfferState.offerCursors.get(1)) {
+      multiOfferState.offerCursors.set(1, dualStreamState.stream1Index);
+    }
+    if (offerNumber === 2 && Number.isInteger(dualStreamState.stream2Index) && dualStreamState.stream2Index !== multiOfferState.offerCursors.get(2)) {
+      multiOfferState.offerCursors.set(2, dualStreamState.stream2Index >= 0 ? dualStreamState.stream2Index : Math.max(0, M - 1));
+    }
+  }
+
+  let cursor = multiOfferState.offerCursors.get(offerNumber) ?? 0;
+  const direction = multiOfferState.offerDirections.get(offerNumber) ?? 1;
+
+  for (let step = 0; step < M; step++) {
+    const idx = ((cursor + (step * direction)) % M + M) % M;
+    const candidate = proxies[idx];
+    if (!candidate) continue;
+
+    const pKey = candidate.server || candidate._queueLine || String(idx);
+
+    // 1. Offer này đã dùng proxy này chưa?
+    if (usedSet.has(pKey)) {
+      continue;
+    }
+
+    // 2. Proxy này có đang được mở ở offer / cửa sổ khác cùng lúc không?
+    if (isProxyCurrentlyActive(candidate)) {
+      continue; // Đang chạy, tạm thời bỏ qua để không trùng IP đồng thời
+    }
+
+    // Proxy hợp lệ: khóa ngay lập tức và ghi nhận đã dùng cho offer này
+    acquireProxyLock(candidate);
+    usedSet.add(pKey);
+
+    const nextCursor = ((idx + direction) % M + M) % M;
+    multiOfferState.offerCursors.set(offerNumber, nextCursor);
+
+    syncDualStreamState(totalOffers);
+    void saveDualStreamState();
+
+    return candidate;
+  }
+
+  // Nếu vòng lặp đầu tiên không tìm được proxy (do các proxy rảnh đều đã nằm trong usedSet của lượt trước),
+  // và còn ít nhất 1 proxy không bận ở cửa sổ khác: reset usedSet cho offer này và thử lại một lượt.
+  const hasInactiveProxy = proxies.some((p) => !isProxyCurrentlyActive(p));
+  if (hasInactiveProxy) {
+    usedSet.clear();
+    for (let step = 0; step < M; step++) {
+      const idx = ((cursor + (step * direction)) % M + M) % M;
+      const candidate = proxies[idx];
+      if (!candidate) continue;
+
+      if (isProxyCurrentlyActive(candidate)) {
+        continue;
+      }
+
+      const pKey = candidate.server || candidate._queueLine || String(idx);
+      acquireProxyLock(candidate);
+      usedSet.add(pKey);
+
+      const nextCursor = ((idx + direction) % M + M) % M;
+      multiOfferState.offerCursors.set(offerNumber, nextCursor);
+
+      syncDualStreamState(totalOffers);
+      void saveDualStreamState();
+
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Lấy proxy tiếp theo cho luồng tương ứng (giữ tương thích hàm getNextProxyForStream cũ).
+ *
+ * @param {number} streamRole 1 hoặc 2.
+ * @param {Array<object>} proxies Danh sách proxy khả dụng.
+ * @return {object|null} Proxy được chọn hoặc null nếu không còn proxy phù hợp.
  */
 export function getNextProxyForStream(streamRole, proxies = []) {
-  if (!proxies.length) return null;
-  if (streamRole === 1) {
-    while (dualStreamState.stream1Index < proxies.length) {
-      const idx = dualStreamState.stream1Index;
-      dualStreamState.stream1Index += 1;
-      const proxy = proxies[idx];
-      const pKey = proxy?.server || proxy?._queueLine || String(idx);
-      if (proxy && !dualStreamState.stream1Used.has(pKey)) {
-        dualStreamState.stream1Used.add(pKey);
-        return proxy;
-      }
-    }
-    return null;
-  } else {
-    if (dualStreamState.stream2Index < 0 || dualStreamState.stream2Index >= proxies.length) {
-      dualStreamState.stream2Index = proxies.length - 1;
-    }
-    while (dualStreamState.stream2Index >= 0) {
-      const idx = dualStreamState.stream2Index;
-      dualStreamState.stream2Index -= 1;
-      const proxy = proxies[idx];
-      const pKey = proxy?.server || proxy?._queueLine || String(idx);
-      if (proxy && !dualStreamState.stream2Used.has(pKey)) {
-        dualStreamState.stream2Used.add(pKey);
-        return proxy;
-      }
-    }
-    return null;
-  }
+  return getNextCollisionFreeProxy(streamRole, proxies, 2);
 }
 
 let proxyHistoryWriteQueue = Promise.resolve();
@@ -194,6 +472,68 @@ const instanceSuffix = instanceId !== '1' ? `-${instanceId}` : '';
 export const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${instanceSuffix}`;
 const baseDataDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC');
 export const appDataDirectory = join(homedir(), 'Library', 'Application Support', dataDirName);
+export const dualStreamStatePath = join(appDataDirectory, 'dual-stream-state.json');
+
+export async function loadDualStreamState() {
+  try {
+    const data = JSON.parse(await readFile(dualStreamStatePath, 'utf8'));
+    if (data && typeof data === 'object') {
+      dualStreamState.enabled = Boolean(data.enabled);
+      dualStreamState.websiteUrl1 = data.websiteUrl1 || '';
+      dualStreamState.websiteUrl2 = data.websiteUrl2 || '';
+      dualStreamState.stream1Index = Number(data.stream1Index) || 0;
+      dualStreamState.stream2Index = Number.isInteger(data.stream2Index) ? data.stream2Index : -1;
+      dualStreamState.stream1Used = new Set(Array.isArray(data.stream1Used) ? data.stream1Used : []);
+      dualStreamState.stream2Used = new Set(Array.isArray(data.stream2Used) ? data.stream2Used : []);
+
+      if (data.multiOffer && typeof data.multiOffer === 'object') {
+        multiOfferState.enabled = Boolean(data.multiOffer.enabled ?? dualStreamState.enabled);
+        multiOfferState.offerCount = Number(data.multiOffer.offerCount) || 2;
+        multiOfferState.offerUrls = Array.isArray(data.multiOffer.offerUrls) ? data.multiOffer.offerUrls : [];
+        if (data.multiOffer.offerCursors) {
+          multiOfferState.offerCursors = new Map(
+            Object.entries(data.multiOffer.offerCursors).map(([k, v]) => [Number(k), Number(v)])
+          );
+        }
+        if (data.multiOffer.offerUsed) {
+          multiOfferState.offerUsed = new Map(
+            Object.entries(data.multiOffer.offerUsed).map(([k, v]) => [Number(k), new Set(v)])
+          );
+        }
+      } else {
+        multiOfferState.offerUsed.set(1, dualStreamState.stream1Used);
+        multiOfferState.offerUsed.set(2, dualStreamState.stream2Used);
+        multiOfferState.offerCursors.set(1, dualStreamState.stream1Index);
+        multiOfferState.offerCursors.set(2, dualStreamState.stream2Index);
+      }
+    }
+  } catch {}
+}
+
+export async function saveDualStreamState() {
+  try {
+    syncDualStreamState(multiOfferState.offerCount || 2);
+    const data = {
+      enabled: dualStreamState.enabled,
+      websiteUrl1: dualStreamState.websiteUrl1,
+      websiteUrl2: dualStreamState.websiteUrl2,
+      stream1Index: dualStreamState.stream1Index,
+      stream2Index: dualStreamState.stream2Index,
+      stream1Used: [...dualStreamState.stream1Used],
+      stream2Used: [...dualStreamState.stream2Used],
+      multiOffer: {
+        enabled: multiOfferState.enabled,
+        offerCount: multiOfferState.offerCount,
+        offerUrls: multiOfferState.offerUrls,
+        offerCursors: Object.fromEntries(multiOfferState.offerCursors.entries()),
+        offerUsed: Object.fromEntries(
+          [...multiOfferState.offerUsed.entries()].map(([k, set]) => [k, [...set]])
+        ),
+      },
+    };
+    await writeFile(dualStreamStatePath, JSON.stringify(data, null, 2)).catch(() => {});
+  } catch {}
+}
 
 export function getAutoLeadPCDir() {
   const custom = join(homedir(), '.autoleadpc');
@@ -538,6 +878,32 @@ function toPlaywrightProxy({ server, username, password }) {
 }
 
 /**
+ * Tự động đổi IP cho proxy nếu có resetUrl (định dạng của proxyHung, proxy xoay: host:port|phút|resetUrl).
+ * Gửi HTTP GET đến resetUrl và chờ IP mới cập nhật trước khi mở trình duyệt.
+ *
+ * @param {object} proxy Cấu hình proxy.
+ * @return {Promise<boolean>} True nếu gọi reset thành công.
+ */
+export async function rotateProxyIfNeeded(proxy) {
+  if (!proxy || !proxy.resetUrl) return false;
+  console.log(`[ProxyRotate] Gọi reset URL đổi IP cho ${proxy.server}: ${proxy.resetUrl}`);
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    const response = await fetch(proxy.resetUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+    const resultText = (await response.text()).trim();
+    console.log(`[ProxyRotate] Phản hồi reset URL (${response.status}):`, resultText);
+    // Chờ 3.5s để proxy provider hoàn tất xoay IP mới
+    await new Promise((resolve) => setTimeout(resolve, 3500));
+    return true;
+  } catch (error) {
+    console.warn(`[ProxyRotate] Lỗi gọi reset URL ${proxy.resetUrl}: ${error.message}`);
+    return false;
+  }
+}
+
+/**
  * Đọc danh sách proxy từ giao diện và kiểm tra giới hạn số lượng.
  *
  * @param {string} proxyList Danh sách proxy nhiều dòng.
@@ -749,7 +1115,7 @@ async function openBrowserThroughProxy({
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = '') {
+async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = '', checkDuplicate = true) {
   const ipPage = await browser.newPage();
   let exitIp;
   const failures = [];
@@ -787,9 +1153,14 @@ async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = 
     await ipPage.close().catch(() => {});
   }
   await onExitIp(exitIp);
+  // Kiểm tra xung đột IP đồng thời: tuyệt đối không mở 2 cửa sổ có cùng exit IP cùng một thời điểm
+  if (isExitIpCurrentlyInUse(exitIp)) {
+    throw new Error(`IP ${exitIp} đang được sử dụng ở một cửa sổ khác; tránh mở trùng đồng thời.`);
+  }
+  activeExitIpLocks.add(exitIp);
   const normUrl = websiteUrl ? normalizeUrl(websiteUrl) : '';
   const keyWithUrl = normUrl ? `${exitIp}::${normUrl}` : exitIp;
-  if (usedExitIps.has(keyWithUrl)) {
+  if (checkDuplicate && usedExitIps.has(keyWithUrl)) {
     throw new Error(`IP ${exitIp} đã được dùng trước đây cho trang đích này`);
   }
   usedExitIps.add(keyWithUrl);
@@ -948,12 +1319,13 @@ export function buildProxyUsageHistoryCsv(history) {
   const records = Object.values(history.proxies)
     .sort((left, right) => String(left.attemptedAt ?? '').localeCompare(String(right.attemptedAt ?? '')));
   return [
-    ['proxy', 'trang_thai', 'ip_exit', 'website', 'url_cuoi', 'profile_id', 'bat_dau', 'ket_thuc', 'ghi_chu']
+    ['proxy', 'trang_thai', 'ip_exit', 'offer_so', 'website', 'url_cuoi', 'profile_id', 'bat_dau', 'ket_thuc', 'ghi_chu']
       .map(csvCell).join(','),
     ...records.map((record) => [
       record.proxy,
       record.status,
       record.exitIp,
+      record.offerNumber ?? record.streamRole ?? 1,
       record.websiteUrl,
       record.finalUrl,
       record.profileId,
@@ -1310,17 +1682,51 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
     if (added > 0) await saveEmailQueue();
   }
 
-  // 1. Phân tích 2 trang đích và xác định chế độ Dual Stream (2 luồng song song)
-  let websiteUrl = normalizeUrl(body.websiteUrl);
-  let websiteUrl2 = body.websiteUrl2 ? normalizeUrl(body.websiteUrl2) : '';
-  if (!websiteUrl2 && body.websiteUrl && /[\r\n,]/.test(body.websiteUrl)) {
-    const splitUrls = body.websiteUrl.split(/[\r\n,]+/).map((u) => u.trim()).filter(Boolean);
-    if (splitUrls.length >= 2) {
-      websiteUrl = normalizeUrl(splitUrls[0]);
-      websiteUrl2 = normalizeUrl(splitUrls[1]);
+  // 1. Phân tích danh sách các trang đích (hỗ trợ đa luồng nhiều offer)
+  const offerUrls = [];
+  if (Array.isArray(body.offerUrls) && body.offerUrls.length > 0) {
+    offerUrls.push(...body.offerUrls.map((u) => normalizeUrl(u)).filter(Boolean));
+  } else if (Array.isArray(body.offerList) && body.offerList.length > 0) {
+    offerUrls.push(...body.offerList.map((u) => normalizeUrl(u)).filter(Boolean));
+  } else {
+    const rawUrl1 = body.websiteUrl ? String(body.websiteUrl).trim() : '';
+    const rawUrl2 = body.websiteUrl2 ? String(body.websiteUrl2).trim() : '';
+    if (rawUrl1) {
+      if (/[\r\n,;]/.test(rawUrl1)) {
+        const parts = rawUrl1.split(/[\r\n,;]+/).map((u) => u.trim()).filter(Boolean);
+        for (const p of parts) {
+          try {
+            const norm = normalizeUrl(p);
+            if (!offerUrls.includes(norm)) offerUrls.push(norm);
+          } catch {}
+        }
+      } else {
+        try { offerUrls.push(normalizeUrl(rawUrl1)); } catch {}
+      }
+    }
+    if (rawUrl2) {
+      try {
+        const norm2 = normalizeUrl(rawUrl2);
+        if (!offerUrls.includes(norm2)) offerUrls.push(norm2);
+      } catch {}
+    }
+    if (body.websiteUrl3) {
+      try {
+        const norm3 = normalizeUrl(body.websiteUrl3);
+        if (!offerUrls.includes(norm3)) offerUrls.push(norm3);
+      } catch {}
+    }
+    if (body.websiteUrl4) {
+      try {
+        const norm4 = normalizeUrl(body.websiteUrl4);
+        if (!offerUrls.includes(norm4)) offerUrls.push(norm4);
+      } catch {}
     }
   }
-  const isDualStream = Boolean(websiteUrl2 && websiteUrl2 !== websiteUrl);
+
+  let websiteUrl = offerUrls[0] || (body.websiteUrl ? normalizeUrl(body.websiteUrl) : '');
+  let websiteUrl2 = offerUrls[1] || (body.websiteUrl2 ? normalizeUrl(body.websiteUrl2) : '');
+  const isDualStream = offerUrls.length >= 2;
 
   const usageHistory = await readProxyUsageHistory();
   // IP được ghi nhận theo từng trang đích (exitIp::websiteUrl) để 1 IP mở được 2 trang đích đồng thời
@@ -1334,6 +1740,15 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
       .filter(Boolean)
   );
 
+  // Nếu hàng đợi available trống nhưng có proxy trong used (đã chạy hết vòng trước),
+  // tự động hồi phục lại toàn bộ used vào available để các luồng và tự bù tiếp tục chạy trơn tru
+  if (proxyQueue.available.length === 0 && proxyQueue.used.length > 0) {
+    console.log('[ProxyQueue] Toàn bộ proxy trong hàng đợi đã dùng qua các offer. Tự động xoay vòng tái sử dụng hàng đợi...');
+    proxyQueue.available.push(...proxyQueue.used.splice(0));
+    multiOfferState.offerUsed.clear();
+    void saveProxyQueue();
+  }
+
   // Queue là nguồn chính — parse available thành proxy objects, dedup theo server
   const seenServers = new Set();
   const availableProxies = proxyQueue.available.map((line) => {
@@ -1345,19 +1760,31 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
     return true;
   });
 
-  // Khởi tạo trạng thái Dual Stream khi bắt đầu phiên mới
-  if (isDualStream) {
-    if (!dualStreamState.enabled || dualStreamState.websiteUrl1 !== websiteUrl || dualStreamState.websiteUrl2 !== websiteUrl2 || activeBrowsers.size === 0) {
-      dualStreamState.enabled = true;
-      dualStreamState.websiteUrl1 = websiteUrl;
-      dualStreamState.websiteUrl2 = websiteUrl2;
-      dualStreamState.stream1Index = 0;
-      dualStreamState.stream2Index = availableProxies.length - 1;
-      dualStreamState.stream1Used = new Set();
-      dualStreamState.stream2Used = new Set();
-    }
+  // Khởi tạo hoặc cập nhật trạng thái Multi-Offer / Dual Stream khi bắt đầu phiên mới
+  const offerCount = Math.max(1, offerUrls.length);
+  const offerUrlsKey = offerUrls.join('|');
+  const previousUrlsKey = (multiOfferState.offerUrls || []).join('|');
+  const urlsChanged = offerUrlsKey !== previousUrlsKey;
+
+  multiOfferState.enabled = offerCount >= 2;
+  multiOfferState.offerCount = offerCount;
+  multiOfferState.offerUrls = [...offerUrls];
+
+  if (urlsChanged) {
+    multiOfferState.offerUsed.clear();
+    multiOfferState.offerCursors.clear();
+    multiOfferState.offerDirections.clear();
+    initMultiOfferCursors(offerCount, availableProxies.length);
+    syncDualStreamState(offerCount);
+    void saveDualStreamState();
   } else {
-    dualStreamState.enabled = false;
+    for (let k = 1; k <= offerCount; k++) {
+      if (!multiOfferState.offerCursors.has(k) && availableProxies.length > 0) {
+        initMultiOfferCursors(offerCount, availableProxies.length);
+        break;
+      }
+    }
+    syncDualStreamState(offerCount);
   }
 
   const countParam = (body.requestedCount !== undefined && body.requestedCount !== '')
@@ -1403,18 +1830,26 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
   const occupiedTileIndexes = new Set([...activeBrowsers].map((session) => session.tileIndex));
   const availableTileIndexes = Array.from({ length: layoutCount }, (_, index) => index)
     .filter((index) => !occupiedTileIndexes.has(index));
+  const allInstalledBuilds = await listInstalledChromeChannels();
+  if (allInstalledBuilds.length === 0) {
+    throw new Error('Chưa cài đặt phiên bản Google Chrome nào.');
+  }
   const occupiedChromeMajors = new Set([...activeBrowsers]
     .map((session) => Number(session.chromeVersion?.split('.')[0])).filter(Boolean));
-  const availableChromeBuilds = (await listInstalledChromeChannels())
+  let availableChromeBuilds = allInstalledBuilds
     .filter((build) => !occupiedChromeMajors.has(build.major));
   if (availableChromeBuilds.length > 1) {
     const offset = chromeBuildRotationCounter % availableChromeBuilds.length;
     availableChromeBuilds.push(...availableChromeBuilds.splice(0, offset));
   }
+  // Nếu số phiên bản chưa mở ít hơn số lượng cần mở (hoặc các phiên bản đang bận/đang đóng),
+  // tự động bổ sung xoay vòng từ danh sách tất cả phiên bản đã cài thay vì báo lỗi chặn đứng tiến trình.
   if (availableChromeBuilds.length < targetSuccessCount) {
-    throw new Error('Cần ' + targetSuccessCount + ' phiên bản Google Chrome thường khác nhau, '
-      + 'nhưng hiện chỉ còn ' + availableChromeBuilds.length + ' phiên bản chưa mở. '
-      + 'Hãy cài thêm phiên bản hoặc giảm số cửa sổ.');
+    let poolIndex = chromeBuildRotationCounter;
+    while (availableChromeBuilds.length < targetSuccessCount) {
+      availableChromeBuilds.push(allInstalledBuilds[poolIndex % allInstalledBuilds.length]);
+      poolIndex++;
+    }
   }
   warnings.push('Các phiên bản Google Chrome thường của lượt này: '
     + availableChromeBuilds.slice(0, targetSuccessCount).map((build) => build.version).join(', ') + '.');
@@ -1425,6 +1860,10 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
       proxyType: proxyType,
       websiteUrl: body.websiteUrl,
       websiteUrl2: websiteUrl2 || body.websiteUrl2,
+      websiteUrl3: body.websiteUrl3,
+      websiteUrl4: body.websiteUrl4,
+      offerUrls,
+      checkDuplicate: body.checkDuplicate !== false,
       autofillData: body.autofillData,
       emailList: body.emailList,
       autoSubmitForm: body.autoSubmitForm !== false,
@@ -1454,10 +1893,12 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
    * @since 2026-10-15
    */
   const attemptProxy = async (workerIndex) => {
-    const streamRole = assignedStreamRoles?.[workerIndex]
-      ?? (isDualStream ? ((workerIndex % 2 === 0) ? 1 : 2) : 1);
-    const targetUrl = (streamRole === 2 && websiteUrl2) ? websiteUrl2 : websiteUrl;
-    const streamLabel = isDualStream ? (streamRole === 1 ? 'Luồng 1 (Xuôi)' : 'Luồng 2 (Ngược)') : '';
+    const offerCount = Math.max(1, offerUrls.length);
+    const offerNumber = assignedStreamRoles?.[workerIndex]
+      ?? ((workerIndex % offerCount) + 1);
+    const targetUrl = offerUrls[offerNumber - 1] || websiteUrl;
+    const streamRole = offerNumber;
+    const streamLabel = offerCount > 1 ? `Offer ${offerNumber}` : '';
 
     while (successfulBrowsers < targetSuccessCount) {
       // Dừng khi đã đạt giới hạn limitRun (số phiên hoàn tất)
@@ -1465,35 +1906,11 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
         console.log(`[limitRun] Đã đạt giới hạn ${limitRunMax} phiên hoàn tất, dừng mở thêm.`);
         break;
       }
-      let proxy;
-      if (isDualStream) {
-        proxy = getNextProxyForStream(streamRole, availableProxies);
-      } else {
-        if (nextProxyIndex >= availableProxies.length) break;
-        proxy = availableProxies[nextProxyIndex];
-        nextProxyIndex += 1;
-      }
+      let proxy = getNextCollisionFreeProxy(offerNumber, availableProxies, offerCount);
       if (!proxy) break;
 
-      // Quản lý hàng đợi proxyQueue:
-      if (!isDualStream) {
-        const queueIdx = proxyQueue.available.indexOf(proxy._queueLine);
-        if (queueIdx !== -1) {
-          proxyQueue.available.splice(queueIdx, 1);
-          proxyQueue.used.push(proxy._queueLine);
-          void saveProxyQueue();
-        }
-      } else {
-        // Trong chế độ dual stream: chỉ chuyển proxy vào proxyQueue.used khi cả 2 luồng đều đã dùng
-        const pKey = proxy.server || proxy._queueLine;
-        if (dualStreamState.stream1Used.has(pKey) && dualStreamState.stream2Used.has(pKey)) {
-          const queueIdx = proxyQueue.available.indexOf(proxy._queueLine);
-          if (queueIdx !== -1) {
-            proxyQueue.available.splice(queueIdx, 1);
-            proxyQueue.used.push(proxy._queueLine);
-            void saveProxyQueue();
-          }
-        }
+      if (proxy.resetUrl) {
+        await rotateProxyIfNeeded(proxy);
       }
 
       const proxyKey = createProxyUsageKey(proxy, 1, targetUrl);
@@ -1512,6 +1929,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           proxy: proxy.server,
           username: proxy.username ?? '',
           websiteUrl: targetUrl,
+          offerNumber: offerNumber,
           streamRole: streamRole,
           attemptedAt: attemptStartedAt,
         };
@@ -1525,6 +1943,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
             proxy: proxy.server,
             username: proxy.username ?? '',
             websiteUrl: targetUrl,
+            offerNumber: offerNumber,
             streamRole: streamRole,
             attemptedAt: attemptStartedAt,
           };
@@ -1548,6 +1967,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           proxy: proxy,
           proxyKey: proxyKey,
           websiteUrl: targetUrl,
+          offerNumber: offerNumber,
           usedExitIps: usedExitIps,
           onExitIp: recordExitIp,
           tile: tileAt(tileIndex, layoutCount, screen),
@@ -1560,16 +1980,31 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           streamLabel: streamLabel,
           scriptSteps, captchaApiKey, completeText, timeLimit, delayStop, scriptPath,
           antiFingerprint,
+          checkDuplicate: body.checkDuplicate !== false,
         });
         activeSession = openedBrowser.session;
         successfulBrowsers += 1;
         chromeBuildRotationCounter += 1;
+
+        // Quản lý hàng đợi proxyQueue:
+        // 1 proxy dùng lại được cho tất cả offer; chỉ chuyển proxy vào proxyQueue.used
+        // khi TẤT CẢ các offer đang cấu hình đều đã hoàn tất sử dụng proxy này thành công.
+        if (isProxyUsedByAllOffers(proxy, offerCount)) {
+          const queueIdx = proxyQueue.available.indexOf(proxy._queueLine);
+          if (queueIdx !== -1) {
+            proxyQueue.available.splice(queueIdx, 1);
+            proxyQueue.used.push(proxy._queueLine);
+            void saveProxyQueue();
+          }
+        }
+
         usageHistory.proxies[proxyKey] = {
           status: 'success',
           exitIp: exitIp,
           proxy: proxy.server,
           username: proxy.username ?? '',
           websiteUrl: targetUrl,
+          offerNumber: offerNumber,
           streamRole: streamRole,
           finalUrl: openedBrowser.finalUrl,
           profileId: browserProfileId,
@@ -1583,6 +2018,11 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           + targetUrl + ' qua IP ' + exitIp + ' (' + proxy.server + ').');
         return;
       } catch (error) {
+        releaseProxyLock(proxy, exitIp);
+        const pKey = proxy?.server || proxy?._queueLine;
+        if (pKey) {
+          multiOfferState.offerUsed.get(offerNumber)?.delete(pKey);
+        }
         failureReason = error.message.split('\n')[0];
         if (activeSession) {
           activeSession.suppressAutoRefill = true;
@@ -1650,6 +2090,10 @@ async function launchUserRequestedBrowsers(requestBody) {
       proxyType: body.proxyType ?? 'socks5',
       websiteUrl: body.websiteUrl,
       websiteUrl2: body.websiteUrl2,
+      websiteUrl3: body.websiteUrl3,
+      websiteUrl4: body.websiteUrl4,
+      offerUrls: body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : undefined),
+      checkDuplicate: body.checkDuplicate !== false,
       autofillData: body.autofillData,
       autoSubmitForm: body.autoSubmitForm !== false,
       enableLeadCheck: body.enableLeadCheck !== false,
@@ -1703,22 +2147,37 @@ function queueAutomaticRefill(delayMs = 0) {
     }
 
     const activeSettings = autoRefill.settings;
-    let url1 = activeSettings.websiteUrl ? normalizeUrl(activeSettings.websiteUrl) : '';
-    let url2 = activeSettings.websiteUrl2 ? normalizeUrl(activeSettings.websiteUrl2) : '';
-    if (!url2 && url1 && /[\r\n,]/.test(activeSettings.websiteUrl)) {
-      const parts = activeSettings.websiteUrl.split(/[\r\n,]+/).map((u) => u.trim()).filter(Boolean);
-      if (parts.length >= 2) {
-        url1 = normalizeUrl(parts[0]);
-        url2 = normalizeUrl(parts[1]);
+    const configuredOffers = [];
+    if (Array.isArray(activeSettings.offerUrls) && activeSettings.offerUrls.length > 0) {
+      configuredOffers.push(...activeSettings.offerUrls.map((u) => normalizeUrl(u)).filter(Boolean));
+    } else {
+      const u1 = activeSettings.websiteUrl ? normalizeUrl(activeSettings.websiteUrl) : '';
+      const u2 = activeSettings.websiteUrl2 ? normalizeUrl(activeSettings.websiteUrl2) : '';
+      const u3 = activeSettings.websiteUrl3 ? normalizeUrl(activeSettings.websiteUrl3) : '';
+      const u4 = activeSettings.websiteUrl4 ? normalizeUrl(activeSettings.websiteUrl4) : '';
+      if (!u2 && u1 && /[\r\n,]/.test(activeSettings.websiteUrl)) {
+        const parts = activeSettings.websiteUrl.split(/[\r\n,]+/).map((u) => u.trim()).filter(Boolean);
+        for (const p of parts) {
+          try {
+            const norm = normalizeUrl(p);
+            if (!configuredOffers.includes(norm)) configuredOffers.push(norm);
+          } catch {}
+        }
+      } else {
+        if (u1) configuredOffers.push(u1);
+        if (u2 && !configuredOffers.includes(u2)) configuredOffers.push(u2);
+        if (u3 && !configuredOffers.includes(u3)) configuredOffers.push(u3);
+        if (u4 && !configuredOffers.includes(u4)) configuredOffers.push(u4);
       }
     }
-    const isDual = Boolean(url1 && url2 && url1 !== url2);
-    const seqTarget = autoRefill.sequential ? (isDual ? 2 : 1) : autoRefill.targetCount;
+    const offerCount = Math.max(1, configuredOffers.length);
+    const isMultiOffer = offerCount >= 2;
+    const seqTarget = autoRefill.sequential ? (isMultiOffer ? offerCount : 1) : autoRefill.targetCount;
     const neededSlots = Math.min(seqTarget, maxAliveBrowsers) - activeBrowsers.size;
     if (neededSlots <= 0) return;
 
     autoRefill.message = autoRefill.sequential
-      ? (isDual ? 'Chế độ tuần tự 2 luồng: đang mở phiên tiếp theo…' : 'Chế độ tuần tự: đang mở phiên tiếp theo…')
+      ? (isMultiOffer ? `Chế độ tuần tự ${offerCount} luồng: đang mở phiên tiếp theo…` : 'Chế độ tuần tự: đang mở phiên tiếp theo…')
       : `Đang tìm proxy mới để bù ${neededSlots} slot trống…`;
 
     // Dispatch đến remote agents có enabled + còn slot + còn sống
@@ -1736,25 +2195,35 @@ function queueAutomaticRefill(delayMs = 0) {
     }
 
     let assignedStreamRoles = null;
-    if (isDual) {
+    if (isMultiOffer) {
       assignedStreamRoles = [];
-      let curStream1 = [...activeBrowsers].filter((s) => s.streamRole === 1).length;
-      let curStream2 = [...activeBrowsers].filter((s) => s.streamRole === 2).length;
+      const currentOfferCounts = new Map();
+      for (let k = 1; k <= offerCount; k++) {
+        const c = [...activeBrowsers].filter((s) => (s.offerNumber ?? s.streamRole ?? 1) === k).length;
+        currentOfferCounts.set(k, c);
+      }
       for (let i = 0; i < localNeeded; i++) {
-        if (curStream1 <= curStream2) {
-          assignedStreamRoles.push(1);
-          curStream1++;
-        } else {
-          assignedStreamRoles.push(2);
-          curStream2++;
+        let minOffer = 1;
+        let minCount = Infinity;
+        for (let k = 1; k <= offerCount; k++) {
+          const c = currentOfferCounts.get(k) || 0;
+          if (c < minCount) {
+            minCount = c;
+            minOffer = k;
+          }
         }
+        assignedStreamRoles.push(minOffer);
+        currentOfferCounts.set(minOffer, minCount + 1);
       }
     }
 
     const result = await launchRequestedBrowsers(JSON.stringify({
       ...activeSettings,
-      websiteUrl: url1 || activeSettings.websiteUrl,
-      websiteUrl2: url2 || activeSettings.websiteUrl2,
+      offerUrls: configuredOffers,
+      websiteUrl: configuredOffers[0] || activeSettings.websiteUrl,
+      websiteUrl2: configuredOffers[1] || activeSettings.websiteUrl2,
+      websiteUrl3: configuredOffers[2] || activeSettings.websiteUrl3,
+      websiteUrl4: configuredOffers[3] || activeSettings.websiteUrl4,
       requestedCount: localNeeded,
     }), { layoutTarget: seqTarget, assignedStreamRoles });
     autoRefill.message = activeBrowsers.size >= seqTarget
@@ -1819,6 +2288,7 @@ function getAutoRefillStatus() {
         extensions: session.extensions ?? null,
         streamRole: session.streamRole ?? 1,
         streamLabel: session.streamLabel ?? '',
+        offerNumber: session.offerNumber ?? session.streamRole ?? 1,
         websiteUrl: session.websiteUrl ?? null,
         aiRunning: Boolean(session.aiAssistRunning),
         aiStatus: session.aiAssistRunning ? 'Đang phân tích form bằng AI...' : (session.autofillFields ? `Đã điền ${session.autofillFields} trường` : 'Sẵn sàng'),
@@ -1971,6 +2441,8 @@ async function closeActiveBrowsers() {
   for (const session of sessions) session.suppressAutoRefill = true;
   await Promise.all(sessions.map((session) => Promise.resolve(session.browser.close()).catch(() => {})));
   activeBrowsers.clear();
+  activeProxyLocks.clear();
+  activeExitIpLocks.clear();
 
   return {
     results: [sessions.length > 0
@@ -2012,10 +2484,8 @@ async function clearUsedProxyHistory() {
   const usageHistory = await readProxyUsageHistory();
   const count = Object.keys(usageHistory.proxies).length;
   await persistProxyUsageHistory({ version: 1, proxies: {} });
-  dualStreamState.stream1Index = 0;
-  dualStreamState.stream2Index = -1;
-  dualStreamState.stream1Used.clear();
-  dualStreamState.stream2Used.clear();
+  resetMultiOfferState();
+  void saveDualStreamState();
   try {
     const profilesDir = join(chromeProfileDirectory, 'stable');
     await rm(profilesDir, { recursive: true, force: true });
@@ -2402,11 +2872,14 @@ async function startLeadVerification(session, leadConfig) {
   const exitIp = session.exitIp;
   const proxyHost = session.proxyServer ? normalizeIpAddress(session.proxyServer) : null;
   const targetIps = [exitIp, proxyHost].filter(Boolean);
-  const slotNum = (session.tileIndex ?? 0) + 1;
-  const targetScreen = leadConfig.checkScreen || 5;
+  const targetDesc = session.emailScreenNumber
+    ? `màn điền email (Màn ${session.emailScreenNumber})`
+    : (session.emailFilled ? 'màn điền email' : (leadConfig.checkScreen ? `Màn ${leadConfig.checkScreen}` : 'sau khi điền email'));
+  const slotNum = session.tileIndex !== undefined ? (session.tileIndex + 1) : (session.slot || 1);
   const label = `Slot ${slotNum} [IP: ${exitIp}]`;
 
-  console.log(`[LeadCheck] ${label}: Đã đến màn ${targetScreen}. Bắt đầu kiểm tra lead từ toffers.top...`);
+  console.log(`[LeadCheck] ${label}: Đã nộp ${targetDesc}. Bắt đầu kiểm tra lead từ toffers.top...`);
+  try {
 
   const updateBadge = (text) => {
     try {
@@ -2423,12 +2896,11 @@ async function startLeadVerification(session, leadConfig) {
     } catch {}
   };
 
-  const intervalSeconds = leadConfig.intervalSeconds || DEFAULT_LEAD_CONFIG.intervalSeconds;
-  const maxAttempts = leadConfig.maxAttempts || DEFAULT_LEAD_CONFIG.maxAttempts;
-  const initialWaitSeconds = Math.min(5, intervalSeconds);
+  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 30);
+  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 2);
 
-  session.leadCheckMessage = `Đã đến màn ${targetScreen}; đang kiểm tra lead lần 1...`;
-  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang kiểm tra lead màn ${targetScreen} (1/${maxAttempts})...</span>`);
+  session.leadCheckMessage = `Đã nộp ${targetDesc}; bắt đầu chờ kiểm tra lead (${maxAttempts} lần x ${intervalSeconds}s)...`;
+  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead sau khi điền email (${maxAttempts} lần x ${intervalSeconds}s)...</span>`);
 
   let leadFound = false;
   let attempt = 0;
@@ -2437,12 +2909,15 @@ async function startLeadVerification(session, leadConfig) {
 
   while (attempt < maxAttempts) {
     attempt += 1;
-    const currentWaitSeconds = attempt === 1 ? initialWaitSeconds : intervalSeconds;
-    if (attempt > 1) {
-      session.leadCheckMessage = `Chưa có lead lần ${attempt - 1}; chờ tiếp ${currentWaitSeconds}s để kiểm tra lần ${attempt}/${maxAttempts}...`;
-      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Đang chờ lead (lần ${attempt}/${maxAttempts})...</span>`);
+    // Chờ trọn vẹn intervalSeconds (30s) cho mỗi lần kiểm tra, đếm ngược trực tiếp trên badge và message
+    for (let sec = intervalSeconds; sec > 0; sec--) {
+      if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
+        return; // Phiên đã bị đóng bởi người dùng
+      }
+      session.leadCheckMessage = `Đang chờ có lead lần ${attempt}/${maxAttempts}: còn ${sec}s...`;
+      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead lần ${attempt}/${maxAttempts}: còn ${sec}s...</span>`);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    await new Promise((resolve) => { setTimeout(resolve, currentWaitSeconds * 1000); });
 
     if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
       return; // Phiên đã bị đóng bởi người dùng
@@ -2483,56 +2958,41 @@ async function startLeadVerification(session, leadConfig) {
     if (logs) {
       logs.push({
         time: new Date().toISOString(),
+        offer: session.offerNumber ?? session.streamRole ?? 1,
         type: 'lead_confirmed',
         ip: exitIp,
         detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt} (Màn ${targetScreen}).`,
       });
+      queueSaveBrowserLogs();
     }
 
     // Kích hoạt ngay lượt quét autofill tiếp theo để tiếp tục Jump Page / Rewards / Offerwall
     try {
       session.triggerAutofillScan?.();
     } catch {}
-  } else if (hasApiError) {
-    // API BỊ LỖI (Cookie hết hạn, Cloudflare chặn hoặc mất mạng):
-    // GIỮ NGUYÊN TRÌNH DUYỆT ĐỂ BẢO VỆ LEAD VÀ SOCK
-    session.leadCheckStatus = 'api_error';
-    session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}. Đã giữ nguyên trình duyệt để bạn kiểm tra hoặc cập nhật Cookie!`;
-    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">⚠️ Giữ browser: Lỗi API</span>`);
-
-    console.warn(`[LeadCheck] ${label}: ⚠️ Gặp lỗi API (${lastApiErrorMessage}). GIỮ NGUYÊN TRÌNH DUYỆT để người dùng kiểm tra hoặc đổi Cookie.`);
-
-    const logs = browserSessionLogs.get(session);
-    if (logs) {
-      logs.push({
-        time: new Date().toISOString(),
-        type: 'lead_api_error',
-        ip: exitIp,
-        detail: `Lỗi gọi API toffers.top: ${lastApiErrorMessage}. Trình duyệt được giữ nguyên.`,
-      });
-    }
-
-    try {
-      session.triggerAutofillScan?.();
-    } catch {}
   } else {
-    // KHÔNG CÓ LEAD VỀ SAU KHI KIỂM TRA MÀN 5:
-    // "nếu không thì tắt trình duyệt" -> Tắt trình duyệt và xoay sock mới
+    // KHÔNG CÓ LEAD VỀ HOẶC API LỖI: TỰ ĐỘNG TẮT TRÌNH DUYỆT ĐỂ ĐỔI SOCK MỚI
     session.leadCheckStatus = 'failed';
+    session.screen5LeadVerified = false;
     session.closingDueToNoLead = true;
-    session.leadCheckMessage = `❌ Không có lead về cho IP ${exitIp} sau ${attempt} lần kiểm tra màn ${targetScreen}. Đang tắt trình duyệt để đổi sock mới...`;
-    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead. Đóng Chrome...</span>`);
+    const reasonText = hasApiError
+      ? `Lỗi gọi API toffers.top (${lastApiErrorMessage})`
+      : `Không có lead về cho IP ${exitIp} sau ${attempt} lần kiểm tra (${intervalSeconds}s/lần)`;
+    session.leadCheckMessage = `❌ ${reasonText}. Tự động tắt trình duyệt để đổi sock mới...`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead. Tự tắt Chrome...</span>`);
 
-    console.log(`[LeadCheck] ${label}: ❌ Không có lead về sau ${attempt} lần kiểm tra màn ${targetScreen}. Tắt trình duyệt và xoay sock.`);
+    console.log(`[LeadCheck] ${label}: ❌ ${reasonText}. Tắt trình duyệt và xoay sock.`);
 
     const logs = browserSessionLogs.get(session);
     if (logs) {
       logs.push({
         time: new Date().toISOString(),
+        offer: session.offerNumber ?? session.streamRole ?? 1,
         type: 'lead_failed',
         ip: exitIp,
-        detail: `Không có lead về sau ${attempt} lần kiểm tra màn ${targetScreen}. Đóng trình duyệt để chuyển proxy tiếp theo.`,
+        detail: `${reasonText}. Tự động đóng trình duyệt để chuyển proxy tiếp theo.`,
       });
+      queueSaveBrowserLogs();
     }
 
     try {
@@ -2543,6 +3003,9 @@ async function startLeadVerification(session, leadConfig) {
     } catch (closeErr) {
       console.warn(`[LeadCheck] ${label}: Lỗi khi đóng trình duyệt:`, closeErr.message);
     }
+  }
+  } catch (fatalLeadErr) {
+    console.error(`[LeadCheck] ${label}: Lỗi nghiêm trọng khi kiểm tra lead:`, fatalLeadErr.message);
   }
 }
 
@@ -2560,9 +3023,9 @@ async function startLeadVerification(session, leadConfig) {
  * @since 2026-10-15
  */
 async function openBrowserWithInstalledChrome({
-  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows', streamRole = 1, streamLabel = '',
+  build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows', streamRole = 1, streamLabel = '', offerNumber = 1,
   scriptSteps = null, captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
-  antiFingerprint = {},
+  antiFingerprint = {}, checkDuplicate = true,
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
@@ -2606,6 +3069,7 @@ async function openBrowserWithInstalledChrome({
     await relay?.close();
     throw error;
   }
+  const actualOfferNumber = Number(offerNumber) || Number(streamRole) || 1;
   const session = {
     browser: context,
     tileIndex,
@@ -2614,6 +3078,10 @@ async function openBrowserWithInstalledChrome({
     suppressAutoRefill: false,
     proxyKey,
     proxyServer: proxy.server,
+    websiteUrl,
+    streamRole,
+    streamLabel: streamLabel || `Offer ${actualOfferNumber}`,
+    offerNumber: actualOfferNumber,
     leadCheckStatus: null,
     leadCheckMessage: null,
     extensions: extensionNames.length > 0
@@ -2622,20 +3090,26 @@ async function openBrowserWithInstalledChrome({
     updateBadge: (text) => {
       try {
         if (context?.pages) {
+          const offerTag = `<span style="display:inline-block;background:#3b82f6;color:#ffffff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:bold;margin-right:6px;">Offer ${session.offerNumber}</span>`;
+          const decoratedText = text.includes('Offer ') ? text : `${offerTag}${text}`;
           for (const p of context.pages()) {
             if (!p.isClosed()) {
               p.evaluate((t) => {
                 const b = document.getElementById('__autolead_ip_badge');
                 if (b) b.innerHTML = t;
-              }, text).catch(() => {});
+              }, decoratedText).catch(() => {});
             }
           }
         }
       } catch {}
     },
     addLog: (entry) => {
-      const logs = browserSessionLogs.get(session);
-      if (logs) logs.push(entry);
+      if (typeof session.addBrowserLog === 'function') {
+        session.addBrowserLog(entry);
+      } else {
+        const logs = browserSessionLogs.get(session);
+        if (logs) logs.push({ time: new Date().toISOString(), offer: session.offerNumber, ...entry });
+      }
     },
   };
   const assignedEmail = dequeueNextEmail();
@@ -2644,8 +3118,8 @@ async function openBrowserWithInstalledChrome({
   }
   attachBrowserLogger(context, session);
 
-  // Inject device spoof toàn diện: prototype override + Client Hints + devicePixelRatio + webdriver cleanup
-  await context.addInitScript(({ platform, maxTouchPoints, mobile, uaPlatform, dpr, vendor }) => {
+  // Inject device spoof toàn diện: prototype override + Client Hints + devicePixelRatio + webdriver cleanup + stealth
+  await context.addInitScript(({ platform, maxTouchPoints, mobile, uaPlatform, dpr, vendor, webglVendor, webglRenderer }) => {
     const def = (obj, prop, value) => {
       try {
         Object.defineProperty(obj, prop, { get: () => value, configurable: true });
@@ -2662,6 +3136,32 @@ async function openBrowserWithInstalledChrome({
 
     // Chặn phát hiện tự động hóa
     def(navProto, 'webdriver', false);
+
+    // Permissions spoofing: Notification prompt tự nhiên tránh bị gắn cờ automation
+    if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+      const origQuery = navigator.permissions.query.bind(navigator.permissions);
+      navigator.permissions.query = (param) => {
+        if (param && param.name === 'notifications') {
+          return Promise.resolve({ state: 'prompt', onchange: null });
+        }
+        return origQuery(param);
+      };
+    }
+
+    // WebGL Vendor & Renderer đồng bộ chuẩn theo device profile
+    if (webglVendor && webglRenderer) {
+      const spoofParam = (getParameter) => function (param) {
+        if (param === 37445) return webglVendor; // UNMASKED_VENDOR_WEBGL
+        if (param === 37446) return webglRenderer; // UNMASKED_RENDERER_WEBGL
+        return getParameter.apply(this, [param]);
+      };
+      if (window.WebGLRenderingContext) {
+        WebGLRenderingContext.prototype.getParameter = spoofParam(WebGLRenderingContext.prototype.getParameter);
+      }
+      if (window.WebGL2RenderingContext) {
+        WebGL2RenderingContext.prototype.getParameter = spoofParam(WebGL2RenderingContext.prototype.getParameter);
+      }
+    }
 
     // Xử lý Client Hints (navigator.userAgentData)
     if (uaPlatform === 'iOS') {
@@ -2698,7 +3198,7 @@ async function openBrowserWithInstalledChrome({
 
   // Chống fingerprint theo tuỳ chọn (tương đương Canvas/ClientRects/WebGLImage/WebRTC trong Settings.ini bản Windows)
   if (antiFingerprint.canvas || antiFingerprint.clientRects || antiFingerprint.webgl || antiFingerprint.webrtc) {
-    await context.addInitScript(({ canvas, clientRects, webgl, webrtc, seed }) => {
+    await context.addInitScript(({ canvas, clientRects, webgl, webrtc, webglVendor, webglRenderer, seed }) => {
       // Nhiễu nhỏ ổn định theo seed của phiên để cùng 1 phiên luôn ra cùng kết quả, nhưng khác giữa các phiên
       let s = seed;
       const rand = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
@@ -2735,8 +3235,8 @@ async function openBrowserWithInstalledChrome({
 
       if (webgl) {
         const spoofParam = (getParameter) => function (param) {
-          if (param === 37445) return 'Intel Inc.'; // UNMASKED_VENDOR_WEBGL
-          if (param === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+          if (param === 37445) return webglVendor || 'Intel Inc.'; // UNMASKED_VENDOR_WEBGL
+          if (param === 37446) return webglRenderer || 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
           return getParameter.apply(this, [param]);
         };
         if (window.WebGLRenderingContext) {
@@ -2745,6 +3245,27 @@ async function openBrowserWithInstalledChrome({
         if (window.WebGL2RenderingContext) {
           WebGL2RenderingContext.prototype.getParameter = spoofParam(WebGL2RenderingContext.prototype.getParameter);
         }
+      }
+
+      // AudioContext micro-noise chống fingerprint âm thanh
+      if (window.AudioBuffer) {
+        const origGetChannelData = AudioBuffer.prototype.getChannelData;
+        AudioBuffer.prototype.getChannelData = function (channel) {
+          const buffer = origGetChannelData.apply(this, [channel]);
+          for (let i = 0; i < buffer.length; i += 97) {
+            buffer[i] += (rand() - 0.5) * 1e-7;
+          }
+          return buffer;
+        };
+      }
+      if (window.AnalyserNode) {
+        const origGetFloatFrequencyData = AnalyserNode.prototype.getFloatFrequencyData;
+        AnalyserNode.prototype.getFloatFrequencyData = function (array) {
+          origGetFloatFrequencyData.apply(this, [array]);
+          for (let i = 0; i < array.length; i += 11) {
+            array[i] += (rand() - 0.5) * 0.1;
+          }
+        };
       }
 
       if (webrtc) {
@@ -2759,6 +3280,8 @@ async function openBrowserWithInstalledChrome({
       clientRects: Boolean(antiFingerprint.clientRects),
       webgl: Boolean(antiFingerprint.webgl),
       webrtc: Boolean(antiFingerprint.webrtc),
+      webglVendor: dp.spoof.webglVendor,
+      webglRenderer: dp.spoof.webglRenderer,
       seed: Math.floor(Math.random() * 0x7fffffff) || 1,
     });
   }
@@ -2790,6 +3313,9 @@ async function openBrowserWithInstalledChrome({
       void markAutofillRecordUsed(record);
     },
     onScreen5Reached: (sess, page) => {
+      void startLeadVerification(sess, leadConfig);
+    },
+    onEmailSubmitted: (sess, page) => {
       void startLeadVerification(sess, leadConfig);
     },
     onStuck: (page) => {
@@ -2854,6 +3380,7 @@ async function openBrowserWithInstalledChrome({
 
   context.on('close', () => {
     activeBrowsers.delete(session);
+    releaseProxyLock(proxy, session.exitIp);
     void relay?.close();
     // Profile dùng xong là xoá cả profile và cache: không giữ lại ~179 MB mỗi proxy đã thử.
     void removeChromeSessionProfile(userDataDirectory);
@@ -2869,7 +3396,7 @@ async function openBrowserWithInstalledChrome({
   });
   try {
     const page = context.pages()[0] ?? await context.newPage();
-    const exitIp = await verifyBrowserExitIp(context, usedExitIps, onExitIp, websiteUrl);
+    const exitIp = await verifyBrowserExitIp(context, usedExitIps, onExitIp, websiteUrl, checkDuplicate);
     session.exitIp = exitIp;
     session.streamRole = streamRole;
     session.streamLabel = streamLabel;
@@ -3074,6 +3601,8 @@ function attachBrowserLogger(context, session) {
   const sessionItem = {
     id: sessionId,
     slot: session.tileIndex + 1,
+    offer: session.offerNumber ?? session.streamRole ?? 1,
+    offerUrl: session.websiteUrl ?? '',
     ip: session.exitIp ?? '?',
     version: session.chromeVersion ?? 'stable',
     startedAt: new Date().toISOString(),
@@ -3081,7 +3610,7 @@ function attachBrowserLogger(context, session) {
   };
 
   persistedBrowserLogs.unshift(sessionItem);
-  if (persistedBrowserLogs.length > 30) {
+  if (persistedBrowserLogs.length > 50) {
     persistedBrowserLogs.pop();
   }
 
@@ -3089,7 +3618,13 @@ function attachBrowserLogger(context, session) {
 
   function addLog(entry) {
     sessionItem.ip = session.exitIp ?? sessionItem.ip;
-    const logItem = { time: new Date().toISOString(), ...entry };
+    if (session.offerNumber) sessionItem.offer = session.offerNumber;
+    if (session.websiteUrl) sessionItem.offerUrl = session.websiteUrl;
+    const logItem = {
+      time: new Date().toISOString(),
+      offer: session.offerNumber ?? session.streamRole ?? 1,
+      ...entry,
+    };
     sessionItem.logs.push(logItem);
     if (sessionItem.logs.length > 500) sessionItem.logs.shift();
     queueSaveBrowserLogs();
@@ -3384,9 +3919,11 @@ export function watchTrafficBlockedPage(session) {
             if (logs) {
               logs.push({
                 time: new Date().toISOString(),
+                offer: session.offerNumber ?? session.streamRole ?? 1,
                 type: 'traffic_blocked',
                 detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị ${deadReason}. Đóng cửa sổ và đổi sock khác.`,
               });
+              queueSaveBrowserLogs();
             }
 
             try {
@@ -3447,9 +3984,11 @@ export function watchTrafficBlockedPage(session) {
                     if (logs) {
                       logs.push({
                         time: new Date().toISOString(),
+                        offer: session.offerNumber ?? session.streamRole ?? 1,
                         type: 'adtrapper_reload',
                         detail: `Đứng ở adtrapper quá 8s chưa nhảy tab. Đang tải lại trang (lần ${tracker.reloadCount}/2)...`,
                       });
+                      queueSaveBrowserLogs();
                     }
 
                     page.evaluate((cnt) => {
@@ -3497,9 +4036,11 @@ export function watchTrafficBlockedPage(session) {
                     if (logs) {
                       logs.push({
                         time: new Date().toISOString(),
+                        offer: session.offerNumber ?? session.streamRole ?? 1,
                         type: 'adtrapper_stuck_close',
                         detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị kẹt tại adtrapper không nhảy tab sau 2 lần tải lại. Đóng cửa sổ và đổi sock khác.`,
                       });
+                      queueSaveBrowserLogs();
                     }
 
                     chromeBuildRotationCounter += 1;
@@ -3568,6 +4109,7 @@ async function startLocalInterface() {
   await loadAutofillUsed();
   await loadAutofillQueue();
   await loadProxyQueue();
+  await loadDualStreamState();
   await initializeEmailQueue();
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
@@ -3913,10 +4455,26 @@ async function startLocalInterface() {
     }
 
     if (request.method === 'GET' && request.url === '/proxy-queue') {
+      const allOfferUsed = new Set([
+        ...dualStreamState.stream1Used,
+        ...dualStreamState.stream2Used,
+        ...[...multiOfferState.offerUsed.values()].flatMap((set) => [...set]),
+      ]);
+      const multiUsedCount = (multiOfferState.enabled || dualStreamState.enabled)
+        ? allOfferUsed.size
+        : proxyQueue.used.length;
       respondWithJson(response, 200, {
         available: proxyQueue.available.length,
-        used: proxyQueue.used.length,
+        used: Math.max(proxyQueue.used.length, multiUsedCount),
         usedList: proxyQueue.used,
+        dualStream: dualStreamState.enabled || multiOfferState.enabled,
+        stream1Index: dualStreamState.stream1Index,
+        stream2Index: dualStreamState.stream2Index,
+        multiOffer: {
+          enabled: multiOfferState.enabled,
+          offerCount: multiOfferState.offerCount,
+          activeLocks: activeProxyLocks.size,
+        },
       });
       return;
     }
@@ -3957,10 +4515,28 @@ async function startLocalInterface() {
         proxyQueue.available.push(...proxyQueue.used.splice(0));
       }
       await saveProxyQueue();
-      dualStreamState.stream1Index = 0;
-      dualStreamState.stream2Index = -1;
-      dualStreamState.stream1Used.clear();
-      dualStreamState.stream2Used.clear();
+      resetMultiOfferState();
+      await saveDualStreamState();
+
+      // Xoá bản ghi trong usageHistory cho các proxy được reset để không bị chặn bởi lượt cũ
+      try {
+        const history = await readProxyUsageHistory();
+        if (rawLines.length > 0) {
+          const allowedServers = new Set(rawLines.map((l) => {
+            try { return parseProxyLine(l, 1, 'socks5')?.server; } catch { return null; }
+          }).filter(Boolean));
+          for (const key of Object.keys(history.proxies)) {
+            const entry = history.proxies[key];
+            if (entry && (allowedServers.has(entry.proxy) || allowedServers.has(entry.server))) {
+              delete history.proxies[key];
+            }
+          }
+        } else {
+          history.proxies = {};
+        }
+        await persistProxyUsageHistory(history);
+      } catch {}
+
       respondWithJson(response, 200, {
         available: proxyQueue.available.length,
         used: proxyQueue.used.length,
@@ -3990,6 +4566,7 @@ async function startLocalInterface() {
           ...s,
           websiteUrl: url1 || s.websiteUrl,
           websiteUrl2: url2 || s.websiteUrl2,
+          checkDuplicate: s.checkDuplicate !== false,
         };
         autoRefill.message = isDual
           ? 'Chế độ tuần tự 2 luồng đã bật: chạy đồng thời cả 2 link (Luồng 1 từ đầu, Luồng 2 từ cuối), delay 5s giữa các phiên.'
@@ -4105,6 +4682,33 @@ async function startLocalInterface() {
         htmlCount,
         sessions: persistedBrowserLogs,
       });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/browser-logs/export-csv') {
+      const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const rows = [
+        ['Thời gian', 'Offer #', 'Slot', 'IP Exit', 'Loại sự kiện', 'Chi tiết thao tác', 'Tên file HTML', 'URL trang'].map(csvCell).join(','),
+      ];
+      for (const session of persistedBrowserLogs) {
+        for (const entry of session.logs || []) {
+          rows.push([
+            entry.time || '',
+            entry.offer ?? session.offer ?? 1,
+            session.slot ?? '',
+            session.ip ?? '',
+            entry.type ?? '',
+            entry.detail || entry.text || entry.url || '',
+            entry.htmlFilename || '',
+            entry.url || session.offerUrl || '',
+          ].map(csvCell).join(','));
+        }
+      }
+      response.writeHead(200, {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': 'attachment; filename="autoleadpc-interaction-logs.csv"',
+      });
+      response.end('\uFEFF' + rows.join('\r\n'), 'utf8');
       return;
     }
 

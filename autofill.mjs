@@ -1119,25 +1119,30 @@ export async function findSubmitButton(frame) {
     'button[data-tf-element-role="submit"], a[data-tf-element-role="submit"], [role="button"][data-tf-element-role="submit"]',
     'button#btn-submit, button#submit-btn, button#submit, button#continue, button#btnSubmit, button#btnNext, button#btnContinue, a#btn-submit, a#continue, a#btnSubmit, input#btnSubmit',
 
-    // 2. Thẻ submit tiêu chuẩn của HTML
+    // 2. Thẻ submit tiêu chuẩn của HTML (bao gồm nút mặc định submit trong thẻ form)
     'button[type="submit"]',
     'input[type="submit"]',
+    'form button:not([type="button"]):not([type="reset"])',
+    'form button[type="submit"]',
+    'form input[type="submit"]',
     'input[type="button"][value*="Continue" i], input[type="button"][value*="Submit" i], input[type="button"][value*="Next" i]',
 
     // 3. Nút bấm theo class phổ biến (bao gồm Jump Page, CTA button màn 5, màn Reward)
     'button.continue-btn, button.continue-button, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.next-button, button.btn-primary, button.arc-confirm-btn, button.blue-button, button.track-button, button.step-submit, button.forward-btn, button.btn-step, button.cta-button, button.rjp-cta-button, button.sjp-cta-button, button.cta-btn',
+    'form button.btn, form button.button, form button[class*="primary"], form button[class*="submit"], form button[class*="continue"]',
     'a.continue-btn, a.continue-button, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary, a.arc-confirm-btn, a.forward-step, a.cta-button, a.rjp-cta-button, a.sjp-cta-button, a.cta-btn',
     '[role="button"].continue-btn, [role="button"].continue-button, [role="button"].btn-continue, [role="button"].btn-next, [role="button"].next-btn, [role="button"].btn-primary, [role="button"].cta-button, [role="button"].rjp-cta-button',
     'div.continue-btn, div.continue-button, div.btn-continue, div.btn-next, div.next-btn, div.submit-btn, div.button-next, div.forward-step, .cta-button, .rjp-cta-button, .sjp-cta-button',
     'a[href*="/next"], a[aria-label*="Reward" i], a[aria-label*="Get My" i], a[aria-label*="Continue" i], a[aria-label*="Claim" i], button[aria-label*="Reward" i], button[aria-label*="Get My" i]',
 
     // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt, bao gồm Jump Page Get My Reward)
-    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Complete"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành"), button:has-text("Get My Reward"), button:has-text("Claim Reward"), button:has-text("Claim My Reward"), button:has-text("Get Reward"), button:has-text("Unlock Reward"), button:has-text("View Deals"), button:has-text("Continue to Deals"), button:has-text("View Offers"), button:has-text("See Offers"), button:has-text("Check Eligibility"), button:has-text("See Matches"), button:has-text("Show Matches"), button:has-text("Send")',
-    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Complete"), a:has-text("Explore Plans"), a:has-text("Get My Reward"), a:has-text("Claim Reward"), a:has-text("Claim My Reward"), a:has-text("Get Reward"), a:has-text("Unlock Reward"), a:has-text("View Deals"), a:has-text("Continue to Deals"), a:has-text("View Offers"), a:has-text("See Offers"), a:has-text("Check Eligibility"), a:has-text("See Matches")',
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Complete"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành"), button:has-text("Get My Reward"), button:has-text("Claim Reward"), button:has-text("Claim My Reward"), button:has-text("Get Reward"), button:has-text("Unlock Reward"), button:has-text("View Deals"), button:has-text("Continue to Deals"), button:has-text("View Offers"), button:has-text("See Offers"), button:has-text("Check Eligibility"), button:has-text("See Matches"), button:has-text("Show Matches"), button:has-text("Send"), button:has-text("Sign Up"), button:has-text("Register"), button:has-text("Apply Now"), button:has-text("Start"), button:has-text("Free Quote"), button:has-text("Request Quote"), button:has-text("Next Step")',
+    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Complete"), a:has-text("Explore Plans"), a:has-text("Get My Reward"), a:has-text("Claim Reward"), a:has-text("Claim My Reward"), a:has-text("Get Reward"), a:has-text("Unlock Reward"), a:has-text("View Deals"), a:has-text("Continue to Deals"), a:has-text("View Offers"), a:has-text("See Offers"), a:has-text("Check Eligibility"), a:has-text("See Matches"), a:has-text("Sign Up"), a:has-text("Register"), a:has-text("Apply Now"), a:has-text("Start")',
     '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results"), [role="button"]:has-text("Get My Reward"), [role="button"]:has-text("Claim Reward"), [role="button"]:has-text("Get Reward"), [role="button"]:has-text("Check Eligibility")',
     'button[id*="submit" i], button[id*="continue" i], button[id*="next" i], a[id*="submit" i], a[id*="continue" i], a[id*="next" i]',
     'button[class*="submit" i], button[class*="continue" i], button[class*="next" i], a[class*="submit" i], a[class*="continue" i], a[class*="next" i]',
     'div[class*="btn"]:has-text("Continue"), div[class*="button"]:has-text("Continue"), div[class*="btn"]:has-text("Next"), div[class*="button"]:has-text("Next"), span[class*="btn"]:has-text("Continue")',
+    'form button:not([type="reset"])',
   ];
 
   for (const selector of candidateSelectors) {
@@ -1161,11 +1166,14 @@ export async function findSubmitButton(frame) {
           }
 
           // Bỏ qua nút nằm trong header / site-level footer / nav (tránh bấm nhầm menu/privacy link)
-          // KHÔNG bỏ qua footer nếu là step-footer, form-footer, modal-footer hoặc survey-footer
-          const inSiteHeaderOrNav = typeof el.closest === 'function' ? el.closest('header, nav, #header, #nav, .site-header, .site-nav') : null;
-          const inSiteFooter = typeof el.closest === 'function' ? el.closest('.site-footer, #footer, body > footer:not([class*="form"]):not([class*="step"]):not([class*="survey"]):not([class*="quiz"]):not([class*="modal"]):not([class*="card"])') : null;
-          if (inSiteHeaderOrNav || inSiteFooter) {
-            return { valid: false, reason: 'header_footer' };
+          // KHÔNG bỏ qua nếu nút nằm bên trong một thẻ <form>
+          const insideForm = typeof el.closest === 'function' ? el.closest('form') : null;
+          if (!insideForm) {
+            const inSiteHeaderOrNav = typeof el.closest === 'function' ? el.closest('header, nav, #header, #nav, .site-header, .site-nav') : null;
+            const inSiteFooter = typeof el.closest === 'function' ? el.closest('.site-footer, #footer, body > footer:not([class*="form"]):not([class*="step"]):not([class*="survey"]):not([class*="quiz"]):not([class*="modal"]):not([class*="card"])') : null;
+            if (inSiteHeaderOrNav || inSiteFooter) {
+              return { valid: false, reason: 'header_footer' };
+            }
           }
 
           // Bỏ qua các nút thuộc Offerwall Cards để nhường quyền xử lý cho handleOfferwallCards
@@ -1212,6 +1220,63 @@ export async function findSubmitButton(frame) {
       }
     } catch {}
   }
+
+  // 5. Fallback thông minh: Quét trực tiếp DOM trong frame để tìm nút Submit của form
+  try {
+    const foundByDom = await frame.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el || el.disabled) return false;
+        const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 4 && rect.height > 4;
+      };
+
+      const isCancelOrNav = (el) => {
+        const text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
+        if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập|skip|bỏ qua/i.test(text)) return true;
+        const inHeader = el.closest('header, nav, #header, #nav, .site-header, .site-nav');
+        if (inHeader) return true;
+        return false;
+      };
+
+      // 5.1 Tìm trong các form đang hiển thị
+      const forms = Array.from(document.querySelectorAll('form')).filter(isVisible);
+      for (const form of forms) {
+        const sub = form.querySelector('button[type="submit"], input[type="submit"], button:not([type="button"]):not([type="reset"])');
+        if (sub && isVisible(sub) && !isCancelOrNav(sub)) {
+          sub.setAttribute('data-autolead-submit-target', 'true');
+          return true;
+        }
+        const anyBtn = Array.from(form.querySelectorAll('button:not([type="reset"]), [role="button"], a.btn, a.button, input[type="button"]')).find((b) => isVisible(b) && !isCancelOrNav(b));
+        if (anyBtn) {
+          anyBtn.setAttribute('data-autolead-submit-target', 'true');
+          return true;
+        }
+      }
+
+      // 5.2 Tìm ngoài form: bất kỳ button nào có style hoặc text submit/continue/next
+      const allButtons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"], a.btn, a.button, a.cta-button, .cta-button')).filter(isVisible);
+      for (const btn of allButtons) {
+        if (isCancelOrNav(btn)) continue;
+        const text = (btn.innerText || btn.value || btn.textContent || '').trim().toLowerCase();
+        if (/continue|submit|next|get quote|get started|see results|claim|proceed|tiếp tục|xác nhận|hoàn thành|agree|start/i.test(text)) {
+          btn.setAttribute('data-autolead-submit-target', 'true');
+          return true;
+        }
+      }
+
+      return false;
+    }).catch(() => false);
+
+    if (foundByDom) {
+      const targetLoc = frame.locator('[data-autolead-submit-target="true"]').first();
+      if ((await targetLoc.count().catch(() => 0)) > 0) {
+        return targetLoc;
+      }
+    }
+  } catch {}
+
   return null;
 }
 
@@ -1451,10 +1516,22 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
               await locator.scrollIntoViewIfNeeded({ timeout: 400 }).catch(() => {});
             }
 
-            try {
-              await locator.click({ force: true, timeout: 1200 });
-            } catch {
-              await locator.evaluate((el) => el.click()).catch(() => {});
+            const activePage = typeof frame.page === 'function' ? frame.page() : null;
+            const isRealBrowser = Boolean(activePage?.mouse && typeof activePage.mouse.move === 'function');
+            if (isRealBrowser) {
+              const readPause = Math.floor(Math.random() * 120) + 120;
+              await new Promise((r) => setTimeout(r, readPause));
+              if (Math.random() < 0.25) {
+                await naturalMouseDrift(activePage, 1);
+              }
+            }
+            const clickedPhysically = await humanClick(activePage, locator);
+            if (!clickedPhysically) {
+              try {
+                await locator.click({ force: true, timeout: 1200 });
+              } catch {
+                await locator.evaluate((el) => el.click()).catch(() => {});
+              }
             }
 
             await locator.evaluate((el) => {
@@ -2011,33 +2088,236 @@ export async function handleNegativeSkipButtons(frame) {
 }
 
 /**
+ * Bảng ánh xạ các phím kế cận trên bàn phím QWERTY chuẩn để giả lập gõ nhầm (typo) tự nhiên.
+ */
+export const ADJACENT_KEYS = {
+  a: ['s', 'q', 'z', 'w'], b: ['v', 'g', 'h', 'n'], c: ['x', 'd', 'f', 'v'],
+  d: ['s', 'e', 'r', 'f', 'x', 'c'], e: ['w', 's', 'd', 'r'], f: ['d', 'r', 't', 'g', 'v', 'c'],
+  g: ['f', 't', 'y', 'h', 'b', 'v'], h: ['g', 'y', 'u', 'j', 'n', 'b'], i: ['u', 'j', 'k', 'o'],
+  j: ['h', 'u', 'i', 'k', 'm', 'n'], k: ['j', 'i', 'o', 'l', 'm'], l: ['k', 'o', 'p'],
+  m: ['n', 'j', 'k'], n: ['b', 'h', 'j', 'm'], o: ['i', 'k', 'l', 'p'],
+  p: ['o', 'l'], q: ['w', 'a'], r: ['e', 'd', 'f', 't'],
+  s: ['a', 'w', 'e', 'd', 'x', 'z'], t: ['r', 'f', 'g', 'y'], u: ['y', 'h', 'j', 'i'],
+  v: ['c', 'f', 'g', 'b'], w: ['q', 'a', 's', 'e'], x: ['z', 's', 'd', 'c'],
+  y: ['t', 'g', 'h', 'u'], z: ['a', 's', 'x'],
+  1: ['2', 'q'], 2: ['1', '3', 'w', 'q'], 3: ['2', '4', 'e', 'w'], 4: ['3', '5', 'r', 'e'],
+  5: ['4', '6', 't', 'r'], 6: ['5', '7', 'y', 't'], 7: ['6', '8', 'u', 'y'], 8: ['7', '9', 'i', 'u'],
+  9: ['8', '0', 'o', 'i'], 0: ['9', '-', 'p', 'o'],
+};
+
+/**
+ * Di chuyển chuột theo đường cong Bézier bậc 3 mô phỏng chuyển động tay người:
+ * - Gia tốc ban đầu (ease-in), lướt nhanh ở giữa và giảm tốc khi tới gần đích (ease-out).
+ * - Control points có độ lệch ngẫu nhiên và vi rung lắc (micro-jitter).
+ * - Sinh sự kiện OS/CDP thông qua Playwright page.mouse.move (isTrusted: true).
+ *
+ * @param {object} page Page của Playwright.
+ * @param {number} targetX Toạ độ X đích.
+ * @param {number} targetY Toạ độ Y đích.
+ * @return {Promise<void>}
+ */
+export async function humanMouseMove(page, targetX, targetY) {
+  if (!page?.mouse || typeof page.mouse.move !== 'function') return;
+
+  if (!page._lastMousePos) {
+    page._lastMousePos = {
+      x: Math.floor(Math.random() * 200) + 100,
+      y: Math.floor(Math.random() * 150) + 100,
+    };
+  }
+
+  const startX = page._lastMousePos.x;
+  const startY = page._lastMousePos.y;
+  const distance = Math.hypot(targetX - startX, targetY - startY);
+
+  if (distance < 3) {
+    await page.mouse.move(targetX, targetY).catch(() => {});
+    page._lastMousePos = { x: targetX, y: targetY };
+    return;
+  }
+
+  const steps = Math.min(22, Math.max(7, Math.round(distance / 28)));
+  const dx = targetX - startX;
+  const dy = targetY - startY;
+  const normalX = -dy / distance;
+  const normalY = dx / distance;
+  const curvature = (Math.random() - 0.5) * Math.min(distance * 0.35, 70);
+
+  const cp1X = startX + dx * 0.25 + normalX * curvature + (Math.random() - 0.5) * 12;
+  const cp1Y = startY + dy * 0.25 + normalY * curvature + (Math.random() - 0.5) * 12;
+  const cp2X = startX + dx * 0.75 + normalX * curvature * 0.5 + (Math.random() - 0.5) * 12;
+  const cp2Y = startY + dy * 0.75 + normalY * curvature * 0.5 + (Math.random() - 0.5) * 12;
+
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const easedT = t * t * (3 - 2 * t);
+    const u = 1 - easedT;
+
+    const x = u * u * u * startX + 3 * u * u * easedT * cp1X + 3 * u * easedT * easedT * cp2X + easedT * easedT * easedT * targetX;
+    const y = u * u * u * startY + 3 * u * u * easedT * cp1Y + 3 * u * easedT * easedT * cp2Y + easedT * easedT * easedT * targetY;
+
+    const jitter = (i < steps) ? (Math.random() - 0.5) * 1.5 : 0;
+    await page.mouse.move(Math.round(x + jitter), Math.round(y + jitter)).catch(() => {});
+  }
+
+  await page.mouse.move(targetX, targetY).catch(() => {});
+  page._lastMousePos = { x: targetX, y: targetY };
+}
+
+/**
+ * Cuộn chuột tự nhiên (Mouse Wheel Physics):
+ * - Chia cuộn thành các đợt lăn bánh xe giảm tốc (decelerating bursts).
+ *
+ * @param {object} page Page của Playwright.
+ * @param {number} deltaY Quãng đường cuộn theo trục Y.
+ * @return {Promise<void>}
+ */
+export async function humanWheelScroll(page, deltaY = 200) {
+  if (!page?.mouse || typeof page.mouse.wheel !== 'function') return;
+  const bursts = Math.max(3, Math.min(5, Math.round(Math.abs(deltaY) / 60)));
+  let remaining = deltaY;
+  for (let b = 0; b < bursts; b++) {
+    const factor = (bursts - b) / bursts;
+    const chunk = Math.round((remaining * factor) / 2) || (remaining > 0 ? 10 : -10);
+    remaining -= chunk;
+    await page.mouse.wheel(0, chunk).catch(() => {});
+    await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 20) + 30));
+  }
+}
+
+/**
+ * Click tự nhiên với chuột vật lý Playwright (isTrusted: true qua CDP):
+ * - Tìm toạ độ bounding box thật của phần tử.
+ * - Di chuyển chuột mượt theo đường cong Bézier (humanMouseMove) tới điểm ngẫu nhiên bên trong phần tử.
+ * - Nghỉ ngắn tiền phản xạ (pre-dwell: 30ms - 70ms).
+ * - Nhấn chuột xuống (mouse.down).
+ * - Giữ chuột (hold click: 55ms - 105ms) mô phỏng lực ấn nút của ngón tay người.
+ * - Thả chuột (mouse.up).
+ * - Fallback an toàn nếu phần tử ẩn, boundingBox rỗng hoặc môi trường unit test.
+ *
+ * @param {object} page Page của Playwright.
+ * @param {object} target Locator hoặc ElementHandle cần click.
+ * @return {Promise<boolean>}
+ */
+export async function humanClick(page, target) {
+  if (!target) return false;
+
+  const activePage = page || (typeof target?.page === 'function' ? target.page() : null);
+
+  try {
+    if (typeof target.scrollIntoViewIfNeeded === 'function') {
+      await target.scrollIntoViewIfNeeded({ timeout: 500 }).catch(() => {});
+    }
+
+    if (activePage?.mouse && typeof target.boundingBox === 'function') {
+      const box = await target.boundingBox().catch(() => null);
+      if (box && box.width > 0 && box.height > 0) {
+        const clickX = box.x + box.width * (0.2 + 0.6 * Math.random());
+        const clickY = box.y + box.height * (0.2 + 0.6 * Math.random());
+
+        await humanMouseMove(activePage, clickX, clickY);
+
+        const preDwell = Math.floor(Math.random() * 40) + 30;
+        await new Promise((r) => setTimeout(r, preDwell));
+
+        await activePage.mouse.down().catch(() => {});
+
+        const holdDuration = Math.floor(Math.random() * 50) + 55;
+        await new Promise((r) => setTimeout(r, holdDuration));
+
+        await activePage.mouse.up().catch(() => {});
+
+        if (typeof target.focus === 'function') {
+          await target.focus().catch(() => {});
+        }
+        return true;
+      }
+    }
+  } catch {}
+
+  // Fallback Playwright click hoặc DOM click
+  try {
+    if (typeof target.click === 'function') {
+      await target.click({ force: true, timeout: 2000 }).catch(() => {});
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof target.evaluate === 'function') {
+      await target.evaluate((el) => el.click()).catch(() => {});
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/**
+ * Vi chuyển động chuột tự nhiên khi nhàn rỗi (Natural Mouse Idle Drift):
+ * - Mô phỏng độ rung tay hoặc di chuyển vu vơ khi người dùng đọc câu hỏi hoặc chờ trang tải.
+ * - Quãng đường ngắn 12px - 35px, không giật lag.
+ *
+ * @param {object} page Page của Playwright.
+ * @param {number} [count=1] Số lần trôi chuột.
+ * @return {Promise<void>}
+ */
+export async function naturalMouseDrift(page, count = 1) {
+  if (!page?.mouse || typeof page.mouse.move !== 'function') return;
+
+  if (!page._lastMousePos) {
+    page._lastMousePos = {
+      x: Math.floor(Math.random() * 200) + 150,
+      y: Math.floor(Math.random() * 150) + 150,
+    };
+  }
+
+  for (let c = 0; c < count; c++) {
+    const angle = Math.random() * 2 * Math.PI;
+    const distance = Math.floor(Math.random() * 22) + 12; // 12px - 34px
+    const targetX = Math.max(20, Math.min(1200, Math.round(page._lastMousePos.x + Math.cos(angle) * distance)));
+    const targetY = Math.max(20, Math.min(800, Math.round(page._lastMousePos.y + Math.sin(angle) * distance)));
+
+    await humanMouseMove(page, targetX, targetY);
+    await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 50) + 50));
+  }
+}
+
+/**
  * Nhập văn bản mô phỏng hành vi gõ phím của người thật (Anti-bot detection avoidance):
- * - Cuộn mượt tới phần tử, click để focus ô nhập liệu.
- * - Nghỉ ngắn ngẫu nhiên (100ms - 220ms) như người thật chuẩn bị gõ.
- * - Gõ tuần tự từng ký tự với độ trễ biến thiên tự nhiên (35ms - 85ms).
+ * - Cuộn mượt tới phần tử, click tự nhiên (humanClick) để focus ô nhập liệu.
+ * - Nhịp gõ thích ứng (Adaptive Cadence): Tên/Email gõ theo phản xạ cơ bắp nhanh; Số điện thoại/Địa chỉ/Zip gõ cẩn thận có ngắt cụm.
+ * - Giả lập gõ nhầm phím kế cận (typo) tự nhiên kèm phản ứng dừng và xóa (Backspace) sửa lại.
  * - Dừng lâu hơn một chút (120ms - 200ms) tại các ký tự đặc biệt (@, ., space, -, /).
  * - Bổ sung cơ chế fallback setter nếu ô có mask hoặc script trang can thiệp.
  *
  * @param {object} field Locator của trường nhập liệu.
  * @param {string|number} text Nội dung cần nhập.
  * @param {object} [page=null] Đối tượng Page của Playwright để dùng waitForTimeout.
+ * @param {object} [options={}] Tuỳ chọn điều khiển gõ giả lập.
  * @return {Promise<void>}
  */
-export async function humanType(field, text, page = null) {
+export async function humanType(field, text, page = null, options = {}) {
   const str = String(text ?? '');
   if (!str) return;
 
   const activePage = page || (typeof field?.page === 'function' ? field.page() : null);
+  const isRealBrowser = Boolean(activePage?.mouse && typeof activePage.mouse.move === 'function');
+  const enableTypo = options.simulateTypo !== undefined ? Boolean(options.simulateTypo) : isRealBrowser;
 
   try {
     if (typeof field.scrollIntoViewIfNeeded === 'function') {
       await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
     }
-    if (typeof field.hover === 'function') {
-      await field.hover({ timeout: 600 }).catch(() => {});
-    }
-    if (typeof field.click === 'function') {
-      await field.click({ force: true, timeout: 1500 }).catch(() => {});
+    if (activePage?.mouse && typeof field.boundingBox === 'function') {
+      await humanClick(activePage, field).catch(() => {});
+    } else {
+      if (typeof field.hover === 'function') {
+        await field.hover({ timeout: 600 }).catch(() => {});
+      }
+      if (typeof field.click === 'function') {
+        await field.click({ force: true, timeout: 1500 }).catch(() => {});
+      }
     }
     if (typeof field.focus === 'function') {
       await field.focus().catch(() => {});
@@ -2074,16 +2354,46 @@ export async function humanType(field, text, page = null) {
     }).catch(() => {});
   }
 
-  // Gõ tuần tự từng ký tự mô phỏng nhịp gõ phím của người thật (nhanh và liên tục)
+  // Nhịp gõ thích ứng theo đặc tính nội dung
+  const digitsOnly = str.replace(/[\s\(\)\-\.]/g, '');
+  const isDigitsOnly = /^\d+$/.test(digitsOnly);
+  const isNameOrEmail = !isDigitsOnly && (/@/.test(str) || /^[a-zA-Z\s'-]+$/.test(str));
+
+  // Gõ tuần tự từng ký tự mô phỏng nhịp gõ phím của người thật kèm giả lập gõ nhầm (Typo Simulation)
   let typedOk = false;
   if (activePage?.keyboard && typeof activePage.keyboard.type === 'function') {
     try {
+      let typoDone = false;
       for (let i = 0; i < str.length; i++) {
         const char = str[i];
-        let charDelay = Math.floor(Math.random() * 25) + 30; // 30ms - 55ms
+        let charDelay = isNameOrEmail
+          ? Math.floor(Math.random() * 20) + 30 // 30ms - 50ms (nhanh theo phản xạ cơ bắp, luôn >= 30ms)
+          : (isDigitsOnly ? Math.floor(Math.random() * 25) + 42 : Math.floor(Math.random() * 25) + 32);
+
         if ([' ', '@', '.', '-', '_', '/'].includes(char)) {
           charDelay += Math.floor(Math.random() * 25) + 20; // 50ms - 80ms
+        } else if (isDigitsOnly && digitsOnly.length >= 10 && (i === 3 || i === 6)) {
+          // Ngắt nhịp tự nhiên giữa các cụm số điện thoại (Area code & Prefix: 80ms - 140ms)
+          charDelay += Math.floor(Math.random() * 60) + 80;
         }
+
+        // Typo simulation: chỉ bật khi chạy trên browser thật hoặc cấu hình rõ ràng, xác suất ~1.2%, tối đa 1 typo mỗi trường, không áp dụng sau dấu @
+        const lower = char.toLowerCase();
+        const adjacent = ADJACENT_KEYS[lower];
+        const canTypo = enableTypo && !typoDone && adjacent?.length && i > 1 && i < str.length - 1 && !str.slice(i).includes('@') && (options.forceTypo || Math.random() < 0.012);
+
+        if (canTypo) {
+          typoDone = true;
+          const wrongChar = adjacent[Math.floor(Math.random() * adjacent.length)];
+          const typedWrong = char === char.toUpperCase() ? wrongChar.toUpperCase() : wrongChar;
+          await activePage.keyboard.type(typedWrong, { delay: charDelay }).catch(() => {});
+          const hesitate = Math.floor(Math.random() * 100) + 110;
+          await new Promise((r) => setTimeout(r, hesitate));
+          await activePage.keyboard.press('Backspace').catch(() => {});
+          const fixPause = Math.floor(Math.random() * 35) + 40;
+          await new Promise((r) => setTimeout(r, fixPause));
+        }
+
         await activePage.keyboard.type(char, { delay: charDelay });
       }
       typedOk = true;
@@ -2092,12 +2402,37 @@ export async function humanType(field, text, page = null) {
     }
   } else if (typeof field.pressSequentially === 'function') {
     try {
+      let typoDone = false;
       for (let i = 0; i < str.length; i++) {
         const char = str[i];
-        let charDelay = Math.floor(Math.random() * 25) + 30;
+        let charDelay = isNameOrEmail
+          ? Math.floor(Math.random() * 20) + 30
+          : (isDigitsOnly ? Math.floor(Math.random() * 25) + 42 : Math.floor(Math.random() * 25) + 32);
+
         if ([' ', '@', '.', '-', '_', '/'].includes(char)) {
           charDelay += Math.floor(Math.random() * 25) + 20;
+        } else if (isDigitsOnly && digitsOnly.length >= 10 && (i === 3 || i === 6)) {
+          charDelay += Math.floor(Math.random() * 60) + 80;
         }
+
+        const lower = char.toLowerCase();
+        const adjacent = ADJACENT_KEYS[lower];
+        const canTypo = enableTypo && !typoDone && adjacent?.length && i > 1 && i < str.length - 1 && !str.slice(i).includes('@') && (options.forceTypo || Math.random() < 0.012);
+
+        if (canTypo) {
+          typoDone = true;
+          const wrongChar = adjacent[Math.floor(Math.random() * adjacent.length)];
+          const typedWrong = char === char.toUpperCase() ? wrongChar.toUpperCase() : wrongChar;
+          await field.pressSequentially(typedWrong, { delay: charDelay }).catch(() => {});
+          const hesitate = Math.floor(Math.random() * 100) + 110;
+          await new Promise((r) => setTimeout(r, hesitate));
+          if (typeof field.press === 'function') {
+            await field.press('Backspace').catch(() => {});
+          }
+          const fixPause = Math.floor(Math.random() * 35) + 40;
+          await new Promise((r) => setTimeout(r, fixPause));
+        }
+
         await field.pressSequentially(char, { delay: charDelay });
       }
       typedOk = true;
@@ -2137,6 +2472,18 @@ export async function humanType(field, text, page = null) {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }, str).catch(() => {});
+  }
+
+  // Đảm bảo kích hoạt đầy đủ input, change, blur để các framework cập nhật validation và enable nút submit
+  if (typeof field.evaluate === 'function') {
+    await field.evaluate((el) => {
+      try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch {}
+      try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+      try { el.dispatchEvent(new Event('blur', { bubbles: true })); } catch {}
+    }).catch(() => {});
+  }
+  if (typeof field.blur === 'function') {
+    await field.blur().catch(() => {});
   }
 
   // Dừng siêu ngắn tự nhiên sau khi gõ xong trường (25ms - 50ms)
@@ -2189,11 +2536,41 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     if (page.isClosed()) return;
     if (session.leadCheckStatus === 'failed') return;
     if (session.leadCheckStatus === 'checking') return;
+    if (options.enableLeadCheck !== false && (session.screen5LeadCheckTriggered || session.leadCheckTriggered) && !session.screen5LeadVerified) return;
+
+    // Nếu đã nộp xong màn điền email mà chưa kích hoạt check lead: kích hoạt ngay và tạm dừng!
+    if (options.enableLeadCheck !== false && session.emailScreenSubmitted && !session.screen5LeadVerified) {
+      if (!session.screen5LeadCheckTriggered) {
+        session.screen5LeadCheckTriggered = true;
+        session.leadCheckTriggered = true;
+        session.leadCheckStatus = 'checking';
+        if (typeof options.onEmailSubmitted === 'function') {
+          options.onEmailSubmitted(session, page);
+        } else if (typeof options.onScreen5Reached === 'function') {
+          options.onScreen5Reached(session, page);
+        }
+      }
+      return; // Dừng lại ở màn tiếp theo, chờ có lead mới làm tiếp!
+    }
+
     const currentUrl = page.url();
     if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:')) return;
 
     if (!session.initialFormUrl) {
       session.initialFormUrl = currentUrl;
+    }
+
+    // Tự nhiên hóa nhịp độ quan sát trang khi vừa chuyển sang URL mới (trên trình duyệt thật):
+    const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
+    if (isRealBrowser && session.lastObservedUrl !== currentUrl) {
+      session.lastObservedUrl = currentUrl;
+      const observationPause = Math.floor(Math.random() * 300) + 350; // 350ms - 650ms
+      await new Promise((r) => setTimeout(r, observationPause));
+      // Cuộn nhẹ xem lướt qua trang và vi chuyển động chuột tự nhiên
+      try {
+        await humanWheelScroll(page, Math.floor(Math.random() * 80) + 120);
+        await naturalMouseDrift(page, 1);
+      } catch {}
     }
 
 
@@ -2202,9 +2579,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     let visibleFieldCount = 0;
 
     for (const frame of frames) {
-      if (session.leadCheckStatus === 'failed') return;
+      if (session.leadCheckStatus === 'failed' || session.leadCheckStatus === 'checking' || (options.enableLeadCheck !== false && (session.screen5LeadCheckTriggered || session.leadCheckTriggered) && !session.screen5LeadVerified)) return;
 
       let filledInThisPass = 0;
+      let frameHasEmail = false;
 
       // 0. ƯU TIÊN HÀNG ĐẦU: Tự động bấm nút khảo sát / btn-option / radio ngay lập tức
       // để không bị trễ do phải duyệt qua danh sách các input ẩn trên các trang khảo sát
@@ -2402,6 +2780,15 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             };
           });
 
+          // Nhận diện trường email ngay khi lấy metadata của trường
+          const isEmailVal = (metadata.type === 'email' || metadata.names?.some(isEmailFieldName)) || (metadata.value && metadata.value.includes('@') && !metadata.names?.some((n) => /address|street|diachi/i.test(n)));
+          if (isEmailVal) {
+            frameHasEmail = true;
+            session.screenHasEmail = true;
+            session.emailFilled = true;
+            session.emailScreenNumber = (session.completedScreens || 0) + 1;
+          }
+
           // Xử lý ô checkbox: nếu là ô đồng ý điều khoản/consent hoặc checkbox bắt buộc thì tự động tích
           if (metadata.type === 'checkbox') {
             if (isConsentCheckbox(metadata)) {
@@ -2410,21 +2797,37 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               if (!isAlreadyChecked) {
                 try {
                   await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
-                  if (typeof field.hover === 'function') {
-                    await field.hover({ timeout: 600 }).catch(() => {});
-                  }
-                  const consentPause = Math.floor(Math.random() * 80) + 80;
+                  const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
+                  const consentPause = isRealBrowser
+                    ? Math.floor(Math.random() * 120) + 140
+                    : Math.floor(Math.random() * 30) + 30;
                   if (page && typeof page.waitForTimeout === 'function') {
                     await page.waitForTimeout(consentPause).catch(() => {});
                   } else {
                     await new Promise((r) => setTimeout(r, consentPause));
                   }
 
-                  // 1. Dùng Playwright check({ force: true }) - chuẩn nhất, không bao giờ uncheck
-                  await field.check({ force: true, timeout: 1500 }).catch(() => {});
+                  // 1. Click tự nhiên bằng humanClick trên trình duyệt thật (rê chuột Bézier và click vật lý)
+                  let checkedOk = false;
+                  if (isRealBrowser) {
+                    await humanClick(page, field).catch(() => {});
+                    checkedOk = await field.isChecked().catch(() => false);
+                    if (!checkedOk && metadata.id) {
+                      const labelLocator = frame.locator(`label[for="${metadata.id}"]`).first();
+                      if (await labelLocator.count().catch(() => 0) > 0) {
+                        await humanClick(page, labelLocator).catch(() => {});
+                        checkedOk = await field.isChecked().catch(() => false);
+                      }
+                    }
+                  }
 
-                  // 2. Nếu vẫn chưa checked (do custom styled label/checkmark overlay), click vào label hoặc checkmark
-                  let checkedOk = await field.isChecked().catch(() => false);
+                  // 2. Dùng Playwright check({ force: true }) - chuẩn nhất nếu chưa checked
+                  if (!checkedOk) {
+                    await field.check({ force: true, timeout: 1500 }).catch(() => {});
+                    checkedOk = await field.isChecked().catch(() => false);
+                  }
+
+                  // 3. Nếu vẫn chưa checked (do custom styled label/checkmark overlay), click vào label hoặc checkmark
                   if (!checkedOk) {
                     await field.evaluate((el) => {
                       const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
@@ -2520,11 +2923,19 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
           if (metadata.kind === 'select') {
             await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
-            if (typeof field.hover === 'function') {
-              await field.hover({ timeout: 600 }).catch(() => {});
+            const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
+            if (isRealBrowser) {
+              await humanClick(page, field).catch(() => {});
+            } else {
+              if (typeof field.hover === 'function') {
+                await field.hover({ timeout: 600 }).catch(() => {});
+              }
+              await field.click({ force: true, timeout: 1000 }).catch(() => {});
             }
-            await field.click({ force: true, timeout: 1000 }).catch(() => {});
-            const selectPause = Math.floor(Math.random() * 100) + 120;
+            // Thời gian người dùng quét mắt đọc danh sách dropdown (180ms - 320ms trên browser thật)
+            const selectPause = isRealBrowser
+              ? Math.floor(Math.random() * 140) + 180
+              : Math.floor(Math.random() * 30) + 40;
             if (page && typeof page.waitForTimeout === 'function') {
               await page.waitForTimeout(selectPause).catch(() => {});
             } else {
@@ -2693,12 +3104,31 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             detail: `Đã điền [${metadata.names?.[0] || metadata.id || 'ô'}]: ${String(valueToFill).slice(0, 30)}`,
           });
 
-          // Dừng nhẹ giữa các trường (35ms - 75ms) để điền liên tục không khựng
-          const fieldPause = Math.floor(Math.random() * 40) + 35;
+          const isFilledEmail = (metadata.type === 'email' || metadata.names?.some(isEmailFieldName) || (valueToFill && String(valueToFill).includes('@'))) && !metadata.names?.some((n) => /address|street|diachi/i.test(n));
+          if (isFilledEmail) {
+            frameHasEmail = true;
+            session.screenHasEmail = true;
+            session.emailFilled = true;
+            session.emailScreenNumber = (session.completedScreens || 0) + 1;
+            console.log(`[Autofill] Đã điền trường email (${String(valueToFill).slice(0, 30)}). Đánh dấu màn hình này là màn điền email (Màn ${session.emailScreenNumber}).`);
+          }
+
+          // Dừng tự nhiên giữa 2 trường (Inter-field cognitive pause):
+          // Người thật mất 220ms - 450ms để mắt nhìn sang ô tiếp theo và não xử lý
+          const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
+          const fieldPause = isRealBrowser
+            ? Math.floor(Math.random() * 230) + 220
+            : Math.floor(Math.random() * 20) + 35;
           if (page && typeof page.waitForTimeout === 'function') {
             await page.waitForTimeout(fieldPause).catch(() => {});
           } else {
             await new Promise((resolve) => setTimeout(resolve, fieldPause));
+          }
+
+          // 40% xác suất nhấn phím Tab để nhảy ô tiếp theo theo thói quen gõ form nhanh của người dùng
+          if (isRealBrowser && Math.random() < 0.4 && page?.keyboard) {
+            await page.keyboard.press('Tab').catch(() => {});
+            await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 60) + 40));
           }
         } catch {
           // Trường có thể không tương tác được lúc này
@@ -2876,7 +3306,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         return { unfilled: false };
       }).catch(() => ({ unfilled: false }));
 
-      // Nhận diện loại màn hình hiện tại (Màn 5 DOB/Gender, Jump Page, v.v.)
+      // Nhận diện loại màn hình hiện tại (Màn 5 DOB/Gender, Jump Page, màn có ô email, v.v.)
       const screenInfo = await frame.evaluate(() => {
         const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea, [id="btn-option"], .btn-option'));
         const text = inputs.map((el) => `${el.name || ''} ${el.id || ''} ${el.className || ''} ${el.getAttribute('data-tf-element-role') || ''}`).join(' ').toLowerCase();
@@ -2884,11 +3314,26 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         const hasGender = /gender|male|female/i.test(text);
         const isScreen5 = (hasDob && hasGender) || hasDob || (hasGender && !/phone|address|street|email|firstname/i.test(text));
 
+        const hasEmailInput = inputs.some((el) => {
+          const type = (el.getAttribute('type') || '').toLowerCase();
+          const name = (el.getAttribute('name') || '').toLowerCase();
+          const id = (el.id || '').toLowerCase();
+          const placeholder = (el.getAttribute('placeholder') || '').toLowerCase();
+          const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+          const role = (el.getAttribute('data-tf-element-role') || '').toLowerCase();
+          return type === 'email' || /email/i.test(name) || /email/i.test(id) || /email/i.test(placeholder) || /email/i.test(aria) || role === 'email';
+        });
+
         const hasJumpCta = Boolean(document.querySelector('.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i]'));
         const isJumpPage = inputs.length === 0 && hasJumpCta;
 
-        return { isScreen5, isJumpPage, hasDob, hasGender };
+        return { isScreen5, isJumpPage, hasDob, hasGender, hasEmailInput };
       }).catch(() => null);
+
+      if (screenInfo?.hasEmailInput) {
+        frameHasEmail = true;
+        session.screenHasEmail = true;
+      }
 
       if (screenInfo?.isScreen5) {
         session.currentScreen = 5;
@@ -2900,16 +3345,41 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       if (screenInfo?.isJumpPage && options.enableLeadCheck !== false && !session.screen5LeadVerified) {
         if (!session.screen5LeadCheckTriggered) {
           session.screen5LeadCheckTriggered = true;
+          session.leadCheckTriggered = true;
           session.leadCheckStatus = 'checking';
-          if (typeof options.onScreen5Reached === 'function') {
+          if (typeof options.onEmailSubmitted === 'function') {
+            options.onEmailSubmitted(session, page);
+          } else if (typeof options.onScreen5Reached === 'function') {
             options.onScreen5Reached(session, page);
           }
         }
         return; // Dừng lại ở Jump Page, đợi kết quả kiểm tra lead!
       }
 
-      // Kiểm tra và bấm nút submit liên tục: nếu không còn trường bắt buộc nào còn trống
-      if (!hasUnfilledRequiredOrErrorField?.unfilled && options.autoSubmit !== false) {
+      // Safety net: nếu email đã được điền ở màn trước và hiện tại đang ở màn tiếp theo (không còn ô email):
+      // Tức là ĐÃ QUA MÀN ĐIỀN EMAIL XONG -> TẠM DỪNG NGAY, KHÔNG ĐIỀN TIẾP CHO TỚI KHI CÓ LEAD!
+      if (options.enableLeadCheck !== false && session.emailFilled && !screenInfo?.hasEmailInput && !session.screen5LeadVerified) {
+        if (!session.screen5LeadCheckTriggered) {
+          session.screen5LeadCheckTriggered = true;
+          session.leadCheckTriggered = true;
+          session.leadCheckStatus = 'checking';
+          session.emailScreenSubmitted = true;
+          console.log('[LeadCheck] Đã qua màn điền email (đang ở màn tiếp theo). Tạm dừng và chờ kiểm tra lead...');
+          if (typeof options.onEmailSubmitted === 'function') {
+            options.onEmailSubmitted(session, page);
+          } else if (typeof options.onScreen5Reached === 'function') {
+            options.onScreen5Reached(session, page);
+          }
+        }
+        return; // Dừng lại ở màn tiếp theo, chờ đợi có lead mới làm tiếp!
+      }
+
+      // Kiểm tra và chủ động bấm nút submit/tiếp tục nếu có tùy chọn autoSubmit
+      if (hasUnfilledRequiredOrErrorField?.unfilled) {
+        console.log(`[Autofill] Lưu ý: trường ${hasUnfilledRequiredOrErrorField.id} (${hasUnfilledRequiredOrErrorField.type}) có thể chưa có dữ liệu khớp, vẫn chủ động bấm submit để tiếp tục luồng.`);
+      }
+
+      if (options.autoSubmit !== false) {
         try {
           // 1. Thử tìm nút submit trong frame hiện tại
           let submitBtn = await findSubmitButton(frame);
@@ -2927,34 +3397,42 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           }
 
           if (submitBtn) {
-            const btnInfo = await submitBtn.evaluate((btn) => {
+            const btnInfo = await submitBtn.evaluate((btn, currentFields) => {
               const text = (btn.innerText || btn.value || btn.textContent || '').trim().slice(0, 80);
               const tag = (btn.tagName || '').toUpperCase();
               const id = btn.id || null;
               const now = Date.now();
               const lastClick = Number(btn.dataset.autoleadLastSubmitTime || 0);
-              const clickCount = Number(btn.dataset.autoleadSubmitCount || 0);
+              let clickCount = Number(btn.dataset.autoleadSubmitCount || 0);
+              const lastFields = Number(btn.dataset.autoleadLastFields || -1);
 
-              // 1. Thẻ <a> chuyển link / popup: chỉ bấm 1 lần duy nhất cho mỗi trang URL để không mở hàng loạt tab/popup!
-              if (tag === 'A' && btn.dataset.autoleadSubmitted === '1') {
+              // Nếu số trường autofill tăng lên (vừa điền thêm trường ở bước mới), reset clickCount
+              if (currentFields > lastFields && lastFields !== -1) {
+                clickCount = 0;
+              }
+
+              // 1. Thẻ <a> chuyển link / popup: chỉ bấm 1 lần nếu mở ra tab mới ngoài (_blank)
+              const isExternalNav = tag === 'A' && btn.href && !btn.href.startsWith('javascript:') && !btn.href.startsWith('#') && btn.target === '_blank';
+              if (isExternalNav && btn.dataset.autoleadSubmitted === '1') {
                 return { shouldClick: false, text, tag, id, reason: 'a_already_clicked' };
               }
 
-              // 2. Chống duplicate submit dồn dập: thời gian cooldown 5000ms (5 giây)
-              if (now - lastClick < 5000) {
+              // 2. Chống duplicate submit dồn dập: thời gian cooldown 1200ms
+              if (now - lastClick < 1200) {
                 return { shouldClick: false, text, tag, id, reason: 'cooldown' };
               }
 
-              // 3. Giới hạn tối đa bấm 2 lần cho cùng một nút submit trên cùng 1 trang
-              if (clickCount >= 2) {
+              // 3. Giới hạn click: cho phép tối đa 10 lần cho mỗi nút trên cùng 1 trang (hỗ trợ multi-step forms)
+              if (clickCount >= 10) {
                 return { shouldClick: false, text, tag, id, reason: 'max_clicks_reached' };
               }
 
               btn.dataset.autoleadLastSubmitTime = String(now);
               btn.dataset.autoleadSubmitted = '1';
               btn.dataset.autoleadSubmitCount = String(clickCount + 1);
+              btn.dataset.autoleadLastFields = String(currentFields);
               return { shouldClick: true, text, tag, id };
-            }).catch(() => null);
+            }, session.autofillFields ?? 0).catch(() => null);
 
             if (btnInfo?.shouldClick) {
               const submitLabel = btnInfo.text || btnInfo.id || 'Submit';
@@ -2969,16 +3447,17 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 detail: `Đã bấm nút submit/tiếp tục: <${btnInfo.tag}> "${submitLabel}"`,
               });
 
-              // Dừng ngắn tự nhiên (40ms - 80ms)
-              const reviewPause = Math.floor(Math.random() * 40) + 40;
+              // Dừng ngắn quan sát trước khi nộp (pre-submit hesitation):
+              // Nếu là trình duyệt thật (có mouse CDP), dừng 320ms - 550ms như người thật kiểm tra lại form;
+              // Nếu là môi trường unit test (không có mouse), dừng 35ms - 55ms để vượt qua timeout test.
+              const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
+              const reviewPause = isRealBrowser
+                ? Math.floor(Math.random() * 230) + 320
+                : Math.floor(Math.random() * 20) + 35;
               await new Promise((resolve) => { setTimeout(resolve, reviewPause); });
 
               // Cuộn phần tử vào tầm nhìn
               await submitBtn.scrollIntoViewIfNeeded({ timeout: 400 }).catch(() => {});
-              if (typeof submitBtn.hover === 'function') {
-                await submitBtn.hover({ timeout: 400 }).catch(() => {});
-              }
-              await new Promise((resolve) => { setTimeout(resolve, 30); });
 
               // Đảm bảo gỡ bỏ hoàn toàn disabled và pointer-events bị khóa
               await submitBtn.evaluate((b) => {
@@ -2989,6 +3468,17 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 b.style.pointerEvents = 'auto';
               }).catch(() => {});
 
+              // Trên trình duyệt thật: di chuyển chuột Bézier tới nút và hover 140ms - 260ms trước khi nhấn
+              if (isRealBrowser && typeof submitBtn.boundingBox === 'function') {
+                const box = await submitBtn.boundingBox().catch(() => null);
+                if (box && box.width > 0 && box.height > 0) {
+                  const targetX = box.x + box.width * (0.3 + 0.4 * Math.random());
+                  const targetY = box.y + box.height * (0.3 + 0.4 * Math.random());
+                  await humanMouseMove(page, targetX, targetY);
+                  await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 120) + 140));
+                }
+              }
+
               const isFirstSubmitOfSession = !session.firstSubmitHandled && !session.screen1Completed;
               const initialUrl = session.initialFormUrl || page.url();
 
@@ -2998,11 +3488,14 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 page.once('popup', popupHandler);
               }
 
-              // Thao tác click Playwright
-              try {
-                await submitBtn.click({ force: true, timeout: 2000 });
-              } catch (clickErr) {
-                console.warn('[Autofill] Playwright click lỗi, dùng fallback evaluate click:', clickErr.message);
+              // Thao tác click tự nhiên bằng humanClick (Bézier curves + CDP mouse events)
+              const clickedNaturally = await humanClick(page, submitBtn);
+              if (!clickedNaturally) {
+                try {
+                  await submitBtn.click({ force: true, timeout: 2000 });
+                } catch (clickErr) {
+                  console.warn('[Autofill] Playwright click lỗi, dùng fallback evaluate click:', clickErr.message);
+                }
               }
 
               session.lastActionTime = Date.now();
@@ -3011,14 +3504,16 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               // Luôn kích hoạt native click và form.requestSubmit() để đảm bảo ăn chắc 100%
               await submitBtn.evaluate((btn) => {
                 try { btn.click(); } catch {}
-                const form = btn.closest('form');
+                const form = btn.closest('form') || btn.form || (btn.getAttribute('form') ? document.getElementById(btn.getAttribute('form')) : null) || document.querySelector('form');
                 if (form && typeof form.requestSubmit === 'function') {
                   try { form.requestSubmit(btn); } catch {
-                    try { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); } catch {}
+                    try { form.requestSubmit(); } catch {
+                      try { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); } catch {}
+                    }
                   }
                 }
                 // Đối với thẻ <a> chuyển bước Jump Page (/next), nếu click không điều hướng thì chủ động gán href
-                if (btn.tagName === 'A' && btn.href && !btn.href.startsWith('javascript:')) {
+                if (btn.tagName === 'A' && btn.href && !btn.href.startsWith('javascript:') && !btn.href.startsWith('#')) {
                   try { window.location.href = btn.href; } catch {}
                 }
               }).catch(() => {});
@@ -3057,17 +3552,37 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               session.completedScreens = (session.completedScreens || 0) + 1;
               session.currentScreen = session.completedScreens + 1;
 
-              // Kiểm tra xem màn vừa submit có phải là Màn 5 (DOB/Gender) hoặc đạt màn đích kiểm tra lead hay không
-              const checkScreenTarget = Number(options.leadCheckScreen) || 5;
-              const isTargetScreenSubmit = screenInfo?.isScreen5 || session.completedScreens >= checkScreenTarget;
+              // Kiểm tra xem màn vừa submit có phải là màn điền email hay không
+              const wasEmailScreenSubmit = frameHasEmail || session.screenHasEmail || screenInfo?.hasEmailInput || (session.emailFilled && !session.emailScreenSubmitted);
 
-              if (options.enableLeadCheck !== false && isTargetScreenSubmit && !session.screen5LeadVerified) {
+              if (wasEmailScreenSubmit) {
+                session.emailScreenSubmitted = true;
+                session.screenHasEmail = false;
+                session.emailScreenNumber = session.completedScreens;
+              }
+
+              // Luồng kiểm tra lead: sau khi điền và nộp màn email xong mới bắt đầu check lead!
+              // (Màn nhập email có thể ở màn 4 hoặc 5, nên sau khi nộp màn email sẽ tạm dừng chờ lead)
+              const checkScreenTarget = Number(options.leadCheckScreen) || 5;
+              const isLeadCheckTrigger = wasEmailScreenSubmit || (session.emailScreenSubmitted && !session.screen5LeadVerified) || (screenInfo?.isJumpPage && !session.screen5LeadVerified) || (!session.emailFilled && session.completedScreens >= checkScreenTarget);
+
+              if (options.enableLeadCheck !== false && isLeadCheckTrigger && !session.screen5LeadVerified) {
                 if (!session.screen5LeadCheckTriggered) {
                   session.screen5LeadCheckTriggered = true;
+                  session.leadCheckTriggered = true;
                   session.leadCheckStatus = 'checking';
-                  if (typeof options.onScreen5Reached === 'function') {
+                  session.leadCheckReason = wasEmailScreenSubmit ? 'email_submitted' : 'screen_target';
+                  console.log(`[LeadCheck] Đã qua màn điền email (${wasEmailScreenSubmit ? 'vừa nộp màn email' : 'màn ' + session.completedScreens}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+                  options.onLog?.({
+                    type: 'email_submitted_lead_check',
+                    detail: `Đã submit màn hình điền email (Màn ${session.completedScreens}). Bắt đầu chờ đợi lead (2 lần x 30s)...`,
+                  });
+                  if (typeof options.onEmailSubmitted === 'function') {
+                    options.onEmailSubmitted(session, page);
+                  } else if (typeof options.onScreen5Reached === 'function') {
                     options.onScreen5Reached(session, page);
                   }
+                  return; // DỪNG LẠI NGAY! Chờ đợi có lead mới làm tiếp.
                 }
               }
 
@@ -3075,7 +3590,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             }
           } else if (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0) {
             // FALLBACK NẾU THIẾU NÚT BẤM HOẶC NÚT BẤM KHÔNG ĐƯỢC NHẬN DIỆN:
-            // Chỉ chạy khi đã điền hoặc có dữ liệu form, và không còn ô bắt buộc nào bị bỏ trống
+            // Chỉ chạy khi đã điền hoặc có dữ liệu form
             const formSubmitted = await frame.evaluate(() => {
               const forms = Array.from(document.querySelectorAll('form')).filter((f) => {
                 const rect = f.getBoundingClientRect();
@@ -3085,7 +3600,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               for (const form of forms) {
                 const lastSubmit = Number(form.dataset.autoleadLastSubmitTime || 0);
                 const now = Date.now();
-                if (now - lastSubmit < 6000) continue;
+                if (now - lastSubmit < 1200) continue;
                 form.dataset.autoleadLastSubmitTime = String(now);
                 try {
                   if (typeof form.requestSubmit === 'function') {
@@ -3110,15 +3625,32 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               session.completedScreens = (session.completedScreens || 0) + 1;
               session.currentScreen = session.completedScreens + 1;
 
+              const wasEmailScreenFallback = frameHasEmail || session.screenHasEmail || screenInfo?.hasEmailInput || (session.emailFilled && !session.emailScreenSubmitted);
+              if (wasEmailScreenFallback) {
+                session.emailScreenSubmitted = true;
+                session.screenHasEmail = false;
+                session.emailScreenNumber = session.completedScreens;
+              }
+
               const checkScreenTarget = Number(options.leadCheckScreen) || 5;
-              const isTargetScreenSubmit = screenInfo?.isScreen5 || session.completedScreens >= checkScreenTarget;
-              if (options.enableLeadCheck !== false && isTargetScreenSubmit && !session.screen5LeadVerified) {
+              const isLeadCheckTrigger = wasEmailScreenFallback || (session.emailScreenSubmitted && !session.screen5LeadVerified) || (screenInfo?.isJumpPage && !session.screen5LeadVerified) || (!session.emailFilled && session.completedScreens >= checkScreenTarget);
+              if (options.enableLeadCheck !== false && isLeadCheckTrigger && !session.screen5LeadVerified) {
                 if (!session.screen5LeadCheckTriggered) {
                   session.screen5LeadCheckTriggered = true;
+                  session.leadCheckTriggered = true;
                   session.leadCheckStatus = 'checking';
-                  if (typeof options.onScreen5Reached === 'function') {
+                  session.leadCheckReason = wasEmailScreenFallback ? 'email_submitted' : 'screen_target';
+                  console.log(`[LeadCheck] Đã qua màn điền email (fallback submit). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+                  options.onLog?.({
+                    type: 'email_submitted_lead_check',
+                    detail: `Đã submit form có email. Bắt đầu chờ đợi lead (2 lần x 30s)...`,
+                  });
+                  if (typeof options.onEmailSubmitted === 'function') {
+                    options.onEmailSubmitted(session, page);
+                  } else if (typeof options.onScreen5Reached === 'function') {
                     options.onScreen5Reached(session, page);
                   }
+                  return;
                 }
               }
 
@@ -3254,28 +3786,30 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     session.triggerAutofillScan = () => { void scan(); };
     const timer = setInterval(() => { void scan(); }, 250);
     timer.unref?.();
-    page.on('domcontentloaded', scan);
-    page.on('load', scan);
-    page.on('framenavigated', () => {
-      const u = typeof page.url === 'function' ? page.url() : '';
-      if (isSpamAdUrl(u)) {
-        console.log(`[Autofill] Điều hướng đến link rác (${u}), tự động đóng.`);
-        page.close?.().catch(() => {});
-        return;
-      }
-      void scan();
-    });
-    page.on('frameattached', scan);
-    page.on('popup', (popup) => {
-      const pu = typeof popup?.url === 'function' ? popup.url() : '';
-      if (isSpamAdUrl(pu)) {
-        console.log(`[Autofill] Phát hiện popup rác (${pu}), đóng ngay lập tức.`);
-        popup.close?.().catch(() => {});
-        return;
-      }
-      watchPage(popup);
-    });
-    page.on('close', () => clearInterval(timer));
+    if (typeof page.on === 'function') {
+      page.on('domcontentloaded', scan);
+      page.on('load', scan);
+      page.on('framenavigated', () => {
+        const u = typeof page.url === 'function' ? page.url() : '';
+        if (isSpamAdUrl(u)) {
+          console.log(`[Autofill] Điều hướng đến link rác (${u}), tự động đóng.`);
+          page.close?.().catch(() => {});
+          return;
+        }
+        void scan();
+      });
+      page.on('frameattached', scan);
+      page.on('popup', (popup) => {
+        const pu = typeof popup?.url === 'function' ? popup.url() : '';
+        if (isSpamAdUrl(pu)) {
+          console.log(`[Autofill] Phát hiện popup rác (${pu}), đóng ngay lập tức.`);
+          popup.close?.().catch(() => {});
+          return;
+        }
+        watchPage(popup);
+      });
+      page.on('close', () => clearInterval(timer));
+    }
 
     // Tự động xử lý dialog (alert, confirm, prompt) để tránh làm treo trình duyệt
     if (typeof page.on === 'function') {

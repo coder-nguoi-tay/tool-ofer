@@ -121,21 +121,25 @@ rm -f "$TMP_BIN"
 # Deploy to ~/Downloads and ~/Downloads/AutoLeadPC-mac
 echo "Deploying to ~/Downloads/ and ~/Downloads/AutoLeadPC-mac/ ..."
 mkdir -p "$HOME/Downloads/AutoLeadPC-mac"
-rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC Mac.app"
-rm -rf "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac.app"
+rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app" "$HOME/Downloads/AutoLeadPC Mac.app"
+rm -rf "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 - Chrome.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac.app"
 
 cp -R "AutoLeadPC Mac 1.app" "$HOME/Downloads/"
 cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/"
+cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app"
 cp -R "AutoLeadPC Mac.app" "$HOME/Downloads/"
 cp -R "AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC-mac/"
 cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC-mac/"
+cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 - Chrome.app"
 cp -R "AutoLeadPC Mac.app" "$HOME/Downloads/AutoLeadPC-mac/"
 
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 1.app" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 2.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac.app" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 1.app" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 - Chrome.app" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac.app" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC" 2>/dev/null || true
 
