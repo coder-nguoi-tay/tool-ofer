@@ -4225,33 +4225,45 @@ async function startLocalInterface() {
     if (request.method === 'GET' && request.url === '/pc/offer/read') {
       try {
         const baseDir = getAutoLeadPCDir();
-        const filePath = join(baseDir, 'Config', 'Offer', 'Offer.ini');
-        if (!existsSync(filePath)) {
-          respondWithJson(response, 200, {});
-          return;
+        const offerDir = join(baseDir, 'Config', 'Offer');
+        const filePath = join(offerDir, 'Offer.ini');
+        let data = {};
+        if (existsSync(filePath)) {
+          const buf = readFileSync(filePath);
+          let text = '';
+          if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+            text = buf.toString('utf16le');
+          } else {
+            text = buf.toString('utf8');
+          }
+          const getVal = (key) => {
+            const m = text.match(new RegExp(`^${key}=(.*)$`, 'm'));
+            return m ? m[1].trim().replace(/\\n/g, '\n') : '';
+          };
+          data = {
+            NameOffer: getVal('NameOffer'),
+            LinkOffer: getVal('LinkOffer'),
+            LinkOffer2: getVal('LinkOffer2'),
+            LinkOffer3: getVal('LinkOffer3'),
+            LinkOffer4: getVal('LinkOffer4'),
+            Script: getVal('Script'),
+            Complete: getVal('Complete'),
+            TimeLimit: getVal('Timeload1') || '30',
+            delayStart: getVal('delayStart') || '1',
+            delayStop: getVal('delayStop') || '1',
+          };
         }
-        const buf = readFileSync(filePath);
-        let text = '';
-        if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
-          text = buf.toString('utf16le');
-        } else {
-          text = buf.toString('utf8');
+        const listPath = join(offerDir, 'saved-offers.json');
+        let savedList = [];
+        if (existsSync(listPath)) {
+          try {
+            savedList = JSON.parse(readFileSync(listPath, 'utf8'));
+            if (!Array.isArray(savedList)) savedList = [];
+          } catch {}
         }
-        const getVal = (key) => {
-          const m = text.match(new RegExp(`^${key}=(.*)$`, 'm'));
-          return m ? m[1].trim() : '';
-        };
-        respondWithJson(response, 200, {
-          NameOffer: getVal('NameOffer'),
-          LinkOffer: getVal('LinkOffer'),
-          Script: getVal('Script'),
-          Complete: getVal('Complete'),
-          TimeLimit: getVal('Timeload1') || '30',
-          delayStart: getVal('delayStart') || '1',
-          delayStop: getVal('delayStop') || '1',
-        });
+        respondWithJson(response, 200, { ...data, savedList });
       } catch (err) {
-        respondWithJson(response, 200, {});
+        respondWithJson(response, 200, { savedList: [] });
       }
       return;
     }
@@ -4260,14 +4272,72 @@ async function startLocalInterface() {
       try {
         const body = JSON.parse(await readRequestBody(request));
         const baseDir = getAutoLeadPCDir();
-        const filePath = join(baseDir, 'Config', 'Offer', 'Offer.ini');
-        const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${body.LinkOffer || ''}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\n`;
-        const dir = dirname(filePath);
-        if (!existsSync(dir)) {
-          mkdirSync(dir, { recursive: true });
+        const offerDir = join(baseDir, 'Config', 'Offer');
+        if (!existsSync(offerDir)) {
+          mkdirSync(offerDir, { recursive: true });
         }
+        const filePath = join(offerDir, 'Offer.ini');
+        const link1 = (body.LinkOffer || '').replace(/[\r\n]+/g, '\\n');
+        const link2 = (body.LinkOffer2 || '').trim();
+        const link3 = (body.LinkOffer3 || '').trim();
+        const link4 = (body.LinkOffer4 || '').trim();
+        const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${link1}\nLinkOffer2=${link2}\nLinkOffer3=${link3}\nLinkOffer4=${link4}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\n`;
         writeFileSync(filePath, iniContent, 'utf8');
-        respondWithJson(response, 200, { success: true });
+
+        // Lưu / cập nhật danh sách preset saved-offers.json
+        const listPath = join(offerDir, 'saved-offers.json');
+        let savedList = [];
+        if (existsSync(listPath)) {
+          try {
+            savedList = JSON.parse(readFileSync(listPath, 'utf8'));
+            if (!Array.isArray(savedList)) savedList = [];
+          } catch {}
+        }
+        const offerName = (body.NameOffer || '').trim() || (body.LinkOffer || '').trim().split('\n')[0] || 'Offer ' + (savedList.length + 1);
+        const offerItem = {
+          id: body.id || `offer-${Date.now()}`,
+          NameOffer: offerName,
+          LinkOffer: body.LinkOffer || '',
+          LinkOffer2: body.LinkOffer2 || '',
+          LinkOffer3: body.LinkOffer3 || '',
+          LinkOffer4: body.LinkOffer4 || '',
+          Complete: body.Complete || '',
+          TimeLimit: body.TimeLimit || '30',
+          delayStart: body.delayStart || '1',
+          delayStop: body.delayStop || '1',
+          updatedAt: new Date().toISOString(),
+        };
+        const existingIdx = savedList.findIndex((item) => (item.id && item.id === offerItem.id) || item.NameOffer === offerName);
+        if (existingIdx !== -1) {
+          savedList[existingIdx] = { ...savedList[existingIdx], ...offerItem };
+        } else {
+          savedList.unshift(offerItem);
+        }
+        if (savedList.length > 50) savedList.length = 50;
+        writeFileSync(listPath, JSON.stringify(savedList, null, 2), 'utf8');
+
+        respondWithJson(response, 200, { success: true, savedItem: offerItem, savedList });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/pc/offer/delete') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const baseDir = getAutoLeadPCDir();
+        const listPath = join(baseDir, 'Config', 'Offer', 'saved-offers.json');
+        let savedList = [];
+        if (existsSync(listPath)) {
+          try {
+            savedList = JSON.parse(readFileSync(listPath, 'utf8'));
+            if (!Array.isArray(savedList)) savedList = [];
+          } catch {}
+        }
+        savedList = savedList.filter((item) => item.id !== body.id && item.NameOffer !== body.NameOffer);
+        writeFileSync(listPath, JSON.stringify(savedList, null, 2), 'utf8');
+        respondWithJson(response, 200, { success: true, savedList });
       } catch (err) {
         respondWithJson(response, 400, { error: err.message });
       }

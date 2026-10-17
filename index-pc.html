@@ -573,30 +573,41 @@
         <!-- pnlOffer Panel -->
         <fieldset class="win-group" id="pnlOffer">
           <legend class="win-legend">Offer (Chạy nhiều luồng & nhiều Offer)</legend>
-          <div class="form-row">
-            <span class="form-label">Name:</span>
-            <input type="text" id="txtNameOffer" class="win-input" style="flex:1;" value="demosite|de">
+          <div class="form-row" style="margin-bottom:6px;">
+            <span class="form-label" style="min-width:75px;">Offer đã lưu:</span>
+            <select id="cbbSavedOffers" class="win-select" style="flex:1;" onchange="handleSelectSavedOffer()">
+              <option value="">-- Chọn danh sách Offer đã lưu --</option>
+            </select>
+            <button type="button" class="win-btn" id="btnDeleteSavedOffer" onclick="deleteSavedOffer()" title="Xoá Offer đang chọn khỏi danh sách">Xoá</button>
           </div>
           <div class="form-row">
-            <span class="form-label">Link Offer 1:</span>
+            <span class="form-label" style="min-width:75px;">Tên Offer:</span>
+            <input type="text" id="txtNameOffer" class="win-input" style="flex:1;" value="demosite|de" placeholder="Nhập tên offer để lưu và phân loại">
+          </div>
+          <div class="form-row">
+            <span class="form-label" style="min-width:75px;">Link Offer 1:</span>
             <input type="text" id="txtLinkOffer" class="win-input" style="flex:1;" value="https://demoqa.com/automation-practice-form" placeholder="URL Offer 1 (hoặc dán danh sách nhiều link, mỗi dòng 1 link)">
-            <button type="button" class="win-btn" id="btnAddOffer" onclick="saveOfferConfig()">Add</button>
-            <button type="button" class="win-btn" id="btnResetOffer" onclick="resetOfferConfig()">Reset</button>
           </div>
           <div class="form-row">
-            <span class="form-label">Link Offer 2:</span>
+            <span class="form-label" style="min-width:75px;">Link Offer 2:</span>
             <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;" placeholder="URL Offer 2 (tùy chọn)">
           </div>
           <div class="form-row">
-            <span class="form-label">Link Offer 3:</span>
+            <span class="form-label" style="min-width:75px;">Link Offer 3:</span>
             <input type="text" id="txtLinkOffer3" class="win-input" style="flex:1;" placeholder="URL Offer 3 (tùy chọn)">
           </div>
           <div class="form-row">
-            <span class="form-label">Link Offer 4:</span>
+            <span class="form-label" style="min-width:75px;">Link Offer 4:</span>
             <input type="text" id="txtLinkOffer4" class="win-input" style="flex:1;" placeholder="URL Offer 4 (tùy chọn)">
           </div>
-          <div style="font-size:10px;color:#555555;margin-top:2px;">
-            💡 <em>Mẹo: Bạn có thể nhập Offer 1..4 hoặc dán nhiều link vào Link Offer 1 (mỗi dòng 1 link). Khi chạy nhiều luồng, hệ thống sẽ tự động luân phiên phân bổ Offer 1, 2, 3, 4... cho từng luồng.</em>
+          <div class="form-row" style="margin-top:6px;gap:6px;align-items:center;">
+            <button type="button" class="win-btn" id="btnSaveOffer" onclick="saveOfferConfig()" style="font-weight:bold;color:#003399;padding:3px 14px;">💾 Lưu Offer</button>
+            <button type="button" class="win-btn" id="btnNewOffer" onclick="newOfferConfig()" style="padding:3px 10px;">➕ Thêm mới</button>
+            <button type="button" class="win-btn" id="btnResetOffer" onclick="resetOfferConfig()" style="padding:3px 10px;">🔄 Xoá form</button>
+            <span id="offerSaveStatus" style="font-size:11px;color:#2e7d32;font-weight:bold;margin-left:6px;"></span>
+          </div>
+          <div style="font-size:10px;color:#555555;margin-top:4px;">
+            💡 <em>Mẹo: Điền các Link Offer 1..4 (hoặc dán nhiều link vào ô Link Offer 1, mỗi dòng 1 link) rồi bấm <b>"💾 Lưu Offer"</b> để lưu lại. Khi chạy nhiều luồng, hệ thống sẽ tự động luân phiên phân bổ Offer 1, 2, 3, 4... cho từng luồng.</em>
           </div>
         </fieldset>
 
@@ -1475,30 +1486,165 @@
       }
     }
 
-    // Offer Config
+    // Offer Config & Presets
+    let currentSavedOffers = [];
+
+    function renderSavedOffersDropdown(list, selectedId = '') {
+      const cbb = document.getElementById('cbbSavedOffers');
+      if (!cbb) return;
+      cbb.innerHTML = '<option value="">-- Chọn danh sách Offer đã lưu --</option>';
+      for (const item of list) {
+        const opt = document.createElement('option');
+        opt.value = item.id || item.NameOffer;
+        const linkSnippet = item.LinkOffer ? (item.LinkOffer.replace(/\n.*/s, '').slice(0, 35) + '...') : '';
+        opt.textContent = `${item.NameOffer || 'Offer không tên'}${linkSnippet ? ' — ' + linkSnippet : ''}`;
+        if (selectedId && (item.id === selectedId || item.NameOffer === selectedId)) {
+          opt.selected = true;
+        }
+        cbb.appendChild(opt);
+      }
+    }
+
     async function loadOfferConfig() {
+      // 1. Thử nạp nhanh từ localStorage nếu có
+      try {
+        const cached = localStorage.getItem('autoleadpc_current_offer');
+        if (cached) {
+          const c = JSON.parse(cached);
+          if (c.NameOffer && document.getElementById('txtNameOffer')) document.getElementById('txtNameOffer').value = c.NameOffer;
+          if (c.LinkOffer && document.getElementById('txtLinkOffer')) document.getElementById('txtLinkOffer').value = c.LinkOffer;
+          if (c.LinkOffer2 && document.getElementById('txtLinkOffer2')) document.getElementById('txtLinkOffer2').value = c.LinkOffer2;
+          if (c.LinkOffer3 && document.getElementById('txtLinkOffer3')) document.getElementById('txtLinkOffer3').value = c.LinkOffer3;
+          if (c.LinkOffer4 && document.getElementById('txtLinkOffer4')) document.getElementById('txtLinkOffer4').value = c.LinkOffer4;
+        }
+      } catch {}
+
+      // 2. Nạp từ backend
       const data = await api('/pc/offer/read');
       if (data && !data.error) {
         if (data.NameOffer) document.getElementById('txtNameOffer').value = data.NameOffer;
         if (data.LinkOffer) document.getElementById('txtLinkOffer').value = data.LinkOffer;
+        if (data.LinkOffer2 !== undefined && data.LinkOffer2 !== '') document.getElementById('txtLinkOffer2').value = data.LinkOffer2;
+        if (data.LinkOffer3 !== undefined && data.LinkOffer3 !== '') document.getElementById('txtLinkOffer3').value = data.LinkOffer3;
+        if (data.LinkOffer4 !== undefined && data.LinkOffer4 !== '') document.getElementById('txtLinkOffer4').value = data.LinkOffer4;
         if (data.TimeLimit) document.getElementById('txtTimeLimit').value = data.TimeLimit;
         if (data.Complete) document.getElementById('txtTextComplete').value = data.Complete;
         if (data.delayStart) document.getElementById('nudDelayStart').value = data.delayStart;
         if (data.delayStop) document.getElementById('nudDelayStop').value = data.delayStop;
+
+        if (Array.isArray(data.savedList)) {
+          currentSavedOffers = data.savedList;
+          renderSavedOffersDropdown(currentSavedOffers, data.NameOffer);
+        }
       }
     }
 
-    async function saveOfferConfig() {
+    async function saveOfferConfig(silent = false) {
+      const name = document.getElementById('txtNameOffer')?.value.trim() || '';
+      const link1 = document.getElementById('txtLinkOffer')?.value.trim() || '';
+      const link2 = document.getElementById('txtLinkOffer2')?.value.trim() || '';
+      const link3 = document.getElementById('txtLinkOffer3')?.value.trim() || '';
+      const link4 = document.getElementById('txtLinkOffer4')?.value.trim() || '';
+
+      if (!link1 && !link2 && !link3 && !link4) {
+        if (!silent) showWinAlert('Vui lòng nhập ít nhất Link Offer 1 trước khi bấm Lưu!');
+        return;
+      }
+
       const payload = {
-        NameOffer: document.getElementById('txtNameOffer').value,
-        LinkOffer: document.getElementById('txtLinkOffer').value,
-        TimeLimit: document.getElementById('txtTimeLimit').value,
-        Complete: document.getElementById('txtTextComplete').value,
-        delayStart: document.getElementById('nudDelayStart').value,
-        delayStop: document.getElementById('nudDelayStop').value,
+        NameOffer: name || (link1 ? link1.split('\n')[0].slice(0, 35) : 'Offer Mới'),
+        LinkOffer: link1,
+        LinkOffer2: link2,
+        LinkOffer3: link3,
+        LinkOffer4: link4,
+        TimeLimit: document.getElementById('txtTimeLimit')?.value || '30',
+        Complete: document.getElementById('txtTextComplete')?.value || '',
+        delayStart: document.getElementById('nudDelayStart')?.value || '1',
+        delayStop: document.getElementById('nudDelayStop')?.value || '1',
       };
-      await api('/pc/offer/save', { method: 'POST', body: JSON.stringify(payload) });
-      document.getElementById('lbStatus').textContent = 'Saved Offer.ini';
+
+      try {
+        localStorage.setItem('autoleadpc_current_offer', JSON.stringify(payload));
+      } catch {}
+
+      const res = await api('/pc/offer/save', { method: 'POST', body: JSON.stringify(payload) });
+      if (res && res.success) {
+        if (Array.isArray(res.savedList)) {
+          currentSavedOffers = res.savedList;
+          renderSavedOffersDropdown(currentSavedOffers, res.savedItem?.id || payload.NameOffer);
+        }
+        const statusEl = document.getElementById('offerSaveStatus');
+        if (statusEl) {
+          statusEl.textContent = '✓ Đã lưu Offer thành công!';
+          statusEl.style.display = 'inline';
+          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3500);
+        }
+        document.getElementById('lbStatus').textContent = `Đã lưu Offer: ${payload.NameOffer}`;
+      } else if (!silent) {
+        showWinAlert('Không thể lưu Offer: ' + (res?.error || 'Lỗi không xác định'));
+      }
+    }
+
+    function handleSelectSavedOffer() {
+      const cbb = document.getElementById('cbbSavedOffers');
+      if (!cbb || !cbb.value) return;
+      const val = cbb.value;
+      const found = currentSavedOffers.find((i) => i.id === val || i.NameOffer === val);
+      if (found) {
+        document.getElementById('txtNameOffer').value = found.NameOffer || '';
+        document.getElementById('txtLinkOffer').value = found.LinkOffer || '';
+        document.getElementById('txtLinkOffer2').value = found.LinkOffer2 || '';
+        document.getElementById('txtLinkOffer3').value = found.LinkOffer3 || '';
+        document.getElementById('txtLinkOffer4').value = found.LinkOffer4 || '';
+        if (found.TimeLimit) document.getElementById('txtTimeLimit').value = found.TimeLimit;
+        if (found.Complete) document.getElementById('txtTextComplete').value = found.Complete;
+        if (found.delayStart) document.getElementById('nudDelayStart').value = found.delayStart;
+        if (found.delayStop) document.getElementById('nudDelayStop').value = found.delayStop;
+
+        const statusEl = document.getElementById('offerSaveStatus');
+        if (statusEl) {
+          statusEl.textContent = `✓ Đã nạp: ${found.NameOffer}`;
+          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 2500);
+        }
+        document.getElementById('lbStatus').textContent = `Đã chọn: ${found.NameOffer}`;
+      }
+    }
+
+    async function deleteSavedOffer() {
+      const cbb = document.getElementById('cbbSavedOffers');
+      if (!cbb || !cbb.value) {
+        showWinAlert('Vui lòng chọn một Offer trong danh sách để xoá!');
+        return;
+      }
+      const val = cbb.value;
+      const found = currentSavedOffers.find((i) => i.id === val || i.NameOffer === val);
+      if (!found) return;
+
+      if (!confirm(`Bạn có chắc chắn muốn xoá "${found.NameOffer}" khỏi danh sách lưu?`)) {
+        return;
+      }
+
+      const res = await api('/pc/offer/delete', {
+        method: 'POST',
+        body: JSON.stringify({ id: found.id, NameOffer: found.NameOffer }),
+      });
+      if (res && res.success) {
+        currentSavedOffers = res.savedList || [];
+        renderSavedOffersDropdown(currentSavedOffers);
+        resetOfferConfig();
+        document.getElementById('lbStatus').textContent = `Đã xoá Offer: ${found.NameOffer}`;
+      }
+    }
+
+    function newOfferConfig() {
+      document.getElementById('txtNameOffer').value = '';
+      document.getElementById('txtLinkOffer').value = '';
+      document.getElementById('txtLinkOffer2').value = '';
+      document.getElementById('txtLinkOffer3').value = '';
+      document.getElementById('txtLinkOffer4').value = '';
+      const cbb = document.getElementById('cbbSavedOffers');
+      if (cbb) cbb.value = '';
+      document.getElementById('txtNameOffer').focus();
     }
 
     function resetOfferConfig() {
@@ -1508,6 +1654,8 @@
       if (document.getElementById('txtLinkOffer3')) document.getElementById('txtLinkOffer3').value = '';
       if (document.getElementById('txtLinkOffer4')) document.getElementById('txtLinkOffer4').value = '';
       document.getElementById('txtTextComplete').value = '';
+      const cbb = document.getElementById('cbbSavedOffers');
+      if (cbb) cbb.value = '';
     }
 
     // Proxies
@@ -1875,6 +2023,9 @@
         showWinAlert('Vui lòng nhập Link Offer!');
         return;
       }
+
+      // Tự động lưu các link offer mới điền để không bị mất khi chạy
+      void saveOfferConfig(true);
 
       const concurrency = Math.min(10, Math.max(1, parseInt(document.getElementById('nudThread').value) || 1));
       const scriptPath = document.getElementById('cbbScript').value;
