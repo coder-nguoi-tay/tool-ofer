@@ -2592,9 +2592,6 @@ async function openBrowserWithInstalledChrome({
     onScreen5Reached: (sess, page) => {
       void startLeadVerification(sess, leadConfig);
     },
-    onFirstScreenCompleted: () => {
-      void startLeadVerification(session, leadConfig);
-    },
     onStuck: (page) => {
       // Chỉ chạy AI Assist cho tab chính đang active, không chạy trên tab phụ/ad/trang blog
       if (session.mainPage && page !== session.mainPage) return;
@@ -2665,8 +2662,8 @@ async function openBrowserWithInstalledChrome({
       if (!session.closingDueToTrafficBlocked) {
         autoRefill.message = `Slot ${tileIndex + 1} (${streamLabel || 'Trình duyệt'}) trống; đang tìm proxy thay thế.`;
       }
-      // 5s delay chỉ khi không có lead; các trường hợp khác (IP lỗi, bị chặn) mở ngay
-      queueAutomaticRefill(session.closingDueToNoLead ? 5000 : 0);
+      // 5s delay khi chạy tuần tự hoặc khi không có lead; các trường hợp khác mở ngay
+      queueAutomaticRefill(autoRefill.sequential || session.closingDueToNoLead ? 5000 : 0);
     }
   });
   try {
