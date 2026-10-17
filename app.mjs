@@ -164,6 +164,12 @@ export const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${insta
 const baseDataDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC');
 export const appDataDirectory = join(homedir(), 'Library', 'Application Support', dataDirName);
 
+export function getAutoLeadPCDir() {
+  const custom = join(homedir(), '.autoleadpc');
+  if (existsSync(custom)) return custom;
+  return join(homedir(), 'Downloads', 'AutoLeadPC');
+}
+
 const remoteAgents = new Map();
 // Tasks dequeued from proxy/autofill queue, waiting for a remote agent to pick up
 const pendingAgentTasks = [];
@@ -3517,8 +3523,8 @@ async function startLocalInterface() {
   await initializeEmailQueue();
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
-  const interfaceHtml = await readFile(userInterfacePath, 'utf8');
-  const interfacePcHtml = await readFile(userInterfacePcPath, 'utf8').catch(() => interfaceHtml);
+  const interfaceHtml = readFileSync(userInterfacePath, 'utf8');
+  const interfacePcHtml = existsSync(userInterfacePcPath) ? readFileSync(userInterfacePcPath, 'utf8') : interfaceHtml;
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
     '/check': checkRequestedProxies,
@@ -3535,7 +3541,7 @@ async function startLocalInterface() {
     if (request.method === 'GET' && (request.url === '/' || request.url === '/pc' || request.url === '/mac')) {
       const servePc = request.url === '/pc' || (request.url === '/' && instanceId === '2');
       const targetHtmlPath = servePc ? userInterfacePcPath : userInterfacePath;
-      const htmlContent = await readFile(targetHtmlPath, 'utf8').catch(() => interfaceHtml);
+      const htmlContent = existsSync(targetHtmlPath) ? readFileSync(targetHtmlPath, 'utf8') : (servePc ? interfacePcHtml : interfaceHtml);
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       response.end(htmlContent);
       return;
@@ -3543,12 +3549,17 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && request.url === '/pc-app.png') {
       try {
-        const iconBuf = await readFile(new URL('./pc-app.png', import.meta.url));
-        response.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=86400' });
-        response.end(iconBuf);
+        const iconPath = new URL('./pc-app.png', import.meta.url);
+        if (existsSync(iconPath)) {
+          const iconBuf = readFileSync(iconPath);
+          response.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=86400' });
+          response.end(iconBuf);
+          return;
+        }
       } catch {
-        response.writeHead(404); response.end();
+        // ignore
       }
+      response.writeHead(404); response.end();
       return;
     }
 
@@ -3584,7 +3595,8 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/pc/config/read') {
       try {
         const body = JSON.parse(await readRequestBody(request));
-        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Proxy', body.file);
+        const baseDir = getAutoLeadPCDir();
+        const filePath = join(baseDir, 'Config', 'Proxy', body.file);
         let text = '';
         if (existsSync(filePath)) {
           text = readFileSync(filePath, 'utf8');
@@ -3599,7 +3611,8 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/pc/config/save') {
       try {
         const body = JSON.parse(await readRequestBody(request));
-        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Proxy', body.file);
+        const baseDir = getAutoLeadPCDir();
+        const filePath = join(baseDir, 'Config', 'Proxy', body.file);
         const dir = dirname(filePath);
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
@@ -3614,7 +3627,8 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && request.url === '/pc/offer/read') {
       try {
-        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Offer', 'Offer.ini');
+        const baseDir = getAutoLeadPCDir();
+        const filePath = join(baseDir, 'Config', 'Offer', 'Offer.ini');
         if (!existsSync(filePath)) {
           respondWithJson(response, 200, {});
           return;
@@ -3648,7 +3662,8 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/pc/offer/save') {
       try {
         const body = JSON.parse(await readRequestBody(request));
-        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Offer', 'Offer.ini');
+        const baseDir = getAutoLeadPCDir();
+        const filePath = join(baseDir, 'Config', 'Offer', 'Offer.ini');
         const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${body.LinkOffer || ''}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\n`;
         const dir = dirname(filePath);
         if (!existsSync(dir)) {
@@ -3664,7 +3679,8 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && request.url === '/pc/settings/read') {
       try {
-        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Settings', 'Settings.ini');
+        const baseDir = getAutoLeadPCDir();
+        const filePath = join(baseDir, 'Config', 'Settings', 'Settings.ini');
         let text = '';
         if (existsSync(filePath)) {
           text = readFileSync(filePath, 'utf8');
@@ -3694,7 +3710,8 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/pc/settings/save') {
       try {
         const body = JSON.parse(await readRequestBody(request));
-        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Settings', 'Settings.ini');
+        const baseDir = getAutoLeadPCDir();
+        const filePath = join(baseDir, 'Config', 'Settings', 'Settings.ini');
         const b = (val) => val ? 'True' : 'False';
         const content = `[Browser]\nChrome=True\nChromeAdsPower=False\nChromeFirefox=False\nChromeGologin=False\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\n`;
         const dir = dirname(filePath);
@@ -3711,7 +3728,8 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && request.url === '/pc/commands') {
       try {
-        const cmdPath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Command', 'command.txt');
+        const baseDir = getAutoLeadPCDir();
+        const cmdPath = join(baseDir, 'Config', 'Command', 'command.txt');
         let text = '';
         if (existsSync(cmdPath)) {
           text = readFileSync(cmdPath, 'utf8');
@@ -3740,7 +3758,8 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && request.url === '/pc/help') {
       try {
-        const helpPath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Help', 'Help.rtf');
+        const baseDir = getAutoLeadPCDir();
+        const helpPath = join(baseDir, 'Help', 'Help.rtf');
         if (!existsSync(helpPath)) {
           respondWithJson(response, 200, { helpText: 'Không tìm thấy file Help.rtf' });
           return;
@@ -3764,12 +3783,13 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/pc/browser-config/read') {
       try {
         const body = JSON.parse(await readRequestBody(request));
-        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Browser', body.file);
+        const baseDir = getAutoLeadPCDir();
+        const filePath = join(baseDir, 'Config', 'Browser', body.file);
         let text = '';
         if (existsSync(filePath)) {
           text = readFileSync(filePath, 'utf8');
         } else {
-          const fallback = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', body.file);
+          const fallback = join(baseDir, 'Config', body.file);
           if (existsSync(fallback)) {
             text = readFileSync(fallback, 'utf8');
           }
@@ -3784,7 +3804,8 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/pc/browser-config/save') {
       try {
         const body = JSON.parse(await readRequestBody(request));
-        const filePath = join(homedir(), 'Downloads', 'AutoLeadPC', 'Config', 'Browser', body.file);
+        const baseDir = getAutoLeadPCDir();
+        const filePath = join(baseDir, 'Config', 'Browser', body.file);
         const dir = dirname(filePath);
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
@@ -3806,7 +3827,11 @@ async function startLocalInterface() {
     }
 
     if (request.method === 'GET' && request.url === '/scripts') {
+      const baseDir = getAutoLeadPCDir();
       const candidates = [
+        join(baseDir, 'Script', 'Offers'),
+        join(baseDir, 'Script', 'RRS'),
+        join(baseDir, 'Script'),
         join(homedir(), 'Downloads', 'AutoLeadPC', 'Script', 'Offers'),
         join(homedir(), 'Downloads', 'AutoLeadPC', 'Script', 'RRS'),
         join(homedir(), 'Downloads', 'AutoLeadPC', 'Script'),

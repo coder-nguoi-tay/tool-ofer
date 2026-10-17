@@ -126,6 +126,9 @@ cp -R "AutoLeadPC Mac 1.app" "$HOME/Downloads/"
 cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/"
 cp -R "AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC-mac/"
 cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC-mac/"
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 1.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 2.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC" 2>/dev/null || true
 
 echo "=========================================="
 echo "Build thành công 2 bản AutoLeadPC cho Mac:"
