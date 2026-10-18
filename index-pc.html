@@ -2255,8 +2255,8 @@
             <span style="font-weight:bold;color:#003399;font-size:11px;margin-left:4px;">datas:</span>
             <input type="text" id="leadDatasParam" class="win-input" value="1504" style="width:65px;font-size:11px;padding:2px 6px;" title="Tham số datas POST lên toffers.top">
 
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;margin-left:6px;" title="Tự động cập nhật mỗi 10 giây">
-              <input type="checkbox" id="chkLeadAutoRefresh" checked onchange="toggleLeadAutoRefresh(this.checked)"> Auto refresh (10s)
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;margin-left:6px;" title="Tự động gọi API toffers.top chu kỳ mỗi 10 giây">
+              <input type="checkbox" id="chkLeadAutoRefresh" checked onchange="toggleLeadAutoRefresh(this.checked)"> Auto refresh (10s) <span id="leadRefreshCountdown" style="font-size:10px;color:#0284c7;font-weight:bold;margin-left:2px;">(10s)</span>
             </label>
           </div>
 
@@ -2453,6 +2453,7 @@
         loadWindowsSettings(),
         loadAiConfigUi(),
         fetchLogs(),
+        fetchToffersLeads(false),
       ]);
       syncOptionPills();
       setInterval(fetchRunningState, 1500);
@@ -3692,6 +3693,21 @@
       const elAi = document.getElementById('runStatAi');
       if (elAi) elAi.textContent = totalAi;
 
+      // Đồng bộ thông tin point & lead từ toffers nền
+      if (state.toffers && state.toffers.point !== null && state.toffers.point !== undefined) {
+        const ptStr = `${state.toffers.point} pt`;
+        const elH = document.getElementById('tabLeadPointHeader');
+        if (elH && elH.textContent !== ptStr) elH.textContent = ptStr;
+        const elLb = document.getElementById('lbToffersPoint');
+        if (elLb && elLb.textContent !== String(state.toffers.point)) elLb.textContent = String(state.toffers.point);
+        const elSb = document.getElementById('sbToffersPoint');
+        if (elSb && elSb.textContent !== String(state.toffers.point)) elSb.textContent = String(state.toffers.point);
+        const elRun = document.getElementById('runStatPoint');
+        if (elRun && elRun.textContent !== String(state.toffers.point)) elRun.textContent = String(state.toffers.point);
+        const elCnt = document.getElementById('lbToffersLeadCount');
+        if (elCnt && elCnt.textContent !== String(state.toffers.leadCount)) elCnt.textContent = String(state.toffers.leadCount);
+      }
+
       // Populate manual AI trigger dropdown
       const aiSlotSelect = document.getElementById('cbbAiManualSlot');
       if (aiSlotSelect) {
@@ -4783,6 +4799,32 @@
     // ─── TOFFERS.TOP LEADS & POINT DASHBOARD ───
     let toffersLeadsData = [];
     let leadAutoRefreshTimer = null;
+    let leadCountdownInterval = null;
+    let leadRefreshCountdownSec = 10;
+
+    function resetLeadCountdown() {
+      leadRefreshCountdownSec = 10;
+      updateCountdownDisplay();
+    }
+
+    function updateCountdownDisplay() {
+      const el = document.getElementById('leadRefreshCountdown');
+      if (el) {
+        el.textContent = `(${leadRefreshCountdownSec}s)`;
+        el.style.color = leadRefreshCountdownSec <= 2 ? '#16a34a' : '#0284c7';
+      }
+    }
+
+    function startLeadCountdown() {
+      if (leadCountdownInterval) clearInterval(leadCountdownInterval);
+      leadCountdownInterval = setInterval(() => {
+        leadRefreshCountdownSec--;
+        if (leadRefreshCountdownSec <= 0) {
+          leadRefreshCountdownSec = 10;
+        }
+        updateCountdownDisplay();
+      }, 1000);
+    }
 
     async function fetchToffersLeads(isManual = false) {
       const btn = document.getElementById('btnRefreshToffersLeads');
@@ -4797,12 +4839,13 @@
       try {
         const res = await api('/toffers/overview', {
           method: 'POST',
-          body: JSON.stringify({ datas, cookie })
+          body: JSON.stringify({ datas, cookie, forceRefresh: isManual })
         });
 
         if (res && res.success) {
           toffersLeadsData = res.results || [];
           renderToffersLeads(res);
+          resetLeadCountdown();
         } else {
           console.warn('[Toffers] Không lấy được dữ liệu:', res?.error);
           if (isManual && res?.error) {
@@ -4866,7 +4909,7 @@
       const elLastUp = document.getElementById('leadLastUpdatedText');
       if (elLastUp) {
         const now = new Date();
-        elLastUp.textContent = `Cập nhật: ${now.toLocaleTimeString('vi-VN')}`;
+        elLastUp.textContent = `Cập nhật: ${now.toLocaleTimeString('vi-VN')} (chu kỳ 10s)`;
       }
 
       filterToffersLeadsTable();
@@ -4928,10 +4971,21 @@
         clearInterval(leadAutoRefreshTimer);
         leadAutoRefreshTimer = null;
       }
+      if (leadCountdownInterval) {
+        clearInterval(leadCountdownInterval);
+        leadCountdownInterval = null;
+      }
+      const elCd = document.getElementById('leadRefreshCountdown');
+
       if (enabled) {
+        resetLeadCountdown();
+        startLeadCountdown();
         leadAutoRefreshTimer = setInterval(() => {
           fetchToffersLeads(false);
+          resetLeadCountdown();
         }, 10000);
+      } else {
+        if (elCd) elCd.textContent = '(đã tắt)';
       }
     }
     window.toggleLeadAutoRefresh = toggleLeadAutoRefresh;

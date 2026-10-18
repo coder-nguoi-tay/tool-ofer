@@ -55,6 +55,7 @@ import {
   fetchLeadDatas,
   fetchCurrentPoint,
   fetchToffersOverview,
+  updateLeadConfig,
   isLeadPresent,
   normalizeIpAddress,
   LeadApiError,
@@ -681,6 +682,95 @@ async function loadAutoRefillSettings() {
       autoRefill.message = 'Đã khôi phục cấu hình sau restart; đang bù slot...';
     }
   } catch {}
+}
+
+const toffersConfigPath = join(appDataDirectory, 'toffers-config.json');
+
+export let latestToffersOverview = {
+  success: false,
+  point: null,
+  results: [],
+  check: null,
+  error: null,
+  updatedAt: null,
+};
+let toffersAutoRefreshTimer = null;
+
+async function loadToffersConfig() {
+  try {
+    const raw = JSON.parse(await readFile(toffersConfigPath, 'utf8'));
+    if (raw && typeof raw === 'object') {
+      if (raw.cookie) updateLeadConfig({ cookie: raw.cookie });
+      if (raw.datas) updateLeadConfig({ datas: raw.datas });
+      if (raw.pointUrl) updateLeadConfig({ pointUrl: raw.pointUrl });
+      if (raw.apiUrl) updateLeadConfig({ apiUrl: raw.apiUrl });
+    }
+  } catch {}
+}
+
+async function saveToffersConfig(cfg = {}) {
+  try {
+    const data = {
+      cookie: cfg.cookie || DEFAULT_LEAD_CONFIG.cookie,
+      datas: cfg.datas || DEFAULT_LEAD_CONFIG.datas,
+      pointUrl: cfg.pointUrl || DEFAULT_LEAD_CONFIG.pointUrl,
+      apiUrl: cfg.apiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeFile(toffersConfigPath, JSON.stringify(data, null, 2), 'utf8');
+  } catch {}
+}
+
+export async function refreshToffersOverview(customConfig = null) {
+  const config = {
+    datas: customConfig?.datas || DEFAULT_LEAD_CONFIG.datas || '1504',
+    cookie: customConfig?.cookie || DEFAULT_LEAD_CONFIG.cookie,
+    pointUrl: customConfig?.pointUrl || DEFAULT_LEAD_CONFIG.pointUrl,
+    apiUrl: customConfig?.apiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
+  };
+
+  if (customConfig?.cookie && customConfig.cookie !== DEFAULT_LEAD_CONFIG.cookie) {
+    updateLeadConfig({ cookie: customConfig.cookie });
+    void saveToffersConfig(config);
+  }
+  if (customConfig?.datas && customConfig.datas !== DEFAULT_LEAD_CONFIG.datas) {
+    updateLeadConfig({ datas: customConfig.datas });
+    void saveToffersConfig(config);
+  }
+
+  try {
+    const overview = await fetchToffersOverview(config);
+    if (overview.success) {
+      const prevPoint = latestToffersOverview.point;
+      const prevLeadCount = latestToffersOverview.results?.length || 0;
+      latestToffersOverview = overview;
+      if (prevPoint !== overview.point || prevLeadCount !== overview.results.length) {
+        console.log(`[Toffers] [10s Auto-check] Cập nhật: Point = ${overview.point} pt | Tổng số leads = ${overview.results.length}`);
+      }
+    } else {
+      latestToffersOverview = {
+        ...overview,
+        point: latestToffersOverview.point, // Giữ điểm cũ nếu mạng chập chờn
+      };
+    }
+    return latestToffersOverview;
+  } catch (err) {
+    latestToffersOverview = {
+      ...latestToffersOverview,
+      error: err.message,
+    };
+    return latestToffersOverview;
+  }
+}
+
+export function startToffersBackgroundPolling(intervalMs = 10_000) {
+  if (toffersAutoRefreshTimer) clearInterval(toffersAutoRefreshTimer);
+  // Thực hiện gọi lần đầu
+  void refreshToffersOverview();
+  toffersAutoRefreshTimer = setInterval(() => {
+    void refreshToffersOverview();
+  }, intervalMs);
+  console.log(`[Toffers] Đã kích hoạt tiến trình tự động gọi API lấy lead & point chu kỳ mỗi ${intervalMs / 1000}s.`);
 }
 
 const chromeProfileDirectory = join(appDataDirectory, 'chrome-profiles');
@@ -5600,6 +5690,8 @@ async function startLocalInterface() {
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
   loadAiConfig();
+  await loadToffersConfig();
+  startToffersBackgroundPolling(10_000);
   const interfaceHtml = readFileSync(userInterfacePath, 'utf8');
   const interfacePcHtml = existsSync(userInterfacePcPath) ? readFileSync(userInterfacePcPath, 'utf8') : interfaceHtml;
   const handlers = {
@@ -5995,6 +6087,11 @@ async function startLocalInterface() {
       respondWithJson(response, 200, {
         ...getAutoRefillStatus(),
         limitRun: { count: limitRunCount, max: limitRunMax },
+        toffers: {
+          point: latestToffersOverview.point,
+          leadCount: latestToffersOverview.results?.length || 0,
+          updatedAt: latestToffersOverview.updatedAt,
+        },
       });
       return;
     }
@@ -6442,14 +6539,28 @@ async function startLocalInterface() {
       } catch {}
 
       const urlObj = new URL(request.url, 'http://localhost');
-      const datas = params.datas || urlObj.searchParams.get('datas') || DEFAULT_LEAD_CONFIG.datas || '1504';
-      const cookie = params.cookie || urlObj.searchParams.get('cookie') || DEFAULT_LEAD_CONFIG.cookie;
-      const pointUrl = params.pointUrl || urlObj.searchParams.get('pointUrl') || DEFAULT_LEAD_CONFIG.pointUrl;
-      const apiUrl = params.apiUrl || urlObj.searchParams.get('apiUrl') || DEFAULT_LEAD_CONFIG.apiUrl;
+      const datas = params.datas || urlObj.searchParams.get('datas');
+      const cookie = params.cookie || urlObj.searchParams.get('cookie');
+      const pointUrl = params.pointUrl || urlObj.searchParams.get('pointUrl');
+      const apiUrl = params.apiUrl || urlObj.searchParams.get('apiUrl');
+      const forceRefresh = params.forceRefresh === true || urlObj.searchParams.get('force') === 'true';
+
+      const customCfg = {};
+      if (datas) customCfg.datas = datas;
+      if (cookie) customCfg.cookie = cookie;
+      if (pointUrl) customCfg.pointUrl = pointUrl;
+      if (apiUrl) customCfg.apiUrl = apiUrl;
+
+      const hasCustomParams = Object.keys(customCfg).length > 0;
+      const isStale = !latestToffersOverview.updatedAt || (Date.now() - new Date(latestToffersOverview.updatedAt).getTime() > 10_000);
 
       try {
-        const overview = await fetchToffersOverview({ datas, cookie, pointUrl, apiUrl });
-        respondWithJson(response, 200, overview);
+        if (forceRefresh || hasCustomParams || isStale) {
+          const overview = await refreshToffersOverview(hasCustomParams ? customCfg : null);
+          respondWithJson(response, 200, overview);
+        } else {
+          respondWithJson(response, 200, latestToffersOverview);
+        }
       } catch (err) {
         respondWithJson(response, 500, { success: false, error: err.message, code: err.code || 'UNKNOWN_ERROR' });
       }

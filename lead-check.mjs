@@ -315,3 +315,15 @@ export async function fetchToffersOverview(config = {}) {
     updatedAt: new Date().toISOString(),
   };
 }
+
+/**
+ * Cập nhật cấu hình mặc định (Cookie, datas, URL) cho việc kiểm tra lead.
+ *
+ * @param {object} partialConfig Cấu hình cần ghi đè.
+ * @return {object} Đối tượng DEFAULT_LEAD_CONFIG đã cập nhật.
+ */
+export function updateLeadConfig(partialConfig = {}) {
+  Object.assign(DEFAULT_LEAD_CONFIG, partialConfig);
+  return DEFAULT_LEAD_CONFIG;
+}
+
