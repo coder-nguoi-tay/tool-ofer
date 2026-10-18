@@ -143,6 +143,11 @@ xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac.app" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC" 2>/dev/null || true
 
+# Tạo gói zip tiện gửi hoặc sao lưu
+rm -f "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.zip" 2>/dev/null || true
+(cd "$HOME/Downloads" && zip -rq "AutoLeadPC Mac 2 - Chrome.zip" "AutoLeadPC Mac 2 - Chrome.app")
+
+
 echo "=========================================="
 echo "Build thành công 2 bản AutoLeadPC cho Mac:"
 echo "1. AutoLeadPC Mac 1.app (Cổng 3210)"

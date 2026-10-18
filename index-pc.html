@@ -614,6 +614,24 @@
         <!-- panel2 Setting & Controls -->
         <fieldset class="win-group">
           <legend class="win-legend">Setting</legend>
+
+          <!-- Browser Selection Bar on Dashboard -->
+          <div style="background:#eaf2fb;border:1px solid #b8d2eb;border-radius:4px;padding:6px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:14px;">
+              <span style="font-weight:bold;color:#003399;font-size:12px;">Trình duyệt:</span>
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-weight:bold;color:#333;font-size:12px;">
+                <input type="radio" name="dashBrowserRadio" id="dashRadioChrome" value="Chrome" onchange="syncBrowserChoice('Chrome')">
+                🌐 Google Chrome
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-weight:bold;color:#0055aa;font-size:12px;">
+                <input type="radio" name="dashBrowserRadio" id="dashRadioGologin" value="Gologin" checked onchange="syncBrowserChoice('Gologin')">
+                🛡️ Chrome GoLogin (Orbita)
+              </label>
+            </div>
+            <div id="dashBrowserBadge" style="font-size:11px;font-weight:bold;padding:3px 10px;border-radius:3px;background:#28a745;color:#fff;">
+              🛡️ Đang chọn: Chrome GoLogin (Orbita)
+            </div>
+          </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
             <div>
               <div class="form-row">
@@ -667,8 +685,8 @@
                 <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
                   <input type="checkbox" id="cbxCheckDuplicateIP" checked> Check duplicate
                 </label>
-                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;">
-                  <input type="checkbox" id="cbxHideBrowser"> Hide Browser
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;" title="Chạy ngầm ẩn trình duyệt trong lúc kiểm tra IP và chuyển hướng; chỉ hiển thị lên màn hình khi đã vào trang đích thành công">
+                  <input type="checkbox" id="cbxHideUntilTarget"> Ẩn trình duyệt (chỉ mở khi vào trang đích)
                 </label>
                 <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;">
                   <input type="checkbox" id="cbxRRS"> Save RRS
@@ -716,7 +734,13 @@
             <button type="button" class="win-btn win-btn-danger" onclick="handleCloseAll()">Close Chrome</button>
           </div>
         </div>
-        <div class="grid-container" style="height:calc(100% - 32px);">
+
+        <!-- Offer Sub-Tabs for Running Threads -->
+        <div class="win-tab-headers" id="runningOfferTabHeaders" style="margin-bottom:6px;border-bottom:1px solid #919b9c;">
+          <div class="win-tab active" data-run-offer="all" onclick="switchRunningOfferTab('all')">🌐 Tất cả luồng (<span id="countRunAll">0</span>)</div>
+        </div>
+
+        <div class="grid-container" style="height:calc(100% - 64px);">
           <table class="win-grid" id="dgvRunning">
             <thead>
               <tr>
@@ -1042,10 +1066,10 @@
         <!-- Email Tab -->
         <div class="sub-panel active" id="infopanel-email">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <span>Total Email: <b id="lbTotalEmail" style="color:#003399;">0</b></span>
+            <span>Total Email: <b id="lbTotalEmail" style="color:#003399;">0</b> <span style="font-size:11px;color:#555;margin-left:6px;">(Sẵn sàng: <b id="lbAvailEmail" style="color:#107c41;">0</b> | Đã dùng: <b id="lbUsedEmail" style="color:#d83b01;">0</b>)</span></span>
             <div style="display:flex;gap:6px;">
-              <button type="button" class="win-btn win-btn-primary" onclick="saveEmailList()">Add</button>
-              <button type="button" class="win-btn" onclick="resetEmailQueue()">Reset</button>
+              <button type="button" class="win-btn win-btn-primary" onclick="saveEmailList()">Lưu / Thêm Email</button>
+              <button type="button" class="win-btn" onclick="resetEmailQueue()">Reset Email</button>
             </div>
           </div>
           <textarea id="txtEmailList" class="win-textarea" style="width:100%;height:calc(100% - 32px);"></textarea>
@@ -1053,10 +1077,12 @@
 
         <!-- Info Lead Tab -->
         <div class="sub-panel" id="infopanel-lead">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <span>Total Info: <b id="lbTotalInfo" style="color:#003399;">0</b></span>
-            <div style="display:flex;gap:6px;">
-              <button type="button" class="win-btn" onclick="resetAutofillQueue()">Reset</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+            <span>Total Info: <b id="lbTotalInfo" style="color:#003399;">0</b> <span style="font-size:11px;color:#555;margin-left:6px;">(Sẵn sàng: <b id="lbAvailInfo" style="color:#107c41;">0</b> | Đã dùng: <b id="lbUsedInfo" style="color:#d83b01;">0</b>)</span></span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button type="button" class="win-btn win-btn-primary" onclick="importPredefinedLead('zip5')" title="Nạp 1.060 lead mới nhất có Zipcode 5 chữ số chuẩn Mỹ">📥 Nạp 1.060 Lead Mới (Zip 5 số)</button>
+              <button type="button" class="win-btn" onclick="importPredefinedLead('full7k')" title="Nạp toàn bộ 7.135 lead đầy đủ từ info-new-autofill.json">🔄 Nạp 7.135 Lead Đầy đủ</button>
+              <button type="button" class="win-btn" onclick="resetAutofillQueue()">Reset Hàng đợi</button>
             </div>
           </div>
           <div class="grid-container" style="height:calc(100% - 32px);">
@@ -1096,11 +1122,15 @@
       <div class="tab-panel" id="panel-Settings">
         <fieldset class="win-group">
           <legend class="win-legend">Browser</legend>
-          <div style="display:flex;gap:20px;">
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonChrome" checked> Chrome</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonFirefox"> Chrome Firefox</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonAdspower"> Chrome AdsPower</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonGologinCMD2"> Chrome Gologin</label>
+          <div style="display:flex;gap:20px;margin-bottom:6px;">
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonChrome" onchange="syncBrowserChoice('Chrome')"> Chrome</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonFirefox" onchange="syncBrowserChoice('Firefox')"> Chrome Firefox</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonAdspower" onchange="syncBrowserChoice('AdsPower')"> Chrome AdsPower</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonGologinCMD2" onchange="syncBrowserChoice('Gologin')"> Chrome Gologin</label>
+          </div>
+          <div id="gologin-token-group" style="display:none;">
+            <input type="hidden" id="txtGoLoginToken">
+            <span style="font-size:11px;color:#555;">GoLogin app phải đang chạy và đã đăng nhập. Profile sẽ được lấy từ GoLogin app.</span>
           </div>
         </fieldset>
 
@@ -1139,16 +1169,32 @@
 
       <!-- 8. LOGS -->
       <div class="tab-panel" id="panel-Logs">
+        <!-- Offer Sub-Tab Bar for Logs -->
+        <div class="win-tab-headers" id="offerLogTabHeaders" style="margin-bottom:6px;border-bottom:1px solid #919b9c;">
+          <div class="win-tab active" data-offer-tab="all" onclick="switchOfferLogTab('all')">🌐 Tất cả Offer (<span id="tabLogAllCount">0</span>)</div>
+        </div>
+
+        <!-- Offer Summary KPI Bar -->
+        <div id="offerKpiBar" style="display:flex;align-items:center;justify-content:space-between;background:#f0f7ff;border:1px solid #bae6fd;padding:4px 8px;margin-bottom:6px;font-size:11px;border-radius:2px;flex-wrap:wrap;gap:8px;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span id="kpiOfferTitle" style="font-weight:bold;color:#0369a1;font-size:11px;">🌐 Tất cả Offer</span>
+            <span style="color:#b8cbe0;">|</span>
+            <span>🚀 Phiên: <b id="kpiTotalRuns" style="color:#0f172a;">0</b></span>
+            <span>✅ Lead: <b id="kpiLeadCount" style="color:#16a34a;">0</b></span>
+            <span>🚫 Chặn/Lỗi: <b id="kpiBlockedCount" style="color:#dc2626;">0</b></span>
+            <span>🤖 AI Assist: <b id="kpiAiCount" style="color:#7c3aed;">0</b></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span id="kpiOfferUrl" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:10px;" title=""></span>
+          </div>
+        </div>
+
         <!-- Filter Toolbar -->
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-weight:bold;color:#003399;">Filter Slot:</span>
             <select id="logFilterSlot" class="win-select" style="width:95px;" onchange="renderLogs()">
               <option value="">Tất cả slot</option>
-            </select>
-            <span style="font-weight:bold;color:#003399;margin-left:4px;">Offer:</span>
-            <select id="logFilterOffer" class="win-select" style="width:105px;" onchange="renderLogs()">
-              <option value="">Tất cả offer</option>
             </select>
             <span style="font-weight:bold;color:#003399;margin-left:4px;">Type:</span>
             <select id="logFilterType" class="win-select" style="width:145px;" onchange="renderLogs()">
@@ -1172,16 +1218,16 @@
             </label>
           </div>
           <div style="display:flex;gap:6px;">
-            <button type="button" class="win-btn" onclick="exportLogsCsv()">Export CSV</button>
-            <button type="button" class="win-btn" onclick="openLogHtmlFolder()">Open HTML Folder</button>
+            <button type="button" class="win-btn" id="btnExportLogCsv" onclick="exportLogsCsv()">Export CSV</button>
+            <button type="button" class="win-btn" id="btnOpenHtmlFolder" onclick="openLogHtmlFolder()">Open HTML Folder</button>
             <button type="button" class="win-btn" onclick="clearLogFilters()">Clear Filter</button>
-            <button type="button" class="win-btn win-btn-danger" onclick="promptClearAllLogs()">Clear All Logs & HTML</button>
+            <button type="button" class="win-btn win-btn-danger" id="btnClearLogsBtn" onclick="promptClearAllLogs()">Clear Logs</button>
           </div>
         </div>
 
         <!-- Confirm bar for clearing logs -->
         <div id="logClearConfirmBar" style="display:none;align-items:center;justify-content:space-between;background:#fef2f2;border:1px solid #fca5a5;padding:4px 8px;margin-bottom:6px;font-size:11px;color:#991b1b;">
-          <span>⚠️ Bạn có chắc muốn xoá toàn bộ log tương tác và tất cả các file HTML đã lưu? Không thể hoàn tác.</span>
+          <span id="logClearConfirmText">⚠️ Bạn có chắc muốn xoá toàn bộ log tương tác và tất cả các file HTML đã lưu? Không thể hoàn tác.</span>
           <div style="display:flex;gap:6px;">
             <button type="button" class="win-btn win-btn-danger" onclick="confirmClearAllLogs()">Xoá vĩnh viễn</button>
             <button type="button" class="win-btn" onclick="cancelClearAllLogs()">Huỷ</button>
@@ -1195,7 +1241,7 @@
         </div>
 
         <!-- DataGridView Logs -->
-        <div class="grid-container" style="height:calc(100% - 75px);">
+        <div class="grid-container" style="height:calc(100% - 110px);">
           <table class="win-grid" id="dgvLogs">
             <thead>
               <tr>
@@ -1345,9 +1391,9 @@
 
     // Tab switching (tbcTool)
     function switchTab(tabId) {
-      document.querySelectorAll('.win-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('#mainTabHeaders .win-tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-      const targetHeader = document.querySelector(`.win-tab[data-tab="${tabId}"]`);
+      const targetHeader = document.querySelector(`#mainTabHeaders .win-tab[data-tab="${tabId}"]`);
       const targetPanel = document.getElementById(`panel-${tabId}`);
       if (targetHeader) targetHeader.classList.add('active');
       if (targetPanel) targetPanel.classList.add('active');
@@ -1359,7 +1405,7 @@
     }
     window.switchTab = switchTab;
 
-    document.querySelectorAll('.win-tab').forEach(tab => {
+    document.querySelectorAll('#mainTabHeaders .win-tab').forEach(tab => {
       tab.addEventListener('click', () => switchTab(tab.getAttribute('data-tab')));
     });
 
@@ -1396,7 +1442,10 @@
         document.querySelectorAll('.sub-tab[data-infotab]').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('#panel-Info .sub-panel').forEach(p => p.classList.remove('active'));
         tab.classList.add('active');
-        document.getElementById(`infopanel-${tab.getAttribute('data-infotab')}`)?.classList.add('active');
+        const infotab = tab.getAttribute('data-infotab');
+        document.getElementById(`infopanel-${infotab}`)?.classList.add('active');
+        if (infotab === 'email') void loadEmailList();
+        if (infotab === 'lead') void loadAutofillList();
       });
     });
 
@@ -1418,6 +1467,10 @@
         });
         return await res.json();
       } catch (err) {
+        const msg = err.message || '';
+        if (msg.toLowerCase().includes('load failed') || msg.toLowerCase().includes('failed to fetch')) {
+          return { error: 'Máy chủ chưa sẵn sàng (kết nối thất bại). Vui lòng thử lại sau vài giây hoặc khởi động lại app.' };
+        }
         return { error: err.message };
       }
     }
@@ -1541,6 +1594,23 @@
           renderSavedOffersDropdown(currentSavedOffers, data.NameOffer);
         }
       }
+
+      // Khôi phục trạng thái checkbox Ẩn trình duyệt
+      try {
+        const cachedHide = localStorage.getItem('autoleadpc_hide_until_target');
+        const cbxHide = document.getElementById('cbxHideUntilTarget');
+        if (cbxHide && cachedHide !== null) {
+          cbxHide.checked = (cachedHide === 'true');
+        }
+        if (cbxHide && !cbxHide._hasStorageListener) {
+          cbxHide._hasStorageListener = true;
+          cbxHide.addEventListener('change', (e) => {
+            try {
+              localStorage.setItem('autoleadpc_hide_until_target', String(e.target.checked));
+            } catch {}
+          });
+        }
+      } catch {}
     }
 
     async function saveOfferConfig(silent = false) {
@@ -1910,7 +1980,11 @@
     async function loadEmailList() {
       const data = await api('/email-queue');
       if (data && !data.error) {
-        document.getElementById('lbTotalEmail').textContent = (data.available || 0) + (data.used || 0);
+        const avail = data.available || 0;
+        const used = data.used || 0;
+        if (document.getElementById('lbTotalEmail')) document.getElementById('lbTotalEmail').textContent = avail + used;
+        if (document.getElementById('lbAvailEmail')) document.getElementById('lbAvailEmail').textContent = avail;
+        if (document.getElementById('lbUsedEmail')) document.getElementById('lbUsedEmail').textContent = used;
         if (data.availableList) {
           document.getElementById('txtEmailList').value = data.availableList.join('\n');
         }
@@ -1920,13 +1994,13 @@
     async function saveEmailList() {
       const text = document.getElementById('txtEmailList').value;
       const res = await api('/email-queue/import', { method: 'POST', body: JSON.stringify({ emailList: text }) });
-      alert(res.message || 'Imported email list.');
+      showWinAlert(res.message || 'Imported email list.');
       await loadEmailList();
     }
 
     async function resetEmailQueue() {
       const res = await api('/email-queue/reset', { method: 'POST' });
-      alert(res.message || 'Reset email list.');
+      showWinAlert(res.message || 'Reset email list.');
       await loadEmailList();
     }
 
@@ -1934,46 +2008,161 @@
     async function loadAutofillList() {
       const data = await api('/autofill-queue');
       const tbody = document.getElementById('dgvInfoBody');
+      const avail = data?.available || 0;
+      const used = data?.used || 0;
+      if (document.getElementById('lbTotalInfo')) document.getElementById('lbTotalInfo').textContent = avail + used;
+      if (document.getElementById('lbAvailInfo')) document.getElementById('lbAvailInfo').textContent = avail;
+      if (document.getElementById('lbUsedInfo')) document.getElementById('lbUsedInfo').textContent = used;
+
       if (data && data.availableList && data.availableList.length > 0) {
-        document.getElementById('lbTotalInfo').textContent = (data.available || 0) + (data.used || 0);
         tbody.innerHTML = '';
         data.availableList.forEach((item, idx) => {
           const tr = document.createElement('tr');
+          const fname = item.firstname || item.first_name || item.fName || '';
+          const lname = item.lastname || item.last_name || item.lName || '';
+          const gender = item.gender || item.sex || '';
+          const sex = item.sex || item.gender || '';
+          const day = item.birthday || item.bDay || '';
+          const month = item.birthmonth || item.bMonth || '';
+          const year = item.birthyear || item.bYear || '';
+          const phone = item.phone || item.phonenumber || item.cellphone || '';
+          const address = item.address || item.addressline1 || item.streetaddress || '';
+          const city = item.city || '';
+          const state = item.state || item.stateorprovince || '';
+          const zip = item.zipcode || item.zip || item.ziporpostcode || item.zip_code || '';
+          const username = item.userid || item.username || '';
+          const password = item.password ? '******' : '';
+          const email = item.email || '';
           tr.innerHTML = `
             <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
-            <td>${item.first_name || ''}</td>
-            <td>${item.last_name || ''}</td>
-            <td>${item.gender || ''}</td>
-            <td>${item.sex || ''}</td>
-            <td>${item.bDay || ''}</td>
-            <td>${item.bMonth || ''}</td>
-            <td>${item.bYear || ''}</td>
-            <td>${item.phone || ''}</td>
-            <td>${item.address || ''}</td>
-            <td>${item.city || ''}</td>
-            <td>${item.state || ''}</td>
-            <td>${item.zip_code || ''}</td>
-            <td>${item.username || ''}</td>
-            <td>${item.password ? '******' : ''}</td>
-            <td>${item.email || ''}</td>
+            <td>${fname}</td>
+            <td>${lname}</td>
+            <td>${gender}</td>
+            <td>${sex}</td>
+            <td>${day}</td>
+            <td>${month}</td>
+            <td>${year}</td>
+            <td>${phone}</td>
+            <td>${address}</td>
+            <td>${city}</td>
+            <td>${state}</td>
+            <td>${zip}</td>
+            <td>${username}</td>
+            <td>${password}</td>
+            <td>${email}</td>
           `;
           tbody.appendChild(tr);
         });
       } else {
-        tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="15" style="text-align:center;color:#888888;padding:25px;">Chưa có dữ liệu Autofill.</td></tr>';
+        tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="15" style="text-align:center;color:#888888;padding:25px;">Chưa có dữ liệu Autofill hoặc hàng đợi đã hết.</td></tr>';
+      }
+    }
+
+    async function importPredefinedLead(type) {
+      let filePath = '';
+      let label = '';
+      if (type === 'zip5') {
+        filePath = '/Users/codernguoitay/Downloads/json_full_da_loai_zipcode_4_ky_tu.json';
+        label = '1.060 Lead mới (Zip 5 số)';
+      } else {
+        filePath = '/Users/codernguoitay/Downloads/INFO NEW/info-new-autofill.json';
+        label = '7.135 Lead đầy đủ';
+      }
+      if (!confirm(`Bạn có muốn nạp bộ dữ liệu [${label}] và làm mới hàng đợi Autofill không?`)) return;
+      document.getElementById('lbStatus').textContent = `Đang nạp ${label}...`;
+      const res = await api('/autofill-queue/import', {
+        method: 'POST',
+        body: JSON.stringify({ filePath, replace: true })
+      });
+      if (res && res.success) {
+        showWinAlert(res.message);
+        document.getElementById('lbStatus').textContent = res.message;
+        await loadAutofillList();
+      } else {
+        showWinAlert('Lỗi nạp lead: ' + (res?.error || 'Không xác định'));
       }
     }
 
     async function resetAutofillQueue() {
       const res = await api('/autofill-queue/reset', { method: 'POST' });
-      alert(res.message || 'Reset Autofill queue.');
+      showWinAlert(res.message || 'Đã reset Autofill queue.');
       await loadAutofillList();
+    }
+
+    // Browser Mode Synchronization (Dashboard <-> Settings Tab)
+    function syncBrowserChoice(mode, shouldSave = true) {
+      const isGoLogin = (mode === 'Gologin');
+      const isChrome = (mode === 'Chrome');
+
+      // Update Dashboard radios
+      const dashChrome = document.getElementById('dashRadioChrome');
+      const dashGologin = document.getElementById('dashRadioGologin');
+      if (dashChrome) dashChrome.checked = isChrome;
+      if (dashGologin) dashGologin.checked = isGoLogin;
+
+      // Update Settings radios
+      const radChrome = document.getElementById('RadioButtonChrome');
+      const radGologin = document.getElementById('RadioButtonGologinCMD2');
+      const radFirefox = document.getElementById('RadioButtonFirefox');
+      const radAdspower = document.getElementById('RadioButtonAdspower');
+      if (radChrome) radChrome.checked = isChrome;
+      if (radGologin) radGologin.checked = isGoLogin;
+      if (radFirefox) radFirefox.checked = (mode === 'Firefox');
+      if (radAdspower) radAdspower.checked = (mode === 'AdsPower');
+
+      // Update Dashboard badge
+      const badge = document.getElementById('dashBrowserBadge');
+      if (badge) {
+        if (isGoLogin) {
+          badge.style.background = '#28a745';
+          badge.style.color = '#fff';
+          badge.textContent = '🛡️ Đang chọn: Chrome GoLogin (Orbita)';
+        } else if (isChrome) {
+          badge.style.background = '#0078d7';
+          badge.style.color = '#fff';
+          badge.textContent = '🌐 Đang chọn: Google Chrome';
+        } else {
+          badge.style.background = '#6c757d';
+          badge.style.color = '#fff';
+          badge.textContent = `⚙️ Đang chọn: ${mode}`;
+        }
+      }
+
+      // Update GoLogin token group in Settings
+      const tokenGroup = document.getElementById('gologin-token-group');
+      if (tokenGroup) tokenGroup.style.display = isGoLogin ? '' : 'none';
+
+      // Persist to localStorage
+      try {
+        localStorage.setItem('autoleadpc_browser_choice', mode);
+      } catch {}
+
+      if (shouldSave) {
+        void saveWindowsSettings();
+      }
     }
 
     // Settings (Settings.ini)
     async function loadWindowsSettings() {
       const data = await api('/pc/settings/read');
+      const localChoice = (() => {
+        try { return localStorage.getItem('autoleadpc_browser_choice'); } catch { return null; }
+      })();
+
+      let selectedMode = 'Gologin'; // Default to GoLogin as desired by the user
+      if (localChoice) {
+        selectedMode = localChoice;
+      } else if (data) {
+        if (data.ChromeGologin) selectedMode = 'Gologin';
+        else if (data.ChromeFirefox) selectedMode = 'Firefox';
+        else if (data.ChromeAdsPower) selectedMode = 'AdsPower';
+        else if (data.Chrome) selectedMode = 'Chrome';
+      }
+
+      syncBrowserChoice(selectedMode, false);
+
       if (data) {
+        if (data.TokensGologin) document.getElementById('txtGoLoginToken').value = data.TokensGologin;
         if (data.Canvas !== undefined) document.getElementById('CheckBoxCanvas').checked = data.Canvas;
         if (data.ClientRects !== undefined) document.getElementById('CheckboxClientRects').checked = data.ClientRects;
         if (data.WebGLImage !== undefined) document.getElementById('CheckBoxWebGLImage').checked = data.WebGLImage;
@@ -1988,49 +2177,73 @@
     }
 
     async function saveWindowsSettings() {
+      let browserMode = 'Gologin';
+      if (document.getElementById('dashRadioChrome')?.checked || document.getElementById('RadioButtonChrome')?.checked) {
+        browserMode = 'Chrome';
+      } else if (document.getElementById('dashRadioGologin')?.checked || document.getElementById('RadioButtonGologinCMD2')?.checked) {
+        browserMode = 'Gologin';
+      } else if (document.getElementById('RadioButtonFirefox')?.checked) {
+        browserMode = 'Firefox';
+      } else if (document.getElementById('RadioButtonAdspower')?.checked) {
+        browserMode = 'AdsPower';
+      }
+
       const payload = {
-        Canvas: document.getElementById('CheckBoxCanvas').checked,
-        ClientRects: document.getElementById('CheckboxClientRects').checked,
-        WebGLImage: document.getElementById('CheckBoxWebGLImage').checked,
-        Fonts: document.getElementById('CheckboxFonts').checked,
-        WebRTC: document.getElementById('CheckBoxWebRTC').checked,
-        ApiFakeIP: document.getElementById('CheckBoxGetApiPake').checked,
-        Windows: document.getElementById('chkWindows').checked,
-        Mac: document.getElementById('chkMac').checked,
-        Linux: document.getElementById('chkLinux').checked,
-        Android: document.getElementById('chkAndroid').checked,
+        browserMode,
+        TokensGologin: document.getElementById('txtGoLoginToken')?.value.trim() || '',
+        Canvas: document.getElementById('CheckBoxCanvas')?.checked ?? false,
+        ClientRects: document.getElementById('CheckboxClientRects')?.checked ?? true,
+        WebGLImage: document.getElementById('CheckBoxWebGLImage')?.checked ?? true,
+        Fonts: document.getElementById('CheckboxFonts')?.checked ?? true,
+        WebRTC: document.getElementById('CheckBoxWebRTC')?.checked ?? true,
+        ApiFakeIP: document.getElementById('CheckBoxGetApiPake')?.checked ?? true,
+        Windows: document.getElementById('chkWindows')?.checked ?? true,
+        Mac: document.getElementById('chkMac')?.checked ?? true,
+        Linux: document.getElementById('chkLinux')?.checked ?? true,
+        Android: document.getElementById('chkAndroid')?.checked ?? false,
       };
       await api('/pc/settings/save', { method: 'POST', body: JSON.stringify(payload) });
-      document.getElementById('settingsSaveStatus').textContent = 'Saved to Settings.ini successfully!';
-      setTimeout(() => { document.getElementById('settingsSaveStatus').textContent = ''; }, 3000);
+      const statusEl = document.getElementById('settingsSaveStatus');
+      if (statusEl) {
+        statusEl.textContent = 'Saved to Settings.ini successfully!';
+        setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      }
     }
 
     // Launch & Stop Engine
     async function handleStart() {
-      const offerUrls = [];
-      const raw1 = document.getElementById('txtLinkOffer')?.value.trim() || '';
-      const raw2 = document.getElementById('txtLinkOffer2')?.value.trim() || '';
-      const raw3 = document.getElementById('txtLinkOffer3')?.value.trim() || '';
-      const raw4 = document.getElementById('txtLinkOffer4')?.value.trim() || '';
+      const btnStart = document.getElementById('btnStart');
+      if (btnStart) {
+        if (btnStart.disabled) return;
+        btnStart.disabled = true;
+        btnStart.style.opacity = '0.6';
+        btnStart.style.cursor = 'not-allowed';
+      }
+      try {
+        const offerUrls = [];
+        const raw1 = document.getElementById('txtLinkOffer')?.value.trim() || '';
+        const raw2 = document.getElementById('txtLinkOffer2')?.value.trim() || '';
+        const raw3 = document.getElementById('txtLinkOffer3')?.value.trim() || '';
+        const raw4 = document.getElementById('txtLinkOffer4')?.value.trim() || '';
 
-      if (raw1) {
-        for (const line of raw1.split(/[\r\n,;]+/)) {
-          const u = line.trim();
-          if (u && !offerUrls.includes(u)) offerUrls.push(u);
+        if (raw1) {
+          for (const line of raw1.split(/[\r\n,;]+/)) {
+            const u = line.trim();
+            if (u && !offerUrls.includes(u)) offerUrls.push(u);
+          }
         }
-      }
-      if (raw2 && !offerUrls.includes(raw2)) offerUrls.push(raw2);
-      if (raw3 && !offerUrls.includes(raw3)) offerUrls.push(raw3);
-      if (raw4 && !offerUrls.includes(raw4)) offerUrls.push(raw4);
+        if (raw2 && !offerUrls.includes(raw2)) offerUrls.push(raw2);
+        if (raw3 && !offerUrls.includes(raw3)) offerUrls.push(raw3);
+        if (raw4 && !offerUrls.includes(raw4)) offerUrls.push(raw4);
 
-      const websiteUrl = offerUrls[0] || raw1;
-      const websiteUrl2 = offerUrls[1] || raw2;
-      const websiteUrl3 = offerUrls[2] || raw3;
-      const websiteUrl4 = offerUrls[3] || raw4;
-      if (!websiteUrl) {
-        showWinAlert('Vui lòng nhập Link Offer!');
-        return;
-      }
+        const websiteUrl = offerUrls[0] || raw1;
+        const websiteUrl2 = offerUrls[1] || raw2;
+        const websiteUrl3 = offerUrls[2] || raw3;
+        const websiteUrl4 = offerUrls[3] || raw4;
+        if (!websiteUrl) {
+          showWinAlert('Vui lòng nhập Link Offer!');
+          return;
+        }
 
       // Tự động lưu các link offer mới điền để không bị mất khi chạy
       void saveOfferConfig(true);
@@ -2057,12 +2270,65 @@
         });
       }
 
+      // Kiểm tra chế độ trình duyệt (Mặc định mở bằng GoLogin trừ khi người dùng chủ động tích chọn Chrome)
+      const isExplicitChrome = Boolean(
+        (document.getElementById('dashRadioChrome')?.checked || document.getElementById('RadioButtonChrome')?.checked) &&
+        !document.getElementById('dashRadioGologin')?.checked &&
+        !document.getElementById('RadioButtonGologinCMD2')?.checked
+      );
+      const isGoLogin = !isExplicitChrome;
+
+      if (isGoLogin) {
+        document.getElementById('lbStatus').textContent = 'Đang mở GoLogin (Orbita)...';
+        switchTab('tabRunning');
+        fetchRunningState();
+
+        const goLoginToken = document.getElementById('txtGoLoginToken')?.value.trim() || '';
+        const res = await api('/launch-gologin', {
+          method: 'POST',
+          body: JSON.stringify({
+            websiteUrl,
+            websiteUrl2,
+            websiteUrl3,
+            websiteUrl4,
+            offerUrls,
+            offerList: offerUrls,
+            requestedCount: concurrency,
+            proxyList: proxyLines,
+            proxyType: 'socks5',
+            scriptPath,
+            timeLimit,
+            delayStart,
+            delayStop,
+            completeText,
+            limitRun,
+            antiFpCanvas,
+            antiFpClientRects,
+            antiFpWebgl,
+            antiFpWebrtc,
+            hideUntilTarget: Boolean(document.getElementById('cbxHideUntilTarget')?.checked),
+          })
+        });
+        if (res.error) {
+          showWinAlert('Lỗi GoLogin: ' + res.error);
+          document.getElementById('lbStatus').textContent = 'GoLogin error: ' + res.error;
+        } else if (res.warnings?.length > 0 && !res.results?.length) {
+          showWinAlert('Thông báo: ' + res.warnings.join('\n'));
+          document.getElementById('lbStatus').textContent = res.warnings[0];
+        } else {
+          document.getElementById('lbStatus').textContent = `GoLogin: mở ${res.results?.length || 0} profile thành công.`;
+        }
+        fetchRunningState();
+        return;
+      }
+
       document.getElementById('lbStatus').textContent = 'Starting Chrome...';
       switchTab('tabRunning');
       fetchRunningState();
 
       const checkDuplicate = document.getElementById('cbxCheckDuplicateIP') ? document.getElementById('cbxCheckDuplicateIP').checked : true;
       const enableLeadCheck = document.getElementById('cbxCheckLead') ? document.getElementById('cbxCheckLead').checked : true;
+      const hideUntilTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
 
       const streamCount = Math.max(concurrency, offerUrls.length >= 2 ? offerUrls.length : 1);
 
@@ -2098,6 +2364,8 @@
               leadCheckInterval: 30,
               leadCheckMaxAttempts: 2,
               leadCheckScreen: 5,
+              hideUntilTarget,
+              hideBrowser: hideUntilTarget,
             }
           })
         });
@@ -2132,6 +2400,8 @@
             leadCheckInterval: 30,
             leadCheckMaxAttempts: 2,
             leadCheckScreen: 5,
+            hideUntilTarget,
+            hideBrowser: hideUntilTarget,
           })
         });
         if (res.error) {
@@ -2143,22 +2413,66 @@
         } else {
           document.getElementById('lbStatus').textContent = res.message || 'Chrome launched successfully.';
         }
+        fetchRunningState();
+      } finally {
+        if (btnStart) {
+          btnStart.disabled = false;
+          btnStart.style.opacity = '1';
+          btnStart.style.cursor = 'pointer';
+        }
       }
-
-      fetchRunningState();
     }
 
     async function handleStop() {
-      await api('/auto-refill', { method: 'POST', body: JSON.stringify({ enabled: false }) });
-      await api('/close', { method: 'POST' });
-      document.getElementById('lbStatus').textContent = 'Stopped all threads.';
+      document.getElementById('lbStatus').textContent = 'Đang dừng tất cả tiến trình...';
+      try {
+        await Promise.allSettled([
+          api('/auto-refill', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
+          api('/auto-refill/sequential', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
+          api('/close', { method: 'POST' })
+        ]);
+      } catch {}
+      document.getElementById('lbStatus').textContent = 'Đã dừng toàn bộ luồng & đóng trình duyệt.';
       fetchRunningState();
     }
 
     async function handleCloseAll() {
-      await api('/close', { method: 'POST' });
-      document.getElementById('lbStatus').textContent = 'Closed all Chrome sessions.';
+      document.getElementById('lbStatus').textContent = 'Đang đóng tất cả trình duyệt...';
+      try {
+        await Promise.allSettled([
+          api('/auto-refill', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
+          api('/auto-refill/sequential', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
+          api('/close', { method: 'POST' })
+        ]);
+      } catch {}
+      document.getElementById('lbStatus').textContent = 'Đã đóng tất cả trình duyệt.';
       fetchRunningState();
+    }
+
+    let currentSelectedRunningOfferTab = 'all';
+    let currentSelectedOfferLogTab = 'all';
+
+    function getConfiguredOfferMap() {
+      const map = {};
+      const o1 = document.getElementById('txtLinkOffer')?.value.trim();
+      const o2 = document.getElementById('txtLinkOffer2')?.value.trim();
+      const o3 = document.getElementById('txtLinkOffer3')?.value.trim();
+      const o4 = document.getElementById('txtLinkOffer4')?.value.trim();
+      if (o1) map['1'] = o1.split(/\r?\n/)[0].trim();
+      if (o2) map['2'] = o2.split(/\r?\n/)[0].trim();
+      if (o3) map['3'] = o3.split(/\r?\n/)[0].trim();
+      if (o4) map['4'] = o4.split(/\r?\n/)[0].trim();
+      return map;
+    }
+
+    function switchRunningOfferTab(offerKey) {
+      currentSelectedRunningOfferTab = String(offerKey);
+      fetchRunningState();
+    }
+
+    function switchOfferLogTab(offerKey) {
+      currentSelectedOfferLogTab = String(offerKey);
+      renderLogs();
     }
 
     // Running state monitor (dgvRunning)
@@ -2181,14 +2495,53 @@
         }
       }
 
+      // Compute counts per running offer
+      const runOfferCounts = {};
+      const allOfferKeys = new Set(['1']);
+      const cfgOffers = getConfiguredOfferMap();
+      Object.keys(cfgOffers).forEach(k => allOfferKeys.add(k));
+
+      sessions.forEach(s => {
+        const off = String(s.offerNumber || s.streamRole || 1);
+        allOfferKeys.add(off);
+        runOfferCounts[off] = (runOfferCounts[off] || 0) + 1;
+      });
+
+      // Render running offer sub-tabs
+      const runTabContainer = document.getElementById('runningOfferTabHeaders');
+      if (runTabContainer) {
+        const sortedRunOffers = [...allOfferKeys].sort((a, b) => Number(a) - Number(b));
+        const tabsHtml = [
+          `<div class="win-tab ${currentSelectedRunningOfferTab === 'all' ? 'active' : ''}" data-run-offer="all" onclick="switchRunningOfferTab('all')">🌐 Tất cả luồng (<span id="countRunAll">${sessions.length}</span>)</div>`,
+          ...sortedRunOffers.map(k => {
+            const cnt = runOfferCounts[k] || 0;
+            return `<div class="win-tab ${currentSelectedRunningOfferTab === k ? 'active' : ''}" data-run-offer="${k}" onclick="switchRunningOfferTab('${k}')">🏷️ Offer ${k} (<span>${cnt}</span>)</div>`;
+          })
+        ].join('');
+        if (runTabContainer.innerHTML !== tabsHtml) {
+          runTabContainer.innerHTML = tabsHtml;
+        }
+      }
+
+      // Filter visible sessions according to sub-tab
+      let visibleSessions = sessions;
+      if (currentSelectedRunningOfferTab !== 'all') {
+        visibleSessions = sessions.filter(s => String(s.offerNumber || s.streamRole || 1) === currentSelectedRunningOfferTab);
+      }
+
       const tbody = document.getElementById('dgvRunningBody');
-      if (sessions.length === 0) {
-        tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="8" style="text-align:center;color:#888888;padding:30px;">Không có luồng trình duyệt nào đang chạy.</td></tr>';
+      if (!tbody) return;
+
+      if (visibleSessions.length === 0) {
+        const emptyMsg = currentSelectedRunningOfferTab === 'all'
+          ? 'Không có luồng trình duyệt nào đang chạy.'
+          : `Không có luồng nào đang chạy cho Offer ${currentSelectedRunningOfferTab}.`;
+        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="8" style="text-align:center;color:#888888;padding:30px;">${emptyMsg}</td></tr>`;
         return;
       }
 
       tbody.innerHTML = '';
-      sessions.forEach((s, idx) => {
+      visibleSessions.forEach((s, idx) => {
         const tr = document.createElement('tr');
         const leadBadge = s.leadCheckStatus === 'matched' 
           ? '<span style="color:#008000;font-weight:bold;">Lead</span>'
@@ -2258,38 +2611,136 @@
 
     function renderLogs() {
       const slotFilterEl = document.getElementById('logFilterSlot');
-      const offerFilterEl = document.getElementById('logFilterOffer');
       const typeFilterEl = document.getElementById('logFilterType');
       if (!slotFilterEl || !typeFilterEl) return;
 
       const slotFilter = slotFilterEl.value;
-      const offerFilter = offerFilterEl ? offerFilterEl.value : '';
       const typeFilter = typeFilterEl.value;
+
+      // Extract all slots and offer stats
       const slots = new Set(logData.map((s) => String(s.slot)));
-      const offers = new Set();
-      for (const s of logData) {
-        if (s.offer) offers.add(String(s.offer));
-        for (const e of s.logs || []) {
-          if (e.offer) offers.add(String(e.offer));
+      const logOfferCounts = {};
+      const logOfferLeads = {};
+      const logOfferBlocked = {};
+      const logOfferAi = {};
+      let totalAllEntries = 0;
+      let totalAllLeads = 0;
+      let totalAllBlocked = 0;
+      let totalAllAi = 0;
+
+      const allOfferKeys = new Set(['1']);
+      const cfgOffers = getConfiguredOfferMap();
+      Object.keys(cfgOffers).forEach(k => allOfferKeys.add(k));
+
+      for (const session of logData) {
+        const sessOffer = String(session.offer || 1);
+        allOfferKeys.add(sessOffer);
+
+        for (const entry of session.logs || []) {
+          const off = String(entry.offer ?? sessOffer);
+          allOfferKeys.add(off);
+          logOfferCounts[off] = (logOfferCounts[off] || 0) + 1;
+          totalAllEntries++;
+
+          if (entry.type === 'lead_confirmed') {
+            logOfferLeads[off] = (logOfferLeads[off] || 0) + 1;
+            totalAllLeads++;
+          } else if (entry.type === 'traffic_blocked' || entry.type === 'ai_error') {
+            logOfferBlocked[off] = (logOfferBlocked[off] || 0) + 1;
+            totalAllBlocked++;
+          }
+          if (entry.type && (entry.type.startsWith('ai_') || entry.type === 'ai_action')) {
+            logOfferAi[off] = (logOfferAi[off] || 0) + 1;
+            totalAllAi++;
+          }
         }
       }
 
+      // Populate slot filter dropdown
       const curSlot = slotFilterEl.value;
       slotFilterEl.innerHTML = '<option value="">Tất cả slot</option>'
         + [...slots].sort((a,b)=>Number(a)-Number(b)).map((s) => `<option value="${s}"${s === curSlot ? ' selected' : ''}>Slot ${s}</option>`).join('');
 
-      if (offerFilterEl) {
-        const curOffer = offerFilterEl.value;
-        offerFilterEl.innerHTML = '<option value="">Tất cả offer</option>'
-          + [...offers].sort((a,b)=>Number(a)-Number(b)).map((o) => `<option value="${o}"${o === curOffer ? ' selected' : ''}>Offer ${o}</option>`).join('');
+      // Render Offer Sub-Tabs for Logs
+      const offerTabContainer = document.getElementById('offerLogTabHeaders');
+      if (offerTabContainer) {
+        const sortedLogOffers = [...allOfferKeys].sort((a, b) => Number(a) - Number(b));
+        const tabsHtml = [
+          `<div class="win-tab ${currentSelectedOfferLogTab === 'all' ? 'active' : ''}" data-offer-tab="all" onclick="switchOfferLogTab('all')">🌐 Tất cả Offer (<span id="tabLogAllCount">${totalAllEntries}</span>)</div>`,
+          ...sortedLogOffers.map(k => {
+            const cnt = logOfferCounts[k] || 0;
+            return `<div class="win-tab ${currentSelectedOfferLogTab === k ? 'active' : ''}" data-offer-tab="${k}" onclick="switchOfferLogTab('${k}')">🏷️ Offer ${k} (<span>${cnt}</span>)</div>`;
+          })
+        ].join('');
+        if (offerTabContainer.innerHTML !== tabsHtml) {
+          offerTabContainer.innerHTML = tabsHtml;
+        }
       }
 
+      // Update Offer KPI Bar
+      const isAll = currentSelectedOfferLogTab === 'all';
+      const kpiTitleEl = document.getElementById('kpiOfferTitle');
+      const kpiRunsEl = document.getElementById('kpiTotalRuns');
+      const kpiLeadsEl = document.getElementById('kpiLeadCount');
+      const kpiBlockedEl = document.getElementById('kpiBlockedCount');
+      const kpiAiEl = document.getElementById('kpiAiCount');
+      const kpiUrlEl = document.getElementById('kpiOfferUrl');
+
+      if (kpiTitleEl) kpiTitleEl.textContent = isAll ? '🌐 Tất cả Offer' : `🏷️ Offer ${currentSelectedOfferLogTab}`;
+      if (kpiRunsEl) {
+        if (isAll) {
+          kpiRunsEl.textContent = logData.length;
+        } else {
+          const matchingSessions = logData.filter(s => String(s.offer || 1) === currentSelectedOfferLogTab || (s.logs && s.logs.some(e => String(e.offer || 1) === currentSelectedOfferLogTab)));
+          kpiRunsEl.textContent = matchingSessions.length;
+        }
+      }
+      if (kpiLeadsEl) kpiLeadsEl.textContent = isAll ? totalAllLeads : (logOfferLeads[currentSelectedOfferLogTab] || 0);
+      if (kpiBlockedEl) kpiBlockedEl.textContent = isAll ? totalAllBlocked : (logOfferBlocked[currentSelectedOfferLogTab] || 0);
+      if (kpiAiEl) kpiAiEl.textContent = isAll ? totalAllAi : (logOfferAi[currentSelectedOfferLogTab] || 0);
+      if (kpiUrlEl) {
+        let offerUrl = '';
+        if (isAll) {
+          offerUrl = cfgOffers['1'] ? `Offer 1: ${cfgOffers['1']}` : '';
+        } else {
+          offerUrl = cfgOffers[currentSelectedOfferLogTab] || '';
+          if (!offerUrl) {
+            for (const s of logData) {
+              if (String(s.offer || 1) === currentSelectedOfferLogTab) {
+                const nav = s.logs?.find(e => e.type === 'navigate' && e.url);
+                if (nav) { offerUrl = nav.url; break; }
+              }
+            }
+          }
+        }
+        kpiUrlEl.textContent = offerUrl ? `🔗 ${offerUrl}` : '';
+        kpiUrlEl.title = offerUrl || '';
+      }
+
+      // Update button labels
+      const offerLabel = isAll ? '' : ` (Offer ${currentSelectedOfferLogTab})`;
+      const btnExport = document.getElementById('btnExportLogCsv');
+      const btnOpenFolder = document.getElementById('btnOpenHtmlFolder');
+      const btnClear = document.getElementById('btnClearLogsBtn');
+      if (btnExport) btnExport.textContent = isAll ? 'Export CSV' : `Export CSV${offerLabel}`;
+      if (btnOpenFolder) btnOpenFolder.textContent = isAll ? 'Open HTML Folder' : `Open Folder${offerLabel}`;
+      if (btnClear) btnClear.textContent = isAll ? 'Clear Logs' : `Clear Logs${offerLabel}`;
+
+      const confirmTextEl = document.getElementById('logClearConfirmText');
+      if (confirmTextEl) {
+        confirmTextEl.textContent = isAll
+          ? '⚠️ Bạn có chắc muốn xoá toàn bộ log tương tác và tất cả các file HTML đã lưu? Không thể hoàn tác.'
+          : `⚠️ Bạn có chắc muốn xoá toàn bộ log tương tác và file HTML của Offer ${currentSelectedOfferLogTab}? Không thể hoàn tác.`;
+      }
+
+      // Filter rows
       const rows = [];
       for (const session of logData) {
         if (slotFilter && String(session.slot) !== slotFilter) continue;
+        const sessOffer = String(session.offer || 1);
         for (const entry of [...session.logs].reverse()) {
-          const entryOffer = String(entry.offer ?? session.offer ?? 1);
-          if (offerFilter && entryOffer !== offerFilter) continue;
+          const entryOffer = String(entry.offer ?? sessOffer);
+          if (!isAll && entryOffer !== currentSelectedOfferLogTab) continue;
           if (typeFilter && entry.type !== typeFilter) continue;
           rows.push({ session, entry });
         }
@@ -2302,7 +2753,10 @@
       if (!tbody) return;
 
       if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td class="cell-selector">►</td><td colspan="6" style="text-align:center;color:#888888;padding:30px;">Chưa có log thao tác trình duyệt. Mở trình duyệt để bắt đầu ghi.</td></tr>';
+        const emptyMsg = isAll
+          ? 'Chưa có log thao tác trình duyệt. Mở trình duyệt để bắt đầu ghi.'
+          : `Chưa có log thao tác cho Offer ${currentSelectedOfferLogTab}.`;
+        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="6" style="text-align:center;color:#888888;padding:30px;">${emptyMsg}</td></tr>`;
         return;
       }
 
@@ -2437,18 +2891,24 @@
     }
 
     function exportLogsCsv() {
-      window.open('/browser-logs/export-csv', '_blank');
+      const url = currentSelectedOfferLogTab && currentSelectedOfferLogTab !== 'all'
+        ? `/browser-logs/export-csv?offer=${encodeURIComponent(currentSelectedOfferLogTab)}`
+        : '/browser-logs/export-csv';
+      window.open(url, '_blank');
     }
 
     function clearLogFilters() {
       document.getElementById('logFilterSlot').value = '';
-      if (document.getElementById('logFilterOffer')) document.getElementById('logFilterOffer').value = '';
       document.getElementById('logFilterType').value = '';
+      currentSelectedOfferLogTab = 'all';
       renderLogs();
     }
 
     async function openLogHtmlFolder() {
-      const res = await api('/browser-logs/open-folder', { method: 'POST' });
+      const body = currentSelectedOfferLogTab && currentSelectedOfferLogTab !== 'all'
+        ? { offer: currentSelectedOfferLogTab }
+        : {};
+      const res = await api('/browser-logs/open-folder', { method: 'POST', body: JSON.stringify(body) });
       document.getElementById('lbStatus').textContent = res.message || 'Đã mở thư mục HTML trong Finder.';
     }
 
@@ -2464,7 +2924,10 @@
 
     async function confirmClearAllLogs() {
       cancelClearAllLogs();
-      const res = await api('/browser-logs/clear', { method: 'POST' });
+      const body = currentSelectedOfferLogTab && currentSelectedOfferLogTab !== 'all'
+        ? { offer: currentSelectedOfferLogTab }
+        : {};
+      const res = await api('/browser-logs/clear', { method: 'POST', body: JSON.stringify(body) });
       document.getElementById('lbStatus').textContent = res.message || 'Đã xoá toàn bộ log & file HTML.';
       await fetchLogs();
     }
