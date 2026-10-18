@@ -910,8 +910,8 @@ assert.equal(normalizeIpAddress('99.145.85.141'), '99.145.85.141');
 assert.equal(normalizeIpAddress(' 99.145.85.141:8080 '), '99.145.85.141');
 assert.equal(normalizeIpAddress('socks5://1.2.3.4:1080'), '1.2.3.4');
 assert.equal(normalizeIpAddress('http://5.6.7.8:8080'), '5.6.7.8');
-assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 30);
-assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 2);
+assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 15);
+assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 1);
 assert.equal(DEFAULT_LEAD_CONFIG.checkScreen, 5);
 
 const sampleApiResponse = {
@@ -1991,6 +1991,7 @@ const mockEmailSession = {
 attachAutofill(mockEmailContext, [{ email: 'test@gmail.com' }], 'https://example.com', mockEmailSession, {
   autoSubmit: true,
   enableLeadCheck: true,
+  leadCheckScreen: 1,
   onEmailSubmitted: (sess) => {
     emailSubmitTriggered = true;
   },
@@ -2005,7 +2006,7 @@ await new Promise((r) => setTimeout(r, 600));
 assert.ok(mockEmailSession.emailFilled, 'Session phải đánh dấu emailFilled khi điền ô email');
 assert.ok(emailSubmitBtnClicked, 'Autofill phải click submit màn chứa email');
 assert.ok(mockEmailSession.emailScreenSubmitted, 'Session phải đánh dấu emailScreenSubmitted');
-assert.ok(mockEmailSession.leadCheckTriggered, 'Session phải kích hoạt leadCheckTriggered sau khi nộp email');
+assert.ok(mockEmailSession.leadCheckTriggered, 'Session phải kích hoạt leadCheckTriggered sau khi nộp email đạt màn đích');
 assert.equal(mockEmailSession.leadCheckStatus, 'checking', 'Trạng thái lead check phải là checking');
 assert.ok(emailSubmitTriggered, 'Callback onEmailSubmitted/onScreen5Reached phải được gọi');
 
@@ -2020,6 +2021,33 @@ assert.strictEqual(secondSubmitAttempted, false, 'Autofill không được thự
 mockEmailSession.screen5LeadVerified = true;
 mockEmailSession.leadCheckStatus = 'confirmed';
 
+mockEmailPageClosed = true;
+
+// 17.2 KIỂM TRA MẶC ĐỊNH KHÔNG DỪNG Ở MÀN 1 NẾU MỤC TIÊU LÀ MÀN 4-5
+mockEmailPageClosed = false;
+const mockEmailSession5 = { autofillFields: 0 };
+let email5LeadTriggered = false;
+let email5SubmitClicked = false;
+mockEmailSubmitBtn.click = async () => {
+  email5SubmitClicked = true;
+  mockEmailPageClosed = true; // Mô phỏng form submit chuyển trang
+};
+
+attachAutofill(mockEmailContext, [{ email: 'test@gmail.com' }], 'https://example.com', mockEmailSession5, {
+  autoSubmit: true,
+  enableLeadCheck: true,
+  leadCheckScreen: 5, // Mục tiêu màn 5
+  onEmailSubmitted: () => { email5LeadTriggered = true; },
+  onScreen5Reached: () => { email5LeadTriggered = true; },
+});
+
+mockEmailSession5.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 400));
+
+assert.ok(email5SubmitClicked, 'Phải click submit màn 1');
+assert.strictEqual(mockEmailSession5.completedScreens, 1, 'Đã hoàn thành màn 1');
+assert.strictEqual(mockEmailSession5.leadCheckTriggered, undefined, 'Màn 1 không được kích hoạt leadCheckTriggered khi mục tiêu là màn 5');
+assert.strictEqual(email5LeadTriggered, false, 'Không được gọi callback chờ lead ở màn 1 khi mục tiêu là màn 5');
 mockEmailPageClosed = true;
 
 // ─── 18. KIỂM TRA TƯƠNG TÁC TRÌNH DUYỆT TỰ NHIÊN (HUMAN INTERACTION PHYSICS) ───

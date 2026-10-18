@@ -12,8 +12,8 @@ export const DEFAULT_LEAD_CONFIG = {
   apiUrl: 'https://toffers.top/partner/chat_leading/get_lead_datas',
   cookie: 'qcodes_=7p0d1pg081d433i45giksp7k5fvm386o; qcodes_sound=1',
   datas: '1504',
-  intervalSeconds: 30,
-  maxAttempts: 2,
+  intervalSeconds: 15,
+  maxAttempts: 1,
 };
 
 /**

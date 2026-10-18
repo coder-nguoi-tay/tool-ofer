@@ -4056,9 +4056,9 @@ async function startLeadVerification(session, leadConfig) {
   const exitIp = session.exitIp;
   const proxyHost = session.proxyServer ? normalizeIpAddress(session.proxyServer) : null;
   const targetIps = [exitIp, proxyHost].filter(Boolean);
-  const targetDesc = session.emailScreenNumber
-    ? `màn điền email (Màn ${session.emailScreenNumber})`
-    : (session.emailFilled ? 'màn điền email' : (leadConfig.checkScreen ? `Màn ${leadConfig.checkScreen}` : 'sau khi điền email'));
+  const targetDesc = session.completedScreens
+    ? `Màn ${session.completedScreens}`
+    : (session.emailScreenNumber ? `màn điền email (Màn ${session.emailScreenNumber})` : (leadConfig.checkScreen ? `Màn ${leadConfig.checkScreen}` : 'sau khi điền form'));
   const slotNum = session.tileIndex !== undefined ? (session.tileIndex + 1) : (session.slot || 1);
   const label = `Slot ${slotNum} [IP: ${exitIp}]`;
 
@@ -4080,11 +4080,12 @@ async function startLeadVerification(session, leadConfig) {
     } catch {}
   };
 
-  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 30);
-  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 2);
+  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 15);
+  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 1);
 
-  session.leadCheckMessage = `Đã nộp ${targetDesc}; bắt đầu chờ kiểm tra lead (${maxAttempts} lần x ${intervalSeconds}s)...`;
-  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead sau khi điền email (${maxAttempts} lần x ${intervalSeconds}s)...</span>`);
+  const attemptText = maxAttempts > 1 ? `${maxAttempts} lần x ${intervalSeconds}s` : `1 lần ${intervalSeconds}s`;
+  session.leadCheckMessage = `Đã nộp ${targetDesc}; bắt đầu chờ kiểm tra lead (${attemptText})...`;
+  updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead (${attemptText})...</span>`);
 
   let leadFound = false;
   let attempt = 0;
@@ -4093,13 +4094,14 @@ async function startLeadVerification(session, leadConfig) {
 
   while (attempt < maxAttempts) {
     attempt += 1;
-    // Chờ trọn vẹn intervalSeconds (30s) cho mỗi lần kiểm tra, đếm ngược trực tiếp trên badge và message
+    // Chờ trọn vẹn intervalSeconds (15s) cho mỗi lần kiểm tra, đếm ngược trực tiếp trên badge và message
     for (let sec = intervalSeconds; sec > 0; sec--) {
       if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
         return; // Phiên đã bị đóng bởi người dùng
       }
-      session.leadCheckMessage = `Đang chờ có lead lần ${attempt}/${maxAttempts}: còn ${sec}s...`;
-      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead lần ${attempt}/${maxAttempts}: còn ${sec}s...</span>`);
+      const attemptLabel = maxAttempts > 1 ? `lần ${attempt}/${maxAttempts}: ` : '';
+      session.leadCheckMessage = `Đang chờ có lead ${attemptLabel}còn ${sec}s...`;
+      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead ${attemptLabel}còn ${sec}s...</span>`);
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
@@ -4164,7 +4166,7 @@ async function startLeadVerification(session, leadConfig) {
     session.closingDueToNoLead = true;
     const reasonText = hasApiError
       ? `Lỗi gọi API toffers.top (${lastApiErrorMessage})`
-      : `Không có lead về cho IP ${exitIp} sau ${attempt} lần kiểm tra (${intervalSeconds}s/lần)`;
+      : `Không có lead về cho IP ${exitIp} sau ${intervalSeconds}s kiểm tra`;
     session.leadCheckMessage = `❌ ${reasonText}. Tự động tắt trình duyệt để đổi sock mới...`;
     updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead. Tự tắt Chrome...</span>`);
 

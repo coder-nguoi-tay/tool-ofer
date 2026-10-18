@@ -2601,19 +2601,29 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     if (session.leadCheckStatus === 'checking') return;
     if (options.enableLeadCheck !== false && (session.screen5LeadCheckTriggered || session.leadCheckTriggered) && !session.screen5LeadVerified) return;
 
-    // Nếu đã nộp xong màn điền email mà chưa kích hoạt check lead: kích hoạt ngay và tạm dừng!
-    if (options.enableLeadCheck !== false && session.emailScreenSubmitted && !session.screen5LeadVerified) {
-      if (!session.screen5LeadCheckTriggered) {
+    // Nếu đang trong quá trình kiểm tra lead mà chưa xác nhận: tạm dừng không thao tác
+    if (options.enableLeadCheck !== false && !session.screen5LeadVerified) {
+      if (session.screen5LeadCheckTriggered || session.leadCheckTriggered) {
+        return;
+      }
+      const checkScreenTarget = Number(options.leadCheckScreen) || 5;
+      if (session.completedScreens >= checkScreenTarget) {
         session.screen5LeadCheckTriggered = true;
         session.leadCheckTriggered = true;
         session.leadCheckStatus = 'checking';
+        session.leadCheckReason = 'screen_target';
+        console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (Mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+        options.onLog?.({
+          type: 'screen_target_lead_check',
+          detail: `Đã hoàn thành ${session.completedScreens} màn hình điền form. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
+        });
         if (typeof options.onEmailSubmitted === 'function') {
           options.onEmailSubmitted(session, page);
         } else if (typeof options.onScreen5Reached === 'function') {
           options.onScreen5Reached(session, page);
         }
+        return;
       }
-      return; // Dừng lại ở màn tiếp theo, chờ có lead mới làm tiếp!
     }
 
     const currentUrl = page.url();
@@ -3429,13 +3439,19 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         session.isAtScreen5 = true;
       }
 
-      // Nếu đang ở Jump Page (sau Màn 5) và chưa kiểm tra lead:
+      // Nếu đang ở Jump Page (sau Màn 4/5) và chưa kiểm tra lead:
       // TẠM DỪNG, KHÔNG CLICK NÚT NHẬN THƯỞNG, GỌI KIỂM TRA LEAD TRÙNG IP!
       if (screenInfo?.isJumpPage && options.enableLeadCheck !== false && !session.screen5LeadVerified) {
         if (!session.screen5LeadCheckTriggered) {
           session.screen5LeadCheckTriggered = true;
           session.leadCheckTriggered = true;
           session.leadCheckStatus = 'checking';
+          session.leadCheckReason = 'jump_page';
+          console.log(`[LeadCheck] Đang ở Jump Page nhận thưởng (sau Màn ${session.completedScreens || 4}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+          options.onLog?.({
+            type: 'jump_page_lead_check',
+            detail: `Đã tới Jump Page nhận thưởng sau khi điền form. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
+          });
           if (typeof options.onEmailSubmitted === 'function') {
             options.onEmailSubmitted(session, page);
           } else if (typeof options.onScreen5Reached === 'function') {
@@ -3445,22 +3461,27 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         return; // Dừng lại ở Jump Page, đợi kết quả kiểm tra lead!
       }
 
-      // Safety net: nếu email đã được điền ở màn trước và hiện tại đang ở màn tiếp theo (không còn ô email):
-      // Tức là ĐÃ QUA MÀN ĐIỀN EMAIL XONG -> TẠM DỪNG NGAY, KHÔNG ĐIỀN TIẾP CHO TỚI KHI CÓ LEAD!
-      if (options.enableLeadCheck !== false && session.emailFilled && !screenInfo?.hasEmailInput && !session.screen5LeadVerified) {
+      // Nếu đã đạt đến số màn quy định (màn 4 hoặc 5) và chưa xác nhận lead: tạm dừng chờ lead
+      const checkScreenTarget = Number(options.leadCheckScreen) || 5;
+      const isTargetReached = (session.completedScreens >= checkScreenTarget) || (session.completedScreens >= 4 && (screenInfo?.isJumpPage || screenInfo?.isScreen5));
+      if (options.enableLeadCheck !== false && isTargetReached && !session.screen5LeadVerified) {
         if (!session.screen5LeadCheckTriggered) {
           session.screen5LeadCheckTriggered = true;
           session.leadCheckTriggered = true;
           session.leadCheckStatus = 'checking';
-          session.emailScreenSubmitted = true;
-          console.log('[LeadCheck] Đã qua màn điền email (đang ở màn tiếp theo). Tạm dừng và chờ kiểm tra lead...');
+          session.leadCheckReason = 'screen_target';
+          console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+          options.onLog?.({
+            type: 'screen_target_lead_check',
+            detail: `Đã hoàn thành ${session.completedScreens} màn hình điền form. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
+          });
           if (typeof options.onEmailSubmitted === 'function') {
             options.onEmailSubmitted(session, page);
           } else if (typeof options.onScreen5Reached === 'function') {
             options.onScreen5Reached(session, page);
           }
         }
-        return; // Dừng lại ở màn tiếp theo, chờ đợi có lead mới làm tiếp!
+        return; // Dừng lại ở màn đích, chờ đợi có lead mới làm tiếp!
       }
 
       // Kiểm tra và chủ động bấm nút submit/tiếp tục nếu có tùy chọn autoSubmit
@@ -3650,21 +3671,23 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 session.emailScreenNumber = session.completedScreens;
               }
 
-              // Luồng kiểm tra lead: sau khi điền và nộp màn email xong mới bắt đầu check lead!
-              // (Màn nhập email có thể ở màn 4 hoặc 5, nên sau khi nộp màn email sẽ tạm dừng chờ lead)
+              // Luồng kiểm tra lead: tiếp tục điền qua các màn khảo sát / câu hỏi,
+              // chỉ bắt đầu chờ kiểm tra lead khi đến Màn 4 hoặc 5 (hoặc Jump Page)!
               const checkScreenTarget = Number(options.leadCheckScreen) || 5;
-              const isLeadCheckTrigger = wasEmailScreenSubmit || (session.emailScreenSubmitted && !session.screen5LeadVerified) || (screenInfo?.isJumpPage && !session.screen5LeadVerified) || (!session.emailFilled && session.completedScreens >= checkScreenTarget);
+              const isLeadCheckTrigger = (session.completedScreens >= checkScreenTarget) ||
+                                         (screenInfo?.isJumpPage && !session.screen5LeadVerified) ||
+                                         (session.completedScreens >= 4 && (screenInfo?.isScreen5 || screenInfo?.isJumpPage));
 
               if (options.enableLeadCheck !== false && isLeadCheckTrigger && !session.screen5LeadVerified) {
                 if (!session.screen5LeadCheckTriggered) {
                   session.screen5LeadCheckTriggered = true;
                   session.leadCheckTriggered = true;
                   session.leadCheckStatus = 'checking';
-                  session.leadCheckReason = wasEmailScreenSubmit ? 'email_submitted' : 'screen_target';
-                  console.log(`[LeadCheck] Đã qua màn điền email (${wasEmailScreenSubmit ? 'vừa nộp màn email' : 'màn ' + session.completedScreens}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+                  session.leadCheckReason = 'screen_target';
+                  console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (Mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
                   options.onLog?.({
-                    type: 'email_submitted_lead_check',
-                    detail: `Đã submit màn hình điền email (Màn ${session.completedScreens}). Bắt đầu chờ đợi lead (2 lần x 30s)...`,
+                    type: 'screen_target_lead_check',
+                    detail: `Đã submit form Màn ${session.completedScreens}. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
                   });
                   if (typeof options.onEmailSubmitted === 'function') {
                     options.onEmailSubmitted(session, page);
@@ -3722,17 +3745,19 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               }
 
               const checkScreenTarget = Number(options.leadCheckScreen) || 5;
-              const isLeadCheckTrigger = wasEmailScreenFallback || (session.emailScreenSubmitted && !session.screen5LeadVerified) || (screenInfo?.isJumpPage && !session.screen5LeadVerified) || (!session.emailFilled && session.completedScreens >= checkScreenTarget);
+              const isLeadCheckTrigger = (session.completedScreens >= checkScreenTarget) ||
+                                         (screenInfo?.isJumpPage && !session.screen5LeadVerified) ||
+                                         (session.completedScreens >= 4 && (screenInfo?.isScreen5 || screenInfo?.isJumpPage));
               if (options.enableLeadCheck !== false && isLeadCheckTrigger && !session.screen5LeadVerified) {
                 if (!session.screen5LeadCheckTriggered) {
                   session.screen5LeadCheckTriggered = true;
                   session.leadCheckTriggered = true;
                   session.leadCheckStatus = 'checking';
-                  session.leadCheckReason = wasEmailScreenFallback ? 'email_submitted' : 'screen_target';
-                  console.log(`[LeadCheck] Đã qua màn điền email (fallback submit). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+                  session.leadCheckReason = 'screen_target';
+                  console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (fallback submit, Mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
                   options.onLog?.({
-                    type: 'email_submitted_lead_check',
-                    detail: `Đã submit form có email. Bắt đầu chờ đợi lead (2 lần x 30s)...`,
+                    type: 'screen_target_lead_check',
+                    detail: `Đã submit form Màn ${session.completedScreens}. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
                   });
                   if (typeof options.onEmailSubmitted === 'function') {
                     options.onEmailSubmitted(session, page);

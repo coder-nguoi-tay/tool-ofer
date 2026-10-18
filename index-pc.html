@@ -1382,9 +1382,9 @@
                 <span class="option-pill-text"><span class="option-pill-icon">🎯</span> Ẩn trình duyệt (Chỉ hiện khi có Lead)</span>
               </label>
 
-              <label class="option-pill option-pill-leadcheck" title="Kiểm tra lead sau khi nộp màn email: 2 lần x 30s, có lead mới làm tiếp, không thì tự tắt Chrome.">
+              <label class="option-pill option-pill-leadcheck" title="Kiểm tra lead ở màn 4-5: 1 lần 15s, có lead mới làm tiếp, không thì tự tắt Chrome.">
                 <input type="checkbox" id="cbxCheckLead" checked onchange="syncOptionPills()">
-                <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (2x30s)</span>
+                <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (1x15s)</span>
               </label>
 
               <label class="option-pill option-pill-ai" title="AI tự động nhận diện câu hỏi / khảo sát khi bị kẹt và hỗ trợ hoàn tất form.">
@@ -3371,8 +3371,8 @@
             checkDuplicate,
             autoSubmitForm: true,
             enableLeadCheck,
-            leadCheckInterval: 30,
-            leadCheckMaxAttempts: 2,
+            leadCheckInterval: 15,
+            leadCheckMaxAttempts: 1,
             leadCheckScreen: 5,
             hideUntilTarget,
             hideUntilLead,
@@ -3428,8 +3428,8 @@
               checkDuplicate,
               autoSubmitForm: true,
               enableLeadCheck,
-              leadCheckInterval: 30,
-              leadCheckMaxAttempts: 2,
+              leadCheckInterval: 15,
+              leadCheckMaxAttempts: 1,
               leadCheckScreen: 5,
               hideUntilTarget,
               hideBrowser: hideUntilTarget,
@@ -3467,8 +3467,8 @@
             checkDuplicate,
             autoSubmitForm: true,
             enableLeadCheck,
-            leadCheckInterval: 30,
-            leadCheckMaxAttempts: 2,
+            leadCheckInterval: 15,
+            leadCheckMaxAttempts: 1,
             leadCheckScreen: 5,
             hideUntilTarget,
             hideBrowser: hideUntilTarget,
