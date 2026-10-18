@@ -519,6 +519,575 @@
     .badge-lead { background: #dcfce7; color: #15803d; font-weight: bold; }
     .badge-blocked { background: #fee2e2; color: #b91c1c; }
     .badge-offer { background: #e0e7ff; color: #1e40af; border: 1px solid #c7d2fe; }
+
+    /* ==========================================================================
+       Options Toolbar & Execution Badges (Windows 11 / Modern WinForms Style)
+       ========================================================================== */
+    .options-toolbar {
+      margin-top: 10px;
+      padding: 9px 12px;
+      background: linear-gradient(180deg, #f8fafc 0%, #edf2f7 100%);
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      box-shadow: inset 0 1px 0 #ffffff, 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
+    .options-toolbar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 7px;
+      padding-bottom: 5px;
+      border-bottom: 1px dashed #cbd5e1;
+    }
+    .options-toolbar-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #1e3a8a;
+      letter-spacing: 0.2px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .options-toolbar-hint {
+      font-size: 10.5px;
+      color: #64748b;
+      font-style: italic;
+    }
+    .options-pills-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+    }
+    .option-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 11px;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 5px;
+      font-size: 11px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #334155;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease-in-out;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      white-space: nowrap;
+    }
+    .option-pill:hover {
+      background: #f1f7fe;
+      border-color: #3b82f6;
+      color: #1e40af;
+      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.12);
+      transform: translateY(-1px);
+    }
+    .option-pill input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      cursor: pointer;
+      accent-color: #2563eb;
+    }
+    .option-pill-text {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      line-height: 1.2;
+    }
+    .option-pill-icon {
+      font-size: 12.5px;
+      line-height: 1;
+    }
+
+    /* Checked states */
+    .option-pill:has(input:checked),
+    .option-pill.is-checked {
+      background: #eef6ff;
+      border-color: #2563eb;
+      color: #1d4ed8;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(37, 99, 235, 0.18);
+    }
+
+    /* Highlight Pill: Hide Until Lead (Tím nổi bật sang trọng) */
+    .option-pill-hidelead {
+      border-color: #d8b4fe;
+      background: #faf5ff;
+    }
+    .option-pill-hidelead input[type="checkbox"] {
+      accent-color: #7c3aed;
+    }
+    .option-pill-hidelead:hover {
+      background: #f3e8ff;
+      border-color: #8b5cf6;
+      color: #6b21a8;
+      box-shadow: 0 2px 5px rgba(124, 58, 237, 0.16);
+    }
+    .option-pill-hidelead:has(input:checked),
+    .option-pill-hidelead.is-checked {
+      background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+      border-color: #7c3aed;
+      color: #581c87;
+      font-weight: 700;
+      box-shadow: 0 2px 6px rgba(124, 58, 237, 0.22);
+    }
+
+    /* Lead Check pill (Xanh lá) */
+    .option-pill-leadcheck input[type="checkbox"] {
+      accent-color: #16a34a;
+    }
+    .option-pill-leadcheck:has(input:checked),
+    .option-pill-leadcheck.is-checked {
+      background: #f0fdf4;
+      border-color: #16a34a;
+      color: #15803d;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(22, 163, 74, 0.16);
+    }
+
+    /* AI Assist pill (Cam vàng) */
+    .option-pill-ai input[type="checkbox"] {
+      accent-color: #d97706;
+    }
+    .option-pill-ai:has(input:checked),
+    .option-pill-ai.is-checked {
+      background: #fffbeb;
+      border-color: #d97706;
+      color: #92400e;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(217, 119, 6, 0.16);
+    }
+
+    /* Duplicate IP check pill (Xanh dương đậm) */
+    .option-pill-dup input[type="checkbox"] {
+      accent-color: #0284c7;
+    }
+    .option-pill-dup:has(input:checked),
+    .option-pill-dup.is-checked {
+      background: #f0f9ff;
+      border-color: #0284c7;
+      color: #0369a1;
+      font-weight: 600;
+    }
+
+    /* Proxy Toolbar & Badges */
+    .proxy-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      padding: 2px 0;
+    }
+    .proxy-stats-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .proxy-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 9px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .proxy-badge-ready {
+      background: #e0f2fe;
+      border: 1px solid #7dd3fc;
+      color: #0369a1;
+    }
+    .proxy-badge-used {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      color: #475569;
+    }
+    .proxy-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .proxy-badge-ready .proxy-badge-dot {
+      background: #0284c7;
+      box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+    }
+    .proxy-badge-used .proxy-badge-dot {
+      background: #94a3b8;
+    }
+
+    /* Action bar controls */
+    .controls-action-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid #d5dfec;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .controls-btn-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .controls-stats-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+    }
+    .stat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #334155;
+    }
+    .stat-pill b {
+      color: #1e3a8a;
+      font-size: 12px;
+    }
+
+    /* ==========================================================================
+       Tab Running Enhanced Styles
+       ========================================================================== */
+    .running-header-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      margin-bottom: 8px;
+      background: linear-gradient(180deg, #f8fafc 0%, #edf2f7 100%);
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      box-shadow: inset 0 1px 0 #ffffff;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .running-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .running-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #1e3a8a;
+      letter-spacing: 0.1px;
+    }
+    .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      background: #f0fdf4;
+      border: 1px solid #86efac;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      color: #15803d;
+    }
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+      animation: pulseLive 1.5s infinite;
+    }
+    @keyframes pulseLive {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+      70% { transform: scale(1.1); box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+    }
+    .running-stat-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .run-stat-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #334155;
+    }
+    .run-stat-chip b {
+      font-weight: 700;
+    }
+    .run-stat-chip.chip-threads b { color: #0284c7; }
+    .run-stat-chip.chip-leads {
+      background: #f0fdf4;
+      border-color: #bbf7d0;
+      color: #166534;
+    }
+    .run-stat-chip.chip-leads b { color: #15803d; }
+    .run-stat-chip.chip-ai {
+      background: #faf5ff;
+      border-color: #e9d5ff;
+      color: #6b21a8;
+    }
+    .run-stat-chip.chip-ai b { color: #7c3aed; }
+
+    .running-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Running table specific overrides */
+    #runningTableWrap {
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: #ffffff;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
+    }
+    #dgvRunning th {
+      background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+      color: #1e293b;
+      font-size: 11px;
+      font-weight: 700;
+      border-right: 1px solid #cbd5e1;
+      border-bottom: 1px solid #94a3b8;
+      padding: 4px 8px;
+    }
+    #dgvRunning td {
+      padding: 4px 8px;
+      font-size: 11px;
+      height: 26px;
+      vertical-align: middle;
+      border-right: 1px solid #e2e8f0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    #dgvRunning tr:nth-child(even) td:not(.cell-selector) {
+      background-color: #f8fafc;
+    }
+    #dgvRunning tr:hover td:not(.cell-selector) {
+      background-color: #eff6ff;
+    }
+
+    /* Slot Badge */
+    .run-slot-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px 6px;
+      background: #e0f2fe;
+      border: 1px solid #bae6fd;
+      border-radius: 3px;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #0369a1;
+      font-family: Consolas, monospace;
+    }
+
+    /* IP Chip */
+    .run-ip-chip {
+      display: inline-block;
+      font-family: Consolas, monospace;
+      font-weight: 600;
+      font-size: 11px;
+      color: #0f172a;
+      background: #f1f5f9;
+      padding: 1px 6px;
+      border-radius: 3px;
+      border: 1px solid #e2e8f0;
+    }
+
+    /* Action styling */
+    .run-ai-pill {
+      display: inline-block;
+      padding: 1px 5px;
+      background: #f3e8ff;
+      border: 1px solid #d8b4fe;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #7c3aed;
+      margin-right: 4px;
+    }
+    .run-action-text {
+      color: #334155;
+      font-size: 11px;
+    }
+
+    /* Status Pill (Lead) */
+    .run-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 10.5px;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .run-status-pill.status-lead {
+      background: #dcfce7;
+      border: 1px solid #86efac;
+      color: #15803d;
+      font-weight: 700;
+    }
+    .run-status-pill.status-checking {
+      background: #fef3c7;
+      border: 1px solid #fde68a;
+      color: #b45309;
+    }
+    .run-status-pill.status-idle {
+      color: #94a3b8;
+    }
+    .spin-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #d97706;
+      animation: spinDot 1s infinite alternate;
+    }
+    @keyframes spinDot {
+      from { opacity: 0.3; transform: scale(0.8); }
+      to { opacity: 1; transform: scale(1.3); }
+    }
+
+    /* Device Info */
+    .run-device-info {
+      color: #475569;
+      font-size: 10.5px;
+    }
+
+    /* Email clickable chip */
+    .run-email-cell {
+      color: #0284c7;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: underline dotted;
+      transition: color 0.1s;
+    }
+    .run-email-cell:hover {
+      color: #0369a1;
+      text-decoration: underline solid;
+    }
+
+    /* Password chip */
+    .run-pass-chip {
+      font-family: Consolas, monospace;
+      color: #64748b;
+      font-size: 10.5px;
+      background: #f8fafc;
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+
+    /* Empty State for Running table */
+    .running-empty-state {
+      padding: 40px 20px;
+      text-align: center;
+      color: #64748b;
+    }
+    .running-empty-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+      opacity: 0.7;
+    }
+    .running-empty-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #334155;
+      margin-bottom: 4px;
+    }
+    .running-empty-sub {
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    /* Thumbnail Tiles in Screen View */
+    #thumbnailGrid {
+      background: #0f172a !important;
+      border-radius: 4px;
+    }
+    .screen-tile-card {
+      position: relative;
+      cursor: pointer;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      overflow: hidden;
+      width: 320px;
+      flex-shrink: 0;
+      background: #1e293b;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      transition: all 0.2s ease-in-out;
+    }
+    .screen-tile-card:hover {
+      border-color: #38bdf8;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(56, 189, 248, 0.25);
+    }
+    .screen-tile-header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 8px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.85) 0%, rgba(15, 23, 42, 0) 100%);
+      z-index: 2;
+    }
+    .screen-tile-slot-badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      background: #0284c7;
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+    .screen-tile-live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #ef4444;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .screen-tile-live-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #ef4444;
+      animation: pulseLive 1s infinite;
+    }
+    .screen-tile-footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(0deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.6) 80%, rgba(15, 23, 42, 0) 100%);
+      color: #f1f5f9;
+      font-size: 11px;
+      padding: 8px 8px 5px 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      z-index: 2;
+    }
   </style>
 </head>
 <body>
@@ -660,78 +1229,141 @@
                   <option value="manual">Manual work</option>
                 </select>
               </div>
-              <div class="form-row">
-                <span class="form-label">Thread:</span>
-                <input type="number" id="nudThread" class="win-input" value="1" min="1" max="30" style="width:65px;">
-                <span style="margin-left:12px;">Limit:</span>
-                <input type="number" id="nudLimitRun" class="win-input" value="0" min="0" style="width:65px;">
-              </div>
             </div>
 
             <div>
               <div class="form-row">
-                <span class="form-label">Time Limit:</span>
-                <input type="number" id="txtTimeLimit" class="win-input" value="30" style="width:65px;">
-                <span style="margin-left:8px;">Delay:</span>
-                <input type="number" id="nudDelayStart" class="win-input" value="1" min="0" style="width:45px;">
-                <span>-</span>
-                <input type="number" id="nudDelayStop" class="win-input" value="1" min="0" style="width:45px;">
+                <span class="form-label">Thread / Limit:</span>
+                <div style="display:flex;align-items:center;gap:6px;flex:1;">
+                  <span style="font-size:11px;color:#555;">Luồng:</span>
+                  <input type="number" id="nudThread" class="win-input" value="1" min="1" max="30" style="width:55px;">
+                  <span style="margin-left:8px;font-size:11px;color:#555;">Giới hạn chạy:</span>
+                  <input type="number" id="nudLimitRun" class="win-input" value="0" min="0" style="width:55px;" title="0 = Chạy không giới hạn">
+                </div>
+              </div>
+              <div class="form-row">
+                <span class="form-label">Time / Delay:</span>
+                <div style="display:flex;align-items:center;gap:6px;flex:1;">
+                  <input type="number" id="txtTimeLimit" class="win-input" value="30" style="width:55px;" title="Thời gian chờ tối đa (giây)">
+                  <span style="font-size:11px;color:#555;">s | Delay:</span>
+                  <input type="number" id="nudDelayStart" class="win-input" value="1" min="0" style="width:40px;">
+                  <span>-</span>
+                  <input type="number" id="nudDelayStop" class="win-input" value="1" min="0" style="width:40px;">
+                  <span style="font-size:11px;color:#555;">s</span>
+                </div>
               </div>
               <div class="form-row">
                 <span class="form-label">Complete:</span>
-                <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" value="" placeholder="Ví dụ: thank you (để trống nếu không dùng)">
-              </div>
-              <div class="form-row" style="margin-top:6px;">
-                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
-                  <input type="checkbox" id="cbxCheckDuplicateIP" checked> Check duplicate
-                </label>
-                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;" title="Chạy ngầm ẩn trình duyệt trong lúc kiểm tra IP và chuyển hướng; chỉ hiển thị lên màn hình khi đã vào trang đích thành công">
-                  <input type="checkbox" id="cbxHideUntilTarget"> Ẩn trình duyệt (chỉ mở khi vào trang đích)
-                </label>
-                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;">
-                  <input type="checkbox" id="cbxRRS"> Save RRS
-                </label>
-                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;">
-                  <input type="checkbox" id="cbxAiAssist" checked onchange="toggleAiAssistDashboard(this.checked)"> AI Assist
-                </label>
-                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:12px;" title="Kiểm tra lead sau khi nộp màn email: 2 lần x 30s, có lead mới làm tiếp, không thì tự tắt Chrome">
-                  <input type="checkbox" id="cbxCheckLead" checked> Check Lead (2x30s)
-                </label>
+                <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" value="" placeholder="Ví dụ: thank you (chuỗi báo thành công)">
               </div>
             </div>
           </div>
 
-          <div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #d5dfec;">
-            <button type="button" class="win-btn win-btn-primary" id="btnStart" style="padding:4px 20px;font-size:12px;" onclick="handleStart()">Start</button>
-            <button type="button" class="win-btn win-btn-danger" id="btnStop" style="padding:4px 18px;font-size:12px;" onclick="handleStop()">Stop</button>
-            <button type="button" class="win-btn" id="btnCloseChrome" style="padding:4px 14px;" onclick="handleCloseAll()">Close Chrome</button>
-            <span style="margin-left:16px;">Total Run: <b id="lbTotalRun" style="color:#003399;">0</b></span>
-            <span style="margin-left:14px;">Total RRS: <b id="lbTotalRRS" style="color:#003399;">0</b></span>
+          <!-- Options Toolbar: Tuỳ chọn thực thi & Chế độ chạy ngầm -->
+          <div class="options-toolbar">
+            <div class="options-toolbar-header">
+              <span class="options-toolbar-title">⚡ Tuỳ chọn thực thi & Chế độ chạy ngầm:</span>
+              <span class="options-toolbar-hint">Bấm trực tiếp vào từng ô để bật / tắt nhanh</span>
+            </div>
+            <div class="options-pills-row">
+              <label class="option-pill option-pill-dup" title="Khi bật: chặn IP đã từng chạy thành công cho offer này. Khi tắt: cho phép chạy lại IP cũ.">
+                <input type="checkbox" id="cbxCheckDuplicateIP" checked onchange="syncOptionPills()">
+                <span class="option-pill-text"><span class="option-pill-icon">🛡️</span> Check duplicate IP</span>
+              </label>
+
+              <label class="option-pill" title="Chạy ngầm ẩn trình duyệt trong lúc kiểm tra IP và chuyển hướng; chỉ hiển thị lên màn hình khi đã vào trang đích thành công.">
+                <input type="checkbox" id="cbxHideUntilTarget" onchange="if(this.checked){const el=document.getElementById('cbxHideUntilLead');if(el)el.checked=false;} syncOptionPills();">
+                <span class="option-pill-text"><span class="option-pill-icon">🌐</span> Ẩn đến trang đích</span>
+              </label>
+
+              <label class="option-pill option-pill-hidelead" title="Chạy ngầm ẩn trình duyệt hoàn toàn; chỉ những IP nào kiểm tra có lead mới hiển thị lên màn hình, không có lead sẽ tự động đóng.">
+                <input type="checkbox" id="cbxHideUntilLead" onchange="if(this.checked){const t=document.getElementById('cbxHideUntilTarget');if(t)t.checked=false;const c=document.getElementById('cbxCheckLead');if(c)c.checked=true;} syncOptionPills();">
+                <span class="option-pill-text"><span class="option-pill-icon">🎯</span> Ẩn trình duyệt (Chỉ hiện khi có Lead)</span>
+              </label>
+
+              <label class="option-pill option-pill-leadcheck" title="Kiểm tra lead sau khi nộp màn email: 2 lần x 30s, có lead mới làm tiếp, không thì tự tắt Chrome.">
+                <input type="checkbox" id="cbxCheckLead" checked onchange="syncOptionPills()">
+                <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (2x30s)</span>
+              </label>
+
+              <label class="option-pill option-pill-ai" title="AI tự động nhận diện câu hỏi / khảo sát khi bị kẹt và hỗ trợ hoàn tất form.">
+                <input type="checkbox" id="cbxAiAssist" checked onchange="toggleAiAssistDashboard(this.checked); syncOptionPills();">
+                <span class="option-pill-text"><span class="option-pill-icon">🤖</span> AI Assist</span>
+              </label>
+
+              <label class="option-pill" title="Lưu lại toàn bộ dữ liệu RRS (profile, cookies, storage) sau khi hoàn tất phiên làm việc.">
+                <input type="checkbox" id="cbxRRS" onchange="syncOptionPills()">
+                <span class="option-pill-text"><span class="option-pill-icon">💾</span> Save RRS</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Bottom Action Buttons & Counters -->
+          <div class="controls-action-bar">
+            <div class="controls-btn-group">
+              <button type="button" class="win-btn win-btn-primary" id="btnStart" style="padding:4px 22px;font-size:12px;gap:5px;" onclick="handleStart()">▶ Start</button>
+              <button type="button" class="win-btn win-btn-danger" id="btnStop" style="padding:4px 20px;font-size:12px;gap:5px;" onclick="handleStop()">⏹ Stop</button>
+              <button type="button" class="win-btn" id="btnCloseChrome" style="padding:4px 14px;gap:5px;" onclick="handleCloseAll()">✕ Close Chrome</button>
+            </div>
+            <div class="controls-stats-group">
+              <div class="stat-pill" title="Tổng số lượt chạy thành công">
+                <span>Total Run:</span>
+                <b id="lbTotalRun">0</b>
+              </div>
+              <div class="stat-pill" title="Tổng số RRS đã lưu">
+                <span>Total RRS:</span>
+                <b id="lbTotalRRS">0</b>
+              </div>
+            </div>
           </div>
         </fieldset>
 
         <!-- List Proxy -->
         <fieldset class="win-group">
           <legend class="win-legend">List Proxy:</legend>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <span>Dán danh sách proxy (1 dòng 1 proxy):</span>
-            <div>
-              <span id="lbProxyCount" style="color:#0078d7;font-weight:bold;">0</span> ready | 
-              <span id="lbProxyUsed" style="color:#666666;font-weight:bold;">0</span> used
-              <button type="button" class="win-btn" style="margin-left:8px;" onclick="resetProxyQueue()">Reset</button>
+          <div class="proxy-toolbar">
+            <span style="color:#475569;font-size:11px;font-weight:500;">Dán danh sách proxy (1 dòng 1 proxy):</span>
+            <div class="proxy-stats-group">
+              <span class="proxy-badge proxy-badge-ready" title="Số proxy đang sẵn sàng trong hàng đợi">
+                <span class="proxy-badge-dot"></span>
+                <span id="lbProxyCount">0</span> ready
+              </span>
+              <span class="proxy-badge proxy-badge-used" title="Số proxy đã chạy qua">
+                <span class="proxy-badge-dot"></span>
+                <span id="lbProxyUsed">0</span> used
+              </span>
+              <button type="button" class="win-btn" style="padding:2px 10px;margin-left:4px;gap:4px;" onclick="resetProxyQueue()" title="Reset lại trạng thái các proxy trong danh sách về ban đầu">🔄 Reset hàng đợi</button>
             </div>
           </div>
-          <textarea id="txtDashboardProxy" class="win-textarea" style="width:100%;height:140px;"></textarea>
+          <textarea id="txtDashboardProxy" class="win-textarea" style="width:100%;height:140px;" placeholder="Dán danh sách proxy vào đây (định dạng: IP:Port hoặc IP:Port:User:Pass, mỗi dòng 1 proxy)..."></textarea>
         </fieldset>
       </div>
 
       <!-- 2. TAB RUNNING -->
       <div class="tab-panel" id="panel-tabRunning">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <span style="font-weight:bold;color:#003399;">dgvRunning</span>
-          <div style="display:flex;gap:6px;">
-            <button type="button" class="win-btn" onclick="fetchRunningState()">Refresh</button>
-            <button type="button" class="win-btn win-btn-danger" onclick="handleCloseAll()">Close Chrome</button>
+        <!-- Running Header Toolbar -->
+        <div class="running-header-toolbar">
+          <div class="running-header-left">
+            <span class="running-title">⚡ Tiến trình đang chạy (dgvRunning)</span>
+            <span class="live-pill" title="Hệ thống tự động đồng bộ trạng thái mỗi 1.5 giây">
+              <span class="live-dot"></span> Realtime
+            </span>
+            <div class="running-stat-group">
+              <span class="run-stat-chip chip-threads" title="Tổng số luồng trình duyệt đang mở">
+                🚀 <b id="runStatThreads">0</b> luồng
+              </span>
+              <span class="run-stat-chip chip-leads" title="Số luồng đã bắt trúng Lead">
+                🎯 <b id="runStatLeads">0</b> lead
+              </span>
+              <span class="run-stat-chip chip-ai" title="Số luồng đang được AI hỗ trợ giải quyết">
+                🤖 <b id="runStatAi">0</b> AI
+              </span>
+            </div>
+          </div>
+          <div class="running-header-actions">
+            <button type="button" class="win-btn" onclick="fetchRunningState()" title="Cập nhật trạng thái ngay lập tức">🔄 Làm mới</button>
+            <button type="button" id="btnToggleScreenView" class="win-btn" onclick="toggleScreenView()" title="Chuyển đổi giữa chế độ Bảng và Xem màn hình trực tiếp">📺 Xem màn hình</button>
+            <button type="button" class="win-btn win-btn-danger" onclick="handleCloseAll()" title="Đóng toàn bộ cửa sổ trình duyệt đang chạy">✕ Đóng tất cả</button>
           </div>
         </div>
 
@@ -740,28 +1372,56 @@
           <div class="win-tab active" data-run-offer="all" onclick="switchRunningOfferTab('all')">🌐 Tất cả luồng (<span id="countRunAll">0</span>)</div>
         </div>
 
-        <div class="grid-container" style="height:calc(100% - 64px);">
+        <!-- Thumbnail Grid (ẩn mặc định) -->
+        <div id="thumbnailGrid" style="display:none;overflow:auto;height:calc(100% - 80px);padding:10px;background:#0f172a;">
+          <div id="thumbnailTiles" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
+          <div id="thumbnailEmpty" style="color:#94a3b8;padding:40px;text-align:center;font-size:12px;">Không có luồng nào đang chạy.</div>
+        </div>
+
+        <!-- DataGridView Table -->
+        <div class="grid-container" id="runningTableWrap" style="height:calc(100% - 80px);">
           <table class="win-grid" id="dgvRunning">
             <thead>
               <tr>
                 <th class="col-header-selector"></th>
-                <th style="width:60px;">Thread</th>
-                <th style="width:130px;">IP</th>
-                <th style="width:240px;">Action</th>
-                <th style="width:90px;">Status</th>
-                <th style="width:140px;">Info</th>
-                <th style="width:170px;">Email</th>
-                <th style="width:100px;">Pass</th>
-                <th>Recover</th>
+                <th style="width:105px;">Thread</th>
+                <th style="width:130px;">IP Thoát</th>
+                <th style="width:240px;">Hành động hiện tại</th>
+                <th style="width:105px;">Trạng thái</th>
+                <th style="width:145px;">Thiết bị & Chrome</th>
+                <th style="width:170px;">Email gán</th>
+                <th style="width:90px;">Mật khẩu</th>
+                <th>Email phụ / Ghi chú</th>
               </tr>
             </thead>
             <tbody id="dgvRunningBody">
               <tr>
                 <td class="cell-selector">►</td>
-                <td colspan="8" style="text-align:center;color:#888888;padding:30px;">Không có luồng trình duyệt nào đang chạy.</td>
+                <td colspan="8">
+                  <div class="running-empty-state">
+                    <div class="running-empty-icon">💤</div>
+                    <div class="running-empty-title">Không có luồng trình duyệt nào đang chạy</div>
+                    <div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Screen Live-View Modal -->
+      <div id="screenModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);z-index:9999;flex-direction:column;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#111;color:#fff;flex-shrink:0;">
+          <span id="screenModalTitle" style="font-weight:bold;font-size:13px;">Màn hình Slot 1</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span id="screenModalFps" style="font-size:11px;color:#aaa;"></span>
+            <button type="button" onclick="closeScreenModal()" style="background:#e53e3e;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">✕ Đóng</button>
+          </div>
+        </div>
+        <div id="screenTabBar" style="display:flex;gap:4px;padding:4px 10px;background:#1a1a2e;overflow-x:auto;flex-shrink:0;min-height:30px;align-items:center;"></div>
+        <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+          <canvas id="screenCanvas" style="max-width:100%;max-height:100%;object-fit:contain;cursor:default;"></canvas>
         </div>
       </div>
 
@@ -1070,6 +1730,7 @@
             <div style="display:flex;gap:6px;">
               <button type="button" class="win-btn win-btn-primary" onclick="saveEmailList()">Lưu / Thêm Email</button>
               <button type="button" class="win-btn" onclick="resetEmailQueue()">Reset Email</button>
+              <button type="button" class="win-btn" style="color:#c50f1f;" onclick="clearAllEmail()">Xóa tất cả</button>
             </div>
           </div>
           <textarea id="txtEmailList" class="win-textarea" style="width:100%;height:calc(100% - 32px);"></textarea>
@@ -1428,6 +2089,20 @@
 
     setupSubTabs('configSubTabs', 'data-cfg', 'cfgpanel-');
 
+    function syncOptionPills() {
+      document.querySelectorAll('.option-pill input[type="checkbox"]').forEach(cb => {
+        const pill = cb.closest('.option-pill');
+        if (pill) {
+          if (cb.checked) {
+            pill.classList.add('is-checked');
+          } else {
+            pill.classList.remove('is-checked');
+          }
+        }
+      });
+    }
+    window.syncOptionPills = syncOptionPills;
+
     document.querySelectorAll('.sub-tab[data-subtab]').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.sub-tab[data-subtab]').forEach(t => t.classList.remove('active'));
@@ -1499,6 +2174,7 @@
         loadAiConfigUi(),
         fetchLogs(),
       ]);
+      syncOptionPills();
       setInterval(fetchRunningState, 1500);
     }
 
@@ -1595,7 +2271,7 @@
         }
       }
 
-      // Khôi phục trạng thái checkbox Ẩn trình duyệt
+      // Khôi phục trạng thái checkbox Ẩn trình duyệt & Check duplicate
       try {
         const cachedHide = localStorage.getItem('autoleadpc_hide_until_target');
         const cbxHide = document.getElementById('cbxHideUntilTarget');
@@ -1610,6 +2286,35 @@
             } catch {}
           });
         }
+
+        const cachedDup = localStorage.getItem('autoleadpc_check_duplicate');
+        const cbxDup = document.getElementById('cbxCheckDuplicateIP');
+        if (cbxDup && cachedDup !== null) {
+          cbxDup.checked = (cachedDup === 'true');
+        }
+        if (cbxDup && !cbxDup._hasStorageListener) {
+          cbxDup._hasStorageListener = true;
+          cbxDup.addEventListener('change', (e) => {
+            try {
+              localStorage.setItem('autoleadpc_check_duplicate', String(e.target.checked));
+            } catch {}
+          });
+        }
+
+        const cachedHideLead = localStorage.getItem('autoleadpc_hide_until_lead');
+        const cbxHideLead = document.getElementById('cbxHideUntilLead');
+        if (cbxHideLead && cachedHideLead !== null) {
+          cbxHideLead.checked = (cachedHideLead === 'true');
+        }
+        if (cbxHideLead && !cbxHideLead._hasStorageListener) {
+          cbxHideLead._hasStorageListener = true;
+          cbxHideLead.addEventListener('change', (e) => {
+            try {
+              localStorage.setItem('autoleadpc_hide_until_lead', String(e.target.checked));
+            } catch {}
+          });
+        }
+        syncOptionPills();
       } catch {}
     }
 
@@ -1635,6 +2340,9 @@
         Complete: document.getElementById('txtTextComplete')?.value || '',
         delayStart: document.getElementById('nudDelayStart')?.value || '1',
         delayStop: document.getElementById('nudDelayStop')?.value || '1',
+        CheckDuplicate: document.getElementById('cbxCheckDuplicateIP')?.checked ?? true,
+        HideUntilTarget: document.getElementById('cbxHideUntilTarget')?.checked ?? false,
+        HideUntilLead: document.getElementById('cbxHideUntilLead')?.checked ?? false,
       };
 
       try {
@@ -1678,6 +2386,28 @@
         }
         if (found.delayStart) document.getElementById('nudDelayStart').value = found.delayStart;
         if (found.delayStop) document.getElementById('nudDelayStop').value = found.delayStop;
+        if (typeof found.CheckDuplicate === 'boolean') {
+          const cbxDup = document.getElementById('cbxCheckDuplicateIP');
+          if (cbxDup) {
+            cbxDup.checked = found.CheckDuplicate;
+            try { localStorage.setItem('autoleadpc_check_duplicate', String(found.CheckDuplicate)); } catch {}
+          }
+        }
+        if (typeof found.HideUntilLead === 'boolean') {
+          const cbxHL = document.getElementById('cbxHideUntilLead');
+          if (cbxHL) {
+            cbxHL.checked = found.HideUntilLead;
+            try { localStorage.setItem('autoleadpc_hide_until_lead', String(found.HideUntilLead)); } catch {}
+          }
+        }
+        if (typeof found.HideUntilTarget === 'boolean') {
+          const cbxHT = document.getElementById('cbxHideUntilTarget');
+          if (cbxHT) {
+            cbxHT.checked = found.HideUntilTarget;
+            try { localStorage.setItem('autoleadpc_hide_until_target', String(found.HideUntilTarget)); } catch {}
+          }
+        }
+        syncOptionPills();
 
         const statusEl = document.getElementById('offerSaveStatus');
         if (statusEl) {
@@ -1751,7 +2481,10 @@
     async function resetProxyQueue() {
       const res = await api('/proxy-queue/reset', {
         method: 'POST',
-        body: JSON.stringify({ proxyList: document.getElementById('txtDashboardProxy').value })
+        body: JSON.stringify({
+          proxyList: document.getElementById('txtDashboardProxy').value,
+          clearAllUsedIps: true
+        })
       });
       document.getElementById('lbStatus').textContent = res.message || 'Reset proxy complete.';
       await loadProxyQueue();
@@ -2001,6 +2734,14 @@
     async function resetEmailQueue() {
       const res = await api('/email-queue/reset', { method: 'POST' });
       showWinAlert(res.message || 'Reset email list.');
+      await loadEmailList();
+    }
+
+    async function clearAllEmail() {
+      if (!confirm('Xóa toàn bộ danh sách gmail? Không thể khôi phục.')) return;
+      const res = await api('/email-queue/clear', { method: 'POST' });
+      showWinAlert(res.message || 'Đã xóa.');
+      document.getElementById('txtEmailList').value = '';
       await loadEmailList();
     }
 
@@ -2261,6 +3002,8 @@
       const antiFpClientRects = document.getElementById('CheckboxClientRects').checked;
       const antiFpWebgl = document.getElementById('CheckBoxWebGLImage').checked;
       const antiFpWebrtc = document.getElementById('CheckBoxWebRTC').checked;
+      const antiFpFonts = document.getElementById('CheckboxFonts').checked;
+      const antiFpApiFakeIP = document.getElementById('CheckBoxGetApiPake').checked;
 
       const proxyLines = document.getElementById('txtDashboardProxy').value.trim();
       if (proxyLines) {
@@ -2269,6 +3012,11 @@
           body: JSON.stringify({ proxyList: proxyLines, proxyType: 'socks5' })
         });
       }
+
+      const checkDuplicate = document.getElementById('cbxCheckDuplicateIP') ? document.getElementById('cbxCheckDuplicateIP').checked : true;
+      const enableLeadCheck = document.getElementById('cbxCheckLead') ? document.getElementById('cbxCheckLead').checked : true;
+      const hideUntilTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
+      const hideUntilLead = Boolean(document.getElementById('cbxHideUntilLead')?.checked);
 
       // Kiểm tra chế độ trình duyệt (Mặc định mở bằng GoLogin trừ khi người dùng chủ động tích chọn Chrome)
       const isExplicitChrome = Boolean(
@@ -2283,7 +3031,6 @@
         switchTab('tabRunning');
         fetchRunningState();
 
-        const goLoginToken = document.getElementById('txtGoLoginToken')?.value.trim() || '';
         const res = await api('/launch-gologin', {
           method: 'POST',
           body: JSON.stringify({
@@ -2306,7 +3053,16 @@
             antiFpClientRects,
             antiFpWebgl,
             antiFpWebrtc,
-            hideUntilTarget: Boolean(document.getElementById('cbxHideUntilTarget')?.checked),
+            antiFpFonts,
+            antiFpApiFakeIP,
+            checkDuplicate,
+            autoSubmitForm: true,
+            enableLeadCheck,
+            leadCheckInterval: 30,
+            leadCheckMaxAttempts: 2,
+            leadCheckScreen: 5,
+            hideUntilTarget,
+            hideUntilLead,
           })
         });
         if (res.error) {
@@ -2325,10 +3081,6 @@
       document.getElementById('lbStatus').textContent = 'Starting Chrome...';
       switchTab('tabRunning');
       fetchRunningState();
-
-      const checkDuplicate = document.getElementById('cbxCheckDuplicateIP') ? document.getElementById('cbxCheckDuplicateIP').checked : true;
-      const enableLeadCheck = document.getElementById('cbxCheckLead') ? document.getElementById('cbxCheckLead').checked : true;
-      const hideUntilTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
 
       const streamCount = Math.max(concurrency, offerUrls.length >= 2 ? offerUrls.length : 1);
 
@@ -2358,6 +3110,8 @@
               antiFpClientRects,
               antiFpWebgl,
               antiFpWebrtc,
+              antiFpFonts,
+              antiFpApiFakeIP,
               checkDuplicate,
               autoSubmitForm: true,
               enableLeadCheck,
@@ -2366,6 +3120,7 @@
               leadCheckScreen: 5,
               hideUntilTarget,
               hideBrowser: hideUntilTarget,
+              hideUntilLead,
             }
           })
         });
@@ -2394,6 +3149,8 @@
             antiFpClientRects,
             antiFpWebgl,
             antiFpWebrtc,
+            antiFpFonts,
+            antiFpApiFakeIP,
             checkDuplicate,
             autoSubmitForm: true,
             enableLeadCheck,
@@ -2402,6 +3159,7 @@
             leadCheckScreen: 5,
             hideUntilTarget,
             hideBrowser: hideUntilTarget,
+            hideUntilLead,
           })
         });
         if (res.error) {
@@ -2414,6 +3172,7 @@
           document.getElementById('lbStatus').textContent = res.message || 'Chrome launched successfully.';
         }
         fetchRunningState();
+      }
       } finally {
         if (btnStart) {
           btnStart.disabled = false;
@@ -2429,6 +3188,7 @@
         await Promise.allSettled([
           api('/auto-refill', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
           api('/auto-refill/sequential', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
+          api('/stop', { method: 'POST' }),
           api('/close', { method: 'POST' })
         ]);
       } catch {}
@@ -2442,6 +3202,7 @@
         await Promise.allSettled([
           api('/auto-refill', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
           api('/auto-refill/sequential', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
+          api('/stop', { method: 'POST' }),
           api('/close', { method: 'POST' })
         ]);
       } catch {}
@@ -2475,14 +3236,37 @@
       renderLogs();
     }
 
+    function copyTextToClipboard(text) {
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          const lb = document.getElementById('lbStatus');
+          if (lb) lb.textContent = `✓ Đã copy vào bộ nhớ tạm: ${text}`;
+        }).catch(() => {});
+      }
+    }
+    window.copyTextToClipboard = copyTextToClipboard;
+
     // Running state monitor (dgvRunning)
     async function fetchRunningState() {
       const state = await api('/state');
       if (!state || state.error) return;
 
       const sessions = state.chromeSessions || [];
+      _updateScreenSlots(sessions);
       document.getElementById('tabRunCount').textContent = sessions.length;
       document.getElementById('lbTotalRun').textContent = state.limitRun?.count || 0;
+
+      // Update Tab Running Stat Chips
+      const totalThreads = sessions.length;
+      const totalLeads = sessions.filter(s => s.leadCheckStatus === 'matched').length;
+      const totalAi = sessions.filter(s => s.aiRunning).length;
+      const elTh = document.getElementById('runStatThreads');
+      if (elTh) elTh.textContent = totalThreads;
+      const elLd = document.getElementById('runStatLeads');
+      if (elLd) elLd.textContent = totalLeads;
+      const elAi = document.getElementById('runStatAi');
+      if (elAi) elAi.textContent = totalAi;
 
       // Populate manual AI trigger dropdown
       const aiSlotSelect = document.getElementById('cbbAiManualSlot');
@@ -2536,7 +3320,7 @@
         const emptyMsg = currentSelectedRunningOfferTab === 'all'
           ? 'Không có luồng trình duyệt nào đang chạy.'
           : `Không có luồng nào đang chạy cho Offer ${currentSelectedRunningOfferTab}.`;
-        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="8" style="text-align:center;color:#888888;padding:30px;">${emptyMsg}</td></tr>`;
+        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="8"><div class="running-empty-state"><div class="running-empty-icon">💤</div><div class="running-empty-title">${emptyMsg}</div><div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div></div></td></tr>`;
         return;
       }
 
@@ -2544,28 +3328,34 @@
       visibleSessions.forEach((s, idx) => {
         const tr = document.createElement('tr');
         const leadBadge = s.leadCheckStatus === 'matched' 
-          ? '<span style="color:#008000;font-weight:bold;">Lead</span>'
+          ? '<span class="run-status-pill status-lead">🎯 Lead</span>'
           : s.leadCheckStatus === 'checking'
-          ? '<span style="color:#cc7a00;">Checking...</span>'
-          : '--';
+          ? '<span class="run-status-pill status-checking"><span class="spin-dot"></span> Checking</span>'
+          : '<span class="run-status-pill status-idle">--</span>';
 
         const actionText = s.aiRunning
-          ? `<span style="color:#6a0dad;font-weight:bold;">🤖 [AI]</span> ${escHtml(s.action || 'Đang hỗ trợ điền form')}`
-          : escHtml(s.action || s.websiteUrl || 'Running');
+          ? `<span class="run-ai-pill">🤖 AI</span> <span class="run-action-text">${escHtml(s.action || 'Đang hỗ trợ điền form')}</span>`
+          : `<span class="run-action-text">${escHtml(s.action || s.websiteUrl || 'Running')}</span>`;
 
         const offerNum = s.offerNumber || s.streamRole || 1;
-        const threadBadge = `<span style="font-weight:bold;">${s.slot}</span> <span class="badge-log badge-offer" style="font-size:9px;margin-left:2px;">Offer ${offerNum}</span>`;
+        const threadBadge = `<span class="run-slot-badge">Slot ${s.slot}</span><span class="badge-log badge-offer" style="font-size:9px;margin-left:4px;">Offer ${offerNum}</span>`;
+        const exitIpBadge = `<span class="run-ip-chip" title="Proxy: ${escHtml(s.proxy || 'Direct')}">${escHtml(s.exitIp || 'Direct')}</span>`;
+        const emailCell = s.assignedEmail && s.assignedEmail !== '--'
+          ? `<span class="run-email-cell" onclick="copyTextToClipboard('${escHtml(s.assignedEmail)}')" title="Nhấp để copy email">${escHtml(s.assignedEmail)}</span>`
+          : '<span style="color:#94a3b8;">--</span>';
+        const passCell = s.assignedPass ? `<span class="run-pass-chip" title="Mật khẩu">${escHtml(s.assignedPass)}</span>` : '<span style="color:#94a3b8;">--</span>';
+        const deviceInfo = `<span class="run-device-info">💻 ${escHtml(s.deviceProfile || 'Windows')} · ${escHtml(s.version || 'Chrome')}</span>`;
 
         tr.innerHTML = `
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
           <td style="text-align:center;white-space:nowrap;">${threadBadge}</td>
-          <td><b>${escHtml(s.exitIp || 'Direct')}</b></td>
+          <td>${exitIpBadge}</td>
           <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(s.websiteUrl || '')}">${actionText}</td>
           <td>${leadBadge}</td>
-          <td>${escHtml(s.deviceProfile || 'Windows')} - ${escHtml(s.version || 'Chrome')}</td>
-          <td style="color:#0044aa;">${escHtml(s.assignedEmail || '--')}</td>
-          <td>${escHtml(s.assignedPass || '******')}</td>
-          <td>${escHtml(s.assignedRecover || '--')}</td>
+          <td>${deviceInfo}</td>
+          <td>${emailCell}</td>
+          <td>${passCell}</td>
+          <td style="color:#64748b;font-size:10.5px;">${escHtml(s.assignedRecover || '--')}</td>
         `;
         tbody.appendChild(tr);
       });
@@ -3120,6 +3910,220 @@
     }
 
     window.addEventListener('DOMContentLoaded', init);
+
+    // ── Screen View ──────────────────────────────────────────────────────────
+    let _screenViewActive = false;
+    let _thumbPollTimer = null;
+    let _screenSlots = [];
+    let _screenEventSource = null;
+    let _screenActiveSlot = null;
+    let _screenFpsCounter = 0;
+    let _screenFpsTimer = null;
+    let _screenTabPollTimer = null;
+    let _screenActiveTabIndex = 0;
+
+    function toggleScreenView() {
+      _screenViewActive = !_screenViewActive;
+      const grid = document.getElementById('thumbnailGrid');
+      const table = document.getElementById('runningTableWrap');
+      const btn = document.getElementById('btnToggleScreenView');
+      if (_screenViewActive) {
+        grid.style.display = 'block';
+        table.style.display = 'none';
+        btn.textContent = '📋 Xem bảng';
+        _startThumbPolling();
+      } else {
+        grid.style.display = 'none';
+        table.style.display = '';
+        btn.textContent = '📺 Xem màn hình';
+        _stopThumbPolling();
+      }
+    }
+
+    function _startThumbPolling() {
+      _stopThumbPolling();
+      _pollThumbnails();
+      _thumbPollTimer = setInterval(_pollThumbnails, 1500);
+    }
+
+    function _stopThumbPolling() {
+      if (_thumbPollTimer) { clearInterval(_thumbPollTimer); _thumbPollTimer = null; }
+    }
+
+    function _pollThumbnails() {
+      if (!_screenViewActive) return;
+      const tilesDiv = document.getElementById('thumbnailTiles');
+      const emptyDiv = document.getElementById('thumbnailEmpty');
+      if (_screenSlots.length === 0) {
+        tilesDiv.innerHTML = '';
+        emptyDiv.style.display = 'block';
+        return;
+      }
+      emptyDiv.style.display = 'none';
+      // Sync tiles: thêm mới / xoá cũ
+      const existingSlots = new Set([...tilesDiv.querySelectorAll('[data-slot]')].map(el => +el.dataset.slot));
+      const currentSlots = new Set(_screenSlots.map(s => s.slot));
+      for (const slot of existingSlots) {
+        if (!currentSlots.has(slot)) tilesDiv.querySelector(`[data-slot="${slot}"]`)?.remove();
+      }
+      for (const { slot, ip } of _screenSlots) {
+        let tile = tilesDiv.querySelector(`[data-slot="${slot}"]`);
+        if (!tile) {
+          tile = document.createElement('div');
+          tile.dataset.slot = slot;
+          tile.className = 'screen-tile-card';
+          tile.onclick = () => openScreenModal(slot);
+
+          const header = document.createElement('div');
+          header.className = 'screen-tile-header';
+          header.innerHTML = `
+            <span class="screen-tile-slot-badge">Slot ${slot}</span>
+            <span class="screen-tile-live-badge"><span class="screen-tile-live-dot"></span> LIVE</span>
+          `;
+          tile.appendChild(header);
+
+          const img = document.createElement('img');
+          img.style.cssText = 'width:320px;height:180px;object-fit:cover;display:block;background:#000;';
+          img.alt = `Slot ${slot}`;
+          tile.appendChild(img);
+
+          const footer = document.createElement('div');
+          footer.className = 'screen-tile-footer';
+          tile.appendChild(footer);
+
+          tilesDiv.appendChild(tile);
+        }
+        const footer = tile.querySelector('.screen-tile-footer');
+        if (footer) {
+          footer.textContent = ip ? `🌐 ${ip}` : `🌐 Đang kết nối...`;
+        }
+        tile.title = ip ? `Slot ${slot} (${ip}) — Nhấp để mở màn hình tương tác` : `Slot ${slot} — Nhấp để mở màn hình tương tác`;
+        // Refresh ảnh bằng cache-buster
+        const img = tile.querySelector('img');
+        if (img) img.src = `/screen/snapshot/${slot}?t=${Date.now()}`;
+      }
+    }
+
+    function openScreenModal(slot) {
+      _screenActiveSlot = slot;
+      document.getElementById('screenModal').style.display = 'flex';
+      const entry = _screenSlots.find(s => s.slot === slot);
+      const ipLabel = entry && entry.ip ? ` — ${entry.ip}` : '';
+      document.getElementById('screenModalTitle').textContent = `Slot ${slot}${ipLabel} (nhấp vào canvas để tương tác)`;
+      _startScreenStream(slot);
+    }
+
+    function closeScreenModal() {
+      document.getElementById('screenModal').style.display = 'none';
+      _stopScreenStream();
+      _screenActiveSlot = null;
+    }
+
+    function _startScreenStream(slot) {
+      _stopScreenStream();
+      const canvas = document.getElementById('screenCanvas');
+      const ctx = canvas.getContext('2d');
+      _screenFpsCounter = 0;
+      if (_screenFpsTimer) clearInterval(_screenFpsTimer);
+      _screenFpsTimer = setInterval(() => {
+        document.getElementById('screenModalFps').textContent = `${_screenFpsCounter} fps`;
+        _screenFpsCounter = 0;
+      }, 1000);
+
+      const es = new EventSource(`/screen/stream/${slot}`);
+      _screenEventSource = es;
+      es.onmessage = (e) => {
+        if (e.data === 'error') return;
+        const bin = atob(e.data);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bmp) => {
+          if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+            canvas.width = bmp.width;
+            canvas.height = bmp.height;
+          }
+          ctx.drawImage(bmp, 0, 0);
+          bmp.close();
+          _screenFpsCounter++;
+        });
+      };
+      es.onerror = () => { document.getElementById('screenModalFps').textContent = 'mất kết nối'; };
+
+      // Input forwarding
+      canvas.onmousedown  = (e) => _sendInput(slot, _buildMouseEvent('mousedown', e, canvas));
+      canvas.onmouseup    = (e) => _sendInput(slot, _buildMouseEvent('mouseup', e, canvas));
+      canvas.onmousemove  = (e) => { if (e.buttons) _sendInput(slot, _buildMouseEvent('mousemove', e, canvas)); };
+      canvas.onwheel      = (e) => { e.preventDefault(); _sendInput(slot, { type: 'wheel', x: _scaleX(e, canvas), y: _scaleY(e, canvas), deltaY: e.deltaY }); };
+      canvas.onkeydown    = (e) => { e.preventDefault(); _sendInput(slot, { type: 'keydown', key: e.key, code: e.code, keyCode: e.keyCode, modifiers: _mods(e) }); _sendInput(slot, { type: 'char', text: e.key.length === 1 ? e.key : '' }); };
+      canvas.onkeyup      = (e) => { e.preventDefault(); _sendInput(slot, { type: 'keyup', key: e.key, code: e.code, keyCode: e.keyCode, modifiers: _mods(e) }); };
+      canvas.tabIndex = 0;
+      canvas.focus();
+      _screenActiveTabIndex = 0;
+      _fetchAndRenderTabs(slot);
+      _screenTabPollTimer = setInterval(() => _fetchAndRenderTabs(slot), 2000);
+    }
+
+    function _stopScreenStream() {
+      if (_screenEventSource) { _screenEventSource.close(); _screenEventSource = null; }
+      if (_screenFpsTimer) { clearInterval(_screenFpsTimer); _screenFpsTimer = null; }
+      if (_screenTabPollTimer) { clearInterval(_screenTabPollTimer); _screenTabPollTimer = null; }
+      const canvas = document.getElementById('screenCanvas');
+      canvas.onmousedown = canvas.onmouseup = canvas.onmousemove = canvas.onwheel = canvas.onkeydown = canvas.onkeyup = null;
+      document.getElementById('screenTabBar').innerHTML = '';
+    }
+
+    async function _fetchAndRenderTabs(slot) {
+      try {
+        const res = await fetch(`/screen/tabs/${slot}`);
+        if (!res.ok) return;
+        const { tabs } = await res.json();
+        const bar = document.getElementById('screenTabBar');
+        if (!bar) return;
+        bar.innerHTML = '';
+        tabs.forEach(tab => {
+          const btn = document.createElement('button');
+          const isActive = tab.index === _screenActiveTabIndex;
+          btn.type = 'button';
+          btn.title = tab.url;
+          btn.style.cssText = `padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid ${isActive ? '#4a90e2' : '#444'};background:${isActive ? '#2a4a7f' : '#2a2a3e'};color:${isActive ? '#fff' : '#aaa'};cursor:pointer;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;`;
+          btn.textContent = tab.title || tab.url || `Tab ${tab.index + 1}`;
+          btn.onclick = () => _switchTab(slot, tab.index);
+          bar.appendChild(btn);
+        });
+      } catch {}
+    }
+
+    async function _switchTab(slot, index) {
+      _screenActiveTabIndex = index;
+      await fetch(`/screen/tabs/${slot}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index }),
+      }).catch(() => {});
+      _fetchAndRenderTabs(slot);
+    }
+
+    function _scaleX(e, canvas) {
+      const rect = canvas.getBoundingClientRect();
+      return Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+    }
+    function _scaleY(e, canvas) {
+      const rect = canvas.getBoundingClientRect();
+      return Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
+    }
+    function _mods(e) { return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0); }
+    function _buildMouseEvent(type, e, canvas) {
+      return { type, x: _scaleX(e, canvas), y: _scaleY(e, canvas), button: ({0:'left',1:'middle',2:'right'})[e.button] || 'none', modifiers: _mods(e) };
+    }
+    function _sendInput(slot, data) {
+      fetch(`/screen/input/${slot}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).catch(() => {});
+    }
+
+    // Cập nhật danh sách slot từ fetchRunningState
+    const _origFetch = window._screenStateHook;
+    function _updateScreenSlots(sessions) {
+      _screenSlots = sessions.filter(s => s.slot).map(s => ({ slot: s.slot, ip: s.exitIp || '' }));
+    }
   </script>
 
   <!-- Windows Form Dialog for HTML Snapshot View -->

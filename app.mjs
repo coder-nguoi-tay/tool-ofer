@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
+import { createConnection as netCreateConnection } from 'node:net';
 import { get as requestHttps } from 'node:https';
-import { access, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { execFile } from 'node:child_process';
@@ -66,6 +67,8 @@ process.on('unhandledRejection', (reason) => {
 
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
+// slot → { cdpClient, sseResponse, intervalId }
+const screencastSessions = new Map();
 let chromeBuildRotationCounter = 0;
 let deviceProfileRotationCounter = 0;
 // limitRun: đếm số phiên hoàn tất (completeText khớp), dừng mở thêm khi đạt giới hạn (0 = không giới hạn)
@@ -144,6 +147,7 @@ export const autoRefill = {
   message: 'Tự bù đang bật; mở profile để bắt đầu.',
   sequential: false, // Chế độ tuần tự: 1 tab, delay 5s giữa các phiên
   deviceProfiles: ['windows'], // Danh sách profile thiết bị đang được dùng
+  stopRequested: false, // Cờ yêu cầu dừng hẳn toàn bộ luồng, không mở hay bù thêm slot nào
 };
 
 /** Lấy profile thiết bị tiếp theo theo vòng tròn xoay vòng toàn cục. */
@@ -832,6 +836,21 @@ export function normalizeUrl(input) {
   return targetUrl.href;
 }
 
+/**
+ * Chuẩn hoá URL an toàn không ném ngoại lệ khi URL rác, dùng để sinh key kiểm tra trùng IP.
+ *
+ * @param {string} input Chuỗi URL thô.
+ * @return {string} URL đã chuẩn hoá hoặc chuỗi đã trim nếu không parse được.
+ */
+export function safeNormalizeUrl(input) {
+  if (!input) return '';
+  try {
+    return normalizeUrl(input);
+  } catch {
+    return String(input).trim();
+  }
+}
+
 function withCredentials(server, username, password) {
   const proxy = { server };
   if (username) proxy.username = username;
@@ -1148,7 +1167,7 @@ async function openBrowserThroughProxy({
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = '', checkDuplicate = true) {
+export async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = '', checkDuplicate = true) {
   const ipPage = await browser.newPage();
   let exitIp;
   const failures = [];
@@ -1157,24 +1176,38 @@ async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = 
       try {
         const response = await ipPage.goto(checkUrl, {
           waitUntil: 'domcontentloaded',
-          timeout: navigationTimeout,
+          timeout: 8_000,
         });
         if (!response || response.status() < 200 || response.status() >= 300) {
           throw new IpVerificationError(
             `trả HTTP ${response?.status() ?? 'không có phản hồi'}`,
           );
         }
-        const ipResponse = JSON.parse(await ipPage.evaluate(() => document.body.innerText));
-        if (typeof ipResponse.ip !== 'string' || !ipResponse.ip.trim()) {
+        const bodyText = await ipPage.evaluate(() => document.body?.innerText || '').catch(() => '');
+        let ipResponse = null;
+        try {
+          ipResponse = JSON.parse(bodyText);
+        } catch {
+          const match = bodyText.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+          if (match) ipResponse = { ip: match[0] };
+        }
+        if (typeof ipResponse?.ip !== 'string' || !ipResponse.ip.trim()) {
           throw new IpVerificationError('không trả địa chỉ IP');
         }
         exitIp = ipResponse.ip.trim();
         break;
       } catch (error) {
+        const errMsg = error.message || '';
         const reason = error instanceof IpVerificationError
           ? error.message
-          : 'không kết nối được';
+          : (errMsg.includes('Timeout') ? 'timeout quá 8s' : 'không kết nối được');
         failures.push(`${new URL(checkUrl).host}: ${reason}`);
+
+        // Fast-fail: Nếu proxy chết hẳn ở tầng mạng/kết nối, dừng ngay không thử các URL tiếp theo
+        const isProxyDead = /ERR_PROXY_CONNECTION_FAILED|ERR_TUNNEL_CONNECTION_FAILED|ERR_SOCKS_CONNECTION_FAILED|ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT|ECONNREFUSED|EHOSTUNREACH/i.test(errMsg);
+        if (isProxyDead) {
+          break;
+        }
       }
     }
     if (!exitIp) {
@@ -1190,12 +1223,12 @@ async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = 
   if (isExitIpCurrentlyInUse(exitIp)) {
     throw new Error(`IP ${exitIp} đang được sử dụng ở một cửa sổ khác; tránh mở trùng đồng thời.`);
   }
-  activeExitIpLocks.add(exitIp);
-  const normUrl = websiteUrl ? normalizeUrl(websiteUrl) : '';
+  const normUrl = websiteUrl ? safeNormalizeUrl(websiteUrl) : '';
   const keyWithUrl = normUrl ? `${exitIp}::${normUrl}` : exitIp;
   if (checkDuplicate && usedExitIps.has(keyWithUrl)) {
     throw new Error(`IP ${exitIp} đã được dùng trước đây cho trang đích này`);
   }
+  activeExitIpLocks.add(exitIp);
   usedExitIps.add(keyWithUrl);
   return exitIp;
 }
@@ -1211,7 +1244,7 @@ async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = 
  * @since 2026-10-15
  */
 export function createProxyUsageKey(proxy, occurrence, websiteUrl = '') {
-  const normUrl = websiteUrl ? normalizeUrl(websiteUrl) : '';
+  const normUrl = websiteUrl ? safeNormalizeUrl(websiteUrl) : '';
   const identity = normUrl ? `${proxyIdentity(proxy)}|${normUrl}` : proxyIdentity(proxy);
   const proxyHash = createHash('sha256').update(identity).digest('hex');
   return `${proxyHash}:${occurrence}`;
@@ -1675,8 +1708,11 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
     clientRects: Boolean(body.antiFpClientRects),
     webgl: Boolean(body.antiFpWebgl),
     webrtc: Boolean(body.antiFpWebrtc),
+    fonts: Boolean(body.antiFpFonts),
+    apiFakeIP: Boolean(body.antiFpApiFakeIP),
   };
   const hideUntilTarget = Boolean(body.hideUntilTarget ?? body.hideBrowser);
+  const hideUntilLead = Boolean(body.hideUntilLead);
 
   let scriptSteps = null;
   if (scriptPath) {
@@ -1768,20 +1804,13 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
     Object.values(usageHistory.proxies)
       .map((entry) => {
         if (!entry.exitIp) return null;
-        if (entry.status !== 'success' && entry.status !== 'attempting') return null;
-        return entry.websiteUrl ? `${entry.exitIp}::${normalizeUrl(entry.websiteUrl)}` : entry.exitIp;
+        if (entry.status !== 'success') return null;
+        return entry.websiteUrl ? `${entry.exitIp}::${safeNormalizeUrl(entry.websiteUrl)}` : entry.exitIp;
       })
       .filter(Boolean)
   );
 
-  // Nếu hàng đợi available trống nhưng có proxy trong used (đã chạy hết vòng trước),
-  // tự động hồi phục lại toàn bộ used vào available để các luồng và tự bù tiếp tục chạy trơn tru
-  if (proxyQueue.available.length === 0 && proxyQueue.used.length > 0) {
-    console.log('[ProxyQueue] Toàn bộ proxy trong hàng đợi đã dùng qua các offer. Tự động xoay vòng tái sử dụng hàng đợi...');
-    proxyQueue.available.push(...proxyQueue.used.splice(0));
-    multiOfferState.offerUsed.clear();
-    void saveProxyQueue();
-  }
+  // Proxy đã dùng không được dùng lại — bấm "Đặt lại hàng đợi" để dùng lại thủ công.
 
   // Queue là nguồn chính — parse available thành proxy objects, dedup theo server
   const seenServers = new Set();
@@ -1935,6 +1964,10 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
     const streamLabel = offerCount > 1 ? `Offer ${offerNumber}` : '';
 
     while (successfulBrowsers < targetSuccessCount) {
+      if (autoRefill.stopRequested || !autoRefill.enabled) {
+        console.log(`[attemptProxy] Stop đã được kích hoạt, dừng worker ${workerIndex + 1}.`);
+        break;
+      }
       // Dừng khi đã đạt giới hạn limitRun (số phiên hoàn tất)
       if (limitRunMax > 0 && limitRunCount >= limitRunMax) {
         console.log(`[limitRun] Đã đạt giới hạn ${limitRunMax} phiên hoàn tất, dừng mở thêm.`);
@@ -1946,6 +1979,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
       if (proxy.resetUrl) {
         await rotateProxyIfNeeded(proxy);
       }
+
+      if (autoRefill.stopRequested || !autoRefill.enabled) break;
 
       const proxyKey = createProxyUsageKey(proxy, 1, targetUrl);
       const installedChrome = availableChromeBuilds[workerIndex];
@@ -1996,6 +2031,9 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
         if (delayStart > 0) {
           await new Promise((r) => setTimeout(r, delayStart * 1000));
         }
+
+        if (autoRefill.stopRequested || !autoRefill.enabled) break;
+
         const openedBrowser = await openBrowserWithInstalledChrome({
           build: installedChrome,
           proxy: proxy,
@@ -2016,6 +2054,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           antiFingerprint,
           checkDuplicate: body.checkDuplicate !== false,
           hideUntilTarget,
+          hideUntilLead,
         });
         activeSession = openedBrowser.session;
         successfulBrowsers += 1;
@@ -2061,8 +2100,19 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
         failureReason = error.message.split('\n')[0];
         if (activeSession) {
           activeSession.suppressAutoRefill = true;
+          activeSession.isClosed = true;
           await activeSession.browser?.close?.().catch(() => {});
+          if (activeSession.proxyKey) {
+            await executeFile('pkill', ['-9', '-f', `user-data-dir.*${activeSession.proxyKey}`]).catch(() => {});
+          }
         }
+        await executeFile('pkill', ['-9', '-f', `user-data-dir.*${proxyKey}`]).catch(() => {});
+
+        if (autoRefill.stopRequested || !autoRefill.enabled) {
+          console.log(`[attemptProxy] Stop đã được kích hoạt sau lỗi proxy, dừng worker ${workerIndex + 1}.`);
+          break;
+        }
+
         const verificationFailure = error instanceof IpVerificationError;
         usageHistory.proxies[proxyKey] = {
           status: verificationFailure ? 'verification_error' : 'failed',
@@ -2078,11 +2128,11 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
         await persistProxyUsageHistory(usageHistory);
         if (verificationFailure) {
           results.push('Proxy ' + proxy.server + ': lỗi kết nối khi xác minh IP ('
-            + failureReason + '); sẽ thử proxy khác.');
+            + failureReason + '); đóng trình duyệt và thử proxy khác.');
           continue;
         }
         results.push('Proxy ' + proxy.server + ': loại bỏ IP ' + (exitIp ?? 'chưa xác định')
-          + ' — ' + failureReason + '; sẽ thử proxy khác.');
+          + ' — ' + failureReason + '; đóng trình duyệt và thử proxy khác.');
       }
     }
   };
@@ -2138,6 +2188,47 @@ async function resolveProxyHost(server) {
   } catch {
     return server;
   }
+}
+
+/**
+ * Starts a local HTTP CONNECT relay on 127.0.0.1 that tunnels through a SOCKS5 proxy.
+ * Returns { port, close() }. Chrome can always reach 127.0.0.1 (bypasses host-resolver-rules).
+ */
+async function startLocalSocksRelay(socksProxyUrl) {
+  const { SocksClient } = await import('socks');
+  const url = new URL(socksProxyUrl);
+  const socksHost = url.hostname;
+  const socksPort = parseInt(url.port);
+  const socksUser = url.username ? decodeURIComponent(url.username) : undefined;
+  const socksPwd  = url.password ? decodeURIComponent(url.password) : undefined;
+
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.on('connect', (req, clientSocket) => {
+      const [destHost, destPortStr] = req.url.split(':');
+      const destPort = parseInt(destPortStr) || 443;
+      SocksClient.createConnection({
+        proxy: { host: socksHost, port: socksPort, type: 5,
+          ...(socksUser && { userId: socksUser, password: socksPwd }) },
+        command: 'connect',
+        destination: { host: destHost, port: destPort },
+      }).then(({ socket: remoteSocket }) => {
+        clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        remoteSocket.pipe(clientSocket);
+        clientSocket.pipe(remoteSocket);
+        remoteSocket.on('error', () => clientSocket.destroy());
+        clientSocket.on('error', () => remoteSocket.destroy());
+      }).catch(() => {
+        clientSocket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+        clientSocket.destroy();
+      });
+    });
+    srv.listen(0, '127.0.0.1', () => {
+      const port = srv.address().port;
+      resolve({ port, close: () => srv.close() });
+    });
+    srv.on('error', reject);
+  });
 }
 
 function buildPreferencesProxy(proxyObj) {
@@ -2216,31 +2307,28 @@ async function checkExitIpViaSocks(proxyObj) {
   try {
     const { stdout } = await executeFile('curl', [
       ...proxyOpt,
-      'https://api.ipify.org?format=json',
-      '-s', '--max-time', '3',
+      'http://api.ipify.org/',
+      '-s', '--max-time', '5',
     ]);
-    const data = JSON.parse(stdout);
-    if (typeof data.ip === 'string' && data.ip.trim()) {
-      return data.ip.trim();
+    const ip = stdout?.trim();
+    if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+      return ip;
     }
   } catch {}
   return null;
 }
 
-async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy, verifiedExitIp, websiteUrl, offer = 1 }) {
-  const profileDir = join(homedir(), 'Library', 'Application Support', 'Gologin', 'profiles', profileId);
-  const prefsPath = join(profileDir, 'Default', 'Preferences');
-  const goLoginFetch = (path, body) => fetch(`http://127.0.0.1:36912${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15000),
-  }).catch((err) => {
-    console.error(`[GoLogin] fetch ${path} error:`, err?.message || err);
-    return null;
-  });
+async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy, verifiedExitIp, websiteUrl, offer = 1,
+  autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
+  captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
+  hideUntilTarget = false, hideUntilLead = false }) {
 
-  // Dọn dẹp bất kỳ session cũ nào của profile này trong activeBrowsers
+  const orbitaBin = await findOrbitaExecutable();
+  if (!orbitaBin) throw new Error('Không tìm thấy Orbita browser. Hãy mở GoLogin app để tải về (hoặc đăng nhập GoLogin).');
+
+  const profileDir = join(homedir(), 'Library', 'Application Support', 'Gologin', 'profiles', profileId);
+
+  // Dọn dẹp session cũ của profile này
   for (const s of [...activeBrowsers]) {
     if (s.isGoLogin && s.profileId === profileId) {
       if (s._monitorInterval) {
@@ -2250,10 +2338,19 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
       s.isClosed = true;
       releaseProxyLock(s.proxy, s.exitIp);
       activeBrowsers.delete(s);
+      await s.browser?.close?.().catch(() => {});
     }
   }
 
-  // Đảm bảo extension RoboForm được cài vào profile GoLogin
+  // Kill bất kỳ tiến trình Orbita nào đang dùng profile này
+  await executeFile('pkill', ['-9', '-f', `user-data-dir.*${profileId}`]).catch(() => {});
+  await new Promise(r => setTimeout(r, 500));
+
+  // Xoá lock file để Orbita khởi động sạch
+  const lock = join(profileDir, 'SingletonLock');
+  try { if (existsSync(lock)) unlinkSync(lock); } catch {}
+
+  // Copy RoboForm extension vào profile nếu chưa có
   try {
     const roboExtId = 'pnlccmojcmeohlpggmfnbbiapkmbliob';
     const roboDestDir = join(profileDir, 'Default', 'Extensions', roboExtId, '10.0.1.1_1');
@@ -2264,179 +2361,331 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
     }
   } catch {}
 
-  // Resolve proxy hostname to IP so Orbita's DNS block doesn't break it
-  let resolvedProxy = null;
-  if (proxy) {
-    try {
-      const resolvedServer = await resolveProxyHost(proxy.server);
-      resolvedProxy = { ...proxy, server: resolvedServer };
-    } catch {
-      resolvedProxy = proxy;
-    }
-  }
-
-  // Chỉ gọi stop-profile khi Orbita thực sự đang chạy để tránh làm nghẽn daemon GoLogin
-  let isOrbitaRunning = false;
-  try {
-    const { stdout } = await executeFile('pgrep', ['-f', `user-data-dir.*${profileId}`]);
-    if (stdout && stdout.trim().length > 0) isOrbitaRunning = true;
-  } catch {}
-
-  if (isOrbitaRunning) {
-    try {
-      await goLoginFetch('/browser/stop-profile', { profileId });
-    } catch {}
-    for (let attempt = 0; attempt < 10; attempt++) {
-      await new Promise(r => setTimeout(r, 200));
-      try {
-        const { stdout } = await executeFile('pgrep', ['-f', `user-data-dir.*${profileId}`]);
-        if (!stdout || !stdout.trim()) break;
-      } catch { break; }
-    }
-    try {
-      const { stdout } = await executeFile('pgrep', ['-f', `user-data-dir.*${profileId}`]);
-      if (stdout && stdout.trim()) {
-        await executeFile('pkill', ['-9', '-f', `user-data-dir.*${profileId}`]).catch(() => {});
-        await new Promise(r => setTimeout(r, 300));
-      }
-    } catch {}
-  }
-  const lock = join(profileDir, 'SingletonLock');
-  try { if (existsSync(lock)) unlinkSync(lock); } catch {}
-
-  const applyPreferencesUpdates = (prefs) => {
-    if (resolvedProxy) {
-      prefs.proxy = buildPreferencesProxy(resolvedProxy);
-    } else {
-      prefs.proxy = { mode: 'direct' };
-    }
-    if (websiteUrl) {
-      prefs.session = {
-        restore_on_startup: 4,
-        startup_urls: [websiteUrl],
-      };
-    }
-    if (!prefs.extensions) prefs.extensions = {};
-    if (!prefs.extensions.settings) prefs.extensions.settings = {};
-    const roboExtId = 'pnlccmojcmeohlpggmfnbbiapkmbliob';
-    if (prefs.extensions.settings[roboExtId]) {
-      prefs.extensions.settings[roboExtId].path = `${roboExtId}/10.0.1.1_1`;
-      prefs.extensions.settings[roboExtId].state = 1;
-      prefs.extensions.settings[roboExtId].active_bit = true;
-    }
-  };
-
-  // Pre-write proxy and startup URL before start (trial expired = GoLogin won't fetch from cloud to overwrite)
-  if (existsSync(prefsPath)) {
-    try {
-      const prefs = JSON.parse(readFileSync(prefsPath, 'utf8'));
-      applyPreferencesUpdates(prefs);
-      writeFileSync(prefsPath, JSON.stringify(prefs));
-    } catch {}
-  }
-
-  const resp = await goLoginFetch('/browser/start-profile', { profileId, sync: false });
-
-  if (!resp) throw new Error('Không thể kết nối GoLogin app. Hãy mở GoLogin app và đăng nhập trước.');
-  const data = await resp.json().catch(() => ({}));
-  if (data.status !== 'success') throw new Error(`GoLogin lỗi: ${JSON.stringify(data)}`);
-
-  // Post-write proxy nhanh sau khi daemon sinh file Preferences
-  await new Promise(resolve => setTimeout(resolve, 250));
-  if (existsSync(prefsPath)) {
-    try {
-      const prefs = JSON.parse(readFileSync(prefsPath, 'utf8'));
-      applyPreferencesUpdates(prefs);
-      writeFileSync(prefsPath, JSON.stringify(prefs));
-    } catch {}
-  }
-  (async () => {
-    for (const delay of [800, 1800]) {
-      await new Promise(resolve => setTimeout(resolve, delay));
-      if (!existsSync(prefsPath)) continue;
-      try {
-        const prefs = JSON.parse(readFileSync(prefsPath, 'utf8'));
-        applyPreferencesUpdates(prefs);
-        writeFileSync(prefsPath, JSON.stringify(prefs));
-      } catch {}
-    }
-  })().catch(() => {});
-
-  const proxyUrl = resolvedProxy?.server ?? null;
-  const proxyHost = proxyUrl ? (() => { try { return new URL(proxyUrl).hostname; } catch { return proxyUrl; } })() : null;
-  const orbitaVersion = await getOrbitaVersion();
   const assignedSlot = slot ?? (tileIndex + 1);
-  const initialExitIp = verifiedExitIp || proxyHost || 'Direct';
+  const screen = await readScreenSize();
+  const tile = tileAt(tileIndex ?? (assignedSlot - 1), 1, screen);
+  const orbitaVersion = await getOrbitaVersion();
+
+  const proxyUrl = proxy?.server ?? null;
+  const initialExitIp = verifiedExitIp || 'Direct';
+
+  // Kill Orbita cũ + reset daemon state trước khi start sync:true
+  await executeFile('pkill', ['-9', '-f', `user-data-dir.*${profileId}`]).catch(() => {});
+  await fetch('http://127.0.0.1:36912/browser/stop-profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId }),
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => {});
+  await new Promise(r => setTimeout(r, 800));
+
+  // Start via GoLogin API với sync:true → Orbita khởi động với --remote-debugging-port
+  const goLoginResp = await fetch('http://127.0.0.1:36912/browser/start-profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId, sync: true }),
+    signal: AbortSignal.timeout(45000),
+  }).then(r => r.json()).catch(() => null);
+
+  if (!goLoginResp?.wsUrl) {
+    throw new Error('GoLogin app không trả về CDP URL. Đảm bảo GoLogin app đang chạy và profile tồn tại.');
+  }
+
+  console.log(`[GoLogin] wsUrl từ daemon: ${goLoginResp.wsUrl}`);
+
+  const prefPath = join(homedir(), 'Library', 'Application Support', 'GoLogin', 'profiles', profileId, 'Default', 'Preferences');
+
+  // Inject user SOCKS5 proxy TRƯỚC khi connectOverCDP: start relay, ghi Preferences,
+  // đợi 2s cho Chrome restart network stack, rồi mới kết nối CDP.
+  // (Nếu ghi SAU khi connect → Chrome restart → CDP WebSocket đứt → context close)
+  let relay = null;
+  if (proxy?.server) {
+    try {
+      relay = await startLocalSocksRelay(proxy.server);
+      const prefs = JSON.parse(readFileSync(prefPath, 'utf8'));
+      prefs.proxy = { mode: 'fixed_servers', server: `http://127.0.0.1:${relay.port}`, bypass_list: '' };
+      writeFileSync(prefPath, JSON.stringify(prefs), 'utf8');
+      // Chờ Chrome restart network stack trước khi kết nối CDP
+      await new Promise(r => setTimeout(r, 2000));
+      console.log(`[GoLogin] Relay proxy: 127.0.0.1:${relay.port} → ${proxy.server}`);
+    } catch (e) {
+      relay?.close();
+      relay = null;
+      console.log(`[GoLogin] Không thể khởi relay proxy: ${e.message}`);
+    }
+  }
+
+  // Kết nối Playwright vào Orbita đang chạy qua CDP (timeout 15s)
+  const cdpBrowser = await Promise.race([
+    chromium.connectOverCDP(goLoginResp.wsUrl),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('CDP connect timeout 15s')), 15000)),
+  ]);
+  console.log(`[GoLogin] CDP connected. Contexts: ${cdpBrowser.contexts().length}`);
+  const context = cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
+
+  // Detect exit IP: dùng user's SOCKS5 trực tiếp nếu relay ok, ngược lại curl qua Preferences proxy
+  let detectedIp = null;
+  try {
+    if (proxy?.server && relay) {
+      const { stdout } = await executeFile('curl', ['-s', '--max-time', '5', '--socks5-hostname', (() => {
+        const u = new URL(proxy.server);
+        const auth = u.username ? `${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}@` : '';
+        return `${auth}${u.hostname}:${u.port}`;
+      })(), 'http://api.ipify.org/']).catch(() => ({ stdout: '' }));
+      const ip = stdout?.trim();
+      if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) detectedIp = ip;
+    } else {
+      const prefs = JSON.parse(readFileSync(prefPath, 'utf8'));
+      const activeProxyServer = prefs?.proxy?.server;
+      if (activeProxyServer && !activeProxyServer.startsWith('direct') && !activeProxyServer.includes('127.0.0.1')) {
+        const { stdout } = await executeFile('curl', ['-s', '--max-time', '5', '-x', activeProxyServer, 'http://api.ipify.org/']).catch(() => ({ stdout: '' }));
+        const ip = stdout?.trim();
+        if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) detectedIp = ip;
+      }
+    }
+  } catch {}
+  if (detectedIp) {
+    console.log(`[GoLogin] Exit IP: ${detectedIp}`);
+  }
 
   const session = {
-    browser: null,
+    browser: context,
+    _cdpBrowser: cdpBrowser,
     tileIndex: tileIndex ?? (assignedSlot - 1),
     slot: assignedSlot,
     chromeVersion: orbitaVersion ?? 'GoLogin',
     deviceProfile: 'windows',
-    suppressAutoRefill: true,
-    proxy: resolvedProxy || proxy,
+    suppressAutoRefill: false,
+    proxy: proxy ?? null,
     proxyKey: proxyUrl ?? profileId,
     proxyServer: proxyUrl ?? profileId,
-    exitIp: initialExitIp,
+    exitIp: detectedIp || initialExitIp,
     offer,
     offerNumber: offer,
     streamRole: offer,
+    streamLabel: `Offer ${offer}`,
     websiteUrl: websiteUrl || '',
     profileId,
     isGoLogin: true,
+    hideUntilTarget: Boolean(hideUntilTarget),
+    hideUntilLead: Boolean(hideUntilLead),
+    hasShownWindow: false,
+    leadCheckStatus: null,
+    leadCheckMessage: null,
+    updateBadge: (text) => {
+      try {
+        for (const p of context.pages()) {
+          if (!p.isClosed()) {
+            p.evaluate((t) => { const b = document.getElementById('__autolead_ip_badge'); if (b) b.innerHTML = t; }, text).catch(() => {});
+          }
+        }
+      } catch {}
+    },
   };
   activeBrowsers.add(session);
 
-  // Background monitor: phát hiện khi người dùng đóng cửa sổ GoLogin để dọn dẹp ngay khỏi activeBrowsers
-  const monitorInterval = setInterval(async () => {
-    try {
-      const { stdout } = await executeFile('pgrep', ['-f', `user-data-dir.*${profileId}`]);
-      if (!stdout || !stdout.trim()) {
-        cleanupSession();
-      }
-    } catch {
-      cleanupSession();
-    }
-  }, 2000);
+  let cdpSession = null;
+  let cdpWindowId = null;
 
-  function cleanupSession() {
-    clearInterval(monitorInterval);
-    session._monitorInterval = null;
-    session.isClosed = true;
-    activeBrowsers.delete(session);
-    releaseProxyLock(resolvedProxy || proxy, session.exitIp);
-    console.log(`[GoLogin] Cửa sổ Profile ${profileId} (Slot ${assignedSlot}) đã đóng; dọn sạch khỏi activeBrowsers.`);
+  if (hideUntilTarget || hideUntilLead) {
+    try {
+      const initPage = context.pages()[0] ?? await context.newPage();
+      cdpSession = await context.newCDPSession(initPage);
+      const win = await cdpSession.send('Browser.getWindowForTarget');
+      cdpWindowId = win.windowId;
+      await cdpSession.send('Browser.setWindowBounds', {
+        windowId: cdpWindowId,
+        bounds: { windowState: 'minimized' },
+      });
+      const modeText = hideUntilLead ? 'chỉ hiện khi có lead' : 'chỉ hiện khi vào trang đích';
+      console.log(`[GoLogin] Slot ${assignedSlot}: Chạy ngầm (ẩn cửa sổ), ${modeText}.`);
+      session.addBrowserLog?.({ type: 'navigate', detail: `Chạy ngầm (ẩn cửa sổ), ${modeText}...` });
+    } catch (err) {
+      console.warn('[GoLogin] Lỗi ẩn cửa sổ ban đầu:', err.message);
+    }
   }
 
-  session._monitorInterval = monitorInterval;
-
-  // Ghi nhận log khởi chạy GoLogin vào Interaction Logs
-  const sessionItem = {
-    id: `gologin-${Date.now()}-${assignedSlot}`,
-    slot: assignedSlot,
-    offer,
-    offerUrl: websiteUrl || '',
-    ip: initialExitIp,
-    version: orbitaVersion ?? 'GoLogin',
-    startedAt: new Date().toISOString(),
-    logs: [{
-      time: new Date().toISOString(),
-      type: 'gologin_launch',
-      offer,
-      detail: `Khởi chạy GoLogin Profile ${profileId} (${orbitaVersion ?? 'Orbita'}) - Slot ${assignedSlot} - IP: ${initialExitIp} - URL: ${websiteUrl || '(blank)'}`,
-      url: websiteUrl || '',
-    }],
+  session.showWindow = async (force = false) => {
+    if ((!hideUntilTarget && !hideUntilLead) || session.hasShownWindow) return;
+    if (hideUntilLead && !force) return;
+    session.hasShownWindow = true;
+    try {
+      const activePage = session.mainPage || (context.pages().filter(p => !p.isClosed())[0]);
+      if (!cdpSession && activePage) {
+        cdpSession = await context.newCDPSession(activePage);
+      }
+      if (cdpSession) {
+        if (!cdpWindowId) {
+          const win = await cdpSession.send('Browser.getWindowForTarget');
+          cdpWindowId = win.windowId;
+        }
+        await cdpSession.send('Browser.setWindowBounds', {
+          windowId: cdpWindowId,
+          bounds: {
+            left: tile.left,
+            top: tile.top,
+            width: tile.width,
+            height: tile.height,
+            windowState: 'normal',
+          },
+        });
+        if (activePage) await activePage.bringToFront().catch(() => {});
+        const reasonText = hideUntilLead ? 'Đã có lead thành công' : 'Đã vào trang đích an toàn';
+        console.log(`[GoLogin] Slot ${assignedSlot}: ${reasonText}, hiển thị trình duyệt.`);
+        session.addBrowserLog?.({ type: 'navigate', detail: `${reasonText}, hiển thị cửa sổ trình duyệt.` });
+      }
+    } catch (err) {
+      console.warn('[GoLogin] Lỗi hiển thị cửa sổ:', err.message);
+    }
   };
-  persistedBrowserLogs.unshift(sessionItem);
-  if (persistedBrowserLogs.length > 150) persistedBrowserLogs.pop();
-  browserSessionLogs.set(session, sessionItem.logs);
-  queueSaveBrowserLogs();
+
+  const assignedEmail = dequeueNextEmail();
+  if (assignedEmail) session.assignedEmail = assignedEmail;
+
+  attachBrowserLogger(context, session);
+
+  context.on('close', () => {
+    session.isClosed = true;
+    activeBrowsers.delete(session);
+    releaseProxyLock(proxy ?? null, session.exitIp);
+    cdpBrowser.close().catch(() => {});
+    relay?.close();
+    const sc = screencastSessions.get(assignedSlot);
+    if (sc) { sc.cdpClient.detach().catch(() => {}); try { sc.sseResponse.end(); } catch {} screencastSessions.delete(assignedSlot); }
+    console.log(`[GoLogin] Profile ${profileId} (Slot ${assignedSlot}) đã đóng.`);
+  });
+
+  // Điều hướng tới URL offer
+  const pages = context.pages();
+  const page = pages.length > 0 ? pages[0] : await context.newPage();
+  session.mainPage = page;
+
+  if (websiteUrl) {
+    await Promise.race([
+      page.goto(websiteUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
+      new Promise(r => setTimeout(r, navigationTimeout + 2000)),
+    ]);
+    if (!hideUntilLead) {
+      await session.showWindow();
+    }
+    await page.bringToFront().catch(() => {});
+
+    // Gắn IP badge vào trang
+    await page.evaluate(({ ip, s }) => {
+      try {
+        if (!document.getElementById('__autolead_ip_badge')) {
+          const badge = document.createElement('div');
+          badge.id = '__autolead_ip_badge';
+          badge.innerHTML = `🌐 <strong>IP:</strong> ${ip} <span style="margin-left:4px;background:#1d4ed8;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;">Slot ${s}</span>`;
+          badge.style.cssText = 'position:fixed;top:8px;right:12px;z-index:2147483647;background:rgba(26,38,57,0.92);color:#fff;padding:4px 10px;border-radius:14px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;pointer-events:none;';
+          document.documentElement.appendChild(badge);
+        }
+      } catch {}
+    }, { ip: initialExitIp, s: assignedSlot }).catch(() => {});
+  }
+
+  closeChromeWhenLastTabCloses(session);
+  watchTrafficBlockedPage(session);
+
+  if (completeText) {
+    const needle = completeText.toLowerCase();
+    const completeTimer = setInterval(async () => {
+      if (page.isClosed()) { clearInterval(completeTimer); return; }
+      const found = await page.evaluate((n) => (document.body?.innerText || '').toLowerCase().includes(n), needle).catch(() => false);
+      if (found) {
+        clearInterval(completeTimer);
+        limitRunCount += 1;
+        session.addLog?.({ time: new Date().toISOString(), type: 'complete_text', detail: `Text hoàn tất "${completeText}" (${limitRunCount}${limitRunMax > 0 ? '/' + limitRunMax : ''}).` });
+        session.suppressAutoRefill = false;
+        await session.browser?.close?.().catch(() => {});
+      }
+    }, 2000);
+    context.on('close', () => clearInterval(completeTimer));
+  }
+
+  if (timeLimit > 0) {
+    const timeLimitTimer = setTimeout(async () => {
+      session.addLog?.({ time: new Date().toISOString(), type: 'time_limit', detail: `Hết timeout phiên (${timeLimit}s), đóng trình duyệt.` });
+      await session.browser?.close?.().catch(() => {});
+    }, timeLimit * 1000);
+    context.on('close', () => clearTimeout(timeLimitTimer));
+  }
+
+  if (scriptSteps?.length > 0) {
+    void (async () => {
+      await page.waitForLoadState('domcontentloaded', { timeout: navigationTimeout }).catch(() => {});
+      const record = session.currentRecord ?? autofillRecords[0] ?? {};
+      await runScript(page, scriptSteps, record, {
+        captchaApiKey,
+        scriptDir: scriptPath ? dirname(scriptPath) : '',
+        logger: (entry) => session.addLog?.({ time: new Date().toISOString(), ...entry }),
+      });
+    })();
+  }
+
+  // Autofill logic giống hệt Chrome thường
+  const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
+  if (websiteUrl) {
+    attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
+      autoSubmit,
+      enableLeadCheck: leadConfig.enabled !== false,
+      leadCheckScreen: leadConfig.checkScreen || 5,
+      onLog: (entry) => {
+        if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
+          if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
+            void session.showWindow?.(entry.type === 'lead_confirmed');
+          }
+        }
+        session.addBrowserLog?.(entry);
+      },
+      onRecordPicked: (record) => {
+        if (!session.hideUntilLead) {
+          void session.showWindow?.();
+        }
+        if (session.assignedEmail && record) {
+          record.email = session.assignedEmail;
+          record.emailaddress = session.assignedEmail;
+          record.mail = session.assignedEmail;
+          record.assignedEmail = session.assignedEmail;
+        }
+        session.currentRecord = record;
+        const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordKey(r) === autofillRecordKey(record));
+        if (idx !== -1) {
+          autofillQueue.available.splice(idx, 1);
+          autofillQueue.used.push(record);
+          void saveAutofillQueue();
+        }
+        void markAutofillRecordUsed(record);
+      },
+      onScreen5Reached: (sess, p) => { void startLeadVerification(sess, leadConfig); },
+      onEmailSubmitted: (sess, p) => { void startLeadVerification(sess, leadConfig); },
+      onStuck: (p) => {
+        if (session.mainPage && p !== session.mainPage) return;
+        if (session.aiAssistRunning) return;
+        const currentUrl = p.url?.() || '';
+        if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:') || currentUrl.includes('api.ipify.org')) return;
+        const now = Date.now();
+        if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 4000)) return;
+        session.lastAiUrl = currentUrl;
+        session.lastAiTime = now;
+        const currentRecord = session.currentRecord ?? autofillRecords[0] ?? {};
+        if (session.assignedEmail && currentRecord) {
+          currentRecord.email = session.assignedEmail;
+          currentRecord.emailaddress = session.assignedEmail;
+          currentRecord.mail = session.assignedEmail;
+          currentRecord.assignedEmail = session.assignedEmail;
+        }
+        void runAiAssist(p, currentRecord, session, { onLog: (e) => session.addLog?.(e) });
+      },
+    });
+  }
 
   return session;
 }
 
 async function launchGoLoginBrowsers(requestBody) {
+  autoRefill.stopRequested = false;
+  autoRefill.enabled = true;
   const body = JSON.parse(requestBody);
   const concurrency = Math.min(10, parseInt(body.requestedCount ?? body.concurrency) || 1);
   const websiteUrl = body.websiteUrl || '';
@@ -2464,22 +2713,11 @@ async function launchGoLoginBrowsers(requestBody) {
     maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
     checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 5,
   };
+  const hideUntilTarget = Boolean(body.hideUntilTarget ?? body.hideBrowser);
+  const hideUntilLead = Boolean(body.hideUntilLead);
 
   // Dọn dẹp các session cũ đã đóng hoặc zombie trước khi khởi chạy
   await pruneDeadGoLoginSessions();
-
-  // Kiểm tra GoLogin desktop app đang mở và lắng nghe cổng 36912
-  let daemonAlive = false;
-  try {
-    const pingRes = await fetch('http://127.0.0.1:36912/', { signal: AbortSignal.timeout(2000) }).catch(() => null);
-    if (pingRes) daemonAlive = true;
-  } catch {}
-
-  if (!daemonAlive) {
-    return { results: [], warnings: ['Không thể kết nối GoLogin app (cổng 36912). Vui lòng mở ứng dụng GoLogin trước khi bấm Start.'] };
-  }
-
-  const token = readGoLoginToken();
 
   const profiles = await getGoLoginProfiles();
   if (profiles.length === 0) {
@@ -2492,12 +2730,14 @@ async function launchGoLoginBrowsers(requestBody) {
     warnings.push(`Chỉ có ${profiles.length} profile GoLogin trên máy (đã mở ${count} profile). Để chạy ${concurrency} luồng cùng lúc, vui lòng tạo thêm profile trong GoLogin app (hoặc chuyển sang chế độ Google Chrome).`);
   }
 
-  // Thu thập proxy: ưu tiên từ request (txtDashboardProxy)
+  // Thu thập proxy: ưu tiên từ request (txtDashboardProxy), bỏ qua proxy đã dùng
   const candidateProxies = [];
   const proxyType = body.proxyType ?? 'socks5';
+  const usedProxyLines = new Set(proxyQueue.used.map((l) => l.trim()));
   if (body.proxyList) {
     for (const [i, line] of body.proxyList.split(/\r?\n/).entries()) {
       if (candidateProxies.length >= count) break;
+      if (usedProxyLines.has(line.trim())) continue;
       try {
         const p = parseProxyLine(line, i + 1, proxyType);
         if (p && !candidateProxies.some(ex => ex.server === p.server)) {
@@ -2509,11 +2749,6 @@ async function launchGoLoginBrowsers(requestBody) {
 
   // Nếu chưa đủ proxy cho các luồng, tự động rút từ proxyQueue.available
   if (candidateProxies.length < count) {
-    if (proxyQueue.available.length === 0 && proxyQueue.used.length > 0) {
-      console.log('[GoLogin] Hàng đợi proxy đã dùng hết, tự động quay vòng...');
-      proxyQueue.available.push(...proxyQueue.used.splice(0));
-      void saveProxyQueue();
-    }
     for (const line of proxyQueue.available) {
       if (candidateProxies.length >= count) break;
       try {
@@ -2526,8 +2761,25 @@ async function launchGoLoginBrowsers(requestBody) {
     }
   }
 
+  const usageHistory = await readProxyUsageHistory();
+  const usedExitIps = new Set(
+    Object.values(usageHistory.proxies)
+      .map((entry) => {
+        if (!entry.exitIp) return null;
+        if (entry.status !== 'success') return null;
+        return entry.websiteUrl ? `${entry.exitIp}::${safeNormalizeUrl(entry.websiteUrl)}` : entry.exitIp;
+      })
+      .filter(Boolean)
+  );
+
+  const gologinWorkers = [];
+  const occupiedSlots = new Set([...activeBrowsers].map(s => s.slot || (s.tileIndex + 1)));
+
   for (let i = 0; i < count; i++) {
     const profileId = profiles[i];
+    const slotOfferUrl = (offerUrls && offerUrls.length > 0) ? offerUrls[i % offerUrls.length] : websiteUrl;
+    const offerNum = (offerUrls && offerUrls.length > 0) ? (i % offerUrls.length) + 1 : 1;
+    const normOfferUrl = slotOfferUrl ? safeNormalizeUrl(slotOfferUrl) : '';
 
     // Dọn dẹp session cũ của profile này ngay trước khi tính slot
     for (const s of [...activeBrowsers]) {
@@ -2542,9 +2794,9 @@ async function launchGoLoginBrowsers(requestBody) {
       }
     }
 
-    const occupiedSlots = new Set([...activeBrowsers].map(s => s.slot || (s.tileIndex + 1)));
     let slot = 1;
     while (occupiedSlots.has(slot)) slot++;
+    occupiedSlots.add(slot);
     const tileIndex = slot - 1;
 
     let assignedProxy = null;
@@ -2574,10 +2826,18 @@ async function launchGoLoginBrowsers(requestBody) {
         continue;
       }
 
+      const keyWithUrl = normOfferUrl ? `${verifiedIp}::${normOfferUrl}` : verifiedIp;
+      if (body.checkDuplicate !== false && usedExitIps.has(keyWithUrl)) {
+        releaseProxyLock(candidate);
+        warnings.push(`Proxy ${candidate.server} có IP exit (${verifiedIp}) đã được dùng trước đây cho offer ${slotOfferUrl}; bỏ qua (Check duplicate).`);
+        continue;
+      }
+
       // Proxy sống và không trùng IP
       assignedProxy = candidate;
       actualExitIp = verifiedIp;
       activeExitIpLocks.add(verifiedIp);
+      usedExitIps.add(keyWithUrl);
 
       if (assignedProxy._queueLine) {
         const qIdx = proxyQueue.available.indexOf(assignedProxy._queueLine);
@@ -2592,25 +2852,46 @@ async function launchGoLoginBrowsers(requestBody) {
 
     if (!assignedProxy) {
       actualExitIp = 'Direct';
-      if (body.checkDuplicate !== false && isExitIpCurrentlyInUse('Direct')) {
+      const directKey = normOfferUrl ? `Direct::${normOfferUrl}` : 'Direct';
+      if (isExitIpCurrentlyInUse('Direct')) {
         warnings.push(`Slot ${slot}: Đã có luồng chạy Direct (IP thật); dừng mở để tránh trùng IP.`);
         continue;
       }
+      if (body.checkDuplicate !== false && usedExitIps.has(directKey)) {
+        warnings.push(`Slot ${slot}: IP Direct (IP thật máy) đã được dùng trước đây cho offer này; dừng mở (Check duplicate).`);
+        continue;
+      }
       activeExitIpLocks.add('Direct');
+      usedExitIps.add(directKey);
     }
 
+    gologinWorkers.push({
+      profileId,
+      slot,
+      tileIndex,
+      assignedProxy,
+      actualExitIp,
+      slotOfferUrl,
+      offerNum,
+    });
+  }
+
+  // Khởi chạy song song (Parallel) các luồng GoLogin với giãn cách nhẹ giữa các lần gọi daemon
+  await Promise.all(gologinWorkers.map(async (worker, workerIdx) => {
+    if (workerIdx > 0) {
+      const staggerMs = Math.max(800, (delayStart > 0 ? delayStart * 1000 : 800));
+      await new Promise(r => setTimeout(r, workerIdx * staggerMs));
+    }
+    if (autoRefill.stopRequested || !autoRefill.enabled) return;
     try {
-      const slotOfferUrl = (offerUrls && offerUrls.length > 0) ? offerUrls[i % offerUrls.length] : websiteUrl;
-      const offerNum = (offerUrls && offerUrls.length > 0) ? (i % offerUrls.length) + 1 : 1;
       await openBrowserViaGoLogin({
-        tileIndex,
-        slot,
-        profileId,
-        token,
-        proxy: assignedProxy,
-        verifiedExitIp: actualExitIp,
-        websiteUrl: slotOfferUrl,
-        offer: offerNum,
+        tileIndex: worker.tileIndex,
+        slot: worker.slot,
+        profileId: worker.profileId,
+        proxy: worker.assignedProxy,
+        verifiedExitIp: worker.actualExitIp,
+        websiteUrl: worker.slotOfferUrl,
+        offer: worker.offerNum,
         autofillRecords,
         autoSubmit: body.autoSubmitForm !== false,
         leadConfig,
@@ -2620,18 +2901,52 @@ async function launchGoLoginBrowsers(requestBody) {
         timeLimit,
         delayStop,
         scriptPath,
+        hideUntilTarget,
+        hideUntilLead,
       });
-      results.push({ status: 'ok', slot, offer: offerNum });
+      results.push({ status: 'ok', slot: worker.slot, offer: worker.offerNum });
+      if (worker.assignedProxy && worker.actualExitIp) {
+        const pKey = createProxyUsageKey(worker.assignedProxy, 1, worker.slotOfferUrl);
+        usageHistory.proxies[pKey] = {
+          status: 'success',
+          proxy: worker.assignedProxy.server,
+          exitIp: worker.actualExitIp,
+          websiteUrl: worker.slotOfferUrl,
+          offerNumber: worker.offerNum,
+          profileId: worker.profileId,
+          attemptedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+        };
+        void persistProxyUsageHistory(usageHistory).catch(() => {});
+      }
     } catch (err) {
-      if (assignedProxy) releaseProxyLock(assignedProxy, actualExitIp);
-      else if (actualExitIp === 'Direct') activeExitIpLocks.delete('Direct');
-      warnings.push(`Slot ${slot}: ${err.message}`);
+      if (worker.assignedProxy) {
+        releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
+        const pKey = createProxyUsageKey(worker.assignedProxy, 1, worker.slotOfferUrl);
+        usageHistory.proxies[pKey] = {
+          status: 'failed',
+          proxy: worker.assignedProxy.server,
+          exitIp: worker.actualExitIp,
+          websiteUrl: worker.slotOfferUrl,
+          offerNumber: worker.offerNum,
+          profileId: worker.profileId,
+          reason: err.message,
+          attemptedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+        };
+        void persistProxyUsageHistory(usageHistory).catch(() => {});
+      } else if (worker.actualExitIp === 'Direct') {
+        activeExitIpLocks.delete('Direct');
+      }
+      warnings.push(`Slot ${worker.slot}: ${err.message}`);
     }
-  }
+  }));
   return { results, warnings };
 }
 
 async function launchUserRequestedBrowsers(requestBody) {
+  autoRefill.stopRequested = false;
+  autoRefill.enabled = true;
   const body = JSON.parse(requestBody);
   const activeBeforeLaunch = activeBrowsers.size;
   const result = await launchRequestedBrowsers(requestBody);
@@ -2673,6 +2988,7 @@ async function launchUserRequestedBrowsers(requestBody) {
       antiFpWebrtc: Boolean(body.antiFpWebrtc),
       hideUntilTarget: Boolean(body.hideUntilTarget ?? body.hideBrowser),
       hideBrowser: Boolean(body.hideUntilTarget ?? body.hideBrowser),
+      hideUntilLead: Boolean(body.hideUntilLead),
     };
     autoRefill.targetCount = Math.min(
       maxAliveBrowsers,
@@ -2692,18 +3008,18 @@ async function launchUserRequestedBrowsers(requestBody) {
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-10
  */
-function queueAutomaticRefill(delayMs = 0) {
-  if (!autoRefill.enabled || !autoRefill.settings || autoRefill.queued) return;
+export function queueAutomaticRefill(delayMs = 0) {
+  if (autoRefill.stopRequested || !autoRefill.enabled || !autoRefill.settings || autoRefill.queued) return;
   autoRefill.queued = true;
   void enqueueExclusively(async () => {
     autoRefill.queued = false;
-    if (!autoRefill.enabled || !autoRefill.settings) return;
+    if (autoRefill.stopRequested || !autoRefill.enabled || !autoRefill.settings) return;
 
     const waitMs = (autoRefill.sequential || activeBrowsers.size === 0) ? delayMs : 0;
     if (waitMs > 0) {
       autoRefill.message = `Chế độ tuần tự: chờ ${waitMs / 1000}s trước khi mở phiên tiếp theo…`;
       await new Promise((resolve) => setTimeout(resolve, waitMs));
-      if (!autoRefill.enabled || !autoRefill.settings) return;
+      if (autoRefill.stopRequested || !autoRefill.enabled || !autoRefill.settings) return;
     }
 
     const activeSettings = autoRefill.settings;
@@ -2966,7 +3282,7 @@ function requestProxyIpInfo(proxy) {
     : new HttpsProxyAgent(proxyUrl);
 
   return new Promise((resolve, reject) => {
-    const proxyRequest = requestHttps(checkUrl, { agent, timeout: navigationTimeout }, (response) => {
+    const proxyRequest = requestHttps(checkUrl, { agent, timeout: 4000 }, (response) => {
       let responseBody = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { responseBody += chunk; });
@@ -2983,7 +3299,7 @@ function requestProxyIpInfo(proxy) {
         }
       });
     });
-    proxyRequest.on('timeout', () => proxyRequest.destroy(new Error(`Timeout sau ${navigationTimeout / 1000} giây.`)));
+    proxyRequest.on('timeout', () => proxyRequest.destroy(new Error('Timeout tra IP sau 4 giây.')));
     proxyRequest.on('error', reject);
   });
 }
@@ -2998,14 +3314,15 @@ function requestProxyIpInfo(proxy) {
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
-async function closeActiveBrowsers() {
+export async function closeActiveBrowsers() {
   const sessions = [...activeBrowsers];
+  autoRefill.stopRequested = true;
   autoRefill.enabled = false;
   autoRefill.sequential = false;
   autoRefill.settings = null;
   autoRefill.targetCount = 0;
   autoRefill.queued = false;
-  autoRefill.message = 'Đã đóng tất cả; tự bù đã tắt.';
+  autoRefill.message = 'Đã dừng toàn bộ luồng; tự bù đã tắt.';
   exclusiveQueue = Promise.resolve(); // Giải phóng ngay hàng đợi để không bị nghẽn
 
   for (const session of sessions) {
@@ -3018,6 +3335,8 @@ async function closeActiveBrowsers() {
   }
   const token = readGoLoginToken();
   await Promise.allSettled(sessions.map(async (session) => {
+    session.suppressAutoRefill = true;
+    session.isClosed = true;
     if (session.isGoLogin && session.profileId) {
       if (session.browser && typeof session.browser.close === 'function') {
         await session.browser.close().catch(() => {});
@@ -3036,7 +3355,15 @@ async function closeActiveBrowsers() {
       try { if (existsSync(lock)) unlinkSync(lock); } catch {}
       return;
     }
-    return session.browser?.close?.().catch(() => {});
+    try {
+      await Promise.race([
+        session.browser?.close?.(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 2000)),
+      ]);
+    } catch {}
+    if (session.proxyKey) {
+      await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
+    }
   }));
 
   // Đảm bảo daemon dừng tất cả profile đang mở
@@ -3055,6 +3382,8 @@ async function closeActiveBrowsers() {
   // Force kill fallback để bảo đảm không còn cửa sổ trình duyệt nào sót lại trên màn hình
   await executeFile('pkill', ['-9', '-f', 'Orbita-Browser']).catch(() => {});
   await executeFile('pkill', ['-9', '-f', 'chrome-regular-builds']).catch(() => {});
+  await executeFile('pkill', ['-9', '-f', 'user-data-dir.*chrome-profiles']).catch(() => {});
+  await executeFile('pkill', ['-9', '-f', 'user-data-dir.*AutoLeadPC']).catch(() => {});
 
   activeBrowsers.clear();
   activeProxyLocks.clear();
@@ -3062,8 +3391,8 @@ async function closeActiveBrowsers() {
 
   return {
     results: [sessions.length > 0
-      ? 'Đã đóng ' + sessions.length + ' trình duyệt.'
-      : 'Đã đóng toàn bộ trình duyệt trên màn hình.'],
+      ? 'Đã đóng ' + sessions.length + ' trình duyệt và dừng hẳn toàn bộ luồng.'
+      : 'Đã đóng toàn bộ trình duyệt trên màn hình và dừng hẳn.'],
     warnings: [],
     autoRefillEnabled: false,
   };
@@ -3344,12 +3673,54 @@ async function removeChromeSessionProfile(userDataDirectory) {
   // cache vẫn tích lại từng lượt.
   const targets = [userDataDirectory, userDataDirectory.replace(chromeProfileDirectory, chromeProfileCacheDirectory)]
     .filter((target) => isManagedChromeProfilePath(target));
-  for (const delayMs of [1500, 2500]) {
-    await new Promise((resolve) => { setTimeout(resolve, delayMs); });
+  // Thử xóa ngay, sau đó retry nếu Chrome chưa nhả file
+  for (const delayMs of [0, 1500, 2500, 10000]) {
+    if (delayMs > 0) await new Promise((resolve) => { setTimeout(resolve, delayMs); });
     await Promise.all(targets.map((target) => rm(target, { recursive: true, force: true }).catch(() => {})));
     const remaining = await Promise.all(targets.map((target) => access(target).then(() => true, () => false)));
     if (!remaining.includes(true)) return;
   }
+}
+
+/**
+ * Xóa tất cả session profiles không có Chrome đang dùng (startup cleanup + có thể gọi lại).
+ * Kiểm tra SingletonLock: nếu không có lock → xóa ngay; nếu có lock nhưng PID trong lock đã chết → xóa.
+ */
+async function cleanupStaleProfiles() {
+  const roots = [chromeProfileDirectory, chromeProfileCacheDirectory];
+  let removed = 0;
+  for (const root of roots) {
+    let channelDirs;
+    try { channelDirs = await readdir(root); } catch { continue; }
+    for (const channel of channelDirs) {
+      const channelPath = join(root, channel);
+      let versionDirs;
+      try { versionDirs = await readdir(channelPath); } catch { continue; }
+      for (const version of versionDirs) {
+        const versionPath = join(channelPath, version);
+        let profileDirs;
+        try { profileDirs = await readdir(versionPath); } catch { continue; }
+        for (const profileDir of profileDirs) {
+          const profilePath = join(versionPath, profileDir);
+          const lockPath = join(profilePath, 'SingletonLock');
+          let hasActiveLock = false;
+          try {
+            const lockTarget = await readlink(lockPath);
+            // lockTarget = "hostname-PID"
+            const pid = parseInt(lockTarget.split('-').pop(), 10);
+            if (pid > 0) {
+              try { process.kill(pid, 0); hasActiveLock = true; } catch { /* PID dead */ }
+            }
+          } catch { /* no lock file */ }
+          if (!hasActiveLock && isManagedChromeProfilePath(profilePath)) {
+            await rm(profilePath, { recursive: true, force: true }).catch(() => {});
+            removed++;
+          }
+        }
+      }
+    }
+  }
+  if (removed > 0) console.log(`[Cleanup] Đã xóa ${removed} profile Chrome cũ không còn dùng.`);
 }
 
 /**
@@ -3570,6 +3941,9 @@ async function startLeadVerification(session, leadConfig) {
     session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp}! Đang tiếp tục tự điền các bước tiếp theo.`;
     updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead về! Làm tiếp...</span>`);
 
+    // Nếu đang bật chế độ ẩn chờ lead: hiển thị trình duyệt lên màn hình ngay khi có lead
+    await session.showWindow?.(true);
+
     const logs = browserSessionLogs.get(session);
     if (logs) {
       logs.push({
@@ -3641,7 +4015,7 @@ async function startLeadVerification(session, leadConfig) {
 async function openBrowserWithInstalledChrome({
   build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows', streamRole = 1, streamLabel = '', offerNumber = 1,
   scriptSteps = null, captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
-  antiFingerprint = {}, checkDuplicate = true, hideUntilTarget = false,
+  antiFingerprint = {}, checkDuplicate = true, hideUntilTarget = false, hideUntilLead = false,
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
@@ -3649,9 +4023,14 @@ async function openBrowserWithInstalledChrome({
   await mkdir(userDataDirectory, { recursive: true, mode: 0o700 });
 
   let timezoneId;
+  let ipLat = 0, ipLng = 0;
   try {
     const ipInfo = await requestProxyIpInfo(proxy);
     if (typeof ipInfo.timezone === 'string' && ipInfo.timezone.includes('/')) timezoneId = ipInfo.timezone;
+    if (typeof ipInfo.loc === 'string') {
+      const parts = ipInfo.loc.split(',').map(Number);
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) [ipLat, ipLng] = parts;
+    }
   } catch {
     // Không tra được múi giờ không chặn việc xác minh IP trong trình duyệt.
   }
@@ -3661,24 +4040,31 @@ async function openBrowserWithInstalledChrome({
     : null;
   const dp = DEVICE_PROFILES[deviceProfile] ?? DEVICE_PROFILES.windows;
   let context;
+  let verifiedExitIp = null;
+  // Chạy ẩn hoàn toàn — người dùng xem qua Screen View trong giao diện AutoLead
+  const headlessViewport = dp.viewport ?? { width: tile.width, height: Math.max(600, tile.height - 85) };
   try {
     context = await chromium.launchPersistentContext(userDataDirectory, {
       executablePath: build.executablePath,
       ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking', '--disable-component-update'],
-      headless: false,
-      viewport: dp.viewport,
+      headless: true,
+      viewport: headlessViewport,
+      ignoreHTTPSErrors: true,
       userAgent: dp.ua(build.version),
       isMobile: dp.isMobile,
       hasTouch: dp.hasTouch,
-      ...(dp.viewport ? { deviceScaleFactor: dp.deviceScaleFactor ?? 1 } : {}),
+      deviceScaleFactor: dp.deviceScaleFactor ?? 1,
       proxy: relay?.proxy ?? toPlaywrightProxy(proxy),
       ...(timezoneId && { timezoneId }),
       args: [
-        `--window-position=${tile.left},${tile.top}`,
-        `--window-size=${dp.viewport ? `${dp.viewport.width},${dp.viewport.height + 100}` : `${tile.width},${tile.height}`}`,
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-blink-features=AutomationControlled',
+        '--disable-gpu',
+        '--js-flags=--max-old-space-size=512',
+        '--disk-cache-size=1',
+        '--media-cache-size=1',
+        '--renderer-process-limit=3',
       ],
     });
   } catch (error) {
@@ -3699,6 +4085,7 @@ async function openBrowserWithInstalledChrome({
     streamLabel: streamLabel || `Offer ${actualOfferNumber}`,
     offerNumber: actualOfferNumber,
     hideUntilTarget: Boolean(hideUntilTarget),
+    hideUntilLead: Boolean(hideUntilLead),
     hasShownWindow: false,
     leadCheckStatus: null,
     leadCheckMessage: null,
@@ -3814,9 +4201,9 @@ async function openBrowserWithInstalledChrome({
     }
   }, dp.spoof);
 
-  // Chống fingerprint theo tuỳ chọn (tương đương Canvas/ClientRects/WebGLImage/WebRTC trong Settings.ini bản Windows)
-  if (antiFingerprint.canvas || antiFingerprint.clientRects || antiFingerprint.webgl || antiFingerprint.webrtc) {
-    await context.addInitScript(({ canvas, clientRects, webgl, webrtc, webglVendor, webglRenderer, seed }) => {
+  // Chống fingerprint theo tuỳ chọn (tương đương Canvas/ClientRects/WebGLImage/WebRTC/Fonts/ApiFakeIP trong Settings.ini bản Windows)
+  if (antiFingerprint.canvas || antiFingerprint.clientRects || antiFingerprint.webgl || antiFingerprint.webrtc || antiFingerprint.fonts || antiFingerprint.apiFakeIP) {
+    await context.addInitScript(({ canvas, clientRects, webgl, webrtc, fonts, apiFakeIP, ipLat, ipLng, webglVendor, webglRenderer, seed }) => {
       // Nhiễu nhỏ ổn định theo seed của phiên để cùng 1 phiên luôn ra cùng kết quả, nhưng khác giữa các phiên
       let s = seed;
       const rand = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
@@ -3893,11 +4280,71 @@ async function openBrowserWithInstalledChrome({
         window.RTCPeerConnection = undefined;
         window.webkitRTCPeerConnection = undefined;
       }
+
+      if (fonts) {
+        // Whitelist chỉ cho phép các font web-safe phổ biến, chặn probe font hệ thống
+        const safeFonts = new Set([
+          'Arial', 'Arial Black', 'Comic Sans MS', 'Courier New', 'Georgia',
+          'Impact', 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Helvetica',
+          'sans-serif', 'serif', 'monospace', 'cursive', 'fantasy',
+          'system-ui', '-apple-system', 'BlinkMacSystemFont',
+        ]);
+        if (document.fonts) {
+          const origCheck = document.fonts.check.bind(document.fonts);
+          document.fonts.check = function (font, text) {
+            const m = font.match(/(?:^|[\s,])([A-Za-z][A-Za-z0-9 \-]+?)(?=\s*,|\s*$)/);
+            const name = m ? m[1].trim() : font;
+            return safeFonts.has(name) ? origCheck(font, text) : false;
+          };
+          document.fonts.load = () => Promise.resolve([]);
+        }
+        // Jitter measureText width để phá font-metric fingerprint
+        const origMeasureText = CanvasRenderingContext2D.prototype.measureText;
+        CanvasRenderingContext2D.prototype.measureText = function (...args) {
+          const real = origMeasureText.apply(this, args);
+          const j = (rand() - 0.5) * 0.1;
+          return new Proxy(real, {
+            get (t, p) {
+              if (p === 'width') return t.width + j;
+              const v = t[p];
+              return typeof v === 'function' ? v.bind(t) : v;
+            },
+          });
+        };
+      }
+
+      if (apiFakeIP) {
+        // Fake navigator.geolocation theo toạ độ IP proxy (ipinfo.io loc)
+        const fakeCoords = {
+          latitude: ipLat || 0,
+          longitude: ipLng || 0,
+          accuracy: 20 + Math.floor(rand() * 60),
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        };
+        const fakePos = { coords: fakeCoords, timestamp: Date.now() };
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition = (success, error, opts) => {
+            setTimeout(() => success(fakePos), 100 + Math.floor(rand() * 400));
+          };
+          navigator.geolocation.watchPosition = (success, error, opts) => {
+            setTimeout(() => success(fakePos), 100 + Math.floor(rand() * 400));
+            return Math.floor(rand() * 9999) + 1;
+          };
+          navigator.geolocation.clearWatch = () => {};
+        }
+      }
     }, {
       canvas: Boolean(antiFingerprint.canvas),
       clientRects: Boolean(antiFingerprint.clientRects),
       webgl: Boolean(antiFingerprint.webgl),
       webrtc: Boolean(antiFingerprint.webrtc),
+      fonts: Boolean(antiFingerprint.fonts),
+      apiFakeIP: Boolean(antiFingerprint.apiFakeIP),
+      ipLat,
+      ipLng,
       webglVendor: dp.spoof.webglVendor,
       webglRenderer: dp.spoof.webglRenderer,
       seed: Math.floor(Math.random() * 0x7fffffff) || 1,
@@ -3912,12 +4359,16 @@ async function openBrowserWithInstalledChrome({
     leadCheckScreen: leadConfig.checkScreen || 5,
     onLog: (entry) => {
       if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
-        void session.showWindow?.();
+        if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
+          void session.showWindow?.(entry.type === 'lead_confirmed');
+        }
       }
       session.addBrowserLog?.(entry);
     },
     onRecordPicked: (record) => {
-      void session.showWindow?.();
+      if (!session.hideUntilLead) {
+        void session.showWindow?.();
+      }
       if (session.assignedEmail && record) {
         record.email = session.assignedEmail;
         record.emailaddress = session.assignedEmail;
@@ -4004,10 +4455,13 @@ async function openBrowserWithInstalledChrome({
     activeBrowsers.delete(session);
     releaseProxyLock(proxy, session.exitIp);
     void relay?.close();
+    const _slot = session.slot ?? tileIndex + 1;
+    const _sc = screencastSessions.get(_slot);
+    if (_sc) { _sc.cdpClient.detach().catch(() => {}); try { _sc.sseResponse.end(); } catch {} screencastSessions.delete(_slot); }
     // Profile dùng xong là xoá cả profile và cache: không giữ lại ~179 MB mỗi proxy đã thử.
     void removeChromeSessionProfile(userDataDirectory);
     chromeBuildRotationCounter += 1;
-    if (!session.suppressAutoRefill) {
+    if (!session.suppressAutoRefill && !autoRefill.stopRequested && autoRefill.enabled) {
       if (!session.closingDueToTrafficBlocked) {
         autoRefill.message = `Slot ${tileIndex + 1} (${streamLabel || 'Trình duyệt'}) trống; đang tìm proxy thay thế.`;
       }
@@ -4021,7 +4475,7 @@ async function openBrowserWithInstalledChrome({
     let cdpSession = null;
     let cdpWindowId = null;
 
-    if (hideUntilTarget) {
+    if (hideUntilTarget || hideUntilLead) {
       try {
         cdpSession = await context.newCDPSession(page);
         const win = await cdpSession.send('Browser.getWindowForTarget');
@@ -4030,15 +4484,17 @@ async function openBrowserWithInstalledChrome({
           windowId: cdpWindowId,
           bounds: { windowState: 'minimized' },
         });
-        console.log(`[HideBrowser] Slot ${tileIndex + 1}: Chạy ngầm (ẩn cửa sổ), chỉ hiện khi vào trang đích.`);
-        session.addBrowserLog?.({ type: 'navigate', detail: 'Chạy ngầm (ẩn cửa sổ), đang kiểm tra IP và kết nối...' });
+        const modeText = hideUntilLead ? 'chỉ hiện khi có lead' : 'chỉ hiện khi vào trang đích';
+        console.log(`[HideBrowser] Slot ${tileIndex + 1}: Chạy ngầm (ẩn cửa sổ), ${modeText}.`);
+        session.addBrowserLog?.({ type: 'navigate', detail: `Chạy ngầm (ẩn cửa sổ), ${modeText}...` });
       } catch (err) {
         console.warn('[HideBrowser] Lỗi ẩn cửa sổ ban đầu:', err.message);
       }
     }
 
-    session.showWindow = async () => {
-      if (!hideUntilTarget || session.hasShownWindow) return;
+    session.showWindow = async (force = false) => {
+      if ((!hideUntilTarget && !hideUntilLead) || session.hasShownWindow) return;
+      if (hideUntilLead && !force) return;
       session.hasShownWindow = true;
       try {
         const activePage = session.mainPage || page;
@@ -4063,8 +4519,9 @@ async function openBrowserWithInstalledChrome({
             },
           });
           if (!activePage.isClosed()) await activePage.bringToFront().catch(() => {});
-          console.log(`[ShowWindow] Slot ${tileIndex + 1}: Đã vào trang đích an toàn, hiển thị trình duyệt.`);
-          session.addBrowserLog?.({ type: 'navigate', detail: 'Đã vào trang đích an toàn, hiển thị cửa sổ trình duyệt.' });
+          const reasonText = hideUntilLead ? 'Đã có lead thành công' : 'Đã vào trang đích an toàn';
+          console.log(`[ShowWindow] Slot ${tileIndex + 1}: ${reasonText}, hiển thị trình duyệt.`);
+          session.addBrowserLog?.({ type: 'navigate', detail: `${reasonText}, hiển thị cửa sổ trình duyệt.` });
         }
       } catch (err) {
         console.warn('[ShowWindow] Lỗi hiển thị cửa sổ:', err.message);
@@ -4072,6 +4529,7 @@ async function openBrowserWithInstalledChrome({
     };
 
     const exitIp = await verifyBrowserExitIp(context, usedExitIps, onExitIp, websiteUrl, checkDuplicate);
+    verifiedExitIp = exitIp;
     session.exitIp = exitIp;
     session.streamRole = streamRole;
     session.streamLabel = streamLabel;
@@ -4086,7 +4544,9 @@ async function openBrowserWithInstalledChrome({
       throw new Error(`trang đích hiển thị ${deadReason}`);
     }
     session.mainPage = page; // dùng để phân biệt tab chính vs tab phụ
-    await session.showWindow();
+    if (!hideUntilLead) {
+      await session.showWindow();
+    }
     await page.bringToFront().catch(() => {});
 
     // Đặt tiền tố IP, thiết bị và luồng vào tiêu đề trang và gắn badge để khi xem đều thấy rõ IP, loại thiết bị và luồng
@@ -4210,7 +4670,19 @@ async function openBrowserWithInstalledChrome({
     return { exitIp, finalUrl, session };
   } catch (error) {
     session.suppressAutoRefill = true;
-    await context.close().catch(() => {});
+    session.isClosed = true;
+    activeBrowsers.delete(session);
+    releaseProxyLock(proxy, session.exitIp || verifiedExitIp);
+    try {
+      await Promise.race([
+        context.close(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 2000)),
+      ]);
+    } catch {}
+    // QUAN TRỌNG: Force kill ngay tiến trình Chrome của profile này để cửa sổ đóng lập tức 100%, không bị kẹt trên màn hình
+    await executeFile('pkill', ['-9', '-f', `user-data-dir.*${proxyKey}`]).catch(() => {});
+    await relay?.close().catch(() => {});
+    void removeChromeSessionProfile(userDataDirectory);
     throw error;
   }
 }
@@ -4558,7 +5030,7 @@ export function watchTrafficBlockedPage(session) {
               console.log(`[DeadTab] Tab phụ bị ${deadReason} (${page.url()}), đóng tab và quay về tab chính.`);
               session.addBrowserLog?.({ type: 'traffic_blocked', detail: `Tab phụ bị ${deadReason}. Đóng tab, giữ trình duyệt.` });
               await page.close().catch(() => {});
-              const remaining = context.pages().filter((p) => !p.isClosed());
+              const remaining = (session.browser?.pages ? session.browser.pages() : []).filter((p) => !p.isClosed());
               if (remaining.length > 0) await (session.mainPage?.isClosed?.() ? remaining[0] : session.mainPage).bringToFront().catch(() => {});
               continue;
             }
@@ -4566,8 +5038,18 @@ export function watchTrafficBlockedPage(session) {
             blocked = true;
             clearInterval(timer);
             session.closingDueToTrafficBlocked = true;
+            if (autoRefill.stopRequested || !autoRefill.enabled) {
+              session.suppressAutoRefill = true;
+              session.isClosed = true;
+              activeBrowsers.delete(session);
+              await page.close().catch(() => {});
+              await session.browser?.close?.().catch(() => {});
+              if (session.proxyKey) {
+                await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
+              }
+              return;
+            }
             session.suppressAutoRefill = false;
-            autoRefill.enabled = true;
 
             try {
               if (session.proxyKey) {
@@ -4620,7 +5102,12 @@ export function watchTrafficBlockedPage(session) {
             chromeBuildRotationCounter += 1;
             await page.close().catch(() => {});
             await session.browser?.close?.().catch(() => {});
-            queueAutomaticRefill();
+            if (session.proxyKey) {
+              await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
+            }
+            if (!autoRefill.stopRequested && autoRefill.enabled) {
+              queueAutomaticRefill();
+            }
             return;
           }
 
@@ -4686,8 +5173,18 @@ export function watchTrafficBlockedPage(session) {
                     blocked = true;
                     clearInterval(timer);
                     session.closingDueToTrafficBlocked = true;
+                    if (autoRefill.stopRequested || !autoRefill.enabled) {
+                      session.suppressAutoRefill = true;
+                      session.isClosed = true;
+                      activeBrowsers.delete(session);
+                      await page.close().catch(() => {});
+                      await session.browser?.close?.().catch(() => {});
+                      if (session.proxyKey) {
+                        await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
+                      }
+                      return;
+                    }
                     session.suppressAutoRefill = false;
-                    autoRefill.enabled = true;
 
                     const reason = 'Kẹt tại adtrapper không chuyển hướng sau 2 lần tải lại';
                     console.log(`[Adtrapper] ${label}: ${reason}. Đang đóng cửa sổ và mở sock khác.`);
@@ -4724,7 +5221,12 @@ export function watchTrafficBlockedPage(session) {
                     chromeBuildRotationCounter += 1;
                     await page.close().catch(() => {});
                     await session.browser?.close?.().catch(() => {});
-                    queueAutomaticRefill();
+                    if (session.proxyKey) {
+                      await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
+                    }
+                    if (!autoRefill.stopRequested && autoRefill.enabled) {
+                      queueAutomaticRefill();
+                    }
                     return;
                   }
                 }
@@ -4784,6 +5286,9 @@ function exitWhenParentExits() {
  * @since 2026-10-15
  */
 async function startLocalInterface() {
+  void cleanupStaleProfiles();
+  // Dọn profile mồ côi định kỳ mỗi 5 phút (bắt Chrome crash không trigger close event)
+  setInterval(() => void cleanupStaleProfiles(), 5 * 60 * 1000);
   await loadAutofillUsed();
   await loadAutofillQueue();
   await loadProxyQueue();
@@ -4799,6 +5304,7 @@ async function startLocalInterface() {
     '/launch-gologin': runExclusively(launchGoLoginBrowsers),
     '/check': checkRequestedProxies,
     '/close': closeActiveBrowsers,
+    '/stop': closeActiveBrowsers,
     '/auto-refill': updateAutoRefill,
     '/used-ips': listUsedExitIps,
     '/used-ips/clear': runExclusively(clearUsedProxyHistory),
@@ -5270,7 +5776,9 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/proxy-queue/reset') {
       const body = JSON.parse(await readRequestBody(request));
       const rawLines = (body.proxyList ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-      if (rawLines.length > 0) {
+      const clearAll = body.clearAllUsedIps === true || rawLines.length === 0;
+
+      if (!clearAll && rawLines.length > 0) {
         // Chỉ reset proxy nằm trong danh sách hiện tại của textarea
         const allowedSet = new Set(rawLines);
         const toRestore = proxyQueue.used.filter((line) => allowedSet.has(line.trim()));
@@ -5278,7 +5786,7 @@ async function startLocalInterface() {
         proxyQueue.available.push(...toRestore);
         proxyQueue.used = keepUsed;
       } else {
-        // Không có danh sách → reset toàn bộ
+        // Reset toàn bộ
         proxyQueue.available.push(...proxyQueue.used.splice(0));
       }
       await saveProxyQueue();
@@ -5288,18 +5796,22 @@ async function startLocalInterface() {
       // Xoá bản ghi trong usageHistory cho các proxy được reset để không bị chặn bởi lượt cũ
       try {
         const history = await readProxyUsageHistory();
-        if (rawLines.length > 0) {
+        if (clearAll) {
+          history.proxies = {};
+        } else if (rawLines.length > 0) {
           const allowedServers = new Set(rawLines.map((l) => {
             try { return parseProxyLine(l, 1, 'socks5')?.server; } catch { return null; }
           }).filter(Boolean));
           for (const key of Object.keys(history.proxies)) {
             const entry = history.proxies[key];
-            if (entry && (allowedServers.has(entry.proxy) || allowedServers.has(entry.server))) {
-              delete history.proxies[key];
+            if (entry) {
+              const matched = allowedServers.has(entry.proxy) || allowedServers.has(entry.server) ||
+                rawLines.some((rl) => entry.proxy?.includes(rl) || entry.server?.includes(rl));
+              if (matched) {
+                delete history.proxies[key];
+              }
             }
           }
-        } else {
-          history.proxies = {};
         }
         await persistProxyUsageHistory(history);
       } catch {}
@@ -5307,7 +5819,7 @@ async function startLocalInterface() {
       respondWithJson(response, 200, {
         available: proxyQueue.available.length,
         used: proxyQueue.used.length,
-        message: `Đã đặt lại: ${proxyQueue.available.length} proxy sẵn sàng dùng lại.`,
+        message: `Đã đặt lại: ${proxyQueue.available.length} proxy sẵn sàng dùng lại (đã làm sạch lịch sử trùng IP).`,
       });
       return;
     }
@@ -5433,6 +5945,15 @@ async function startLocalInterface() {
         used: 0,
         message: `Đã đặt lại: ${emailQueue.available.length} email mẫu sẵn sàng dùng lại.`,
       });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/email-queue/clear') {
+      const count = emailQueue.available.length + emailQueue.used.length;
+      emailQueue.available.length = 0;
+      emailQueue.used.length = 0;
+      await saveEmailQueue();
+      respondWithJson(response, 200, { message: `Đã xóa tất cả ${count} gmail.` });
       return;
     }
 
@@ -5733,6 +6254,140 @@ async function startLocalInterface() {
       if (!agent) { respondWithJson(response, 404, { error: 'Agent not found' }); return; }
       agent.enabled = typeof body.enabled === 'boolean' ? body.enabled : !agent.enabled;
       respondWithJson(response, 200, { agentId: body.agentId, enabled: agent.enabled });
+      return;
+    }
+    // ── Screen view endpoints ─────────────────────────────────────────────────
+    if (request.method === 'GET' && request.url.startsWith('/screen/snapshot/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { response.writeHead(404); response.end(); return; }
+      try {
+        const pages = session.browser.pages().filter(p => !p.isClosed());
+        const page = pages[0];
+        if (!page) { response.writeHead(404); response.end(); return; }
+        const buf = await page.screenshot({ type: 'jpeg', quality: 65 });
+        response.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
+        response.end(buf);
+      } catch { response.writeHead(503); response.end(); }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url.startsWith('/screen/stream/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { response.writeHead(404); response.end(); return; }
+
+      // Nếu slot đang có SSE cũ → ngắt trước
+      const prev = screencastSessions.get(slot);
+      if (prev) {
+        try { await prev.cdpClient.send('Page.stopScreencast').catch(() => {}); prev.cdpClient.detach().catch(() => {}); } catch {}
+        try { prev.sseResponse.end(); } catch {}
+        screencastSessions.delete(slot);
+      }
+
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+      response.write('retry: 3000\n\n');
+
+      try {
+        const pages = session.browser.pages().filter(p => !p.isClosed());
+        const page = pages[0];
+        if (!page) { response.end(); return; }
+        const cdpClient = await session.browser.newCDPSession(page);
+        screencastSessions.set(slot, { cdpClient, sseResponse: response });
+
+        await cdpClient.send('Page.startScreencast', { format: 'jpeg', quality: 55, maxWidth: 960, maxHeight: 720, everyNthFrame: 1 });
+        cdpClient.on('Page.screencastFrame', (frame) => {
+          if (!response.writableEnded) {
+            response.write(`data: ${frame.data}\n\n`);
+          }
+          cdpClient.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+        });
+
+        const cleanup = async () => {
+          const sc = screencastSessions.get(slot);
+          screencastSessions.delete(slot);
+          if (sc) {
+            try { await sc.cdpClient.send('Page.stopScreencast'); } catch {}
+            try { sc.cdpClient.detach(); } catch {}
+          }
+        };
+        request.on('close', cleanup);
+        response.on('close', cleanup);
+      } catch (err) {
+        response.write(`data: error\n\n`);
+        response.end();
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url.startsWith('/screen/tabs/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { respondWithJson(response, 404, { error: 'not found' }); return; }
+      const pages = session.browser.pages().filter(p => !p.isClosed());
+      const tabs = await Promise.all(pages.map(async (p, i) => ({
+        index: i,
+        url: p.url(),
+        title: await p.title().catch(() => p.url()),
+      })));
+      respondWithJson(response, 200, { tabs });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url.startsWith('/screen/tabs/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { respondWithJson(response, 404, { error: 'not found' }); return; }
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const pages = session.browser.pages().filter(p => !p.isClosed());
+        const targetPage = pages[body.index ?? 0];
+        if (!targetPage) { respondWithJson(response, 400, { error: 'invalid tab' }); return; }
+        await targetPage.bringToFront();
+        const sc = screencastSessions.get(slot);
+        if (sc) {
+          try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
+          const newCdp = await session.browser.newCDPSession(targetPage);
+          sc.cdpClient = newCdp;
+          await newCdp.send('Page.startScreencast', { format: 'jpeg', quality: 55, maxWidth: 960, maxHeight: 720, everyNthFrame: 1 });
+          newCdp.on('Page.screencastFrame', (frame) => {
+            if (!sc.sseResponse.writableEnded) sc.sseResponse.write(`data: ${frame.data}\n\n`);
+            newCdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+          });
+        }
+        respondWithJson(response, 200, { ok: true });
+      } catch (err) { respondWithJson(response, 500, { error: err.message }); }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url.startsWith('/screen/input/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const sc = screencastSessions.get(slot);
+      if (!sc) { respondWithJson(response, 404, { error: 'stream not open' }); return; }
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const { cdpClient } = sc;
+        if (body.type === 'mousedown') {
+          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: body.x, y: body.y, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+        } else if (body.type === 'mouseup') {
+          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: body.x, y: body.y, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+        } else if (body.type === 'mousemove') {
+          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: body.x, y: body.y, modifiers: body.modifiers || 0 });
+        } else if (body.type === 'wheel') {
+          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: body.x, y: body.y, deltaX: 0, deltaY: body.deltaY });
+        } else if (body.type === 'keydown') {
+          await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyDown', key: body.key, code: body.code || '', modifiers: body.modifiers || 0, windowsVirtualKeyCode: body.keyCode || 0, nativeVirtualKeyCode: body.keyCode || 0 });
+        } else if (body.type === 'keyup') {
+          await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyUp', key: body.key, code: body.code || '', modifiers: body.modifiers || 0, windowsVirtualKeyCode: body.keyCode || 0, nativeVirtualKeyCode: body.keyCode || 0 });
+        } else if (body.type === 'char') {
+          await cdpClient.send('Input.dispatchKeyEvent', { type: 'char', text: body.text || body.key });
+        }
+        respondWithJson(response, 200, { ok: true });
+      } catch (err) { respondWithJson(response, 500, { error: err.message }); }
       return;
     }
     // ─────────────────────────────────────────────────────────────────────────
