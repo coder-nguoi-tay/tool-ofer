@@ -53,6 +53,8 @@ import { loadScript, runScript } from './script.mjs';
 import {
   DEFAULT_LEAD_CONFIG,
   fetchLeadDatas,
+  fetchCurrentPoint,
+  fetchToffersOverview,
   isLeadPresent,
   normalizeIpAddress,
   LeadApiError,
@@ -656,6 +658,31 @@ export async function clearAllLogsAndHtml(offerNumber = null) {
     return { success: false, error: error.message };
   }
 }
+const autoRefillSettingsPath = join(appDataDirectory, 'autorefill-settings.json');
+
+async function saveAutoRefillSettings() {
+  if (!autoRefill.settings) return;
+  try {
+    await writeFile(autoRefillSettingsPath, JSON.stringify({
+      settings: autoRefill.settings,
+      targetCount: autoRefill.targetCount,
+      sequential: autoRefill.sequential,
+    }), 'utf8');
+  } catch {}
+}
+
+async function loadAutoRefillSettings() {
+  try {
+    const raw = JSON.parse(await readFile(autoRefillSettingsPath, 'utf8'));
+    if (raw?.settings) {
+      autoRefill.settings = raw.settings;
+      autoRefill.targetCount = raw.targetCount || 1;
+      autoRefill.sequential = raw.sequential || false;
+      autoRefill.message = 'Đã khôi phục cấu hình sau restart; đang bù slot...';
+    }
+  } catch {}
+}
+
 const chromeProfileDirectory = join(appDataDirectory, 'chrome-profiles');
 const chromeProfileCacheDirectory = join(homedir(), 'Library', 'Caches', dataDirName, 'chrome-profiles');
 const installedChromeAppPath = process.env.AUTOLEADPC_CHROME_APP || '/Applications/Google Chrome.app';
@@ -3177,6 +3204,7 @@ async function launchUserRequestedBrowsers(requestBody) {
       Math.max(autoRefill.targetCount, activeBeforeLaunch + requestedCount, activeBrowsers.size),
     );
     autoRefill.message = `Tự bù ${autoRefill.enabled ? 'đang bật' : 'đang tắt'}: ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`;
+    void saveAutoRefillSettings();
     if (autoRefill.enabled) queueAutomaticRefill();
   }
 
@@ -3504,6 +3532,8 @@ export async function closeActiveBrowsers() {
   autoRefill.settings = null;
   autoRefill.targetCount = 0;
   autoRefill.queued = false;
+  // Xóa settings đã lưu để không tự khởi động lại sau khi stop chủ động
+  void writeFile(autoRefillSettingsPath, '{}', 'utf8').catch(() => {});
   autoRefill.message = 'Đã dừng toàn bộ luồng; tự bù đã tắt.';
   exclusiveQueue = Promise.resolve(); // Giải phóng ngay hàng đợi để không bị nghẽn
 
@@ -5562,6 +5592,11 @@ async function startLocalInterface() {
   await loadEmailAutoRefillConfig();
   await loadProxy711Config();
   await loadProxy711AutoRefillConfig();
+  await loadAutoRefillSettings();
+  if (autoRefill.settings) {
+    console.log('[AutoRefill] Khôi phục settings sau restart, bắt đầu bù slot...');
+    void queueAutomaticRefill();
+  }
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
   loadAiConfig();
@@ -6392,6 +6427,32 @@ async function startLocalInterface() {
       foundSession.leadCheckMessage = 'Đã mở khóa thủ công. Tiếp tục tự điền form.';
       try { foundSession.triggerAutofillScan?.(); } catch {}
       respondWithJson(response, 200, { message: `Slot ${targetSlot} đã được mở khóa để tiếp tục điền form.` });
+      return;
+    }
+
+    if ((request.method === 'GET' && (request.url === '/toffers/overview' || request.url.startsWith('/toffers/overview?'))) ||
+        (request.method === 'POST' && request.url === '/toffers/overview')) {
+      let bodyText = '';
+      if (request.method === 'POST') {
+        for await (const chunk of request) bodyText += chunk;
+      }
+      let params = {};
+      try {
+        if (bodyText) params = JSON.parse(bodyText);
+      } catch {}
+
+      const urlObj = new URL(request.url, 'http://localhost');
+      const datas = params.datas || urlObj.searchParams.get('datas') || DEFAULT_LEAD_CONFIG.datas || '1504';
+      const cookie = params.cookie || urlObj.searchParams.get('cookie') || DEFAULT_LEAD_CONFIG.cookie;
+      const pointUrl = params.pointUrl || urlObj.searchParams.get('pointUrl') || DEFAULT_LEAD_CONFIG.pointUrl;
+      const apiUrl = params.apiUrl || urlObj.searchParams.get('apiUrl') || DEFAULT_LEAD_CONFIG.apiUrl;
+
+      try {
+        const overview = await fetchToffersOverview({ datas, cookie, pointUrl, apiUrl });
+        respondWithJson(response, 200, overview);
+      } catch (err) {
+        respondWithJson(response, 500, { success: false, error: err.message, code: err.code || 'UNKNOWN_ERROR' });
+      }
       return;
     }
 

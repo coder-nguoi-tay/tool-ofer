@@ -1210,6 +1210,7 @@
     <div class="win-tab-headers" id="mainTabHeaders">
       <div class="win-tab active" data-tab="Dashboard" onclick="switchTab('Dashboard')">Dashboard</div>
       <div class="win-tab" data-tab="tabRunning" onclick="switchTab('tabRunning')">tabRunning (<span id="tabRunCount">0</span>)</div>
+      <div class="win-tab" data-tab="ToffersLeads" onclick="switchTab('ToffersLeads')">🎯 Leads (<span id="tabLeadPointHeader">-- pt</span>)</div>
       <div class="win-tab" data-tab="Script" onclick="switchTab('Script')">Script</div>
       <div class="win-tab" data-tab="RRS" onclick="switchTab('RRS')">RRS</div>
       <div class="win-tab" data-tab="Config" onclick="switchTab('Config')">Config</div>
@@ -1415,6 +1416,14 @@
                 <span>Total RRS:</span>
                 <b id="lbTotalRRS">0</b>
               </div>
+              <div class="stat-pill" style="cursor:pointer;" onclick="switchTab('ToffersLeads')" title="Số Point hiện tại trên toffers.top (Click xem danh sách lead)">
+                <span>💎 Point:</span>
+                <b id="lbToffersPoint" style="color:#0284c7;">--</b>
+              </div>
+              <div class="stat-pill" style="cursor:pointer;" onclick="switchTab('ToffersLeads')" title="Số Lead ghi nhận trên toffers.top (Click xem danh sách lead)">
+                <span>🎯 Leads:</span>
+                <b id="lbToffersLeadCount" style="color:#16a34a;">--</b>
+              </div>
             </div>
           </div>
         </fieldset>
@@ -1503,6 +1512,9 @@
               </span>
               <span class="run-stat-chip chip-ai" title="Số luồng đang được AI hỗ trợ giải quyết">
                 🤖 <b id="runStatAi">0</b> AI
+              </span>
+              <span class="run-stat-chip" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;cursor:pointer;" onclick="switchTab('ToffersLeads')" title="Số Point hiện tại từ toffers.top (Click xem danh sách lead)">
+                💎 <b id="runStatPoint">--</b> pt
               </span>
             </div>
           </div>
@@ -2200,11 +2212,107 @@
           </div>
         </fieldset>
       </div>
+
+      <!-- 10. TOFFERS LEADS & POINT -->
+      <div class="tab-panel" id="panel-ToffersLeads">
+        <!-- Top Summary KPI Cards -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:8px;margin-bottom:8px;">
+          <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div style="font-size:11px;color:#0369a1;font-weight:600;">💎 Số Point hiện tại</div>
+              <div id="leadCardPoint" style="font-size:24px;font-weight:bold;color:#0284c7;line-height:1.2;">--</div>
+            </div>
+            <div style="font-size:28px;opacity:0.8;">💎</div>
+          </div>
+
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div style="font-size:11px;color:#15803d;font-weight:600;">🎯 Tổng số Leads</div>
+              <div id="leadCardCount" style="font-size:24px;font-weight:bold;color:#16a34a;line-height:1.2;">--</div>
+            </div>
+            <div style="font-size:28px;opacity:0.8;">🎯</div>
+          </div>
+
+          <div style="background:#fafaf9;border:1px solid #e7e5e4;border-radius:4px;padding:8px 12px;">
+            <div style="font-size:11px;color:#78716c;font-weight:600;">⏱️ Lead gần nhất</div>
+            <div id="leadCardLatest" style="font-size:12px;font-weight:bold;color:#1c1917;margin-top:2px;">--</div>
+            <div id="leadCardLatestOffer" style="font-size:10px;color:#78716c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">--</div>
+          </div>
+
+          <div style="background:#fffbeb;border:1px solid #fef3c7;border-radius:4px;padding:8px 12px;">
+            <div style="font-size:11px;color:#b45309;font-weight:600;">🌐 IP Lead gần nhất</div>
+            <div id="leadCardLatestIp" style="font-size:13px;font-weight:bold;color:#d97706;margin-top:2px;">--</div>
+            <div id="leadCardLatestUser" style="font-size:10px;color:#92400e;">--</div>
+          </div>
+        </div>
+
+        <!-- Toolbar for Leads: Filter, Search, Config, Refresh -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap;background:#f8fafc;padding:6px 8px;border:1px solid #e2e8f0;border-radius:3px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="font-weight:bold;color:#003399;font-size:11px;">🔍 Tìm kiếm:</span>
+            <input type="text" id="leadSearchInput" class="win-input" placeholder="Lọc theo Tên Offer, IP, ID, User..." style="width:210px;font-size:11px;padding:2px 6px;" oninput="filterToffersLeadsTable()">
+            
+            <span style="font-weight:bold;color:#003399;font-size:11px;margin-left:4px;">datas:</span>
+            <input type="text" id="leadDatasParam" class="win-input" value="1504" style="width:65px;font-size:11px;padding:2px 6px;" title="Tham số datas POST lên toffers.top">
+
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;margin-left:6px;" title="Tự động cập nhật mỗi 10 giây">
+              <input type="checkbox" id="chkLeadAutoRefresh" checked onchange="toggleLeadAutoRefresh(this.checked)"> Auto refresh (10s)
+            </label>
+          </div>
+
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span id="leadLastUpdatedText" style="font-size:10px;color:#64748b;">Chưa cập nhật</span>
+            <button type="button" class="win-btn win-btn-primary" id="btnRefreshToffersLeads" onclick="fetchToffersLeads(true)" style="padding:2px 12px;font-size:11px;gap:4px;">🔄 Làm mới</button>
+            <button type="button" class="win-btn" onclick="toggleLeadCookieConfig()" style="padding:2px 8px;font-size:11px;">⚙️ Cookie</button>
+          </div>
+        </div>
+
+        <!-- Collapsible Cookie & API Config Drawer -->
+        <div id="leadCookieConfigDrawer" style="display:none;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:3px;padding:8px;margin-bottom:6px;">
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:11px;font-weight:600;width:95px;color:#334155;">Cookie toffers:</span>
+              <input type="text" id="leadCustomCookie" class="win-input" style="flex:1;font-size:11px;" value="qcodes_=7p0d1pg081d433i45giksp7k5fvm386o; qcodes_sound=1">
+              <button type="button" class="win-btn win-btn-primary" onclick="saveLeadCustomCookie()" style="font-size:11px;">Lưu Cookie</button>
+            </div>
+            <div style="font-size:10px;color:#64748b;">Cookie phiên đăng nhập trên https://toffers.top/partner/chat_leading. Tự động được áp dụng cho cả luồng kiểm tra lead tự động.</div>
+          </div>
+        </div>
+
+        <!-- Leads DataGridView Table -->
+        <div class="grid-container" id="toffersLeadsTableWrap" style="height:calc(100% - 150px);overflow:auto;">
+          <table class="win-grid" id="dgvToffersLeads">
+            <thead>
+              <tr>
+                <th style="width:36px;text-align:center;">#</th>
+                <th style="width:75px;">ID</th>
+                <th style="width:240px;">Tên Offer</th>
+                <th style="width:75px;text-align:center;">Point</th>
+                <th style="width:130px;">Địa chỉ IP</th>
+                <th style="width:55px;text-align:center;">Geo</th>
+                <th style="width:150px;">Thời gian Lead</th>
+                <th style="width:160px;">Click ID</th>
+                <th style="width:130px;">Thành viên</th>
+                <th style="width:55px;text-align:center;">Net</th>
+              </tr>
+            </thead>
+            <tbody id="dgvToffersLeadsBody">
+              <tr>
+                <td colspan="10" style="text-align:center;padding:30px;color:#64748b;">
+                  <div style="font-size:24px;margin-bottom:6px;">⏳</div>
+                  <div>Đang tải dữ liệu từ toffers.top...</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- WinForms StatusStrip -->
     <div class="win-statusbar">
       <div class="status-panel status-panel-flex" id="lbStatus">Ready</div>
+      <div class="status-panel" style="cursor:pointer;" onclick="switchTab('ToffersLeads')" title="Số Point toffers.top">💎 Point: <b id="sbToffersPoint">--</b></div>
       <div class="status-panel">Total Run: <b id="lbTotalRun">0</b></div>
       <div class="status-panel">Total RRS: <b id="lbTotalRRS">0</b></div>
       <div class="status-panel" id="lbSystemInfo">AutoLeadPC v2.0 - Port 3211</div>
@@ -2229,6 +2337,9 @@
         startLogRefresh();
       } else {
         stopLogRefresh();
+      }
+      if (tabId === 'ToffersLeads') {
+        fetchToffersLeads(false);
       }
     }
     window.switchTab = switchTab;
@@ -4668,6 +4779,191 @@
     function _updateScreenSlots(sessions) {
       _screenSlots = sessions.filter(s => s.slot).map(s => ({ slot: s.slot, ip: s.exitIp || '' }));
     }
+
+    // ─── TOFFERS.TOP LEADS & POINT DASHBOARD ───
+    let toffersLeadsData = [];
+    let leadAutoRefreshTimer = null;
+
+    async function fetchToffersLeads(isManual = false) {
+      const btn = document.getElementById('btnRefreshToffersLeads');
+      if (btn && isManual) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Đang tải...';
+      }
+
+      const datas = document.getElementById('leadDatasParam')?.value || '1504';
+      const cookie = document.getElementById('leadCustomCookie')?.value || '';
+
+      try {
+        const res = await api('/toffers/overview', {
+          method: 'POST',
+          body: JSON.stringify({ datas, cookie })
+        });
+
+        if (res && res.success) {
+          toffersLeadsData = res.results || [];
+          renderToffersLeads(res);
+        } else {
+          console.warn('[Toffers] Không lấy được dữ liệu:', res?.error);
+          if (isManual && res?.error) {
+            showWinAlert('Lỗi toffers.top: ' + res.error);
+          }
+        }
+      } catch (err) {
+        console.error('[Toffers] Lỗi gọi API:', err);
+      } finally {
+        if (btn && isManual) {
+          btn.disabled = false;
+          btn.textContent = '🔄 Làm mới';
+        }
+      }
+    }
+    window.fetchToffersLeads = fetchToffersLeads;
+
+    function renderToffersLeads(data) {
+      const point = (data.point !== null && data.point !== undefined) ? data.point : '--';
+      const results = data.results || [];
+
+      // Cập nhật huy hiệu và stat pills trên toàn giao diện
+      const pointText = `${point} pt`;
+      const elHeaderPt = document.getElementById('tabLeadPointHeader');
+      if (elHeaderPt) elHeaderPt.textContent = pointText;
+
+      const elLbPt = document.getElementById('lbToffersPoint');
+      if (elLbPt) elLbPt.textContent = String(point);
+
+      const elSbPt = document.getElementById('sbToffersPoint');
+      if (elSbPt) elSbPt.textContent = String(point);
+
+      const elLbLd = document.getElementById('lbToffersLeadCount');
+      if (elLbLd) elLbLd.textContent = String(results.length);
+
+      const elRunPt = document.getElementById('runStatPoint');
+      if (elRunPt) elRunPt.textContent = String(point);
+
+      const elCardPt = document.getElementById('leadCardPoint');
+      if (elCardPt) elCardPt.textContent = String(point);
+
+      const elCardCnt = document.getElementById('leadCardCount');
+      if (elCardCnt) elCardCnt.textContent = String(results.length);
+
+      if (results.length > 0) {
+        const first = results[0];
+        const timeStr = first.timelead ? new Date(Number(first.timelead) * 1000).toLocaleString('vi-VN') : '--';
+        const elLatest = document.getElementById('leadCardLatest');
+        if (elLatest) elLatest.textContent = timeStr;
+
+        const elLatestOff = document.getElementById('leadCardLatestOffer');
+        if (elLatestOff) elLatestOff.textContent = first.nameoff || '--';
+
+        const elLatestIp = document.getElementById('leadCardLatestIp');
+        if (elLatestIp) elLatestIp.textContent = first.ip || '--';
+
+        const elLatestUsr = document.getElementById('leadCardLatestUser');
+        if (elLatestUsr) elLatestUsr.textContent = `${first.fullname || ''} (${first.username || ''})`.trim() || '--';
+      }
+
+      const elLastUp = document.getElementById('leadLastUpdatedText');
+      if (elLastUp) {
+        const now = new Date();
+        elLastUp.textContent = `Cập nhật: ${now.toLocaleTimeString('vi-VN')}`;
+      }
+
+      filterToffersLeadsTable();
+    }
+    window.renderToffersLeads = renderToffersLeads;
+
+    function filterToffersLeadsTable() {
+      const tbody = document.getElementById('dgvToffersLeadsBody');
+      if (!tbody) return;
+
+      const query = (document.getElementById('leadSearchInput')?.value || '').trim().toLowerCase();
+      const list = toffersLeadsData.filter((item) => {
+        if (!query) return true;
+        const txt = `${item.id || ''} ${item.nameoff || ''} ${item.ip || ''} ${item.username || ''} ${item.fullname || ''} ${item.clickid || ''} ${item.geo || ''}`.toLowerCase();
+        return txt.includes(query);
+      });
+
+      if (list.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="10" style="text-align:center;padding:30px;color:#64748b;">
+              <div style="font-size:24px;margin-bottom:6px;">📭</div>
+              <div>${toffersLeadsData.length === 0 ? 'Chưa có lead nào được ghi nhận trên toffers.top' : 'Không tìm thấy lead phù hợp với từ khóa'}</div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = list.map((item, idx) => {
+        const timeStr = item.timelead ? new Date(Number(item.timelead) * 1000).toLocaleString('vi-VN') : '--';
+        const flag = item.geo === 'US' ? '🇺🇸' : (item.geo === 'GB' ? '🇬🇧' : (item.geo === 'CA' ? '🇨🇦' : '🌐'));
+        const member = [item.fullname, item.username ? `(${item.username})` : ''].filter(Boolean).join(' ') || '--';
+        const pointVal = Number(item.point) || 0;
+        const pointBadge = pointVal > 0
+          ? `<span style="display:inline-block;padding:1px 6px;border-radius:3px;background:#dcfce7;color:#15803d;font-weight:700;font-size:11px;">+${item.point}</span>`
+          : `<span style="display:inline-block;padding:1px 6px;border-radius:3px;background:#f1f5f9;color:#64748b;font-size:11px;">${item.point || '0'}</span>`;
+
+        return `
+          <tr style="cursor:default;">
+            <td style="text-align:center;color:#64748b;font-size:11px;">${idx + 1}</td>
+            <td style="font-weight:600;color:#0369a1;font-size:11px;">#${escHtml(item.id || '')}</td>
+            <td style="font-weight:600;color:#0f172a;" title="${escHtml(item.nameoff || '')}">${escHtml(item.nameoff || '--')}</td>
+            <td style="text-align:center;">${pointBadge}</td>
+            <td><code style="font-weight:bold;color:#1e293b;font-size:11px;background:#f1f5f9;padding:1px 4px;border-radius:2px;">${escHtml(item.ip || '')}</code></td>
+            <td style="text-align:center;font-size:11px;" title="${escHtml(item.geo || '')}">${flag} ${escHtml(item.geo || '')}</td>
+            <td style="color:#475569;font-size:11px;">${timeStr}</td>
+            <td style="color:#64748b;font-size:10px;font-family:monospace;" title="${escHtml(item.clickid || '')}">${escHtml(item.clickid ? item.clickid.slice(0, 16) + '...' : '--')}</td>
+            <td style="font-size:11px;color:#334155;">${escHtml(member)}</td>
+            <td style="text-align:center;font-size:11px;color:#64748b;">${escHtml(item.network2 || '--')}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+    window.filterToffersLeadsTable = filterToffersLeadsTable;
+
+    function toggleLeadAutoRefresh(enabled) {
+      if (leadAutoRefreshTimer) {
+        clearInterval(leadAutoRefreshTimer);
+        leadAutoRefreshTimer = null;
+      }
+      if (enabled) {
+        leadAutoRefreshTimer = setInterval(() => {
+          fetchToffersLeads(false);
+        }, 10000);
+      }
+    }
+    window.toggleLeadAutoRefresh = toggleLeadAutoRefresh;
+
+    function toggleLeadCookieConfig() {
+      const drawer = document.getElementById('leadCookieConfigDrawer');
+      if (drawer) {
+        drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
+      }
+    }
+    window.toggleLeadCookieConfig = toggleLeadCookieConfig;
+
+    function saveLeadCustomCookie() {
+      const val = (document.getElementById('leadCustomCookie')?.value || '').trim();
+      if (val) {
+        localStorage.setItem('toffers_custom_cookie', val);
+        showWinAlert('Đã lưu Cookie toffers.top!');
+        fetchToffersLeads(true);
+      }
+    }
+    window.saveLeadCustomCookie = saveLeadCustomCookie;
+
+    // Khởi tạo và tải dữ liệu lead & point
+    try {
+      const savedLeadCookie = localStorage.getItem('toffers_custom_cookie');
+      if (savedLeadCookie && document.getElementById('leadCustomCookie')) {
+        document.getElementById('leadCustomCookie').value = savedLeadCookie;
+      }
+    } catch {}
+
+    fetchToffersLeads(false);
+    toggleLeadAutoRefresh(true);
   </script>
 
   <!-- Windows Form Dialog for HTML Snapshot View -->
