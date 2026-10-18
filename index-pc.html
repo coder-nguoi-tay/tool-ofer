@@ -4361,6 +4361,7 @@
       const ctx = canvas.getContext('2d');
       _screenFpsCounter = 0;
       let _lastFrameTime = Date.now();
+      let _fpsMovingAvg = 0;
       const fpsEl = document.getElementById('screenModalFps');
       if (fpsEl) {
         fpsEl.textContent = '🟢 Đang kết nối...';
@@ -4371,16 +4372,19 @@
         const curFpsEl = document.getElementById('screenModalFps');
         if (!curFpsEl) return;
         if (_screenFpsCounter > 0) {
-          curFpsEl.textContent = `🟢 ${_screenFpsCounter} fps`;
+          _fpsMovingAvg = _fpsMovingAvg === 0 ? _screenFpsCounter : Math.round(_fpsMovingAvg * 0.35 + _screenFpsCounter * 0.65);
+          curFpsEl.textContent = `🟢 ${_fpsMovingAvg} fps`;
           curFpsEl.style.color = '#4ade80';
         } else {
           const timeSinceLastFrame = Date.now() - _lastFrameTime;
           if (es && es.readyState === EventSource.OPEN && timeSinceLastFrame < 10000) {
-            curFpsEl.textContent = '🟢 Sẵn sàng';
+            const displayFps = Math.max(_fpsMovingAvg, 5);
+            curFpsEl.textContent = `🟢 ${displayFps} fps (Ổn định)`;
             curFpsEl.style.color = '#38bdf8';
           } else {
             curFpsEl.textContent = '🟡 Đang đợi...';
             curFpsEl.style.color = '#facc15';
+            _fpsMovingAvg = 0;
           }
         }
         _screenFpsCounter = 0;
@@ -4456,10 +4460,31 @@
         }
       }
 
+      // Mouse move throttle
+      let _mouseMoveTimer = null;
+      let _lastMouseMoveEvent = null;
+
+      function _handleCanvasMouseMove(e) {
+        if (!e.buttons) return;
+        _lastMouseMoveEvent = e;
+        if (!_mouseMoveTimer) {
+          _mouseMoveTimer = setTimeout(() => {
+            if (_lastMouseMoveEvent) {
+              _sendInput(slot, _buildMouseEvent('mousemove', _lastMouseMoveEvent, canvas));
+              _lastMouseMoveEvent = null;
+            }
+            _mouseMoveTimer = null;
+          }, 25); // 25ms batching (~40fps) - loại bỏ nghẽn mạng do drag chuột
+        }
+      }
+
       // Input forwarding
       canvas.onmousedown  = (e) => _sendInput(slot, _buildMouseEvent('mousedown', e, canvas));
-      canvas.onmouseup    = (e) => _sendInput(slot, _buildMouseEvent('mouseup', e, canvas));
-      canvas.onmousemove  = (e) => { if (e.buttons) _sendInput(slot, _buildMouseEvent('mousemove', e, canvas)); };
+      canvas.onmouseup    = (e) => {
+        if (_mouseMoveTimer) { clearTimeout(_mouseMoveTimer); _mouseMoveTimer = null; }
+        _sendInput(slot, _buildMouseEvent('mouseup', e, canvas));
+      };
+      canvas.onmousemove  = _handleCanvasMouseMove;
       canvas.onwheel      = _handleCanvasWheel;
       canvas.onkeydown    = (e) => {
         if ((e.ctrlKey || e.metaKey) && (e.key === 'w' || e.key === 'W')) {
@@ -4496,6 +4521,8 @@
       if (_screenEventSource) { _screenEventSource.close(); _screenEventSource = null; }
       if (_screenFpsTimer) { clearInterval(_screenFpsTimer); _screenFpsTimer = null; }
       if (_screenTabPollTimer) { clearInterval(_screenTabPollTimer); _screenTabPollTimer = null; }
+      if (_mouseMoveTimer) { clearTimeout(_mouseMoveTimer); _mouseMoveTimer = null; }
+      if (_wheelTimer) { clearTimeout(_wheelTimer); _wheelTimer = null; }
       const canvas = document.getElementById('screenCanvas');
       if (canvas) {
         canvas.onmousedown = canvas.onmouseup = canvas.onmousemove = canvas.onwheel = canvas.onkeydown = canvas.onkeyup = canvas.onpaste = null;

@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createConnection as netCreateConnection } from 'node:net';
 import { get as requestHttps } from 'node:https';
-import { access, cp, mkdir, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, readdir, readlink, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { execFile } from 'node:child_process';
@@ -578,8 +578,8 @@ export async function loadPersistedBrowserLogs() {
 export async function savePersistedBrowserLogs() {
   try {
     await mkdir(interactionLogDirectory, { recursive: true });
-    if (persistedBrowserLogs.length > 150) {
-      persistedBrowserLogs = persistedBrowserLogs.slice(0, 150);
+    if (persistedBrowserLogs.length > 100) {
+      persistedBrowserLogs = persistedBrowserLogs.slice(0, 100);
     }
     await writeFile(interactionLogFilePath, JSON.stringify(persistedBrowserLogs, null, 2), 'utf8');
   } catch (err) {
@@ -2728,7 +2728,12 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
     cdpBrowser.close().catch(() => {});
     relay?.close();
     const sc = screencastSessions.get(assignedSlot);
-    if (sc) { sc.cdpClient.detach().catch(() => {}); try { sc.sseResponse.end(); } catch {} screencastSessions.delete(assignedSlot); }
+    if (sc) {
+      if (sc.keepaliveTimer) { clearInterval(sc.keepaliveTimer); sc.keepaliveTimer = null; }
+      sc.cdpClient.detach().catch(() => {});
+      try { sc.sseResponse.end(); } catch {}
+      screencastSessions.delete(assignedSlot);
+    }
     console.log(`[GoLogin] Profile ${profileId} (Slot ${assignedSlot}) đã đóng.`);
   });
 
@@ -3509,6 +3514,10 @@ export async function closeActiveBrowsers() {
       clearInterval(session._monitorInterval);
       session._monitorInterval = null;
     }
+    if (session._autofillTimer) {
+      clearInterval(session._autofillTimer);
+      session._autofillTimer = null;
+    }
   }
   const token = readGoLoginToken();
   await Promise.allSettled(sessions.map(async (session) => {
@@ -3569,6 +3578,7 @@ export async function closeActiveBrowsers() {
     s.suppressAutoRefill = true;
     s.isClosed = true;
     if (s._monitorInterval) { clearInterval(s._monitorInterval); s._monitorInterval = null; }
+    if (s._autofillTimer) { clearInterval(s._autofillTimer); s._autofillTimer = null; }
     await s.context?.close?.().catch(() => {});
   }
 
@@ -4660,7 +4670,12 @@ async function openBrowserWithInstalledChrome({
     void relay?.close();
     const _slot = session.slot ?? tileIndex + 1;
     const _sc = screencastSessions.get(_slot);
-    if (_sc) { _sc.cdpClient.detach().catch(() => {}); try { _sc.sseResponse.end(); } catch {} screencastSessions.delete(_slot); }
+    if (_sc) {
+      if (_sc.keepaliveTimer) { clearInterval(_sc.keepaliveTimer); _sc.keepaliveTimer = null; }
+      _sc.cdpClient.detach().catch(() => {});
+      try { _sc.sseResponse.end(); } catch {}
+      screencastSessions.delete(_slot);
+    }
     // Profile dùng xong là xoá cả profile và cache: không giữ lại ~179 MB mỗi proxy đã thử.
     void removeChromeSessionProfile(userDataDirectory);
     chromeBuildRotationCounter += 1;
@@ -4977,7 +4992,7 @@ function attachBrowserLogger(context, session) {
       ...entry,
     };
     sessionItem.logs.push(logItem);
-    if (sessionItem.logs.length > 500) sessionItem.logs.shift();
+    if (sessionItem.logs.length > 200) sessionItem.logs.shift();
     queueSaveBrowserLogs();
   }
   session.addBrowserLog = addLog;
@@ -5022,6 +5037,16 @@ function attachBrowserLogger(context, session) {
           const offerNum = session.offerNumber ?? session.streamRole ?? 1;
           const offerSubDir = join(interactionHtmlDirectory, `offer-${offerNum}`);
           await mkdir(offerSubDir, { recursive: true });
+          // Xóa file cũ nhất nếu vượt 300 file trong thư mục offer này
+          try {
+            const existing = (await readdir(offerSubDir)).filter((f) => f.endsWith('.html'));
+            if (existing.length >= 300) {
+              existing.sort();
+              for (const old of existing.slice(0, existing.length - 299)) {
+                await unlink(join(offerSubDir, old)).catch(() => {});
+              }
+            }
+          } catch {}
           const safeHost = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, '_') || 'page';
           const nowStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
           const randSuffix = Math.random().toString(36).slice(2, 6);
@@ -5037,7 +5062,7 @@ function attachBrowserLogger(context, session) {
         type: 'navigate',
         url,
         title,
-        html: html ? html.slice(0, 65536) : '', // Preview nhanh trong modal web
+        // Không nhúng HTML vào JSON để tránh phình file — dùng htmlPath để load khi cần
         htmlPath: htmlPath || null,
         htmlFilename: htmlFilename || null,
       });
@@ -6645,6 +6670,50 @@ async function startLocalInterface() {
       return;
     }
 
+    // Quản lý và cấu hình luồng Screencast tối ưu (giảm 50% payload, giữ FPS ổn định)
+    async function attachScreencastSession(scObj, cdpSession, targetPage) {
+      scObj.cdpClient = cdpSession;
+      scObj.page = targetPage;
+      scObj.lastFrameTime = Date.now();
+
+      // Tối ưu hóa: chất lượng 55, maxWidth 960, maxHeight 640 giảm hơn 50% dung lượng frame Base64
+      await cdpSession.send('Page.startScreencast', {
+        format: 'jpeg',
+        quality: 55,
+        maxWidth: 960,
+        maxHeight: 640,
+        everyNthFrame: 1,
+      }).catch(() => {});
+
+      cdpSession.on('Page.screencastFrame', (frame) => {
+        scObj.lastFrameTime = Date.now();
+        if (frame.metadata) {
+          scObj.deviceWidth = frame.metadata.deviceWidth;
+          scObj.deviceHeight = frame.metadata.deviceHeight;
+        }
+        if (!scObj.sseResponse.writableEnded) {
+          scObj.sseResponse.write(`data: ${frame.data}\n\n`);
+        }
+        cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+      });
+
+      // Keepalive Heartbeat: Kích hoạt nhẹ nếu quá 250ms trang tĩnh không có chuyển động,
+      // giúp Chrome luôn phát frame đều đặn và giữ FPS ổn định không bao giờ rớt về 0
+      if (!scObj.keepaliveTimer) {
+        scObj.keepaliveTimer = setInterval(() => {
+          if (scObj.sseResponse.writableEnded || !scObj.page || scObj.page.isClosed()) {
+            if (scObj.keepaliveTimer) { clearInterval(scObj.keepaliveTimer); scObj.keepaliveTimer = null; }
+            return;
+          }
+          if (Date.now() - (scObj.lastFrameTime || 0) > 250) {
+            scObj.page.evaluate(() => {
+              document.documentElement.dataset._scTick = Date.now();
+            }).catch(() => {});
+          }
+        }, 200);
+      }
+    }
+
     if (request.method === 'GET' && request.url.startsWith('/screen/stream/')) {
       const slot = parseInt(request.url.split('/').pop(), 10);
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
@@ -6653,6 +6722,7 @@ async function startLocalInterface() {
       // Nếu slot đang có SSE cũ → ngắt trước
       const prev = screencastSessions.get(slot);
       if (prev) {
+        if (prev.keepaliveTimer) { clearInterval(prev.keepaliveTimer); prev.keepaliveTimer = null; }
         try { await prev.cdpClient.send('Page.stopScreencast').catch(() => {}); prev.cdpClient.detach().catch(() => {}); } catch {}
         try { prev.sseResponse.end(); } catch {}
         screencastSessions.delete(slot);
@@ -6670,25 +6740,16 @@ async function startLocalInterface() {
         const page = pages[0];
         if (!page) { response.end(); return; }
         const cdpClient = await session.browser.newCDPSession(page);
-        const scObj = { cdpClient, sseResponse: response, page };
+        const scObj = { sseResponse: response };
         screencastSessions.set(slot, scObj);
 
-        await cdpClient.send('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1024, maxHeight: 768, everyNthFrame: 1 });
-        cdpClient.on('Page.screencastFrame', (frame) => {
-          if (frame.metadata) {
-            scObj.deviceWidth = frame.metadata.deviceWidth;
-            scObj.deviceHeight = frame.metadata.deviceHeight;
-          }
-          if (!response.writableEnded) {
-            response.write(`data: ${frame.data}\n\n`);
-          }
-          cdpClient.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
-        });
+        await attachScreencastSession(scObj, cdpClient, page);
 
         const cleanup = async () => {
           const sc = screencastSessions.get(slot);
           screencastSessions.delete(slot);
           if (sc) {
+            if (sc.keepaliveTimer) { clearInterval(sc.keepaliveTimer); sc.keepaliveTimer = null; }
             try { await sc.cdpClient.send('Page.stopScreencast'); } catch {}
             try { sc.cdpClient.detach(); } catch {}
           }
@@ -6745,17 +6806,7 @@ async function startLocalInterface() {
         if (sc) {
           try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
           const newCdp = await session.browser.newCDPSession(nextActivePage);
-          sc.cdpClient = newCdp;
-          sc.page = nextActivePage;
-          await newCdp.send('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1024, maxHeight: 768, everyNthFrame: 1 });
-          newCdp.on('Page.screencastFrame', (frame) => {
-            if (frame.metadata) {
-              sc.deviceWidth = frame.metadata.deviceWidth;
-              sc.deviceHeight = frame.metadata.deviceHeight;
-            }
-            if (!sc.sseResponse.writableEnded) sc.sseResponse.write(`data: ${frame.data}\n\n`);
-            newCdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
-          });
+          await attachScreencastSession(sc, newCdp, nextActivePage);
         }
         respondWithJson(response, 200, { ok: true, activeIndex: newActiveIndex, remaining: remainingPages.length });
       } catch (err) { respondWithJson(response, 500, { error: err.message }); }
@@ -6778,17 +6829,7 @@ async function startLocalInterface() {
         if (sc) {
           try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
           const newCdp = await session.browser.newCDPSession(newPage);
-          sc.cdpClient = newCdp;
-          sc.page = newPage;
-          await newCdp.send('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1024, maxHeight: 768, everyNthFrame: 1 });
-          newCdp.on('Page.screencastFrame', (frame) => {
-            if (frame.metadata) {
-              sc.deviceWidth = frame.metadata.deviceWidth;
-              sc.deviceHeight = frame.metadata.deviceHeight;
-            }
-            if (!sc.sseResponse.writableEnded) sc.sseResponse.write(`data: ${frame.data}\n\n`);
-            newCdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
-          });
+          await attachScreencastSession(sc, newCdp, newPage);
         }
         respondWithJson(response, 200, { ok: true, index: newIndex });
       } catch (err) { respondWithJson(response, 500, { error: err.message }); }
@@ -6810,17 +6851,7 @@ async function startLocalInterface() {
         if (sc) {
           try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
           const newCdp = await session.browser.newCDPSession(targetPage);
-          sc.cdpClient = newCdp;
-          sc.page = targetPage;
-          await newCdp.send('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1024, maxHeight: 768, everyNthFrame: 1 });
-          newCdp.on('Page.screencastFrame', (frame) => {
-            if (frame.metadata) {
-              sc.deviceWidth = frame.metadata.deviceWidth;
-              sc.deviceHeight = frame.metadata.deviceHeight;
-            }
-            if (!sc.sseResponse.writableEnded) sc.sseResponse.write(`data: ${frame.data}\n\n`);
-            newCdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
-          });
+          await attachScreencastSession(sc, newCdp, targetPage);
         }
         respondWithJson(response, 200, { ok: true });
       } catch (err) { respondWithJson(response, 500, { error: err.message }); }

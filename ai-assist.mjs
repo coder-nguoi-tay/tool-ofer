@@ -13,6 +13,8 @@ import { humanType } from './autofill.mjs';
 
 const MAX_ROUNDS = 20;
 const AGT_TIMEOUT_MS = 90_000;
+const MAX_CONCURRENT_AGT = 3; // tối đa 3 slot chạy agy cùng lúc
+let agtRunningCount = 0;
 
 export let globalAiConfig = {
   enabled: true,
@@ -723,12 +725,17 @@ Format các action được hỗ trợ:
         console.log(`[AI-Assist] Slot ${slotNum} round ${round}: Chế độ Heuristic Fallback Only, bỏ qua gọi CLI.`);
       } else if (session.isClosed) {
         break;
+      } else if (agtRunningCount >= MAX_CONCURRENT_AGT) {
+        console.log(`[AI-Assist] Slot ${slotNum}: đang chờ slot agy (${agtRunningCount}/${MAX_CONCURRENT_AGT} đang chạy), bỏ vòng này.`);
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
       } else {
         addLog({
           time: new Date().toISOString(),
           type: 'ai_waiting_codex',
           detail: `[AI Assist] ⏳ Đang chờ AI phản hồi (vòng ${round}/${maxRounds})… URL: ${page.url()}`,
         });
+        agtRunningCount++;
         try {
           const raw = await callAgt(prompt, { cliBinary: cfg.cliBinary, timeoutSeconds: cfg.timeoutSeconds });
           const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
@@ -747,6 +754,8 @@ Format các action được hỗ trợ:
             type: 'ai_error',
             detail: `[AI Assist] ❌ Lỗi gọi AI sau ${elapsed}s: ${err.message}`,
           });
+        } finally {
+          agtRunningCount = Math.max(0, agtRunningCount - 1);
         }
       }
 

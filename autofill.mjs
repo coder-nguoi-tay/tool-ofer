@@ -3896,6 +3896,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     session.triggerAutofillScan = () => { void scan(); };
     const timer = setInterval(() => { void scan(); }, 250);
     timer.unref?.();
+    session._autofillTimer = timer;
     if (typeof page.on === 'function') {
       page.on('domcontentloaded', scan);
       page.on('load', scan);
