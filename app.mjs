@@ -6844,20 +6844,20 @@ async function startLocalInterface() {
       return;
     }
 
-    // Quản lý và cấu hình luồng Screencast chuẩn mượt mà
+    // Quản lý và cấu hình luồng Screencast chuẩn mượt mà, không bao giờ bị đen hình hay đứng FPS
     async function attachScreencastSession(scObj, cdpSession, targetPage) {
+      if (scObj.keepaliveTimer) {
+        clearInterval(scObj.keepaliveTimer);
+        scObj.keepaliveTimer = null;
+      }
       scObj.cdpClient = cdpSession;
       scObj.page = targetPage;
       scObj.lastFrameTime = Date.now();
 
-      await cdpSession.send('Page.startScreencast', {
-        format: 'jpeg',
-        quality: 65,
-        maxWidth: 1024,
-        maxHeight: 768,
-        everyNthFrame: 1,
-      }).catch(() => {});
+      // 1. Kích hoạt Page domain trên CDP để đảm bảo nhận event screencastFrame
+      await cdpSession.send('Page.enable').catch(() => {});
 
+      // 2. Gắn listener TRƯỚC KHI gọi startScreencast để không bao giờ bị lỡ frame đầu
       cdpSession.on('Page.screencastFrame', (frame) => {
         scObj.lastFrameTime = Date.now();
         if (frame.metadata) {
@@ -6869,12 +6869,67 @@ async function startLocalInterface() {
         }
         cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
       });
+
+      // 3. Bắt đầu screencast với format jpeg quality 65
+      await cdpSession.send('Page.startScreencast', {
+        format: 'jpeg',
+        quality: 65,
+        maxWidth: 1024,
+        maxHeight: 768,
+        everyNthFrame: 1,
+      }).catch((err) => {
+        console.warn('[ScreenStream] Lỗi startScreencast:', err.message);
+      });
+
+      // 4. Gửi ngay lập tức 1 frame ban đầu bằng captureScreenshot hoặc page.screenshot để màn hình hiện ảnh trong 15ms
+      try {
+        const initShot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 65 }).catch(() => null);
+        if (initShot?.data && !scObj.sseResponse.writableEnded) {
+          scObj.lastFrameTime = Date.now();
+          scObj.sseResponse.write(`data: ${initShot.data}\n\n`);
+        } else if (targetPage && !targetPage.isClosed() && !scObj.sseResponse.writableEnded) {
+          const buf = await targetPage.screenshot({ type: 'jpeg', quality: 65 }).catch(() => null);
+          if (buf && !scObj.sseResponse.writableEnded) {
+            scObj.lastFrameTime = Date.now();
+            scObj.sseResponse.write(`data: ${buf.toString('base64')}\n\n`);
+          }
+        }
+      } catch {}
+
+      // 5. Keepalive & Fallback Heartbeat:
+      // - Nếu quá 250ms không có frame mới: kích hoạt DOM tick nhẹ để Chrome phát frame
+      // - Nếu quá 800ms vẫn không có frame (do Chrome throttle khi ẩn/minimized hoặc lỗi driver): chủ động chụp screenshot và đẩy về SSE
+      scObj.keepaliveTimer = setInterval(async () => {
+        if (scObj.sseResponse.writableEnded || !scObj.page || scObj.page.isClosed()) {
+          if (scObj.keepaliveTimer) { clearInterval(scObj.keepaliveTimer); scObj.keepaliveTimer = null; }
+          return;
+        }
+        const idleTime = Date.now() - (scObj.lastFrameTime || 0);
+        if (idleTime > 800) {
+          try {
+            const shot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 65 }).catch(() => null);
+            if (shot?.data && !scObj.sseResponse.writableEnded) {
+              scObj.lastFrameTime = Date.now();
+              scObj.sseResponse.write(`data: ${shot.data}\n\n`);
+            }
+          } catch {}
+        } else if (idleTime > 250) {
+          scObj.page.evaluate(() => {
+            document.documentElement.dataset._scTick = Date.now();
+          }).catch(() => {});
+        }
+      }, 200);
     }
 
     if (request.method === 'GET' && request.url.startsWith('/screen/stream/')) {
       const slot = parseInt(request.url.split('/').pop(), 10);
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
       if (!session) { response.writeHead(404); response.end(); return; }
+
+      // Phục hồi cửa sổ nếu đang ở chế độ ẩn để đảm bảo compositor Chrome hoạt động
+      try {
+        if (session.showWindow) void session.showWindow(true);
+      } catch {}
 
       // Nếu slot đang có SSE cũ → ngắt trước
       const prev = screencastSessions.get(slot);
@@ -6894,7 +6949,7 @@ async function startLocalInterface() {
 
       try {
         const pages = session.browser.pages().filter(p => !p.isClosed());
-        const page = pages[0];
+        const page = (session.mainPage && !session.mainPage.isClosed()) ? session.mainPage : pages[0];
         if (!page) { response.end(); return; }
         const cdpClient = await session.browser.newCDPSession(page);
         const scObj = { sseResponse: response };
@@ -6914,6 +6969,7 @@ async function startLocalInterface() {
         request.on('close', cleanup);
         response.on('close', cleanup);
       } catch (err) {
+        console.error(`[ScreenStream] Lỗi khởi tạo SSE slot ${slot}:`, err.message);
         response.write(`data: error\n\n`);
         response.end();
       }

@@ -4473,6 +4473,21 @@
       const entry = _screenSlots.find(s => s.slot === slot);
       const ipLabel = entry && entry.ip ? ` — ${entry.ip}` : '';
       document.getElementById('screenModalTitle').textContent = `Slot ${slot}${ipLabel} (nhấp vào canvas để tương tác)`;
+
+      // Vẽ ngay lập tức thumbnail đã có lên canvas để modal mở ra là có hình ngay lập tức, 0ms độ trễ
+      const canvas = document.getElementById('screenCanvas');
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        const tileImg = document.querySelector(`.screen-tile-card[data-slot="${slot}"] img`);
+        if (tileImg && tileImg.complete && tileImg.naturalWidth > 0) {
+          if (canvas.width !== tileImg.naturalWidth || canvas.height !== tileImg.naturalHeight) {
+            canvas.width = tileImg.naturalWidth;
+            canvas.height = tileImg.naturalHeight;
+          }
+          try { ctx.drawImage(tileImg, 0, 0); } catch {}
+        }
+      }
+
       _startScreenStream(slot);
     }
 
@@ -4489,11 +4504,14 @@
       _screenFpsCounter = 0;
       let _lastFrameTime = Date.now();
       let _fpsMovingAvg = 0;
+      let es = null;
+
       const fpsEl = document.getElementById('screenModalFps');
       if (fpsEl) {
         fpsEl.textContent = '🟢 Đang kết nối...';
         fpsEl.style.color = '#38bdf8';
       }
+
       if (_screenFpsTimer) clearInterval(_screenFpsTimer);
       _screenFpsTimer = setInterval(() => {
         const curFpsEl = document.getElementById('screenModalFps');
@@ -4517,24 +4535,44 @@
         _screenFpsCounter = 0;
       }, 1000);
 
-      const es = new EventSource(`/screen/stream/${slot}`);
+      es = new EventSource(`/screen/stream/${slot}`);
       _screenEventSource = es;
+
       es.onmessage = (e) => {
-        if (e.data === 'error') return;
-        const bin = atob(e.data);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bmp) => {
-          if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
-            canvas.width = bmp.width;
-            canvas.height = bmp.height;
-          }
-          ctx.drawImage(bmp, 0, 0);
-          bmp.close();
-          _screenFpsCounter++;
-          _lastFrameTime = Date.now();
-        });
+        if (!e.data || e.data === 'error') return;
+        try {
+          const cleanData = e.data.replace(/[\r\n]/g, '');
+          const bin = atob(cleanData);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bmp) => {
+            if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+              canvas.width = bmp.width;
+              canvas.height = bmp.height;
+            }
+            ctx.drawImage(bmp, 0, 0);
+            bmp.close();
+            _screenFpsCounter++;
+            _lastFrameTime = Date.now();
+          }).catch(() => {
+            // Fallback Image element
+            const img = new Image();
+            img.onload = () => {
+              if (canvas.width !== img.width || canvas.height !== img.height) {
+                canvas.width = img.width;
+                canvas.height = img.height;
+              }
+              ctx.drawImage(img, 0, 0);
+              _screenFpsCounter++;
+              _lastFrameTime = Date.now();
+            };
+            img.src = `data:image/jpeg;base64,${cleanData}`;
+          });
+        } catch (err) {
+          console.warn('[ScreenView] Lỗi parse frame SSE:', err);
+        }
       };
+
       es.onerror = () => {
         const errFpsEl = document.getElementById('screenModalFps');
         if (errFpsEl) {
