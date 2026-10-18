@@ -4,6 +4,7 @@ import {
   NEXT_BUTTON_PATTERNS,
   MULTI_CHOICE_INDICATORS,
   NONE_OF_THE_ABOVE_PATTERNS,
+  NOISE_PATTERNS,
   solveRatingQuestions,
   solveMatrixQuestions,
   solveSurveyCheckboxes,
@@ -119,5 +120,47 @@ test('solveSurveyCheckboxes returns 0 when no checkboxes on frame', async () => 
 
   const count = await solveSurveyCheckboxes(mockFrame);
   assert.equal(count, 0);
+});
+
+test('NOISE_PATTERNS correctly matches legal, footer, and nav noise labels while keeping answers intact', () => {
+  const noiseLabels = [
+    'Privacy Policy',
+    'Terms of Service',
+    'Terms & Conditions',
+    'Do Not Sell My Personal Information',
+    'Cookie Policy',
+    'All Rights Reserved',
+    'Opt-Out',
+    'Unsubscribe',
+    'Sign In',
+    'Login',
+    'Contact Us',
+    'About Us',
+    'Help & FAQ',
+  ];
+
+  for (const label of noiseLabels) {
+    const isMatch = NOISE_PATTERNS.some((p) => p.test(label));
+    assert.ok(isMatch, `Should recognize as noise: "${label}"`);
+  }
+
+  const validAnswerLabels = [
+    'Yes',
+    'No',
+    'Male',
+    'Female',
+    '18-24',
+    '25-34',
+    'Homeowner',
+    'Employed',
+    'Next Step',
+    'Continue',
+    'Claim Reward',
+  ];
+
+  for (const label of validAnswerLabels) {
+    const isMatch = NOISE_PATTERNS.some((p) => p.test(label));
+    assert.ok(!isMatch, `Should NOT match valid answer/CTA: "${label}"`);
+  }
 });
 

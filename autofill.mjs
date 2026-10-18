@@ -1159,24 +1159,6 @@ export async function findSubmitButton(frame) {
             return { valid: false, reason: 'container_tag' };
           }
 
-          // Kiểm tra kích thước hình học nếu có: nút bấm không thể quá nhỏ hoặc quá khổng lồ (hỗ trợ nút full-width lên đến 1400px trên desktop)
-          if (typeof el.getBoundingClientRect === 'function') {
-            const rect = el.getBoundingClientRect();
-            if (rect.width <= 4 || rect.height <= 4) return { valid: false, reason: 'zero_size' };
-            if (rect.height > 250 || rect.width > 1400) return { valid: false, reason: 'too_large' };
-          }
-
-          // Bỏ qua nút nằm trong header / site-level footer / nav (tránh bấm nhầm menu/privacy link)
-          // KHÔNG bỏ qua nếu nút nằm bên trong một thẻ <form>
-          const insideForm = typeof el.closest === 'function' ? el.closest('form') : null;
-          if (!insideForm) {
-            const inSiteHeaderOrNav = typeof el.closest === 'function' ? el.closest('header, nav, #header, #nav, .site-header, .site-nav') : null;
-            const inSiteFooter = typeof el.closest === 'function' ? el.closest('.site-footer, #footer, body > footer:not([class*="form"]):not([class*="step"]):not([class*="survey"]):not([class*="quiz"]):not([class*="modal"]):not([class*="card"])') : null;
-            if (inSiteHeaderOrNav || inSiteFooter) {
-              return { valid: false, reason: 'header_footer' };
-            }
-          }
-
           // Bỏ qua các nút thuộc Offerwall Cards để nhường quyền xử lý cho handleOfferwallCards
           if (
             (typeof el.closest === 'function' && el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) ||
@@ -1186,9 +1168,61 @@ export async function findSubmitButton(frame) {
             return { valid: false, reason: 'offerwall' };
           }
 
+          // Kiểm tra kích thước hình học nếu có: nút bấm không thể quá nhỏ hoặc quá khổng lồ (hỗ trợ nút full-width lên đến 1400px trên desktop)
+          const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+          if (rect) {
+            if (rect.width <= 4 || rect.height <= 4) return { valid: false, reason: 'zero_size' };
+            if (rect.height > 250 || rect.width > 1400) return { valid: false, reason: 'too_large' };
+          }
+
           const text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-          if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập|skip|bỏ qua/i.test(text)) {
+          const href = (el.getAttribute && typeof el.getAttribute === 'function' ? el.getAttribute('href') : '') || '';
+          const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
+
+          // 1. Kiểm tra từ khóa pháp lý / chân trang / link điều khoản
+          const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
+          if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) {
+            return { valid: false, reason: 'legal_noise' };
+          }
+
+          // 2. Kiểm tra từ khóa menu / đăng nhập / tài khoản / liên hệ
+          const navNoise = /sign in|sign up|\blogin\b|\blog in\b|\bregister\b|my account|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|contact us|about us|\b(help & faq|faqs?)\b/i;
+          if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) {
+            return { valid: false, reason: 'nav_noise' };
+          }
+
+          if (typeof href === 'string' && (href.startsWith('mailto:') || href.startsWith('tel:'))) {
+            return { valid: false, reason: 'contact_link' };
+          }
+
+          if (/cancel|back|previous|prev|quay lại|hủy|close|đóng|skip|bỏ qua/i.test(text)) {
             return { valid: false, reason: 'cancel_text' };
+          }
+
+          // 3. Bỏ qua nút nằm trong header / site-level footer / nav (nếu trang có thẻ)
+          const insideForm = typeof el.closest === 'function' ? el.closest('form') : null;
+          if (!insideForm) {
+            const inSiteHeaderOrNav = typeof el.closest === 'function' ? el.closest('header, nav, #header, #nav, .site-header, .site-nav') : null;
+            const inSiteFooter = typeof el.closest === 'function' ? el.closest('.site-footer, #footer, body > footer:not([class*="form"]):not([class*="step"]):not([class*="survey"]):not([class*="quiz"]):not([class*="modal"]):not([class*="card"])') : null;
+            if (inSiteHeaderOrNav || inSiteFooter) {
+              return { valid: false, reason: 'header_footer' };
+            }
+          }
+
+          // 4. Kiểm tra vị trí hình học: nếu ở đỉnh trang (< 45px) trên trang dài mà không nằm trong form
+          if (rect && rect.top < 45 && typeof document !== 'undefined' && (document.body?.scrollHeight || 0) > 500 && !insideForm) {
+            return { valid: false, reason: 'top_header_zone' };
+          }
+
+          // 5. Nếu là thẻ A, loại bỏ nếu là inline text link trong đoạn văn bản disclaimer
+          if (tag === 'A') {
+            const isButtonStyled = idAndClass.includes('btn') || idAndClass.includes('button') || (typeof el.getAttribute === 'function' && el.getAttribute('role') === 'button');
+            if (!isButtonStyled) {
+              const parentTextEl = typeof el.closest === 'function' ? el.closest('p, small, span') : null;
+              if (parentTextEl && parentTextEl.textContent && parentTextEl.textContent.length > 60) {
+                return { valid: false, reason: 'inline_disclaimer_link' };
+              }
+            }
           }
 
           if (tag === 'BUTTON') return { valid: true };
@@ -1233,11 +1267,20 @@ export async function findSubmitButton(frame) {
         return rect.width > 4 && rect.height > 4;
       };
 
-      const isCancelOrNav = (el) => {
+      const isNoiseOrNav = (el) => {
         const text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-        if (/cancel|back|previous|quay lại|hủy|close|đóng|sign in|login|đăng nhập|skip|bỏ qua/i.test(text)) return true;
+        const href = (el.getAttribute ? el.getAttribute('href') : '') || '';
+        const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
+        const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
+        if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) return true;
+        const navNoise = /sign in|sign up|\blogin\b|\blog in\b|\bregister\b|my account|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|contact us|about us|\b(help & faq|faqs?)\b/i;
+        if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) return true;
+        if (href.startsWith('mailto:') || href.startsWith('tel:')) return true;
+        if (/cancel|back|previous|prev|quay lại|hủy|close|đóng|skip|bỏ qua/i.test(text)) return true;
         const inHeader = el.closest('header, nav, #header, #nav, .site-header, .site-nav');
         if (inHeader) return true;
+        const rect = el.getBoundingClientRect();
+        if (rect.top < 45 && document.body.scrollHeight > 500 && !el.closest('form')) return true;
         return false;
       };
 
@@ -1245,11 +1288,11 @@ export async function findSubmitButton(frame) {
       const forms = Array.from(document.querySelectorAll('form')).filter(isVisible);
       for (const form of forms) {
         const sub = form.querySelector('button[type="submit"], input[type="submit"], button:not([type="button"]):not([type="reset"])');
-        if (sub && isVisible(sub) && !isCancelOrNav(sub)) {
+        if (sub && isVisible(sub) && !isNoiseOrNav(sub)) {
           sub.setAttribute('data-autolead-submit-target', 'true');
           return true;
         }
-        const anyBtn = Array.from(form.querySelectorAll('button:not([type="reset"]), [role="button"], a.btn, a.button, input[type="button"]')).find((b) => isVisible(b) && !isCancelOrNav(b));
+        const anyBtn = Array.from(form.querySelectorAll('button:not([type="reset"]), [role="button"], a.btn, a.button, input[type="button"]')).find((b) => isVisible(b) && !isNoiseOrNav(b));
         if (anyBtn) {
           anyBtn.setAttribute('data-autolead-submit-target', 'true');
           return true;
@@ -1259,7 +1302,7 @@ export async function findSubmitButton(frame) {
       // 5.2 Tìm ngoài form: bất kỳ button nào có style hoặc text submit/continue/next
       const allButtons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"], a.btn, a.button, a.cta-button, .cta-button')).filter(isVisible);
       for (const btn of allButtons) {
-        if (isCancelOrNav(btn)) continue;
+        if (isNoiseOrNav(btn)) continue;
         const text = (btn.innerText || btn.value || btn.textContent || '').trim().toLowerCase();
         if (/continue|submit|next|get quote|get started|see results|claim|proceed|tiếp tục|xác nhận|hoàn thành|agree|start/i.test(text)) {
           btn.setAttribute('data-autolead-submit-target', 'true');
@@ -1443,9 +1486,49 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         '.options-container [role="button"]',
       ].join(', ')));
 
-      const uniqueElements = Array.from(new Set(rawCandidates));
+      const isNoiseOption = (el) => {
+        if (!el) return true;
+        const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+        const href = (el.getAttribute ? el.getAttribute('href') : '') || '';
+        const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
+
+        const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
+        if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) return true;
+
+        const navNoise = /sign in|sign up|\blogin\b|\blog in\b|\bregister\b|my account|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|contact us|about us|\b(help & faq|faqs?)\b/i;
+        if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) return true;
+
+        if (href.startsWith('mailto:') || href.startsWith('tel:')) return true;
+        if (/cancel|back|previous|prev|quay lại|bỏ qua/i.test(text)) return true;
+
+        return false;
+      };
+
+      // Quét bổ sung các Cụm lựa chọn anh em (Sibling Option Clusters) trong các khối câu hỏi
+      const questionContainers = Array.from(document.querySelectorAll(
+        '.question, .survey-question, .quiz-question, .question-container, .survey-step, .quiz-step, .choices, .answers, .options, .options-wrap, .answer-wrap, .question-card, .quiz-card, .survey-card, [class*="question"], [class*="quiz"], [class*="survey"]'
+      )).filter(isVisible);
+
+      const siblingOptionItems = [];
+      for (const qc of questionContainers) {
+        const interactiveChildren = Array.from(qc.querySelectorAll('button, a, [role="button"], label.option, label.choice, div.card, div.option, div.choice, li.option, li.choice')).filter((child) => {
+          if (!isVisible(child)) return false;
+          if (isNoiseOption(child)) return false;
+          const text = (child.innerText || child.textContent || child.value || '').trim();
+          if (/^(next|continue|proceed|submit|tiếp tục|hoàn tất)($|\b)/i.test(text)) return false;
+          return true;
+        });
+
+        if (interactiveChildren.length >= 2 && interactiveChildren.length <= 12) {
+          siblingOptionItems.push(...interactiveChildren);
+        }
+      }
+
+      const combinedCandidates = rawCandidates.concat(siblingOptionItems);
+      const uniqueElements = Array.from(new Set(combinedCandidates));
       const allCandidates = uniqueElements.filter((el) => {
         if (!isVisible(el)) return false;
+        if (isNoiseOption(el)) return false;
         if (el.closest('.offerwall-card, form[data-tf-element-role="offer"], .offerwall-card-wrap')) return false;
         // Bỏ qua container cha nếu bản thân nó chứa các nút con bên trong đã được chọn vào candidates
         const hasInteractiveChild = uniqueElements.some((child) => child !== el && el.contains(child));

@@ -647,7 +647,7 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
 
   try {
     for (let round = 1; round <= maxRounds; round++) {
-      if (page.isClosed()) break;
+      if (page.isClosed() || session.isClosed) break;
 
       // Vòng 1 luôn chạy AI vì onStuck đã xác nhận trang bị kẹt.
       // Từ vòng 2 trở đi, kiểm tra xem trang còn việc cần làm không.
@@ -721,6 +721,8 @@ Format các action được hỗ trợ:
 
       if (cfg.mode === 'heuristic_only') {
         console.log(`[AI-Assist] Slot ${slotNum} round ${round}: Chế độ Heuristic Fallback Only, bỏ qua gọi CLI.`);
+      } else if (session.isClosed) {
+        break;
       } else {
         addLog({
           time: new Date().toISOString(),
@@ -771,7 +773,7 @@ Format các action được hỗ trợ:
       }
 
       for (const act of actions) {
-        if (page.isClosed()) break;
+        if (page.isClosed() || session.isClosed) break;
         try {
           updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#818cf8;font-weight:600;">🤖 AI: ${act.action} ${act.selector || ''}</span>`);
           await executeAction(page, act, session);

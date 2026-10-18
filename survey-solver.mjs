@@ -109,6 +109,40 @@ export const NONE_OF_THE_ABOVE_PATTERNS = [
 ];
 
 /**
+ * Các từ khóa nhận diện link/nút rác (Legal, Footer, Disclaimer, Nav, Login) cần loại trừ
+ */
+export const NOISE_PATTERNS = [
+  /privacy/i,
+  /\bterms\b/i,
+  /\bcondition(s)?\b/i,
+  /\bpolicy\b/i,
+  /disclaimer/i,
+  /\bcookie(s)?\b/i,
+  /copyright/i,
+  /all rights reserved/i,
+  /do not sell/i,
+  /opt[- ]?out/i,
+  /unsubscribe/i,
+  /dmca/i,
+  /\blegal\b/i,
+  /disclosure/i,
+  /sign in/i,
+  /sign up/i,
+  /\blogin\b/i,
+  /\blog in\b/i,
+  /\bregister\b/i,
+  /my account/i,
+  /^(home|homepage)$/i,
+  /\b(home\s*page|back to home)\b/i,
+  /\b(menu|main menu)\b/i,
+  /\b(cart|view cart|shopping cart)\b/i,
+  /\b(portal|client portal)\b/i,
+  /contact us/i,
+  /about us/i,
+  /\b(help & faq|help center|faqs?)\b/i,
+];
+
+/**
  * Kiểm tra xem một phần tử HTML có đang hiển thị trên màn hình hay không.
  *
  * @param {Element} el Phần tử DOM cần kiểm tra.
@@ -442,9 +476,41 @@ export async function clickSurveyNextButton(frame, options = {}) {
         return rect.width > 0 && rect.height > 0;
       };
 
-      const candidates = Array.from(document.querySelectorAll(
+      const isNoiseElement = (el) => {
+        if (!el) return true;
+        const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+        const href = (el.getAttribute('href') || '').toLowerCase();
+        const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
+
+        // 1. Kiểm tra từ khóa pháp lý / chân trang / link điều khoản
+        const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
+        if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) return true;
+
+        // 2. Kiểm tra từ khóa menu / đăng nhập / tài khoản
+        const navNoise = /sign in|sign up|login|log in|register|my account|home|menu|cart|portal|contact us|about us|help|faq/i;
+        if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) return true;
+
+        // 3. Link liên lạc
+        if (href.startsWith('mailto:') || href.startsWith('tel:')) return true;
+
+        // 4. Bỏ qua các nút back/prev/cancel/skip
+        if (/back|prev|previous|cancel|quay lại|bỏ qua/i.test(text)) return true;
+
+        // 5. Kiểm tra nếu là thẻ A trong đoạn văn bản disclaimer dài
+        if (el.tagName === 'A') {
+          const isButtonStyled = idAndClass.includes('btn') || idAndClass.includes('button') || el.getAttribute('role') === 'button';
+          if (!isButtonStyled) {
+            const parentP = el.closest('p, small, span');
+            if (parentP && parentP.textContent.length > 80) return true;
+          }
+        }
+
+        return false;
+      };
+
+      const rawCandidates = Array.from(document.querySelectorAll(
         'button, input[type="submit"], input[type="button"], a.btn, [role="button"], .next-btn, .continue-btn, .btn-next'
-      )).filter(isVisible);
+      )).filter((el) => isVisible(el) && !isNoiseElement(el));
 
       const patterns = [
         /^next\b/i,
@@ -459,10 +525,22 @@ export async function clickSurveyNextButton(frame, options = {}) {
         /^next question\b/i,
       ];
 
+      // Ưu tiên 1: Nút nằm bên trong container của câu hỏi/bước khảo sát đang active
+      const activeStepContainer = document.querySelector(
+        '.step.active, .survey-step.active, .active-step, [class*="step"].active, [class*="question"].active, .quiz-step.active, .survey-card, .quiz-card, .question-card'
+      );
+
+      const candidates = rawCandidates.slice().sort((a, b) => {
+        const aInActive = activeStepContainer && activeStepContainer.contains(a) ? 1 : 0;
+        const bInActive = activeStepContainer && activeStepContainer.contains(b) ? 1 : 0;
+        return bInActive - aInActive;
+      });
+
       for (const el of candidates) {
-        // Bỏ qua các nút back/prev/cancel/skip nếu đang tìm nút forward
         const text = (el.innerText || el.textContent || el.value || '').trim();
-        if (/back|prev|cancel|quay lại/i.test(text)) continue;
+        const rect = el.getBoundingClientRect();
+        // Bỏ qua các phần tử nằm tít ở thanh top-bar/header sát mép trên
+        if (rect.top < 45 && document.body.scrollHeight > 500) continue;
 
         const isMatch = patterns.some((p) => p.test(text)) ||
           el.id.toLowerCase().includes('next') ||
@@ -477,9 +555,9 @@ export async function clickSurveyNextButton(frame, options = {}) {
         }
       }
 
-      // Fallback: Tìm nút submit duy nhất trong form nếu có
+      // Fallback: Tìm nút submit duy nhất trong form nếu có (và không phải link rác)
       const submitBtn = document.querySelector('form button[type="submit"], button[type="submit"]');
-      if (submitBtn && isVisible(submitBtn)) {
+      if (submitBtn && isVisible(submitBtn) && !isNoiseElement(submitBtn)) {
         const uid = `next_btn_submit_${Date.now()}`;
         submitBtn.setAttribute('data-survey-next-uid', uid);
         return { uid, disabled: submitBtn.disabled };
