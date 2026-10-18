@@ -1573,7 +1573,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#0f172a;border-bottom:1px solid #1e293b;color:#fff;flex-shrink:0;">
           <div style="display:flex;align-items:center;gap:12px;">
             <span id="screenModalTitle" style="font-weight:bold;font-size:13px;color:#38bdf8;">Màn hình Slot 1</span>
-            <span id="screenModalFps" style="font-size:11px;color:#94a3b8;background:#1e293b;padding:2px 8px;border-radius:4px;border:1px solid #334155;">0 fps</span>
+            <span id="screenModalFps" style="font-size:11px;color:#38bdf8;background:#1e293b;padding:2px 8px;border-radius:4px;border:1px solid #334155;">🟢 Đang kết nối...</span>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
             <button type="button" class="win-btn" onclick="_quickScroll(0, -500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang lên trên (hoặc dùng con lăn chuột / trackpad)">⬆ Cuộn lên</button>
@@ -4474,6 +4474,17 @@
       const ipLabel = entry && entry.ip ? ` — ${entry.ip}` : '';
       document.getElementById('screenModalTitle').textContent = `Slot ${slot}${ipLabel} (nhấp vào canvas để tương tác)`;
 
+      const fpsEl = document.getElementById('screenModalFps');
+      if (fpsEl) {
+        if (!entry) {
+          fpsEl.textContent = '🔴 Phiên đã đóng';
+          fpsEl.style.color = '#f87171';
+        } else {
+          fpsEl.textContent = '🟢 Đang kết nối...';
+          fpsEl.style.color = '#38bdf8';
+        }
+      }
+
       // Vẽ ngay lập tức thumbnail đã có lên canvas để modal mở ra là có hình ngay lập tức, 0ms độ trễ
       const canvas = document.getElementById('screenCanvas');
       if (canvas) {
@@ -4516,13 +4527,18 @@
       _screenFpsTimer = setInterval(() => {
         const curFpsEl = document.getElementById('screenModalFps');
         if (!curFpsEl) return;
+        if (!es || es.readyState === EventSource.CLOSED) {
+          curFpsEl.textContent = '🔴 Mất kết nối (phiên đã đóng)';
+          curFpsEl.style.color = '#f87171';
+          return;
+        }
         if (_screenFpsCounter > 0) {
           _fpsMovingAvg = _fpsMovingAvg === 0 ? _screenFpsCounter : Math.round(_fpsMovingAvg * 0.35 + _screenFpsCounter * 0.65);
           curFpsEl.textContent = `🟢 ${_fpsMovingAvg} fps`;
           curFpsEl.style.color = '#4ade80';
         } else {
           const timeSinceLastFrame = Date.now() - _lastFrameTime;
-          if (es && es.readyState === EventSource.OPEN && timeSinceLastFrame < 10000) {
+          if (es.readyState === EventSource.OPEN && timeSinceLastFrame < 10000) {
             const displayFps = Math.max(_fpsMovingAvg, 5);
             curFpsEl.textContent = `🟢 ${displayFps} fps (Ổn định)`;
             curFpsEl.style.color = '#38bdf8';
@@ -4576,7 +4592,7 @@
       es.onerror = () => {
         const errFpsEl = document.getElementById('screenModalFps');
         if (errFpsEl) {
-          errFpsEl.textContent = '🔴 Mất kết nối';
+          errFpsEl.textContent = '🔴 Mất kết nối (phiên đã đóng)';
           errFpsEl.style.color = '#f87171';
         }
       };

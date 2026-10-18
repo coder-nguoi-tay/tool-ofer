@@ -18,6 +18,7 @@ import {
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig } from './ai-assist.mjs';
+import { startTelegramBot, tgNotify } from './tgbot.mjs';
 
 export function getAiConfigFilePath() {
   return join(getAutoLeadPCDir(), 'Config', 'ai-config.json');
@@ -870,10 +871,12 @@ async function autoRefillProxyIfNeeded() {
     if (added > 0) {
       await saveProxyQueue();
       console.log(`[Proxy711AutoRefill] Đã tự động nạp thêm ${added} proxy.`);
+      void tgNotify(`📦 Tự động mua thêm <b>${added} proxy</b> từ 711proxy. Hàng đợi: ${proxyQueue.available.length} proxy.`);
       queueAutomaticRefill();
     }
   } catch (e) {
     console.log('[Proxy711AutoRefill] Lỗi tự động nạp proxy:', e.message);
+    void tgNotify(`⚠️ Lỗi tự động mua proxy 711: ${e.message}`);
   } finally {
     proxy711AutoRefilling = false;
   }
@@ -2895,6 +2898,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
         clearInterval(completeTimer);
         limitRunCount += 1;
         session.addLog?.({ time: new Date().toISOString(), type: 'complete_text', detail: `Text hoàn tất "${completeText}" (${limitRunCount}${limitRunMax > 0 ? '/' + limitRunMax : ''}).` });
+        if (limitRunMax > 0 && limitRunCount >= limitRunMax) void tgNotify(`🎉 <b>Hoàn thành!</b> Đạt ${limitRunCount}/${limitRunMax} leads. Luồng đã dừng.`);
         session.suppressAutoRefill = false;
         await session.browser?.close?.().catch(() => {});
       }
@@ -4402,6 +4406,7 @@ async function openBrowserWithInstalledChrome({
   const session = {
     browser: context,
     tileIndex,
+    slot: (tileIndex ?? 0) + 1,
     chromeVersion: build.version,
     deviceProfile,
     suppressAutoRefill: false,
@@ -7179,6 +7184,7 @@ async function startLocalInterface() {
     console.log(`AutoLeadPC Mac [Bản ${instanceId}] đang chạy tại ${interfaceUrl}`);
     if (listenHost === '0.0.0.0') console.log(`[Hub] Lắng nghe trên tất cả giao diện mạng — agent có thể kết nối qua IP LAN:${port}`);
     exitWhenParentExits();
+    void startTelegramBot();
     if (process.env.AUTOLEADPC_NO_OPEN === '1') return;
     try {
       await executeFile('open', [interfaceUrl]);
