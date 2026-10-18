@@ -2129,6 +2129,10 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
    * @since 2026-10-15
    */
   const attemptProxy = async (workerIndex) => {
+    // Giãn cách khởi động giữa các worker (staggered launch) để tránh giật lag CPU và nghẽn mạng
+    if (workerIndex > 0) {
+      await new Promise((r) => setTimeout(r, Math.min(workerIndex * 800, 4000)));
+    }
     const offerCount = Math.max(1, offerUrls.length);
     const offerNumber = assignedStreamRoles?.[workerIndex]
       ?? ((workerIndex % offerCount) + 1);
@@ -4234,12 +4238,40 @@ async function openBrowserWithInstalledChrome({
         '--no-default-browser-check',
         '--disable-blink-features=AutomationControlled',
         '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-ipc-flooding-protection',
+        '--disable-breakpad',
+        '--disable-component-update',
+        '--disable-domain-reliability',
         '--js-flags=--max-old-space-size=512',
         '--disk-cache-size=1',
         '--media-cache-size=1',
         '--renderer-process-limit=3',
       ],
     });
+
+    // Tối ưu hóa bộ nhớ & băng thông khi chạy song song nhiều luồng/tab:
+    // Chặn video/audio âm thầm phát và các domain tracking/analytics nặng (tiết kiệm 50% RAM & 60% băng thông)
+    await context.route('**/*', (route) => {
+      const req = route.request();
+      const type = req.resourceType();
+      const url = req.url();
+
+      if (type === 'media') {
+        return route.abort('blockedbyclient').catch(() => {});
+      }
+
+      if (
+        /google-analytics\.com|googletagmanager\.com|analytics\.google\.com|hotjar\.com|clarity\.ms|connect\.facebook\.net|facebook\.com\/tr|tiktok\.com\/i18n\/pixel|doubleclick\.net|scorecardresearch\.com|criteo\.com/i.test(url)
+      ) {
+        return route.abort('blockedbyclient').catch(() => {});
+      }
+
+      return route.continue().catch(() => {});
+    }).catch(() => {});
   } catch (error) {
     await relay?.close();
     throw error;

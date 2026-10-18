@@ -87,7 +87,7 @@ EOF
   fi
 
   # Sync launcher files
-  cp -p app.mjs autofill.mjs survey-solver.mjs survey-solver.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md "$LAUNCHER_DIR/"
   if [ -f "script.mjs" ]; then
     cp -p script.mjs "$LAUNCHER_DIR/"
   fi
