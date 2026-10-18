@@ -4360,9 +4360,29 @@
       const canvas = document.getElementById('screenCanvas');
       const ctx = canvas.getContext('2d');
       _screenFpsCounter = 0;
+      let _lastFrameTime = Date.now();
+      const fpsEl = document.getElementById('screenModalFps');
+      if (fpsEl) {
+        fpsEl.textContent = '🟢 Đang kết nối...';
+        fpsEl.style.color = '#38bdf8';
+      }
       if (_screenFpsTimer) clearInterval(_screenFpsTimer);
       _screenFpsTimer = setInterval(() => {
-        document.getElementById('screenModalFps').textContent = `${_screenFpsCounter} fps`;
+        const curFpsEl = document.getElementById('screenModalFps');
+        if (!curFpsEl) return;
+        if (_screenFpsCounter > 0) {
+          curFpsEl.textContent = `🟢 ${_screenFpsCounter} fps`;
+          curFpsEl.style.color = '#4ade80';
+        } else {
+          const timeSinceLastFrame = Date.now() - _lastFrameTime;
+          if (es && es.readyState === EventSource.OPEN && timeSinceLastFrame < 10000) {
+            curFpsEl.textContent = '🟢 Sẵn sàng';
+            curFpsEl.style.color = '#38bdf8';
+          } else {
+            curFpsEl.textContent = '🟡 Đang đợi...';
+            curFpsEl.style.color = '#facc15';
+          }
+        }
         _screenFpsCounter = 0;
       }, 1000);
 
@@ -4381,9 +4401,16 @@
           ctx.drawImage(bmp, 0, 0);
           bmp.close();
           _screenFpsCounter++;
+          _lastFrameTime = Date.now();
         });
       };
-      es.onerror = () => { document.getElementById('screenModalFps').textContent = 'mất kết nối'; };
+      es.onerror = () => {
+        const errFpsEl = document.getElementById('screenModalFps');
+        if (errFpsEl) {
+          errFpsEl.textContent = '🔴 Mất kết nối';
+          errFpsEl.style.color = '#f87171';
+        }
+      };
 
       // Wheel accumulator & throttle
       let _wheelAccumX = 0;
@@ -4441,12 +4468,23 @@
           return;
         }
         e.preventDefault();
-        _sendInput(slot, { type: 'keydown', key: e.key, code: e.code, keyCode: e.keyCode, modifiers: _mods(e) });
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          _sendInput(slot, { type: 'char', text: e.key });
+        const isPrintable = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+        _sendInput(slot, {
+          type: 'key',
+          key: e.key,
+          code: e.code,
+          text: isPrintable ? e.key : undefined,
+          modifiers: _mods(e)
+        });
+      };
+      canvas.onkeyup      = (e) => { e.preventDefault(); };
+      canvas.onpaste      = (e) => {
+        e.preventDefault();
+        const pasteText = (e.clipboardData || window.clipboardData)?.getData('text');
+        if (pasteText) {
+          _sendInput(slot, { type: 'key', text: pasteText });
         }
       };
-      canvas.onkeyup      = (e) => { e.preventDefault(); _sendInput(slot, { type: 'keyup', key: e.key, code: e.code, keyCode: e.keyCode, modifiers: _mods(e) }); };
       canvas.tabIndex = 0;
       canvas.focus();
       _screenActiveTabIndex = 0;
@@ -4460,7 +4498,7 @@
       if (_screenTabPollTimer) { clearInterval(_screenTabPollTimer); _screenTabPollTimer = null; }
       const canvas = document.getElementById('screenCanvas');
       if (canvas) {
-        canvas.onmousedown = canvas.onmouseup = canvas.onmousemove = canvas.onwheel = canvas.onkeydown = canvas.onkeyup = null;
+        canvas.onmousedown = canvas.onmouseup = canvas.onmousemove = canvas.onwheel = canvas.onkeydown = canvas.onkeyup = canvas.onpaste = null;
       }
       document.getElementById('screenTabBar').innerHTML = '';
     }

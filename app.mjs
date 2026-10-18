@@ -3562,6 +3562,16 @@ export async function closeActiveBrowsers() {
   await executeFile('pkill', ['-9', '-f', 'user-data-dir.*chrome-profiles']).catch(() => {});
   await executeFile('pkill', ['-9', '-f', 'user-data-dir.*AutoLeadPC']).catch(() => {});
 
+  // Pass 2: bắt các browser vừa được add vào activeBrowsers trong lúc pass 1 đang chạy
+  await new Promise((r) => setTimeout(r, 800));
+  const lateComers = [...activeBrowsers];
+  for (const s of lateComers) {
+    s.suppressAutoRefill = true;
+    s.isClosed = true;
+    if (s._monitorInterval) { clearInterval(s._monitorInterval); s._monitorInterval = null; }
+    await s.context?.close?.().catch(() => {});
+  }
+
   activeBrowsers.clear();
   activeProxyLocks.clear();
   activeExitIpLocks.clear();
@@ -4252,26 +4262,6 @@ async function openBrowserWithInstalledChrome({
         '--renderer-process-limit=3',
       ],
     });
-
-    // Tối ưu hóa bộ nhớ & băng thông khi chạy song song nhiều luồng/tab:
-    // Chặn video/audio âm thầm phát và các domain tracking/analytics nặng (tiết kiệm 50% RAM & 60% băng thông)
-    await context.route('**/*', (route) => {
-      const req = route.request();
-      const type = req.resourceType();
-      const url = req.url();
-
-      if (type === 'media') {
-        return route.abort('blockedbyclient').catch(() => {});
-      }
-
-      if (
-        /google-analytics\.com|googletagmanager\.com|analytics\.google\.com|hotjar\.com|clarity\.ms|connect\.facebook\.net|facebook\.com\/tr|tiktok\.com\/i18n\/pixel|doubleclick\.net|scorecardresearch\.com|criteo\.com/i.test(url)
-      ) {
-        return route.abort('blockedbyclient').catch(() => {});
-      }
-
-      return route.continue().catch(() => {});
-    }).catch(() => {});
   } catch (error) {
     await relay?.close();
     throw error;
@@ -4655,6 +4645,14 @@ async function openBrowserWithInstalledChrome({
     },
   });
   activeBrowsers.add(session);
+
+  // Nếu stop được bấm trong lúc browser đang khởi động → đóng ngay
+  if (autoRefill.stopRequested) {
+    session.suppressAutoRefill = true;
+    session.isClosed = true;
+    await context.close().catch(() => {});
+    return null;
+  }
 
   context.on('close', () => {
     activeBrowsers.delete(session);
@@ -6837,51 +6835,78 @@ async function startLocalInterface() {
         const body = JSON.parse(await readRequestBody(request));
         const { cdpClient } = sc;
 
-        // Tự động scale toạ độ chuột dựa trên deviceWidth/deviceHeight của viewport thực
-        const devW = sc.deviceWidth || (sc.page ? (await sc.page.evaluate(() => window.innerWidth).catch(() => 0)) : 0);
-        const devH = sc.deviceHeight || (sc.page ? (await sc.page.evaluate(() => window.innerHeight).catch(() => 0)) : 0);
-        let targetX = body.x ?? 0;
-        let targetY = body.y ?? 0;
-        if (body.clientWidth && devW) {
-          targetX = Math.round(targetX * (devW / body.clientWidth));
-        }
-        if (body.clientHeight && devH) {
-          targetY = Math.round(targetY * (devH / body.clientHeight));
-        }
+        // Xử lý sự kiện chuột & cuộn bánh xe (scale toạ độ theo viewport)
+        if (body.type === 'mousedown' || body.type === 'mouseup' || body.type === 'mousemove' || body.type === 'wheel') {
+          const devW = sc.deviceWidth || (typeof sc.page?.viewportSize === 'function' ? sc.page.viewportSize()?.width : 0) || 1280;
+          const devH = sc.deviceHeight || (typeof sc.page?.viewportSize === 'function' ? sc.page.viewportSize()?.height : 0) || 800;
+          let targetX = body.x ?? 0;
+          let targetY = body.y ?? 0;
+          if (body.clientWidth && devW) {
+            targetX = Math.round(targetX * (devW / body.clientWidth));
+          }
+          if (body.clientHeight && devH) {
+            targetY = Math.round(targetY * (devH / body.clientHeight));
+          }
 
-        if (body.type === 'mousedown') {
-          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
-        } else if (body.type === 'mouseup') {
-          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
-        } else if (body.type === 'mousemove') {
-          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: targetX, y: targetY, modifiers: body.modifiers || 0 });
-        } else if (body.type === 'wheel') {
-          const deltaX = Math.round(body.deltaX || 0);
-          const deltaY = Math.round(body.deltaY || 0);
-          try {
-            await cdpClient.send('Input.dispatchMouseEvent', {
-              type: 'mouseWheel',
-              x: targetX,
-              y: targetY,
-              deltaX,
-              deltaY,
-              modifiers: body.modifiers || 0,
-            });
-          } catch (e) {
-            // Fallback nếu CDP mouseWheel gặp lỗi
-            if (sc.page && !sc.page.isClosed()) {
-              await sc.page.evaluate((dy, dx) => {
-                window.scrollBy({ top: dy, left: dx, behavior: 'auto' });
-              }, deltaY, deltaX).catch(() => {});
+          if (body.type === 'mousedown') {
+            await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+          } else if (body.type === 'mouseup') {
+            await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+          } else if (body.type === 'mousemove') {
+            await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: targetX, y: targetY, modifiers: body.modifiers || 0 });
+          } else if (body.type === 'wheel') {
+            const deltaX = Math.round(body.deltaX || 0);
+            const deltaY = Math.round(body.deltaY || 0);
+            try {
+              await cdpClient.send('Input.dispatchMouseEvent', {
+                type: 'mouseWheel',
+                x: targetX,
+                y: targetY,
+                deltaX,
+                deltaY,
+                modifiers: body.modifiers || 0,
+              });
+            } catch (e) {
+              if (sc.page && !sc.page.isClosed()) {
+                await sc.page.evaluate((dy, dx) => {
+                  window.scrollBy({ top: dy, left: dx, behavior: 'auto' });
+                }, deltaY, deltaX).catch(() => {});
+              }
             }
           }
-        } else if (body.type === 'keydown') {
-          await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyDown', key: body.key, code: body.code || '', modifiers: body.modifiers || 0, windowsVirtualKeyCode: body.keyCode || 0, nativeVirtualKeyCode: body.keyCode || 0 });
-        } else if (body.type === 'keyup') {
-          await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyUp', key: body.key, code: body.code || '', modifiers: body.modifiers || 0, windowsVirtualKeyCode: body.keyCode || 0, nativeVirtualKeyCode: body.keyCode || 0 });
-        } else if (body.type === 'char') {
-          if (body.text) {
-            await cdpClient.send('Input.dispatchKeyEvent', { type: 'char', text: body.text });
+        } else if (body.type === 'key' || body.type === 'keydown' || body.type === 'char') {
+          // Xử lý sự kiện bàn phím thông minh qua Playwright page.keyboard (trực tiếp và không nghẽn CDP)
+          if (sc.page && !sc.page.isClosed()) {
+            if (body.text) {
+              await sc.page.keyboard.insertText(body.text).catch(() => {});
+            } else if (body.key === 'Backspace' || body.key === 'Delete' || body.key === 'Enter' || body.key === 'Tab' || body.key === 'Escape' || body.key?.startsWith('Arrow')) {
+              await sc.page.keyboard.press(body.key).catch(() => {});
+            } else if (body.key && body.key.length === 1 && !body.modifiers) {
+              await sc.page.keyboard.insertText(body.key).catch(() => {});
+            } else if (body.key) {
+              let chord = '';
+              if (body.modifiers) {
+                if (body.modifiers & 2) chord += 'Control+';
+                if (body.modifiers & 4) chord += 'Meta+';
+                if (body.modifiers & 1) chord += 'Alt+';
+                if (body.modifiers & 8) chord += 'Shift+';
+              }
+              chord += body.key;
+              await sc.page.keyboard.press(chord).catch(async () => {
+                if (cdpClient) {
+                  await cdpClient.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: body.key, code: body.code || '', modifiers: body.modifiers || 0 }).catch(() => {});
+                  await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyUp', key: body.key, code: body.code || '', modifiers: body.modifiers || 0 }).catch(() => {});
+                }
+              });
+            }
+          } else if (cdpClient) {
+            // Fallback trực tiếp qua CDP nếu page object không khả dụng
+            if (body.text) {
+              await cdpClient.send('Input.dispatchKeyEvent', { type: 'char', text: body.text }).catch(() => {});
+            } else {
+              await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyDown', key: body.key, code: body.code || '', modifiers: body.modifiers || 0 }).catch(() => {});
+              await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyUp', key: body.key, code: body.code || '', modifiers: body.modifiers || 0 }).catch(() => {});
+            }
           }
         }
         respondWithJson(response, 200, { ok: true });

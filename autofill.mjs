@@ -2601,7 +2601,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         }
 
         // Tích hợp SurveySolver chuyên sâu (Ratings, Matrix, Custom Checkboxes)
-        const surveySolverRes = await solveSurveyStep(frame, record, options);
+        const surveySolverRes = await solveSurveyStep(frame, record, { ...options, autoClickNext: false });
         if (surveySolverRes.answeredCount > 0) {
           filledInThisPass += surveySolverRes.answeredCount;
           session.lastActionTime = Date.now();
@@ -3169,7 +3169,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         }
 
         // Tích hợp SurveySolver chuyên sâu (Ratings, Matrix, Custom Checkboxes)
-        const surveySolverRes = await solveSurveyStep(frame, record, options);
+        const surveySolverRes = await solveSurveyStep(frame, record, { ...options, autoClickNext: false });
         if (surveySolverRes.answeredCount > 0) {
           filledInThisPass += surveySolverRes.answeredCount;
           session.lastActionTime = Date.now();

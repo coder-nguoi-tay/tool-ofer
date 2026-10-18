@@ -553,8 +553,22 @@ export async function solveSurveyStep(frame, record = {}, options = {}) {
   const autoAdvanced = Boolean(initialUrl && newUrl && initialUrl !== newUrl);
 
   let nextClicked = false;
-  if (!autoAdvanced) {
-    nextClicked = await clickSurveyNextButton(frame, options);
+  if (!autoAdvanced && options.autoClickNext !== false) {
+    const hasUnfilledTextInputs = await frame.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el || el.disabled) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      const textInputs = Array.from(document.querySelectorAll(
+        'input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input:not([type]), select'
+      )).filter(isVisible);
+      return textInputs.some((inp) => !inp.value || inp.value.trim() === '');
+    }).catch(() => false);
+
+    if (!hasUnfilledTextInputs) {
+      nextClicked = await clickSurveyNextButton(frame, options);
+    }
   }
 
   return {
