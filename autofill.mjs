@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto';
+import { solveSurveyStep } from './survey-solver.mjs';
 
 /**
  * Đọc dữ liệu CSV hoặc JSON để mỗi form có thể chọn một bản ghi.
@@ -2598,6 +2599,19 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             detail: `Đã tự động chọn câu trả lời khảo sát/lựa chọn (${answeredSurvey} câu).`,
           });
         }
+
+        // Tích hợp SurveySolver chuyên sâu (Ratings, Matrix, Custom Checkboxes)
+        const surveySolverRes = await solveSurveyStep(frame, record, options);
+        if (surveySolverRes.answeredCount > 0) {
+          filledInThisPass += surveySolverRes.answeredCount;
+          session.lastActionTime = Date.now();
+          session.autofillFields = (session.autofillFields ?? 0) + surveySolverRes.answeredCount;
+          session.autofillError = null;
+          options.onLog?.({
+            type: 'survey_solver_answered',
+            detail: `[SurveySolver] Đã tự động giải quyết ${surveySolverRes.answeredCount} câu hỏi khảo sát/checkbox.`,
+          });
+        }
       } catch {}
 
       let fields = [];
@@ -3151,6 +3165,19 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           options.onLog?.({
             type: 'survey_answered',
             detail: `Đã tự động chọn câu trả lời khảo sát/lựa chọn (${answeredSurvey} câu).`,
+          });
+        }
+
+        // Tích hợp SurveySolver chuyên sâu (Ratings, Matrix, Custom Checkboxes)
+        const surveySolverRes = await solveSurveyStep(frame, record, options);
+        if (surveySolverRes.answeredCount > 0) {
+          filledInThisPass += surveySolverRes.answeredCount;
+          session.lastActionTime = Date.now();
+          session.autofillFields = (session.autofillFields ?? 0) + surveySolverRes.answeredCount;
+          session.autofillError = null;
+          options.onLog?.({
+            type: 'survey_solver_answered',
+            detail: `[SurveySolver] Đã tự động giải quyết ${surveySolverRes.answeredCount} câu hỏi khảo sát/checkbox.`,
           });
         }
       } catch {}

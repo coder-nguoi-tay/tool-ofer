@@ -1419,6 +1419,51 @@
           </div>
         </fieldset>
 
+        <!-- 711Proxy -->
+        <fieldset class="win-group" id="fieldset711proxy">
+          <legend class="win-legend">711Proxy – Mua proxy nhanh:</legend>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <label style="font-size:11px;color:#555;">Username</label>
+              <input type="text" id="inp711User" placeholder="Email tài khoản" style="width:160px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;" autocomplete="username">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <label style="font-size:11px;color:#555;">Password</label>
+              <input type="password" id="inp711Pass" placeholder="Mật khẩu" style="width:130px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;" autocomplete="current-password">
+            </div>
+            <button type="button" class="win-btn win-btn-primary" style="font-size:12px;" onclick="proxy711Login()">Đăng nhập</button>
+            <span id="lbl711Balance" style="font-size:12px;color:#555;align-self:center;min-width:80px;"></span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px;">
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <label style="font-size:11px;color:#555;">Khu vực</label>
+              <select id="sel711Region" style="padding:2px 6px;border:1px solid #abadb3;font-size:12px;width:80px;">
+                <option value="US">US</option>
+                <option value="GB">GB</option>
+                <option value="CA">CA</option>
+                <option value="AU">AU</option>
+                <option value="DE">DE</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <label style="font-size:11px;color:#555;">Số lượng</label>
+              <input type="number" id="inp711Count" value="50" min="1" max="200" style="width:60px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <label style="font-size:11px;color:#555;">Sticky (phút)</label>
+              <input type="number" id="inp711SessTime" value="20" min="1" max="120" style="width:60px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;">
+            </div>
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="chk711SessAuto"> Đổi IP trước hạn
+            </label>
+            <button type="button" class="win-btn win-btn-primary" id="btn711Generate" style="font-size:12px;" onclick="proxy711Generate()">Tạo proxy</button>
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="chk711AutoRefill" onchange="proxy711SaveAutoRefill()"> Tự động nạp khi hết
+            </label>
+            <span id="lbl711Status" style="font-size:11px;color:#555;align-self:center;"></span>
+          </div>
+        </fieldset>
+
         <!-- List Proxy -->
         <fieldset class="win-group">
           <legend class="win-legend">List Proxy:</legend>
@@ -2277,6 +2322,7 @@
       await Promise.allSettled([
         loadOfferConfig(),
         loadProxyQueue(),
+        proxy711Init(),
         loadScriptList(),
         loadScriptRrsList(),
         loadCommandsPalette(),
@@ -2600,6 +2646,96 @@
         }
       }
     }
+
+    // ── 711Proxy ──
+    async function proxy711Init() {
+      const cfg = await api('/711proxy/config');
+      if (cfg && cfg.username) document.getElementById('inp711User').value = cfg.username;
+      const ar = await api('/711proxy/autorefill');
+      if (ar && !ar.error) {
+        document.getElementById('chk711AutoRefill').checked = !!ar.enabled;
+        if (ar.region) document.getElementById('sel711Region').value = ar.region;
+        if (ar.count) document.getElementById('inp711Count').value = ar.count;
+        if (ar.sessTime) document.getElementById('inp711SessTime').value = ar.sessTime;
+        document.getElementById('chk711SessAuto').checked = !!ar.sessAuto;
+      }
+    }
+
+    async function proxy711SaveAutoRefill() {
+      await api('/711proxy/autorefill', {
+        method: 'POST',
+        body: JSON.stringify({
+          enabled: document.getElementById('chk711AutoRefill').checked,
+          region: document.getElementById('sel711Region').value,
+          count: parseInt(document.getElementById('inp711Count').value) || 50,
+          sessTime: parseInt(document.getElementById('inp711SessTime').value) || 20,
+          sessAuto: document.getElementById('chk711SessAuto').checked,
+        }),
+      });
+    }
+
+    async function proxy711Login() {
+      const username = document.getElementById('inp711User').value.trim();
+      const passwd = document.getElementById('inp711Pass').value;
+      if (!username || !passwd) { showWinAlert('Vui lòng nhập username và password.'); return; }
+      document.getElementById('lbl711Balance').textContent = 'Đang đăng nhập...';
+      const res = await api('/711proxy/login', { method: 'POST', body: JSON.stringify({ username, passwd }) });
+      if (res && res.ok) {
+        document.getElementById('inp711Pass').value = '';
+        document.getElementById('lbl711Balance').textContent = 'Đã đăng nhập ✓';
+        proxy711FetchBalance();
+      } else {
+        document.getElementById('lbl711Balance').textContent = '';
+        showWinAlert('Lỗi đăng nhập: ' + (res?.error || 'Không xác định'));
+      }
+    }
+
+    async function proxy711FetchBalance() {
+      const res = await api('/711proxy/balance');
+      if (!res || res.error || (res.code && res.code !== 0 && res.code !== 200)) {
+        // Balance API không hỗ trợ tài khoản này — không sao, gen proxy vẫn dùng được
+        document.getElementById('lbl711Balance').textContent = '';
+        return;
+      }
+      const bytes = res.flow_balance ?? res.balance ?? res.traffic ?? null;
+      if (bytes !== null) {
+        const gb = (Number(bytes) / 1024 / 1024 / 1024).toFixed(2);
+        document.getElementById('lbl711Balance').textContent = `Số dư: ${gb} GB`;
+      }
+    }
+
+    async function proxy711Generate() {
+      const btn = document.getElementById('btn711Generate');
+      if (btn.disabled) return;
+      const region = document.getElementById('sel711Region').value;
+      const count = parseInt(document.getElementById('inp711Count').value) || 50;
+      const sessTime = parseInt(document.getElementById('inp711SessTime').value) || 20;
+      const sessAuto = document.getElementById('chk711SessAuto').checked;
+      // Lưu cài đặt hiện tại vào auto-refill config
+      await api('/711proxy/autorefill', {
+        method: 'POST',
+        body: JSON.stringify({
+          enabled: document.getElementById('chk711AutoRefill').checked,
+          region, count, sessTime, sessAuto,
+        }),
+      });
+      btn.disabled = true;
+      document.getElementById('lbl711Status').textContent = `Đang tạo ${count} proxy...`;
+      const res = await api('/711proxy/generate', {
+        method: 'POST',
+        body: JSON.stringify({ region, count, sessTime, sessAuto }),
+      });
+      btn.disabled = false;
+      if (res && res.added !== undefined) {
+        document.getElementById('lbl711Status').textContent = '';
+        await loadProxyQueue();
+        showWinAlert(res.message);
+      } else {
+        document.getElementById('lbl711Status').textContent = '';
+        showWinAlert('Lỗi tạo proxy: ' + (res?.error || 'Không xác định'));
+      }
+    }
+    // ─────────────────────────────────────────────────────────
 
     async function resetProxyQueue() {
       const res = await api('/proxy-queue/reset', {

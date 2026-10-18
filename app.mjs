@@ -682,6 +682,109 @@ const proxyQueuePath = join(appDataDirectory, 'proxy-queue.json');
 /** Hàng đợi proxy: available = chưa dùng, used = đã dùng (raw lines gốc). */
 const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
 export const emailQueuePath = join(appDataDirectory, 'email-queue.json');
+const proxy711ConfigPath = join(appDataDirectory, '711proxy-config.json');
+const proxy711 = { username: '', token: '', tokenExpiry: 0 };
+const proxy711AutoRefillConfigPath = join(appDataDirectory, '711proxy-autorefill.json');
+const proxy711AutoRefill = { enabled: false, region: 'US', count: 50, sessTime: 20, sessAuto: false };
+let proxy711AutoRefilling = false;
+
+async function loadProxy711Config() {
+  try {
+    const d = JSON.parse(await readFile(proxy711ConfigPath, 'utf8'));
+    if (d.username) proxy711.username = d.username;
+    if (d.token) proxy711.token = d.token;
+    if (d.tokenExpiry) proxy711.tokenExpiry = Number(d.tokenExpiry);
+  } catch {}
+}
+
+async function saveProxy711Config() {
+  await writeFile(proxy711ConfigPath, JSON.stringify({
+    username: proxy711.username,
+    token: proxy711.token,
+    tokenExpiry: proxy711.tokenExpiry,
+  })).catch(() => {});
+}
+
+async function loadProxy711AutoRefillConfig() {
+  try {
+    const d = JSON.parse(await readFile(proxy711AutoRefillConfigPath, 'utf8'));
+    if (typeof d.enabled === 'boolean') proxy711AutoRefill.enabled = d.enabled;
+    if (typeof d.region === 'string') proxy711AutoRefill.region = d.region;
+    if (typeof d.count === 'number') proxy711AutoRefill.count = d.count;
+    if (typeof d.sessTime === 'number') proxy711AutoRefill.sessTime = d.sessTime;
+    if (typeof d.sessAuto === 'boolean') proxy711AutoRefill.sessAuto = d.sessAuto;
+  } catch {}
+}
+
+async function saveProxy711AutoRefillConfig() {
+  await writeFile(proxy711AutoRefillConfigPath, JSON.stringify(proxy711AutoRefill)).catch(() => {});
+}
+
+async function autoRefillProxyIfNeeded() {
+  if (!proxy711AutoRefill.enabled || proxy711AutoRefilling) return;
+  if (proxyQueue.available.length > 0) return;
+  proxy711AutoRefilling = true;
+  try {
+    const genUrl = new URL('http://global.rotgbapi.trustsource.live:8089/gen');
+    genUrl.searchParams.set('zone', 'custom');
+    genUrl.searchParams.set('ptype', '1');
+    genUrl.searchParams.set('region', proxy711AutoRefill.region);
+    genUrl.searchParams.set('count', String(proxy711AutoRefill.count));
+    genUrl.searchParams.set('proto', 'http');
+    genUrl.searchParams.set('stype', 'text');
+    genUrl.searchParams.set('split', '\r\n');
+    genUrl.searchParams.set('sessType', 'sticky');
+    genUrl.searchParams.set('sessTime', String(proxy711AutoRefill.sessTime));
+    genUrl.searchParams.set('sessAuto', proxy711AutoRefill.sessAuto ? '1' : '0');
+    const res = await fetch(genUrl.toString());
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    if (!text.trim() || text.includes('"code"')) throw new Error(text.slice(0, 200));
+    const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const proxyLines = rawLines.map((l) => {
+      if (/^https?:\/\//i.test(l)) return l;
+      const at = l.lastIndexOf('@');
+      if (at > 0) return `http://${l.slice(0, at)}@${l.slice(at + 1)}`;
+      const parts = l.split(':');
+      if (parts.length === 4) return `http://${encodeURIComponent(parts[2])}:${encodeURIComponent(parts[3])}@${parts[0]}:${parts[1]}`;
+      return `http://${l}`;
+    });
+    const added = importProxyLines(proxyLines, 'http');
+    if (added > 0) {
+      await saveProxyQueue();
+      console.log(`[Proxy711AutoRefill] Đã tự động nạp thêm ${added} proxy.`);
+      queueAutomaticRefill();
+    }
+  } catch (e) {
+    console.log('[Proxy711AutoRefill] Lỗi tự động nạp proxy:', e.message);
+  } finally {
+    proxy711AutoRefilling = false;
+  }
+}
+
+async function fetch711Token(username, passwd) {
+  for (const endpoint of [
+    'https://server.711proxy.com/eapi/token/',
+    'https://server.711proxy.com/wapi/token/',
+  ]) {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, passwd }),
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { continue; }
+    if (data.results) {
+      proxy711.username = username;
+      proxy711.token = data.results;
+      proxy711.tokenExpiry = Date.now() + 3_600_000;
+      await saveProxy711Config();
+      return proxy711.token;
+    }
+  }
+  throw new Error('Đăng nhập thất bại. Kiểm tra lại tài khoản 711proxy.');
+}
 /** Hàng đợi email mẫu: available = chưa dùng, used = đã dùng. */
 export const emailQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
 const emailAutoRefillConfigPath = join(appDataDirectory, 'email-autorefill.json');
@@ -1494,6 +1597,7 @@ function dispatchOneTaskToAgent(agent, settings) {
   const proxyLine = proxyQueue.available.shift();
   proxyQueue.used.push(proxyLine);
   void saveProxyQueue();
+  if (proxyQueue.available.length === 0) void autoRefillProxyIfNeeded();
   const record = autofillQueue.available.shift() ?? {};
   if (record && Object.keys(record).length > 0) {
     autofillQueue.used.push(record);
@@ -5399,6 +5503,8 @@ async function startLocalInterface() {
   await loadDualStreamState();
   await initializeEmailQueue();
   await loadEmailAutoRefillConfig();
+  await loadProxy711Config();
+  await loadProxy711AutoRefillConfig();
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
   loadAiConfig();
@@ -5856,6 +5962,122 @@ async function startLocalInterface() {
       });
       return;
     }
+
+    // ── 711Proxy ──────────────────────────────────────────────
+    if (request.method === 'GET' && request.url === '/711proxy/config') {
+      respondWithJson(response, 200, {
+        username: proxy711.username,
+        hasToken: Boolean(proxy711.token && Date.now() < proxy711.tokenExpiry),
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/711proxy/login') {
+      const body = JSON.parse(await readRequestBody(request));
+      const { username, passwd } = body;
+      if (!username || !passwd) { respondWithJson(response, 400, { error: 'Cần username và passwd.' }); return; }
+      try {
+        await fetch711Token(username, passwd);
+        respondWithJson(response, 200, { ok: true, username });
+      } catch (e) {
+        respondWithJson(response, 400, { error: e.message });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/711proxy/autorefill') {
+      respondWithJson(response, 200, { ...proxy711AutoRefill });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/711proxy/autorefill') {
+      const body = JSON.parse(await readRequestBody(request));
+      if (typeof body.enabled === 'boolean') proxy711AutoRefill.enabled = body.enabled;
+      if (typeof body.region === 'string') proxy711AutoRefill.region = body.region;
+      if (typeof body.count === 'number') proxy711AutoRefill.count = body.count;
+      if (typeof body.sessTime === 'number') proxy711AutoRefill.sessTime = body.sessTime;
+      if (typeof body.sessAuto === 'boolean') proxy711AutoRefill.sessAuto = body.sessAuto;
+      await saveProxy711AutoRefillConfig();
+      respondWithJson(response, 200, { ...proxy711AutoRefill });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/711proxy/logout') {
+      proxy711.token = '';
+      proxy711.tokenExpiry = 0;
+      await saveProxy711Config();
+      respondWithJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/711proxy/balance') {
+      if (!proxy711.token || Date.now() >= proxy711.tokenExpiry) {
+        respondWithJson(response, 401, { error: 'Chưa đăng nhập.' }); return;
+      }
+      try {
+        let data;
+        for (const ep of ['https://server.711proxy.com/eapi/balance/', 'https://server.711proxy.com/wapi/balance/']) {
+          const r = await fetch(ep, { headers: { Authorization: `Bearer ${proxy711.token}` } });
+          const t = await r.text();
+          console.log(`[711Proxy] balance ${ep}:`, t.slice(0, 300));
+          try { const d = JSON.parse(t); if (d && typeof d === 'object') { data = d; break; } } catch {}
+        }
+        if (!data) throw new Error('Không lấy được số dư.');
+        respondWithJson(response, 200, data);
+      } catch (e) {
+        respondWithJson(response, 500, { error: e.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/711proxy/generate') {
+      const body = JSON.parse(await readRequestBody(request));
+      const region = (body.region || 'US').toUpperCase();
+      const count = Math.min(Math.max(parseInt(body.count) || 50, 1), 200);
+      const sessTime = Math.max(parseInt(body.sessTime) || 20, 1);
+      const sessAuto = body.sessAuto ? 1 : 0;
+      const genUrl = new URL('http://global.rotgbapi.trustsource.live:8089/gen');
+      genUrl.searchParams.set('zone', 'custom');
+      genUrl.searchParams.set('ptype', '1');
+      genUrl.searchParams.set('region', region);
+      genUrl.searchParams.set('count', String(count));
+      genUrl.searchParams.set('proto', 'http');
+      genUrl.searchParams.set('stype', 'text');
+      genUrl.searchParams.set('split', '\r\n');
+      genUrl.searchParams.set('sessType', 'sticky');
+      genUrl.searchParams.set('sessTime', String(sessTime));
+      genUrl.searchParams.set('sessAuto', String(sessAuto));
+      try {
+        // Gen URL dùng IP whitelist — không cần Authorization header
+        const res = await fetch(genUrl.toString());
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        const text = await res.text();
+        if (!text.trim() || text.includes('"code"')) throw new Error(text.slice(0, 300));
+        // Chuẩn hóa: host:port → http://host:port, user:pass@host:port → http://user:pass@host:port
+        const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const proxyLines = rawLines.map((l) => {
+          if (/^https?:\/\//i.test(l)) return l;
+          const at = l.lastIndexOf('@');
+          if (at > 0) return `http://${l.slice(0, at)}@${l.slice(at + 1)}`;
+          const parts = l.split(':');
+          if (parts.length === 4) return `http://${encodeURIComponent(parts[2])}:${encodeURIComponent(parts[3])}@${parts[0]}:${parts[1]}`;
+          // host:port không có creds
+          return `http://${l}`;
+        });
+        const added = importProxyLines(proxyLines, 'http');
+        await saveProxyQueue();
+        respondWithJson(response, 200, {
+          added,
+          total: proxyQueue.available.length,
+          lines: proxyLines,
+          message: `Đã thêm ${added} proxy vào hàng đợi (tổng ${proxyQueue.available.length} sẵn sàng).`,
+        });
+      } catch (e) {
+        respondWithJson(response, 500, { error: e.message });
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────
 
     if (request.method === 'POST' && request.url === '/proxy-queue/import') {
       const body = JSON.parse(await readRequestBody(request));
