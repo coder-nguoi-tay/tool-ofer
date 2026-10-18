@@ -1088,6 +1088,107 @@
       text-overflow: ellipsis;
       z-index: 2;
     }
+
+    /* Screen Modal Tab Bar & Chips */
+    #screenTabBar {
+      display: flex;
+      gap: 6px;
+      padding: 6px 12px;
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      overflow-x: auto;
+      flex-shrink: 0;
+      min-height: 38px;
+      align-items: center;
+    }
+    #screenTabBar::-webkit-scrollbar {
+      height: 4px;
+    }
+    #screenTabBar::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 2px;
+    }
+    .screen-tab-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+      max-width: 210px;
+      flex-shrink: 0;
+    }
+    .screen-tab-chip:hover {
+      background: #253349;
+      color: #f1f5f9;
+      border-color: #475569;
+    }
+    .screen-tab-chip.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #ffffff;
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(2, 132, 199, 0.4);
+    }
+    .screen-tab-favicon {
+      font-size: 11px;
+      line-height: 1;
+    }
+    .screen-tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+    .screen-tab-close-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      font-size: 10px;
+      line-height: 1;
+      color: inherit;
+      opacity: 0.75;
+      transition: all 0.12s ease;
+      cursor: pointer;
+      margin-left: 3px;
+    }
+    .screen-tab-close-btn:hover {
+      opacity: 1;
+      background: rgba(239, 68, 68, 0.95);
+      color: #ffffff;
+      transform: scale(1.15);
+    }
+    .screen-tab-new-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #38bdf8;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+    .screen-tab-new-btn:hover {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #38bdf8;
+      transform: scale(1.08);
+    }
   </style>
 </head>
 <body>
@@ -1411,17 +1512,21 @@
       </div>
 
       <!-- Screen Live-View Modal -->
-      <div id="screenModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);z-index:9999;flex-direction:column;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#111;color:#fff;flex-shrink:0;">
-          <span id="screenModalTitle" style="font-weight:bold;font-size:13px;">Màn hình Slot 1</span>
+      <div id="screenModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.94);z-index:9999;flex-direction:column;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#0f172a;border-bottom:1px solid #1e293b;color:#fff;flex-shrink:0;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span id="screenModalTitle" style="font-weight:bold;font-size:13px;color:#38bdf8;">Màn hình Slot 1</span>
+            <span id="screenModalFps" style="font-size:11px;color:#94a3b8;background:#1e293b;padding:2px 8px;border-radius:4px;border:1px solid #334155;">0 fps</span>
+          </div>
           <div style="display:flex;gap:8px;align-items:center;">
-            <span id="screenModalFps" style="font-size:11px;color:#aaa;"></span>
-            <button type="button" onclick="closeScreenModal()" style="background:#e53e3e;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">✕ Đóng</button>
+            <button type="button" class="win-btn" onclick="_quickScroll(0, -500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang lên trên (hoặc dùng con lăn chuột / trackpad)">⬆ Cuộn lên</button>
+            <button type="button" class="win-btn" onclick="_quickScroll(0, 500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang xuống dưới (hoặc dùng con lăn chuột / trackpad)">⬇ Cuộn xuống</button>
+            <button type="button" onclick="closeScreenModal()" style="background:#e11d48;color:#fff;border:none;padding:4px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;">✕ Đóng</button>
           </div>
         </div>
-        <div id="screenTabBar" style="display:flex;gap:4px;padding:4px 10px;background:#1a1a2e;overflow-x:auto;flex-shrink:0;min-height:30px;align-items:center;"></div>
-        <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">
-          <canvas id="screenCanvas" style="max-width:100%;max-height:100%;object-fit:contain;cursor:default;"></canvas>
+        <div id="screenTabBar"></div>
+        <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#090d16;position:relative;">
+          <canvas id="screenCanvas" style="max-width:100%;max-height:100%;object-fit:contain;cursor:default;outline:none;" tabindex="0"></canvas>
         </div>
       </div>
 
@@ -1729,11 +1834,28 @@
             <span>Total Email: <b id="lbTotalEmail" style="color:#003399;">0</b> <span style="font-size:11px;color:#555;margin-left:6px;">(Sẵn sàng: <b id="lbAvailEmail" style="color:#107c41;">0</b> | Đã dùng: <b id="lbUsedEmail" style="color:#d83b01;">0</b>)</span></span>
             <div style="display:flex;gap:6px;">
               <button type="button" class="win-btn win-btn-primary" onclick="saveEmailList()">Lưu / Thêm Email</button>
+              <button type="button" class="win-btn" onclick="document.getElementById('inputEmailFile').click()">Import File</button>
+              <input type="file" id="inputEmailFile" accept=".txt,.csv" style="display:none" onchange="importEmailFile(this)">
               <button type="button" class="win-btn" onclick="resetEmailQueue()">Reset Email</button>
               <button type="button" class="win-btn" style="color:#c50f1f;" onclick="clearAllEmail()">Xóa tất cả</button>
             </div>
           </div>
-          <textarea id="txtEmailList" class="win-textarea" style="width:100%;height:calc(100% - 32px);"></textarea>
+          <div id="emailAutoRefillBar" style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;font-size:11px;">
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-weight:600;">
+              <input type="checkbox" id="chkAutoRefill" onchange="saveAutoRefillConfig()"> Tự động nạp khi hết
+            </label>
+            <input type="text" id="txtAutoRefillPath" placeholder="Hoặc gõ đường dẫn file .txt"
+              style="flex:1;min-width:160px;padding:2px 6px;border:1px solid #aaa;font-size:11px;"
+              onblur="saveAutoRefillConfig()">
+            <button type="button" class="win-btn" style="font-size:11px;padding:2px 8px;" onclick="document.getElementById('inputAutoRefillFile').click()">Chọn file</button>
+            <input type="file" id="inputAutoRefillFile" accept=".txt,.csv" style="display:none" onchange="pickAutoRefillFile(this)">
+            <label style="white-space:nowrap;">Mỗi lần:
+              <input type="number" id="numAutoRefillBatch" value="1000" min="100" max="50000" step="100"
+                style="width:64px;padding:2px 4px;border:1px solid #aaa;font-size:11px;" onchange="saveAutoRefillConfig()">
+            </label>
+            <button type="button" class="win-btn" style="font-size:11px;padding:2px 8px;" onclick="resetAutoRefillCursor()">Reset vị trí</button>
+          </div>
+          <textarea id="txtEmailList" class="win-textarea" style="width:100%;height:calc(100% - 60px);"></textarea>
         </div>
 
         <!-- Info Lead Tab -->
@@ -2119,7 +2241,7 @@
         tab.classList.add('active');
         const infotab = tab.getAttribute('data-infotab');
         document.getElementById(`infopanel-${infotab}`)?.classList.add('active');
-        if (infotab === 'email') void loadEmailList();
+        if (infotab === 'email') { void loadEmailList(); void loadAutoRefillConfig(); }
         if (infotab === 'lead') void loadAutofillList();
       });
     });
@@ -2169,6 +2291,7 @@
         loadBrowserConfigFile('refferent.txt', 'txtCfgRefferent'),
         loadBrowserConfigFile('bookmarks.txt', 'txtCfgBookmarks'),
         loadEmailList(),
+        loadAutoRefillConfig(),
         loadAutofillList(),
         loadWindowsSettings(),
         loadAiConfigUi(),
@@ -2724,25 +2847,79 @@
       }
     }
 
+    async function loadAutoRefillConfig() {
+      const data = await api('/email-queue/autorefill');
+      if (!data || data.error) return;
+      document.getElementById('chkAutoRefill').checked = !!data.enabled;
+      document.getElementById('txtAutoRefillPath').value = data.sourcePath || '';
+      document.getElementById('numAutoRefillBatch').value = data.batchSize || 1000;
+    }
+
+    async function saveAutoRefillConfig() {
+      await api('/email-queue/autorefill', {
+        method: 'POST',
+        body: JSON.stringify({
+          enabled: document.getElementById('chkAutoRefill').checked,
+          sourcePath: document.getElementById('txtAutoRefillPath').value,
+          batchSize: parseInt(document.getElementById('numAutoRefillBatch').value) || 1000,
+        }),
+      });
+    }
+
+    async function pickAutoRefillFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+      input.value = '';
+      // Lưu đường dẫn — trong app native, file.path cho absolute path
+      const path = file.path || file.name;
+      document.getElementById('txtAutoRefillPath').value = path;
+      await api('/email-queue/autorefill', {
+        method: 'POST',
+        body: JSON.stringify({
+          enabled: document.getElementById('chkAutoRefill').checked,
+          sourcePath: path,
+          batchSize: parseInt(document.getElementById('numAutoRefillBatch').value) || 1000,
+          resetCursor: true,
+        }),
+      });
+      showWinAlert(`Đã chọn file nguồn:\n${path}`);
+    }
+
+    async function resetAutoRefillCursor() {
+      await api('/email-queue/autorefill', { method: 'POST', body: JSON.stringify({ resetCursor: true }) });
+      showWinAlert('Đã reset vị trí đọc về đầu file.');
+    }
+
+    async function importEmailFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+      input.value = '';
+      const text = await file.text();
+      document.getElementById('txtEmailList').value = text;
+      await saveEmailList();
+    }
+
     async function saveEmailList() {
       const text = document.getElementById('txtEmailList').value;
+      await api('/email-queue/clear', { method: 'POST' });
       const res = await api('/email-queue/import', { method: 'POST', body: JSON.stringify({ emailList: text }) });
       showWinAlert(res.message || 'Imported email list.');
       await loadEmailList();
     }
 
     async function resetEmailQueue() {
-      const res = await api('/email-queue/reset', { method: 'POST' });
+      await api('/email-queue/clear', { method: 'POST' });
+      const text = document.getElementById('txtEmailList').value;
+      const res = await api('/email-queue/import', { method: 'POST', body: JSON.stringify({ emailList: text }) });
       showWinAlert(res.message || 'Reset email list.');
       await loadEmailList();
     }
 
     async function clearAllEmail() {
-      if (!confirm('Xóa toàn bộ danh sách gmail? Không thể khôi phục.')) return;
       const res = await api('/email-queue/clear', { method: 'POST' });
-      showWinAlert(res.message || 'Đã xóa.');
       document.getElementById('txtEmailList').value = '';
       await loadEmailList();
+      showWinAlert(res.message || 'Đã xóa tất cả email.');
     }
 
     // Autofill List (dgvInfo)
@@ -3898,6 +4075,7 @@
       if (overlay) {
         document.getElementById('winMsgBoxTitle').textContent = title;
         document.getElementById('winMsgBoxContent').textContent = message;
+        document.getElementById('winMsgBoxBtnRow').innerHTML = '<button type="button" class="win-btn win-btn-primary" style="padding:3px 24px;" onclick="closeWinAlert()">OK</button>';
         overlay.style.display = 'flex';
       } else {
         alert(message);
@@ -3907,6 +4085,28 @@
     function closeWinAlert() {
       const overlay = document.getElementById('winMsgBoxOverlay');
       if (overlay) overlay.style.display = 'none';
+    }
+
+    function showWinConfirm(message, onConfirm, title = 'AutoLeadPC') {
+      document.getElementById('winMsgBoxTitle').textContent = title;
+      document.getElementById('winMsgBoxContent').textContent = message;
+      const btnRow = document.getElementById('winMsgBoxBtnRow');
+      btnRow.innerHTML = '';
+      const btnCancel = document.createElement('button');
+      btnCancel.type = 'button';
+      btnCancel.className = 'win-btn';
+      btnCancel.style.cssText = 'padding:3px 18px;';
+      btnCancel.textContent = 'Hủy';
+      btnCancel.onclick = () => closeWinAlert();
+      const btnOk = document.createElement('button');
+      btnOk.type = 'button';
+      btnOk.className = 'win-btn win-btn-primary';
+      btnOk.style.cssText = 'padding:3px 24px;';
+      btnOk.textContent = 'OK';
+      btnOk.onclick = () => { closeWinAlert(); onConfirm(); };
+      btnRow.appendChild(btnCancel);
+      btnRow.appendChild(btnOk);
+      document.getElementById('winMsgBoxOverlay').style.display = 'flex';
     }
 
     window.addEventListener('DOMContentLoaded', init);
@@ -4049,12 +4249,67 @@
       };
       es.onerror = () => { document.getElementById('screenModalFps').textContent = 'mất kết nối'; };
 
+      // Wheel accumulator & throttle
+      let _wheelAccumX = 0;
+      let _wheelAccumY = 0;
+      let _wheelTimer = null;
+      let _wheelLastX = 0;
+      let _wheelLastY = 0;
+
+      function _handleCanvasWheel(e) {
+        e.preventDefault();
+        let dy = e.deltaY;
+        let dx = e.deltaX || 0;
+        if (e.deltaMode === 1) { // DOM_DELTA_LINE (con lăn chuột thông thường)
+          dy *= 35;
+          dx *= 35;
+        } else if (e.deltaMode === 2) { // DOM_DELTA_PAGE
+          dy *= (canvas.height || 700);
+          dx *= (canvas.width || 900);
+        }
+        _wheelAccumX += dx;
+        _wheelAccumY += dy;
+        _wheelLastX = _scaleX(e, canvas);
+        _wheelLastY = _scaleY(e, canvas);
+
+        if (!_wheelTimer) {
+          _wheelTimer = setTimeout(() => {
+            const sendDx = _wheelAccumX;
+            const sendDy = _wheelAccumY;
+            _wheelAccumX = 0;
+            _wheelAccumY = 0;
+            _wheelTimer = null;
+            _sendInput(slot, {
+              type: 'wheel',
+              x: _wheelLastX,
+              y: _wheelLastY,
+              deltaX: sendDx,
+              deltaY: sendDy,
+              clientWidth: canvas.width,
+              clientHeight: canvas.height,
+              modifiers: _mods(e),
+            });
+          }, 25); // 25ms batching (~40fps) - mượt mà, không nghẽn mạng
+        }
+      }
+
       // Input forwarding
       canvas.onmousedown  = (e) => _sendInput(slot, _buildMouseEvent('mousedown', e, canvas));
       canvas.onmouseup    = (e) => _sendInput(slot, _buildMouseEvent('mouseup', e, canvas));
       canvas.onmousemove  = (e) => { if (e.buttons) _sendInput(slot, _buildMouseEvent('mousemove', e, canvas)); };
-      canvas.onwheel      = (e) => { e.preventDefault(); _sendInput(slot, { type: 'wheel', x: _scaleX(e, canvas), y: _scaleY(e, canvas), deltaY: e.deltaY }); };
-      canvas.onkeydown    = (e) => { e.preventDefault(); _sendInput(slot, { type: 'keydown', key: e.key, code: e.code, keyCode: e.keyCode, modifiers: _mods(e) }); _sendInput(slot, { type: 'char', text: e.key.length === 1 ? e.key : '' }); };
+      canvas.onwheel      = _handleCanvasWheel;
+      canvas.onkeydown    = (e) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'w' || e.key === 'W')) {
+          e.preventDefault();
+          _closeTab(slot, _screenActiveTabIndex);
+          return;
+        }
+        e.preventDefault();
+        _sendInput(slot, { type: 'keydown', key: e.key, code: e.code, keyCode: e.keyCode, modifiers: _mods(e) });
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          _sendInput(slot, { type: 'char', text: e.key });
+        }
+      };
       canvas.onkeyup      = (e) => { e.preventDefault(); _sendInput(slot, { type: 'keyup', key: e.key, code: e.code, keyCode: e.keyCode, modifiers: _mods(e) }); };
       canvas.tabIndex = 0;
       canvas.focus();
@@ -4068,7 +4323,9 @@
       if (_screenFpsTimer) { clearInterval(_screenFpsTimer); _screenFpsTimer = null; }
       if (_screenTabPollTimer) { clearInterval(_screenTabPollTimer); _screenTabPollTimer = null; }
       const canvas = document.getElementById('screenCanvas');
-      canvas.onmousedown = canvas.onmouseup = canvas.onmousemove = canvas.onwheel = canvas.onkeydown = canvas.onkeyup = null;
+      if (canvas) {
+        canvas.onmousedown = canvas.onmouseup = canvas.onmousemove = canvas.onwheel = canvas.onkeydown = canvas.onkeyup = null;
+      }
       document.getElementById('screenTabBar').innerHTML = '';
     }
 
@@ -4080,16 +4337,46 @@
         const bar = document.getElementById('screenTabBar');
         if (!bar) return;
         bar.innerHTML = '';
+        if (!tabs || tabs.length === 0) return;
+
         tabs.forEach(tab => {
-          const btn = document.createElement('button');
+          const chip = document.createElement('div');
           const isActive = tab.index === _screenActiveTabIndex;
-          btn.type = 'button';
-          btn.title = tab.url;
-          btn.style.cssText = `padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid ${isActive ? '#4a90e2' : '#444'};background:${isActive ? '#2a4a7f' : '#2a2a3e'};color:${isActive ? '#fff' : '#aaa'};cursor:pointer;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;`;
-          btn.textContent = tab.title || tab.url || `Tab ${tab.index + 1}`;
-          btn.onclick = () => _switchTab(slot, tab.index);
-          bar.appendChild(btn);
+          chip.className = `screen-tab-chip ${isActive ? 'active' : ''}`;
+          chip.title = tab.url || `Tab ${tab.index + 1}`;
+          chip.onclick = () => _switchTab(slot, tab.index);
+
+          const icon = document.createElement('span');
+          icon.className = 'screen-tab-favicon';
+          icon.textContent = '🌐';
+          chip.appendChild(icon);
+
+          const label = document.createElement('span');
+          label.className = 'screen-tab-label';
+          label.textContent = tab.title || tab.url || `Tab ${tab.index + 1}`;
+          chip.appendChild(label);
+
+          const closeBtn = document.createElement('span');
+          closeBtn.className = 'screen-tab-close-btn';
+          closeBtn.title = 'Đóng tab này (✕)';
+          closeBtn.innerHTML = '✕';
+          closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            _closeTab(slot, tab.index);
+          };
+          chip.appendChild(closeBtn);
+
+          bar.appendChild(chip);
         });
+
+        // Nút mở tab mới (+)
+        const newBtn = document.createElement('button');
+        newBtn.type = 'button';
+        newBtn.className = 'screen-tab-new-btn';
+        newBtn.title = 'Mở thêm tab mới';
+        newBtn.textContent = '➕';
+        newBtn.onclick = () => _openNewTab(slot);
+        bar.appendChild(newBtn);
       } catch {}
     }
 
@@ -4103,6 +4390,54 @@
       _fetchAndRenderTabs(slot);
     }
 
+    async function _closeTab(slot, index) {
+      try {
+        const res = await fetch(`/screen/tabs/close/${slot}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.activeIndex !== undefined) {
+          _screenActiveTabIndex = data.activeIndex;
+        } else if (_screenActiveTabIndex >= index && _screenActiveTabIndex > 0) {
+          _screenActiveTabIndex--;
+        }
+        await _fetchAndRenderTabs(slot);
+      } catch {}
+    }
+
+    async function _openNewTab(slot) {
+      try {
+        const res = await fetch(`/screen/tabs/new/${slot}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.index !== undefined) {
+          _screenActiveTabIndex = data.index;
+        }
+        await _fetchAndRenderTabs(slot);
+      } catch {}
+    }
+
+    function _quickScroll(deltaX, deltaY) {
+      if (!_screenActiveSlot) return;
+      const canvas = document.getElementById('screenCanvas');
+      const x = Math.round((canvas?.width || 960) / 2);
+      const y = Math.round((canvas?.height || 720) / 2);
+      _sendInput(_screenActiveSlot, {
+        type: 'wheel',
+        x,
+        y,
+        deltaX,
+        deltaY,
+        clientWidth: canvas?.width || 960,
+        clientHeight: canvas?.height || 720,
+      });
+    }
+    window._quickScroll = _quickScroll;
+
     function _scaleX(e, canvas) {
       const rect = canvas.getBoundingClientRect();
       return Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
@@ -4113,7 +4448,15 @@
     }
     function _mods(e) { return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0); }
     function _buildMouseEvent(type, e, canvas) {
-      return { type, x: _scaleX(e, canvas), y: _scaleY(e, canvas), button: ({0:'left',1:'middle',2:'right'})[e.button] || 'none', modifiers: _mods(e) };
+      return {
+        type,
+        x: _scaleX(e, canvas),
+        y: _scaleY(e, canvas),
+        clientWidth: canvas.width,
+        clientHeight: canvas.height,
+        button: ({0:'left',1:'middle',2:'right'})[e.button] || 'none',
+        modifiers: _mods(e)
+      };
     }
     function _sendInput(slot, data) {
       fetch(`/screen/input/${slot}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).catch(() => {});
@@ -4169,7 +4512,7 @@
       </div>
       <div style="padding:14px;display:flex;flex-direction:column;gap:12px;background:#f0f0f0;">
         <div id="winMsgBoxContent" style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.4;"></div>
-        <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+        <div id="winMsgBoxBtnRow" style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;">
           <button type="button" class="win-btn win-btn-primary" style="padding:3px 24px;" onclick="closeWinAlert()">OK</button>
         </div>
       </div>

@@ -684,6 +684,9 @@ const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {s
 export const emailQueuePath = join(appDataDirectory, 'email-queue.json');
 /** Hàng đợi email mẫu: available = chưa dùng, used = đã dùng. */
 export const emailQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
+const emailAutoRefillConfigPath = join(appDataDirectory, 'email-autorefill.json');
+/** Cấu hình tự động nạp email từ file nguồn khi hàng đợi cạn. */
+export const emailAutoRefill = { enabled: false, sourcePath: '', batchSize: 1000, byteOffset: 0 };
 export const deviceProfilesPath = join(appDataDirectory, 'device-profiles.json');
 
 /** Nếu đang ở instance phụ (vd Bản 2) và file dữ liệu chưa có, sao chép file từ Bản 1 sang để dùng sẵn cấu hình. */
@@ -1552,6 +1555,68 @@ export async function saveEmailQueue() {
   await writeFile(emailQueuePath, JSON.stringify(emailQueue)).catch(() => {});
 }
 
+/** Nạp config auto-refill từ file. */
+export async function loadEmailAutoRefillConfig() {
+  try {
+    const data = JSON.parse(await readFile(emailAutoRefillConfigPath, 'utf8'));
+    if (typeof data.enabled === 'boolean') emailAutoRefill.enabled = data.enabled;
+    if (typeof data.sourcePath === 'string') emailAutoRefill.sourcePath = data.sourcePath;
+    if (typeof data.batchSize === 'number') emailAutoRefill.batchSize = data.batchSize;
+    if (typeof data.byteOffset === 'number') emailAutoRefill.byteOffset = data.byteOffset;
+  } catch { /* chưa có config */ }
+}
+
+/** Lưu config auto-refill xuống file. */
+export async function saveEmailAutoRefillConfig() {
+  await writeFile(emailAutoRefillConfigPath, JSON.stringify(emailAutoRefill)).catch(() => {});
+}
+
+/** Đọc batch email từ file nguồn bắt đầu tại byteOffset, trả về emails và offset mới. */
+async function readEmailBatchFromSource(filePath, byteOffset, batchSize) {
+  const { createReadStream } = await import('fs');
+  const { createInterface } = await import('readline');
+  const existingAll = new Set([...emailQueue.available, ...emailQueue.used]);
+  const emails = [];
+  let bytesConsumed = 0;
+  let done = false;
+  await new Promise((resolve) => {
+    const stream = createReadStream(filePath, { start: byteOffset, encoding: 'utf8' });
+    const rl = createInterface({ input: stream, crlfDelay: Infinity });
+    rl.on('line', (line) => {
+      if (emails.length >= batchSize) { done = true; rl.close(); return; }
+      const raw = line.trim();
+      bytesConsumed += Buffer.byteLength(line, 'utf8') + 1;
+      const email = parseEmailLine(raw);
+      if (email && !existingAll.has(email)) { emails.push(email); existingAll.add(email); }
+    });
+    rl.on('close', () => resolve());
+    stream.on('error', () => resolve());
+  });
+  return { emails, newByteOffset: byteOffset + bytesConsumed };
+}
+
+/** Tự động nạp thêm email từ file nguồn khi hàng đợi cạn. Gọi bất đồng bộ, không block. */
+export async function autoRefillEmailIfNeeded() {
+  if (!emailAutoRefill.enabled || !emailAutoRefill.sourcePath) return;
+  if (emailQueue.available.length > 0) return;
+  try {
+    const { emails, newByteOffset } = await readEmailBatchFromSource(
+      emailAutoRefill.sourcePath, emailAutoRefill.byteOffset, emailAutoRefill.batchSize
+    );
+    if (emails.length === 0) {
+      console.log('[EmailAutoRefill] Đã đọc hết file nguồn.');
+      return;
+    }
+    emailQueue.available.push(...emails);
+    emailAutoRefill.byteOffset = newByteOffset;
+    await saveEmailQueue();
+    await saveEmailAutoRefillConfig();
+    console.log(`[EmailAutoRefill] Đã nạp thêm ${emails.length} email từ file nguồn.`);
+  } catch (e) {
+    console.log('[EmailAutoRefill] Lỗi đọc file nguồn:', e.message);
+  }
+}
+
 /**
  * Trích xuất email hợp lệ từ một dòng văn bản.
  * Hỗ trợ định dạng email đơn thuần hoặc email đi kèm mật khẩu, pipe (|), dấu phẩy.
@@ -1591,15 +1656,19 @@ export function importEmailLines(rawLines) {
  * @return {string|null} Email được gán cho phiên hoặc null nếu rỗng.
  */
 export function dequeueNextEmail() {
-  if (emailQueue.available.length === 0 && emailQueue.used.length > 0) {
+  if (emailQueue.available.length === 0 && emailQueue.used.length > 0 && !emailAutoRefill.enabled) {
     console.log('[EmailQueue] Hàng đợi email mẫu đã hết, tự động quay vòng danh sách đã dùng.');
     emailQueue.available.push(...emailQueue.used.splice(0));
     void saveEmailQueue();
   }
-  if (emailQueue.available.length === 0) return null;
+  if (emailQueue.available.length === 0) {
+    void autoRefillEmailIfNeeded();
+    return null;
+  }
   const email = emailQueue.available.shift();
   emailQueue.used.push(email);
   void saveEmailQueue();
+  if (emailQueue.available.length === 0) void autoRefillEmailIfNeeded();
   return email;
 }
 
@@ -5236,6 +5305,41 @@ export function watchTrafficBlockedPage(session) {
             // Không còn ở adtrapper, xóa tracker
             redirectTracker.delete(page);
           }
+
+          // 3. Phát hiện redirect sang trang không có form sau khi đã điền form → tự quay lại
+          if ((session.autofillFields ?? 0) > 0 && session.initialFormUrl) {
+            const curUrl = typeof page.url === 'function' ? page.url() : '';
+            const isOriginOrBlank = !curUrl || curUrl === session.initialFormUrl
+              || curUrl.startsWith('about:') || curUrl.startsWith('chrome:');
+            if (!isOriginOrBlank) {
+              const nowMs = Date.now();
+              const hasInputs = await page.evaluate(() =>
+                document.querySelectorAll('input:not([type="hidden"]), textarea, select').length > 0
+              ).catch(() => true);
+              const isThankYou = await page.evaluate(() => {
+                const t = document.body?.innerText || '';
+                return /thank\s*you|congratulations|confirmed|your\s*submission|application\s*received|cảm\s*ơn/i.test(t);
+              }).catch(() => false)
+                || /thank[-_]?you|confirmation|success|completed|receipt/i.test(curUrl);
+
+              if (!hasInputs && !isThankYou) {
+                if (session.noFormSinceUrl === curUrl && session.noFormSince && nowMs - session.noFormSince > 3000) {
+                  // Đã đứng ở trang không có form >3s → go back
+                  console.log(`[GoBack] Trang ${curUrl} không có form sau 3s → quay lại.`);
+                  session.addBrowserLog?.({ type: 'navigate', detail: `Trang không có form sau submit (${curUrl}). Đang quay lại...` });
+                  session.noFormSinceUrl = null;
+                  session.noFormSince = null;
+                  await page.goBack({ waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
+                } else if (session.noFormSinceUrl !== curUrl) {
+                  session.noFormSinceUrl = curUrl;
+                  session.noFormSince = nowMs;
+                }
+              } else {
+                session.noFormSinceUrl = null;
+                session.noFormSince = null;
+              }
+            }
+          }
         }
       } catch {
         // Tab có thể đóng hoặc chuyển trang trong lúc kiểm tra.
@@ -5294,6 +5398,7 @@ async function startLocalInterface() {
   await loadProxyQueue();
   await loadDualStreamState();
   await initializeEmailQueue();
+  await loadEmailAutoRefillConfig();
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
   loadAiConfig();
@@ -5957,6 +6062,22 @@ async function startLocalInterface() {
       return;
     }
 
+    if (request.method === 'GET' && request.url === '/email-queue/autorefill') {
+      respondWithJson(response, 200, { ...emailAutoRefill });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/email-queue/autorefill') {
+      const body = JSON.parse(await readRequestBody(request));
+      if (typeof body.enabled === 'boolean') emailAutoRefill.enabled = body.enabled;
+      if (typeof body.sourcePath === 'string') emailAutoRefill.sourcePath = body.sourcePath;
+      if (typeof body.batchSize === 'number' && body.batchSize > 0) emailAutoRefill.batchSize = body.batchSize;
+      if (body.resetCursor) emailAutoRefill.byteOffset = 0;
+      await saveEmailAutoRefillConfig();
+      respondWithJson(response, 200, { ...emailAutoRefill, message: 'Đã lưu cấu hình tự động nạp email.' });
+      return;
+    }
+
     if (request.method === 'GET' && request.url === '/autofill-used') {
       const list = [...autofillUsedKeys].map((key) => {
         try { return JSON.parse(key); } catch { return {}; }
@@ -6297,10 +6418,15 @@ async function startLocalInterface() {
         const page = pages[0];
         if (!page) { response.end(); return; }
         const cdpClient = await session.browser.newCDPSession(page);
-        screencastSessions.set(slot, { cdpClient, sseResponse: response });
+        const scObj = { cdpClient, sseResponse: response, page };
+        screencastSessions.set(slot, scObj);
 
-        await cdpClient.send('Page.startScreencast', { format: 'jpeg', quality: 55, maxWidth: 960, maxHeight: 720, everyNthFrame: 1 });
+        await cdpClient.send('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1024, maxHeight: 768, everyNthFrame: 1 });
         cdpClient.on('Page.screencastFrame', (frame) => {
+          if (frame.metadata) {
+            scObj.deviceWidth = frame.metadata.deviceWidth;
+            scObj.deviceHeight = frame.metadata.deviceHeight;
+          }
           if (!response.writableEnded) {
             response.write(`data: ${frame.data}\n\n`);
           }
@@ -6338,6 +6464,86 @@ async function startLocalInterface() {
       return;
     }
 
+    // Đóng tab trình duyệt được chọn
+    if (request.method === 'POST' && request.url.startsWith('/screen/tabs/close/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { respondWithJson(response, 404, { error: 'not found' }); return; }
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const pages = session.browser.pages().filter(p => !p.isClosed());
+        const targetIndex = body.index ?? 0;
+        const targetPage = pages[targetIndex];
+        if (!targetPage) { respondWithJson(response, 400, { error: 'invalid tab' }); return; }
+
+        await targetPage.close().catch(() => {});
+
+        let remainingPages = session.browser.pages().filter(p => !p.isClosed());
+        if (remainingPages.length === 0) {
+          const freshPage = await session.browser.newPage();
+          await freshPage.goto('about:blank').catch(() => {});
+          remainingPages = [freshPage];
+        }
+
+        const newActiveIndex = Math.max(0, Math.min(targetIndex > 0 ? targetIndex - 1 : 0, remainingPages.length - 1));
+        const nextActivePage = remainingPages[newActiveIndex];
+        await nextActivePage.bringToFront().catch(() => {});
+
+        const sc = screencastSessions.get(slot);
+        if (sc) {
+          try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
+          const newCdp = await session.browser.newCDPSession(nextActivePage);
+          sc.cdpClient = newCdp;
+          sc.page = nextActivePage;
+          await newCdp.send('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1024, maxHeight: 768, everyNthFrame: 1 });
+          newCdp.on('Page.screencastFrame', (frame) => {
+            if (frame.metadata) {
+              sc.deviceWidth = frame.metadata.deviceWidth;
+              sc.deviceHeight = frame.metadata.deviceHeight;
+            }
+            if (!sc.sseResponse.writableEnded) sc.sseResponse.write(`data: ${frame.data}\n\n`);
+            newCdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+          });
+        }
+        respondWithJson(response, 200, { ok: true, activeIndex: newActiveIndex, remaining: remainingPages.length });
+      } catch (err) { respondWithJson(response, 500, { error: err.message }); }
+      return;
+    }
+
+    // Mở thêm tab mới
+    if (request.method === 'POST' && request.url.startsWith('/screen/tabs/new/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { respondWithJson(response, 404, { error: 'not found' }); return; }
+      try {
+        const newPage = await session.browser.newPage();
+        await newPage.goto('about:blank').catch(() => {});
+        const pages = session.browser.pages().filter(p => !p.isClosed());
+        const newIndex = pages.indexOf(newPage);
+        await newPage.bringToFront().catch(() => {});
+
+        const sc = screencastSessions.get(slot);
+        if (sc) {
+          try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
+          const newCdp = await session.browser.newCDPSession(newPage);
+          sc.cdpClient = newCdp;
+          sc.page = newPage;
+          await newCdp.send('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1024, maxHeight: 768, everyNthFrame: 1 });
+          newCdp.on('Page.screencastFrame', (frame) => {
+            if (frame.metadata) {
+              sc.deviceWidth = frame.metadata.deviceWidth;
+              sc.deviceHeight = frame.metadata.deviceHeight;
+            }
+            if (!sc.sseResponse.writableEnded) sc.sseResponse.write(`data: ${frame.data}\n\n`);
+            newCdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+          });
+        }
+        respondWithJson(response, 200, { ok: true, index: newIndex });
+      } catch (err) { respondWithJson(response, 500, { error: err.message }); }
+      return;
+    }
+
+    // Chuyển tab đang xem
     if (request.method === 'POST' && request.url.startsWith('/screen/tabs/')) {
       const slot = parseInt(request.url.split('/').pop(), 10);
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
@@ -6353,8 +6559,13 @@ async function startLocalInterface() {
           try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
           const newCdp = await session.browser.newCDPSession(targetPage);
           sc.cdpClient = newCdp;
-          await newCdp.send('Page.startScreencast', { format: 'jpeg', quality: 55, maxWidth: 960, maxHeight: 720, everyNthFrame: 1 });
+          sc.page = targetPage;
+          await newCdp.send('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1024, maxHeight: 768, everyNthFrame: 1 });
           newCdp.on('Page.screencastFrame', (frame) => {
+            if (frame.metadata) {
+              sc.deviceWidth = frame.metadata.deviceWidth;
+              sc.deviceHeight = frame.metadata.deviceHeight;
+            }
             if (!sc.sseResponse.writableEnded) sc.sseResponse.write(`data: ${frame.data}\n\n`);
             newCdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
           });
@@ -6371,20 +6582,53 @@ async function startLocalInterface() {
       try {
         const body = JSON.parse(await readRequestBody(request));
         const { cdpClient } = sc;
+
+        // Tự động scale toạ độ chuột dựa trên deviceWidth/deviceHeight của viewport thực
+        const devW = sc.deviceWidth || (sc.page ? (await sc.page.evaluate(() => window.innerWidth).catch(() => 0)) : 0);
+        const devH = sc.deviceHeight || (sc.page ? (await sc.page.evaluate(() => window.innerHeight).catch(() => 0)) : 0);
+        let targetX = body.x ?? 0;
+        let targetY = body.y ?? 0;
+        if (body.clientWidth && devW) {
+          targetX = Math.round(targetX * (devW / body.clientWidth));
+        }
+        if (body.clientHeight && devH) {
+          targetY = Math.round(targetY * (devH / body.clientHeight));
+        }
+
         if (body.type === 'mousedown') {
-          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: body.x, y: body.y, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
         } else if (body.type === 'mouseup') {
-          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: body.x, y: body.y, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
         } else if (body.type === 'mousemove') {
-          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: body.x, y: body.y, modifiers: body.modifiers || 0 });
+          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: targetX, y: targetY, modifiers: body.modifiers || 0 });
         } else if (body.type === 'wheel') {
-          await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: body.x, y: body.y, deltaX: 0, deltaY: body.deltaY });
+          const deltaX = Math.round(body.deltaX || 0);
+          const deltaY = Math.round(body.deltaY || 0);
+          try {
+            await cdpClient.send('Input.dispatchMouseEvent', {
+              type: 'mouseWheel',
+              x: targetX,
+              y: targetY,
+              deltaX,
+              deltaY,
+              modifiers: body.modifiers || 0,
+            });
+          } catch (e) {
+            // Fallback nếu CDP mouseWheel gặp lỗi
+            if (sc.page && !sc.page.isClosed()) {
+              await sc.page.evaluate((dy, dx) => {
+                window.scrollBy({ top: dy, left: dx, behavior: 'auto' });
+              }, deltaY, deltaX).catch(() => {});
+            }
+          }
         } else if (body.type === 'keydown') {
           await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyDown', key: body.key, code: body.code || '', modifiers: body.modifiers || 0, windowsVirtualKeyCode: body.keyCode || 0, nativeVirtualKeyCode: body.keyCode || 0 });
         } else if (body.type === 'keyup') {
           await cdpClient.send('Input.dispatchKeyEvent', { type: 'keyUp', key: body.key, code: body.code || '', modifiers: body.modifiers || 0, windowsVirtualKeyCode: body.keyCode || 0, nativeVirtualKeyCode: body.keyCode || 0 });
         } else if (body.type === 'char') {
-          await cdpClient.send('Input.dispatchKeyEvent', { type: 'char', text: body.text || body.key });
+          if (body.text) {
+            await cdpClient.send('Input.dispatchKeyEvent', { type: 'char', text: body.text });
+          }
         }
         respondWithJson(response, 200, { ok: true });
       } catch (err) { respondWithJson(response, 500, { error: err.message }); }
