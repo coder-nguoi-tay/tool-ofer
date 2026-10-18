@@ -6670,18 +6670,17 @@ async function startLocalInterface() {
       return;
     }
 
-    // Quản lý và cấu hình luồng Screencast tối ưu (giảm 50% payload, giữ FPS ổn định)
+    // Quản lý và cấu hình luồng Screencast chuẩn mượt mà
     async function attachScreencastSession(scObj, cdpSession, targetPage) {
       scObj.cdpClient = cdpSession;
       scObj.page = targetPage;
       scObj.lastFrameTime = Date.now();
 
-      // Tối ưu hóa: chất lượng 55, maxWidth 960, maxHeight 640 giảm hơn 50% dung lượng frame Base64
       await cdpSession.send('Page.startScreencast', {
         format: 'jpeg',
-        quality: 55,
-        maxWidth: 960,
-        maxHeight: 640,
+        quality: 65,
+        maxWidth: 1024,
+        maxHeight: 768,
         everyNthFrame: 1,
       }).catch(() => {});
 
@@ -6696,22 +6695,6 @@ async function startLocalInterface() {
         }
         cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
       });
-
-      // Keepalive Heartbeat: Kích hoạt nhẹ nếu quá 250ms trang tĩnh không có chuyển động,
-      // giúp Chrome luôn phát frame đều đặn và giữ FPS ổn định không bao giờ rớt về 0
-      if (!scObj.keepaliveTimer) {
-        scObj.keepaliveTimer = setInterval(() => {
-          if (scObj.sseResponse.writableEnded || !scObj.page || scObj.page.isClosed()) {
-            if (scObj.keepaliveTimer) { clearInterval(scObj.keepaliveTimer); scObj.keepaliveTimer = null; }
-            return;
-          }
-          if (Date.now() - (scObj.lastFrameTime || 0) > 250) {
-            scObj.page.evaluate(() => {
-              document.documentElement.dataset._scTick = Date.now();
-            }).catch(() => {});
-          }
-        }, 200);
-      }
     }
 
     if (request.method === 'GET' && request.url.startsWith('/screen/stream/')) {

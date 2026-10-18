@@ -1504,28 +1504,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         return false;
       };
 
-      // Quét bổ sung các Cụm lựa chọn anh em (Sibling Option Clusters) trong các khối câu hỏi
-      const questionContainers = Array.from(document.querySelectorAll(
-        '.question, .survey-question, .quiz-question, .question-container, .survey-step, .quiz-step, .choices, .answers, .options, .options-wrap, .answer-wrap, .question-card, .quiz-card, .survey-card, [class*="question"], [class*="quiz"], [class*="survey"]'
-      )).filter(isVisible);
-
-      const siblingOptionItems = [];
-      for (const qc of questionContainers) {
-        const interactiveChildren = Array.from(qc.querySelectorAll('button, a, [role="button"], label.option, label.choice, div.card, div.option, div.choice, li.option, li.choice')).filter((child) => {
-          if (!isVisible(child)) return false;
-          if (isNoiseOption(child)) return false;
-          const text = (child.innerText || child.textContent || child.value || '').trim();
-          if (/^(next|continue|proceed|submit|tiếp tục|hoàn tất)($|\b)/i.test(text)) return false;
-          return true;
-        });
-
-        if (interactiveChildren.length >= 2 && interactiveChildren.length <= 12) {
-          siblingOptionItems.push(...interactiveChildren);
-        }
-      }
-
-      const combinedCandidates = rawCandidates.concat(siblingOptionItems);
-      const uniqueElements = Array.from(new Set(combinedCandidates));
+      const uniqueElements = Array.from(new Set(rawCandidates));
       const allCandidates = uniqueElements.filter((el) => {
         if (!isVisible(el)) return false;
         if (isNoiseOption(el)) return false;
