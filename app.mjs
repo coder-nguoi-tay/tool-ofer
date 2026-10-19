@@ -4611,7 +4611,8 @@ async function openBrowserWithInstalledChrome({
   });
   try {
     const page = context.pages()[0] ?? await context.newPage();
-    await applyDeviceOverrides(page);
+    // Có giới hạn thời gian: một lệnh CDP không trả lời không được làm phiên kẹt trước bước xác minh IP.
+    await Promise.race([applyDeviceOverrides(page), new Promise((resolve) => setTimeout(resolve, 5000))]);
     let cdpSession = null;
     let cdpWindowId = null;
 
@@ -6566,9 +6567,18 @@ async function startLocalInterface() {
       if (!session) { response.writeHead(404); response.end(); return; }
       try {
         const pages = session.browser.pages().filter(p => !p.isClosed());
-        const page = pages[0];
+        const page = (session.mainPage && !session.mainPage.isClosed()) ? session.mainPage : pages[0];
         if (!page) { response.writeHead(404); response.end(); return; }
-        const buf = await page.screenshot({ type: 'jpeg', quality: 65 });
+        // Ảnh thu nhỏ được hỏi mỗi 1,5s: chỉ chụp một lần mỗi lúc, chụp có giới hạn thời gian và trả ảnh gần nhất
+        // trong lúc chờ, để các lệnh chụp không dồn lại làm Chrome đơ.
+        if (!session.snapshotInFlight) {
+          session.snapshotInFlight = page.screenshot({ type: 'jpeg', quality: 65, timeout: 5000 })
+            .then((buf) => { session.lastSnapshot = buf; return buf; })
+            .catch(() => session.lastSnapshot ?? null)
+            .finally(() => { session.snapshotInFlight = null; });
+        }
+        const buf = session.lastSnapshot ?? await session.snapshotInFlight;
+        if (!buf) { response.writeHead(503); response.end(); return; }
         response.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
         response.end(buf);
       } catch { response.writeHead(503); response.end(); }
@@ -6627,9 +6637,8 @@ async function startLocalInterface() {
         }
       } catch {}
 
-      // 5. Keepalive & Fallback Heartbeat:
-      // - Nếu quá 250ms không có frame mới: kích hoạt DOM tick nhẹ để Chrome phát frame
-      // - Nếu quá 800ms vẫn không có frame (do Chrome throttle khi ẩn/minimized hoặc lỗi driver): chủ động chụp screenshot và đẩy về SSE
+      // 5. Keepalive & Fallback Heartbeat: quá 800ms không có frame (Chrome throttle khi ẩn/minimized, trang đứng yên
+      // hoặc lỗi driver) thì chủ động chụp screenshot và đẩy về SSE. Không sửa DOM trang đích để ép frame: script chống bot thấy được.
       scObj.keepaliveTimer = setInterval(async () => {
         if (scObj.sseResponse.writableEnded || !scObj.page || scObj.page.isClosed()) {
           if (scObj.keepaliveTimer) { clearInterval(scObj.keepaliveTimer); scObj.keepaliveTimer = null; }
@@ -6637,17 +6646,18 @@ async function startLocalInterface() {
         }
         const idleTime = Date.now() - (scObj.lastFrameTime || 0);
         if (idleTime > 800) {
+          // Timer chạy mỗi 200ms: không gửi lệnh chụp mới khi lệnh trước chưa xong.
+          if (scObj.captureInFlight) return;
+          scObj.captureInFlight = true;
           try {
             const shot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 65 }).catch(() => null);
             if (shot?.data && !scObj.sseResponse.writableEnded) {
               scObj.lastFrameTime = Date.now();
               scObj.sseResponse.write(`data: ${shot.data}\n\n`);
             }
-          } catch {}
-        } else if (idleTime > 250) {
-          scObj.page.evaluate(() => {
-            document.documentElement.dataset._scTick = Date.now();
-          }).catch(() => {});
+          } catch {} finally {
+            scObj.captureInFlight = false;
+          }
         }
       }, 200);
     }
