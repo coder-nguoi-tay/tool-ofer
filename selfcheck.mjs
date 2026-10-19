@@ -1397,10 +1397,10 @@ assert.equal(getNextDeviceProfile(), 'ios');
 resetDeviceProfileRotation();
 autoRefill.deviceProfiles = ['windows'];
 
-// 10.4 Kiểm tra sinh User-Agent khớp phiên bản Chrome: Chrome desktop/Android dùng UA đã giảm (Chrome/150.0.0.0), Chrome iOS giữ số đầy đủ
-assert.ok(DEVICE_PROFILES.android.ua('150.0.7871.187').includes('Chrome/150.0.0.0'), 'Android UA phải chứa Chrome/150.0.0.0');
-assert.ok(DEVICE_PROFILES.android.ua('150.0.7871.187').includes('Android 10; K'), 'Android UA phải theo dạng đã giảm Android 10; K');
-assert.ok(DEVICE_PROFILES.windows.ua('150.0.7871.187').includes('Chrome/150.0.0.0'), 'Windows UA phải chứa Chrome/150.0.0.0');
+// 10.4 Kiểm tra sinh User-Agent mang đúng số phiên bản đầy đủ của Chrome đang mở
+assert.ok(DEVICE_PROFILES.android.ua('150.0.7871.187').includes('Chrome/150.0.7871.187'), 'Android UA phải chứa Chrome/150.0.7871.187');
+assert.ok(DEVICE_PROFILES.windows.ua('150.0.7871.187').includes('Chrome/150.0.7871.187'), 'Windows UA phải chứa Chrome/150.0.7871.187');
+assert.ok(DEVICE_PROFILES.macos.ua('150.0.7871.187').includes('Chrome/150.0.7871.187'), 'macOS UA phải chứa Chrome/150.0.7871.187');
 assert.ok(DEVICE_PROFILES.ios.ua('151.0.7922.174').includes('CriOS/151.0.7922.174'), 'iOS UA phải chứa CriOS/151');
 assert.ok(DEVICE_PROFILES.ipad.ua('152.0.7977.83').includes('CriOS/152.0.7977.83'), 'iPad UA phải chứa CriOS/152');
 

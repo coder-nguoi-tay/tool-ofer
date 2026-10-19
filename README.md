@@ -1,6 +1,6 @@
 # AutoLeadPC Mac — Chrome
 
-Nút **Tạo profile và mở** dùng các ứng dụng Google Chrome đã cài trên máy. Mỗi cửa sổ có phiên bản, thư mục profile và proxy riêng; nếu thiếu phiên bản, app báo lỗi trước khi mở. User-Agent theo profile thiết bị đã chọn và theo dạng rút gọn của Chrome thật (`Chrome/155.0.0.0`); số phiên bản đầy đủ chỉ nằm trong Client Hints.
+Nút **Tạo profile và mở** dùng các ứng dụng Google Chrome đã cài trên máy. Mỗi cửa sổ có phiên bản, thư mục profile và proxy riêng; nếu thiếu phiên bản, app báo lỗi trước khi mở. User-Agent theo profile thiết bị đã chọn và mang số phiên bản đầy đủ của bản Chrome đang mở (ví dụ `Chrome/154.0.8037.98`), khớp với Client Hints.
 
 ### Giả lập thiết bị và chống fingerprint
 
