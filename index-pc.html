@@ -4433,6 +4433,10 @@
     let _screenFpsTimer = null;
     let _screenTabPollTimer = null;
     let _screenActiveTabIndex = 0;
+    // Khai báo ở đây (không phải trong _startScreenStream) để _stopScreenStream dọn được; trước đây đọc biến chưa khai báo
+    // làm _stopScreenStream ném ReferenceError, nên mở màn hình live không bao giờ kết nối.
+    let _mouseMoveTimer = null;
+    let _wheelTimer = null;
 
     function toggleScreenView() {
       _screenViewActive = !_screenViewActive;
@@ -4649,7 +4653,7 @@
       // Wheel accumulator & throttle
       let _wheelAccumX = 0;
       let _wheelAccumY = 0;
-      let _wheelTimer = null;
+      _wheelTimer = null;
       let _wheelLastX = 0;
       let _wheelLastY = 0;
 
@@ -4691,7 +4695,7 @@
       }
 
       // Mouse move throttle
-      let _mouseMoveTimer = null;
+      _mouseMoveTimer = null;
       let _lastMouseMoveEvent = null;
 
       function _handleCanvasMouseMove(e) {
