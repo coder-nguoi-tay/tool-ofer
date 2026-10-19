@@ -1479,6 +1479,12 @@
           <legend class="win-legend">List Proxy:</legend>
           <div class="proxy-toolbar">
             <span style="color:#475569;font-size:11px;font-weight:500;">Dán danh sách proxy (1 dòng 1 proxy):</span>
+            <label style="font-size:11px;">Giao thức
+              <select id="dashboardProxyType" class="win-input" style="width:105px;">
+                <option value="socks5">SOCKS5</option>
+                <option value="http">HTTP/HTTPS</option>
+              </select>
+            </label>
             <div class="proxy-stats-group">
               <span class="proxy-badge proxy-badge-ready" title="Số proxy đang sẵn sàng trong hàng đợi">
                 <span class="proxy-badge-dot"></span>
@@ -1492,7 +1498,7 @@
               <button type="button" class="win-btn" style="padding:2px 10px;margin-left:4px;gap:4px;color:#b91c1c;" onclick="clearProxyQueue()" title="Xóa toàn bộ proxy trong hàng đợi và ô nhập để nạp danh sách mới">🗑️ Xóa hết proxy</button>
             </div>
           </div>
-          <textarea id="txtDashboardProxy" class="win-textarea" style="width:100%;height:140px;" placeholder="Dán danh sách proxy vào đây (định dạng: IP:Port hoặc IP:Port:User:Pass, mỗi dòng 1 proxy)..."></textarea>
+          <textarea id="txtDashboardProxy" class="win-textarea" style="width:100%;height:140px;" placeholder="host:port, host:port:user:pass hoặc http://user:pass@host:port; mỗi dòng 1 proxy"></textarea>
         </fieldset>
       </div>
 
@@ -1971,8 +1977,9 @@
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonGologinCMD2" onchange="syncBrowserChoice('Gologin')"> Chrome Gologin</label>
           </div>
           <div id="gologin-token-group" style="display:none;">
-            <input type="hidden" id="txtGoLoginToken">
-            <span style="font-size:11px;color:#555;">GoLogin app phải đang chạy và đã đăng nhập. Profile sẽ được lấy từ GoLogin app.</span>
+            <label for="txtGoLoginToken">GoLogin API token</label>
+            <input type="password" id="txtGoLoginToken" autocomplete="off" style="width:260px;max-width:100%;">
+            <span style="font-size:11px;color:#555;">Mở và đăng nhập GoLogin desktop. App sẽ tạo profile mới từ proxy của từng luồng.</span>
           </div>
         </fieldset>
 
@@ -3421,6 +3428,13 @@
     }
 
     // Launch & Stop Engine
+    /**
+     * Mở các luồng Chrome hoặc GoLogin theo cấu hình trên giao diện.
+     * @return {Promise<void>} Hoàn tất khi API khởi chạy trả kết quả.
+     * @throws {Error} Khi giao diện không thể gửi yêu cầu mở trình duyệt.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-19
+     */
     async function handleStart() {
       const btnStart = document.getElementById('btnStart');
       if (btnStart) {
@@ -3475,10 +3489,11 @@
       const antiFpApiFakeIP = document.getElementById('CheckBoxGetApiPake').checked;
 
       const proxyLines = document.getElementById('txtDashboardProxy').value.trim();
+      const proxyType = document.getElementById('dashboardProxyType')?.value || 'socks5';
       if (proxyLines) {
         await api('/proxy-queue/import', {
           method: 'POST',
-          body: JSON.stringify({ proxyList: proxyLines, proxyType: 'socks5' })
+          body: JSON.stringify({ proxyList: proxyLines, proxyType })
         });
       }
 
@@ -3511,7 +3526,8 @@
             offerList: offerUrls,
             requestedCount: concurrency,
             proxyList: proxyLines,
-            proxyType: 'socks5',
+            proxyType,
+            goLoginToken: document.getElementById('txtGoLoginToken')?.value.trim() || '',
             scriptPath,
             timeLimit,
             delayStart,
@@ -3568,7 +3584,7 @@
               concurrency: streamCount,
               requestedCount: streamCount,
               proxyList: proxyLines,
-              proxyType: 'socks5',
+              proxyType,
               scriptPath,
               timeLimit,
               delayStart,
@@ -3607,7 +3623,7 @@
             requestedCount: concurrency,
             concurrency,
             proxyList: proxyLines,
-            proxyType: 'socks5',
+            proxyType,
             scriptPath,
             timeLimit,
             delayStart,

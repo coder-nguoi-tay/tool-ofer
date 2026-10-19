@@ -1,6 +1,12 @@
 # AutoLeadPC Mac — Chrome
 
-Nút **Tạo profile và mở** dùng các ứng dụng Google Chrome đã cài trên máy. Mỗi cửa sổ có phiên bản, thư mục profile và proxy riêng; nếu thiếu phiên bản, app báo lỗi trước khi mở. User-Agent theo profile thiết bị đã chọn và mang số phiên bản đầy đủ của bản Chrome đang mở (ví dụ `Chrome/154.0.8037.98`), khớp với Client Hints.
+### GoLogin trên AutoLeadPC Mac 2
+
+Chọn **Chrome GoLogin (Orbita)** trong tab **Thiết lập**, nhập GoLogin API token và lưu cấu hình. GoLogin desktop cần đang chạy và đăng nhập; Orbita cần được cài qua GoLogin. Khi bấm **Tạo profile và mở**, app kiểm tra từng proxy, tạo profile GoLogin mới với proxy và tùy chọn fingerprint đã chọn, mở qua GoLogin desktop rồi kết nối Playwright bằng CDP. App kiểm tra IP ngay trong Orbita; nếu khác IP proxy đã xác minh, phiên sẽ dừng. Profile tạo không thành công được xóa qua GoLogin API. Profile chạy thành công hiện được giữ trong tài khoản để dùng lại.
+
+Phần này sử dụng API profile chính thức của GoLogin vì Orbita trên Mac cần `orbita.config` và run token do GoLogin cấp. Token được lưu trong `Settings.ini` theo cơ chế cấu hình hiện có của app. Luồng này không cần tạo profile thủ công trong GoLogin trước.
+
+Ở chế độ **Chrome**, nút **Tạo profile và mở** dùng các ứng dụng Google Chrome đã cài trên máy. Mỗi cửa sổ có phiên bản, thư mục profile và proxy riêng; nếu thiếu phiên bản, app báo lỗi trước khi mở. User-Agent theo profile thiết bị đã chọn và mang số phiên bản đầy đủ của bản Chrome đang mở (ví dụ `Chrome/154.0.8037.98`), khớp với Client Hints.
 
 ### Giả lập thiết bị và chống fingerprint
 

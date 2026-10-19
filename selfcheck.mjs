@@ -80,6 +80,12 @@ assert.equal(parse('# ghi chu'), null);
 // host:port, kèm khoảng trắng cuối dòng như proxies.txt
 assert.deepEqual(parse('184.181.178.33:4145 '), { server: 'socks5://184.181.178.33:4145' });
 assert.deepEqual(parse('1.2.3.4:8080', 'http'), { server: 'http://1.2.3.4:8080' });
+assert.deepEqual(parse('proxy.example:8080:user:secret', 'http'), {
+  server: 'http://proxy.example:8080', username: 'user', password: 'secret',
+});
+assert.deepEqual(parse('https://user:secret@proxy.example:8443'), {
+  server: 'http://proxy.example:8443', username: 'user', password: 'secret',
+});
 
 // host:port|user|pass, và PacketStream (password chứa dấu gạch dưới)
 assert.deepEqual(parse('1.2.3.4:1080|bob|secret'), {
@@ -1795,6 +1801,14 @@ assert.equal(activeServers.size, 3, 'Cả 3 offer đang chạy đồng thời 3 
 // Giải phóng proxy của Offer 1
 releaseProxyLock(o1_p);
 assert.equal(isProxyCurrentlyActive(o1_p), false, 'Proxy đã được giải phóng');
+
+// Hai tài khoản proxy có cùng gateway vẫn là hai proxy độc lập.
+const firstGatewayAccount = parse('gateway.example:8080:first:secret', 'http');
+const secondGatewayAccount = parse('gateway.example:8080:second:secret', 'http');
+acquireProxyLock(firstGatewayAccount);
+assert.equal(isProxyCurrentlyActive(firstGatewayAccount), true);
+assert.equal(isProxyCurrentlyActive(secondGatewayAccount), false);
+releaseProxyLock(firstGatewayAccount);
 
 // 12.6 Tái sử dụng tuần tự qua toàn bộ 3 offer và chỉ hoàn tất khi tất cả offer đã chạy:
 resetMultiOfferState();

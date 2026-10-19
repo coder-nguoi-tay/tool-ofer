@@ -3,7 +3,6 @@ import { createConnection as netCreateConnection } from 'node:net';
 import { get as requestHttps } from 'node:https';
 import { access, cp, mkdir, readFile, readdir, readlink, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { lookup as dnsLookup } from 'node:dns/promises';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir, hostname as getHostname, cpus } from 'node:os';
@@ -16,6 +15,7 @@ import {
   installChromeVersions,
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
+import { buildGoLoginProfileRequest, createGoLoginProfile, deleteGoLoginProfile } from './gologin-profile.mjs';
 import {
   applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, stealthInitScript,
 } from './stealth.mjs';
@@ -219,15 +219,16 @@ export const activeExitIpLocks = new Set();
  *
  * @param {object|null} proxy Đối tượng proxy cần kiểm tra.
  * @return {boolean} True nếu proxy đang bận.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
  */
 export function isProxyCurrentlyActive(proxy) {
   if (!proxy) return false;
-  const pKey = proxy.server || proxy._queueLine;
-  if (!pKey) return false;
-  if (activeProxyLocks.has(pKey)) return true;
+  if (!proxy.server) return false;
+  const identity = proxyIdentity(proxy);
+  if (activeProxyLocks.has(identity)) return true;
   for (const session of activeBrowsers) {
-    if (session.proxyServer === pKey) return true;
-    if (session.proxyKey && session.proxyKey.includes(pKey)) return true;
+    if (session.proxy?.server && proxyIdentity(session.proxy) === identity) return true;
   }
   return false;
 }
@@ -251,10 +252,12 @@ export function isExitIpCurrentlyInUse(exitIp) {
  * Đặt khóa độc quyền cho proxy trước khi khởi chạy trình duyệt.
  *
  * @param {object|null} proxy Đối tượng proxy.
+ * @return {void} Không trả giá trị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
  */
 export function acquireProxyLock(proxy) {
-  const pKey = proxy?.server || proxy?._queueLine;
-  if (pKey) activeProxyLocks.add(pKey);
+  if (proxy?.server) activeProxyLocks.add(proxyIdentity(proxy));
 }
 
 /**
@@ -262,10 +265,12 @@ export function acquireProxyLock(proxy) {
  *
  * @param {object|null} proxy Đối tượng proxy.
  * @param {string|null} exitIp Địa chỉ IP exit (nếu có).
+ * @return {void} Không trả giá trị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
  */
 export function releaseProxyLock(proxy, exitIp = null) {
-  const pKey = proxy?.server || proxy?._queueLine;
-  if (pKey) activeProxyLocks.delete(pKey);
+  if (proxy?.server) activeProxyLocks.delete(proxyIdentity(proxy));
   if (exitIp) activeExitIpLocks.delete(exitIp);
 }
 
@@ -1232,7 +1237,7 @@ function withCredentials(server, username, password) {
  * Phân tích một dòng proxy thành cấu hình Playwright.
  *
  * Nhận các format của bản PC (Config/Proxy): scheme://[user:pass@]host:port,
- * host:port, host:port|user|pass (gồm cả PacketStream), host:port|phút|reset-url.
+ * host:port, host:port:user:pass, host:port|user|pass và host:port|phút|reset-url.
  * Từ chối rõ ràng SSH proxy và API key provider vì bản Mac không dựng tunnel và
  * không gọi API provider.
  *
@@ -1242,7 +1247,7 @@ function withCredentials(server, username, password) {
  * @return {{server: string, username?: string, password?: string}|null} Cấu hình proxy hoặc null nếu dòng trống.
  * @throws {Error} Khi proxy không đúng định dạng được hỗ trợ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-08
+ * @since 2026-10-19
  */
 export function parseProxyLine(line, lineNumber, proxyType = 'socks5') {
   const value = line.trim();
@@ -1251,14 +1256,23 @@ export function parseProxyLine(line, lineNumber, proxyType = 'socks5') {
   // Phải neo scheme ở đầu dòng: format host:port|phút|reset-url cũng chứa "://".
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     const proxyUrl = new URL(value);
-    if (!['socks5:', 'http:'].includes(proxyUrl.protocol) || !proxyUrl.hostname || !proxyUrl.port) {
-      throw new Error(`Dòng ${lineNumber}: URL proxy phải dùng socks5:// hoặc http:// và có cổng.`);
+    if (!['socks5:', 'http:', 'https:'].includes(proxyUrl.protocol) || !proxyUrl.hostname || !proxyUrl.port) {
+      throw new Error(`Dòng ${lineNumber}: URL proxy phải dùng socks5://, http:// hoặc https:// và có cổng.`);
     }
     return withCredentials(
-      `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+      `${proxyUrl.protocol === 'https:' ? 'http:' : proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
       proxyUrl.username ? decodeURIComponent(proxyUrl.username) : undefined,
       proxyUrl.password ? decodeURIComponent(proxyUrl.password) : undefined,
     );
+  }
+
+  const colonCredentials = value.match(/^([^:|]+):(\d{1,5}):([^:|]+):(.+)$/);
+  if (colonCredentials) {
+    const [, host, proxyPort, username, password] = colonCredentials;
+    if (Number(proxyPort) < 1 || Number(proxyPort) > 65535) {
+      throw new Error(`Dòng ${lineNumber}: port proxy phải nằm trong khoảng 1-65535.`);
+    }
+    return withCredentials(`${proxyType}://${host}:${proxyPort}`, username, password);
   }
 
   const fields = value.split('|');
@@ -2616,95 +2630,78 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
 }
 
 /**
- * Mở profile theo yêu cầu và ghi cấu hình để tự bù các slot bị đóng.
+ * Lấy API token GoLogin từ request, Settings.ini hoặc cấu hình cục bộ của bản app.
  *
- * @param {string} requestBody Nội dung JSON nhận từ giao diện.
- * @return {Promise<object>} Kết quả mở profile và trạng thái tự bù.
- * @throws {Error} Khi cấu hình launch không hợp lệ.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @param {string} requestToken Token vừa nhập trên giao diện.
+ * @return {string} Token API hoặc chuỗi rỗng nếu chưa cấu hình.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
  */
-async function getGoLoginProfiles() {
-  // macOS filesystem is case-insensitive: Gologin/ and GoLogin/ resolve to same dir
-  const profilesDir = join(homedir(), 'Library', 'Application Support', 'Gologin', 'profiles');
-  if (!existsSync(profilesDir)) return [];
-  try {
-    const entries = await readdir(profilesDir, { withFileTypes: true });
-    return entries.filter(e => e.isDirectory()).map(e => e.name);
-  } catch { return []; }
-}
-
-function readGoLoginToken() {
+function readGoLoginToken(requestToken = '') {
+  if (requestToken.trim()) return requestToken.trim();
   try {
     const settingsPath = join(getAutoLeadPCDir(), 'Config', 'Settings', 'Settings.ini');
     const text = readFileSync(settingsPath, 'utf8');
     const m = text.match(/^TokensGologin=(.+)/mi);
-    return m ? m[1].trim() : '';
-  } catch { return ''; }
-}
-
-async function resolveProxyHost(server) {
-  // server: "socks5://host:port" or "http://host:port"
-  const url = new URL(server);
-  const host = url.hostname;
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || /^[0-9a-f:]+$/i.test(host)) return server; // already IP
+    if (m?.[1]?.trim()) return m[1].trim();
+  } catch {}
   try {
-    const { address } = await dnsLookup(host);
-    return `${url.protocol}//${address}:${url.port}`;
+    const saved = JSON.parse(readFileSync(join(appDataDirectory, 'gologin.json'), 'utf8'));
+    return typeof saved.token === 'string' ? saved.token.trim() : '';
   } catch {
-    return server;
+    return '';
   }
 }
 
 /**
- * Starts a local HTTP CONNECT relay on 127.0.0.1 that tunnels through a SOCKS5 proxy.
- * Returns { port, close() }. Chrome can always reach 127.0.0.1 (bypasses host-resolver-rules).
+ * Xác nhận daemon GoLogin đang chạy trước khi tạo profile trên tài khoản.
+ *
+ * @return {Promise<void>} Hoàn tất khi cổng daemon có phản hồi HTTP.
+ * @throws {Error} Khi GoLogin desktop chưa chạy.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
  */
-async function startLocalSocksRelay(socksProxyUrl) {
-  const { SocksClient } = await import('socks');
-  const url = new URL(socksProxyUrl);
-  const socksHost = url.hostname;
-  const socksPort = parseInt(url.port);
-  const socksUser = url.username ? decodeURIComponent(url.username) : undefined;
-  const socksPwd  = url.password ? decodeURIComponent(url.password) : undefined;
-
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.on('connect', (req, clientSocket) => {
-      const [destHost, destPortStr] = req.url.split(':');
-      const destPort = parseInt(destPortStr) || 443;
-      SocksClient.createConnection({
-        proxy: { host: socksHost, port: socksPort, type: 5,
-          ...(socksUser && { userId: socksUser, password: socksPwd }) },
-        command: 'connect',
-        destination: { host: destHost, port: destPort },
-      }).then(({ socket: remoteSocket }) => {
-        clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-        remoteSocket.pipe(clientSocket);
-        clientSocket.pipe(remoteSocket);
-        remoteSocket.on('error', () => clientSocket.destroy());
-        clientSocket.on('error', () => remoteSocket.destroy());
-      }).catch(() => {
-        clientSocket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-        clientSocket.destroy();
-      });
-    });
-    srv.listen(0, '127.0.0.1', () => {
-      const port = srv.address().port;
-      resolve({ port, close: () => srv.close() });
-    });
-    srv.on('error', reject);
-  });
+async function requireGoLoginDesktop() {
+  try {
+    await fetch('http://127.0.0.1:36912/', { signal: AbortSignal.timeout(2000) });
+  } catch {
+    throw new Error('Hãy mở GoLogin desktop và đăng nhập trước khi tạo profile.');
+  }
 }
 
-function buildPreferencesProxy(proxyObj) {
-  // proxyObj: { server: "socks5://IP:port", username, password }
-  const url = new URL(proxyObj.server);
-  const scheme = url.protocol.replace(':', '');
-  const creds = (proxyObj.username && proxyObj.password)
-    ? `${encodeURIComponent(proxyObj.username)}:${encodeURIComponent(proxyObj.password)}@`
-    : '';
-  return { mode: 'fixed_servers', server: `${scheme}://${creds}${url.hostname}:${url.port}` };
+/**
+ * Dừng một profile do app mở để GoLogin đồng bộ trạng thái trước khi xử lý tiếp.
+ *
+ * @param {string} profileId ID profile cần dừng.
+ * @return {Promise<void>} Hoàn tất sau khi daemon phản hồi.
+ * @throws {Error} Khi daemon không thể dừng profile.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+async function stopGoLoginProfile(profileId) {
+  const response = await fetch('http://127.0.0.1:36912/browser/stop-profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`GoLogin desktop không dừng được profile ${profileId} (HTTP ${response.status}).`);
+}
+
+/**
+ * Yêu cầu GoLogin dừng profile của phiên đúng một lần và chờ kết quả khi cần.
+ *
+ * @param {object} session Phiên GoLogin do app tạo.
+ * @return {Promise<void>} Kết quả dừng profile đã được ghi log nếu thất bại.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+function requestGoLoginProfileStop(session) {
+  if (!session._profileStopPromise) {
+    session._profileStopPromise = stopGoLoginProfile(session.profileId)
+      .catch((error) => console.warn(`[GoLogin] Không đồng bộ được profile ${session.profileId}: ${error.message}`));
+  }
+  return session._profileStopPromise;
 }
 
 async function getOrbitaVersion() {
@@ -2730,102 +2727,63 @@ async function findOrbitaExecutable() {
   } catch { return null; }
 }
 
+/**
+ * Loại khỏi danh sách phiên GoLogin những kết nối CDP đã đóng.
+ *
+ * @return {Promise<void>} Hoàn tất sau khi dọn trạng thái phiên.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
 async function pruneDeadGoLoginSessions() {
   for (const s of [...activeBrowsers]) {
-    if (s.isGoLogin && s.profileId) {
-      let isAlive = false;
-      try {
-        const { stdout } = await executeFile('pgrep', ['-f', `user-data-dir.*${s.profileId}`]);
-        if (stdout && stdout.trim().length > 0) {
-          isAlive = true;
-        }
-      } catch {
-        isAlive = false;
-      }
-      if (!isAlive) {
-        if (s._monitorInterval) {
-          clearInterval(s._monitorInterval);
-          s._monitorInterval = null;
-        }
-        s.isClosed = true;
-        releaseProxyLock(s.proxy, s.exitIp);
-        activeBrowsers.delete(s);
-        console.log(`[GoLogin] Đã tự dọn session đóng cho profile ${s.profileId} (Slot ${s.slot}).`);
-      }
-    }
-  }
-}
-
-async function checkExitIpViaSocks(proxyObj) {
-  if (!proxyObj || !proxyObj.server) return null;
-  let url;
-  try { url = new URL(proxyObj.server); } catch { return null; }
-  const scheme = url.protocol.replace(':', '').toLowerCase();
-  const hostPort = `${url.hostname}:${url.port}`;
-  const auth = (proxyObj.username && proxyObj.password)
-    ? `${proxyObj.username}:${proxyObj.password}`
-    : ((url.username && url.password) ? `${url.username}:${url.password}` : '');
-
-  const proxyOpt = scheme.startsWith('socks')
-    ? ['--socks5-hostname', auth ? `${auth}@${hostPort}` : hostPort]
-    : ['--proxy', auth ? `http://${auth}@${hostPort}` : `http://${hostPort}`];
-
-  try {
-    const { stdout } = await executeFile('curl', [
-      ...proxyOpt,
-      'http://api.ipify.org/',
-      '-s', '--max-time', '5',
-    ]);
-    const ip = stdout?.trim();
-    if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
-      return ip;
-    }
-  } catch {}
-  return null;
-}
-
-async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy, verifiedExitIp, websiteUrl, offer = 1,
-  autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
-  captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
-  hideUntilTarget = false, hideUntilLead = false }) {
-
-  const orbitaBin = await findOrbitaExecutable();
-  if (!orbitaBin) throw new Error('Không tìm thấy Orbita browser. Hãy mở GoLogin app để tải về (hoặc đăng nhập GoLogin).');
-
-  const profileDir = join(homedir(), 'Library', 'Application Support', 'Gologin', 'profiles', profileId);
-
-  // Dọn dẹp session cũ của profile này
-  for (const s of [...activeBrowsers]) {
-    if (s.isGoLogin && s.profileId === profileId) {
+    if (s.isGoLogin && s.profileId && !s._cdpBrowser?.isConnected()) {
       if (s._monitorInterval) {
         clearInterval(s._monitorInterval);
         s._monitorInterval = null;
       }
       s.isClosed = true;
       releaseProxyLock(s.proxy, s.exitIp);
+      if (!s.proxy) activeExitIpLocks.delete('Direct');
       activeBrowsers.delete(s);
-      await s.browser?.close?.().catch(() => {});
+      void requestGoLoginProfileStop(s);
+      console.log(`[GoLogin] Đã tự dọn session đóng cho profile ${s.profileId} (Slot ${s.slot}).`);
     }
   }
+}
 
-  // Kill bất kỳ tiến trình Orbita nào đang dùng profile này
-  await executeFile('pkill', ['-9', '-f', `user-data-dir.*${profileId}`]).catch(() => {});
-  await new Promise(r => setTimeout(r, 500));
-
-  // Xoá lock file để Orbita khởi động sạch
-  const lock = join(profileDir, 'SingletonLock');
-  try { if (existsSync(lock)) unlinkSync(lock); } catch {}
-
-  // Copy RoboForm extension vào profile nếu chưa có
+/**
+ * Kiểm tra IP exit của proxy trước khi cấp profile GoLogin.
+ *
+ * @param {object} proxyObj Proxy HTTP hoặc SOCKS5 đã phân tích.
+ * @return {Promise<string|null>} IP exit hoặc null nếu proxy không hoạt động.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+async function checkProxyExitIp(proxyObj) {
+  if (!proxyObj || !proxyObj.server) return null;
   try {
-    const roboExtId = 'pnlccmojcmeohlpggmfnbbiapkmbliob';
-    const roboDestDir = join(profileDir, 'Default', 'Extensions', roboExtId, '10.0.1.1_1');
-    const roboSrcDir = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-template-profile', 'Default', 'Extensions', roboExtId, '10.0.1.1_1');
-    if (!existsSync(roboDestDir) && existsSync(roboSrcDir)) {
-      await mkdir(join(profileDir, 'Default', 'Extensions', roboExtId), { recursive: true }).catch(() => {});
-      await cp(roboSrcDir, roboDestDir, { recursive: true }).catch(() => {});
-    }
+    const info = await requestProxyIpInfo(proxyObj);
+    return typeof info.ip === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(info.ip) ? info.ip : null;
   } catch {}
+  return null;
+}
+
+/**
+ * Mở profile GoLogin đã tạo bằng API, xác minh proxy trong Orbita rồi gắn Playwright.
+ *
+ * @param {object} options ID profile, proxy, slot và dữ liệu tự động hóa của phiên.
+ * @return {Promise<object>} Session trình duyệt đã kết nối.
+ * @throws {Error} Khi Orbita, daemon, CDP hoặc IP proxy không khớp.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifiedExitIp, websiteUrl, offer = 1,
+  autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
+  captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
+  hideUntilTarget = false, hideUntilLead = false }) {
+
+  const orbitaBin = await findOrbitaExecutable();
+  if (!orbitaBin) throw new Error('Không tìm thấy Orbita browser. Hãy mở GoLogin app để tải về (hoặc đăng nhập GoLogin).');
 
   const assignedSlot = slot ?? (tileIndex + 1);
   const screen = await readScreenSize();
@@ -2835,83 +2793,65 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
   const proxyUrl = proxy?.server ?? null;
   const initialExitIp = verifiedExitIp || 'Direct';
 
-  // Kill Orbita cũ + reset daemon state trước khi start sync:true
-  await executeFile('pkill', ['-9', '-f', `user-data-dir.*${profileId}`]).catch(() => {});
-  await fetch('http://127.0.0.1:36912/browser/stop-profile', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId }),
-    signal: AbortSignal.timeout(8000),
-  }).catch(() => {});
-  await new Promise(r => setTimeout(r, 800));
-
-  // Start via GoLogin API với sync:true → Orbita khởi động với --remote-debugging-port
-  const goLoginResp = await fetch('http://127.0.0.1:36912/browser/start-profile', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, sync: true }),
-    signal: AbortSignal.timeout(45000),
-  }).then(r => r.json()).catch(() => null);
+  // Desktop cấp run token hợp lệ, khởi động Orbita và trả về CDP URL.
+  let goLoginResp = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    goLoginResp = await fetch('http://127.0.0.1:36912/browser/start-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId, sync: true }),
+      signal: AbortSignal.timeout(45000),
+    }).then((response) => response.ok ? response.json() : null).catch(() => null);
+    if (goLoginResp?.wsUrl) break;
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
 
   if (!goLoginResp?.wsUrl) {
-    throw new Error('GoLogin app không trả về CDP URL. Đảm bảo GoLogin app đang chạy và profile tồn tại.');
+    throw new Error('GoLogin desktop chưa mở được profile vừa tạo hoặc không trả CDP URL.');
   }
 
-  console.log(`[GoLogin] wsUrl từ daemon: ${goLoginResp.wsUrl}`);
-
-  const prefPath = join(homedir(), 'Library', 'Application Support', 'GoLogin', 'profiles', profileId, 'Default', 'Preferences');
-
-  // Inject user SOCKS5 proxy TRƯỚC khi connectOverCDP: start relay, ghi Preferences,
-  // đợi 2s cho Chrome restart network stack, rồi mới kết nối CDP.
-  // (Nếu ghi SAU khi connect → Chrome restart → CDP WebSocket đứt → context close)
-  let relay = null;
-  if (proxy?.server) {
-    try {
-      relay = await startLocalSocksRelay(proxy.server);
-      const prefs = JSON.parse(readFileSync(prefPath, 'utf8'));
-      prefs.proxy = { mode: 'fixed_servers', server: `http://127.0.0.1:${relay.port}`, bypass_list: '' };
-      writeFileSync(prefPath, JSON.stringify(prefs), 'utf8');
-      // Chờ Chrome restart network stack trước khi kết nối CDP
-      await new Promise(r => setTimeout(r, 2000));
-      console.log(`[GoLogin] Relay proxy: 127.0.0.1:${relay.port} → ${proxy.server}`);
-    } catch (e) {
-      relay?.close();
-      relay = null;
-      console.log(`[GoLogin] Không thể khởi relay proxy: ${e.message}`);
-    }
-  }
-
-  // Kết nối Playwright vào Orbita đang chạy qua CDP (timeout 15s)
+  // Kết nối Playwright vào Orbita đang chạy qua CDP (timeout 15s).
   const cdpBrowser = await Promise.race([
     chromium.connectOverCDP(goLoginResp.wsUrl),
     new Promise((_, reject) => setTimeout(() => reject(new Error('CDP connect timeout 15s')), 15000)),
   ]);
   console.log(`[GoLogin] CDP connected. Contexts: ${cdpBrowser.contexts().length}`);
-  const context = cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
+  const context = cdpBrowser.contexts()[0];
+  if (!context) {
+    await cdpBrowser.close().catch(() => {});
+    await stopGoLoginProfile(profileId).catch(() => {});
+    throw new Error('Orbita không có profile mặc định để kết nối.');
+  }
 
-  // Detect exit IP: dùng user's SOCKS5 trực tiếp nếu relay ok, ngược lại curl qua Preferences proxy
+  // Kiểm tra IP ngay trong Orbita: proxy cấu hình trên cloud phải thật sự áp dụng.
   let detectedIp = null;
+  let ipCheckPage = null;
   try {
-    if (proxy?.server && relay) {
-      const { stdout } = await executeFile('curl', ['-s', '--max-time', '5', '--socks5-hostname', (() => {
-        const u = new URL(proxy.server);
-        const auth = u.username ? `${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}@` : '';
-        return `${auth}${u.hostname}:${u.port}`;
-      })(), 'http://api.ipify.org/']).catch(() => ({ stdout: '' }));
-      const ip = stdout?.trim();
-      if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) detectedIp = ip;
-    } else {
-      const prefs = JSON.parse(readFileSync(prefPath, 'utf8'));
-      const activeProxyServer = prefs?.proxy?.server;
-      if (activeProxyServer && !activeProxyServer.startsWith('direct') && !activeProxyServer.includes('127.0.0.1')) {
-        const { stdout } = await executeFile('curl', ['-s', '--max-time', '5', '-x', activeProxyServer, 'http://api.ipify.org/']).catch(() => ({ stdout: '' }));
-        const ip = stdout?.trim();
-        if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) detectedIp = ip;
+    ipCheckPage = await context.newPage();
+    for (const checkUrl of browserIpCheckUrls) {
+      try {
+        const response = await ipCheckPage.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
+        if (!response?.ok()) continue;
+        const content = await ipCheckPage.locator('body').innerText();
+        const match = content.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+        if (match) {
+          detectedIp = match[0];
+          break;
+        }
+      } catch {
+        // Dịch vụ IP đầu tiên lỗi thì thử dịch vụ còn lại.
       }
     }
-  } catch {}
-  if (detectedIp) {
-    console.log(`[GoLogin] Exit IP: ${detectedIp}`);
+    if (!detectedIp) throw new Error('Không xác minh được IP trong Orbita.');
+    if (proxy && detectedIp !== verifiedExitIp) {
+      throw new Error(`Proxy trong Orbita ra IP ${detectedIp}, khác IP đã kiểm tra ${verifiedExitIp}.`);
+    }
+  } catch (error) {
+    await cdpBrowser.close().catch(() => {});
+    await stopGoLoginProfile(profileId).catch(() => {});
+    throw error;
+  } finally {
+    await ipCheckPage?.close().catch(() => {});
   }
 
   const session = {
@@ -2920,7 +2860,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
     tileIndex: tileIndex ?? (assignedSlot - 1),
     slot: assignedSlot,
     chromeVersion: orbitaVersion ?? 'GoLogin',
-    deviceProfile: 'windows',
+    deviceProfile: 'macos',
     suppressAutoRefill: false,
     proxy: proxy ?? null,
     proxyKey: proxyUrl ?? profileId,
@@ -3017,8 +2957,9 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
     }
     activeBrowsers.delete(session);
     releaseProxyLock(proxy ?? null, session.exitIp);
+    if (!proxy) activeExitIpLocks.delete('Direct');
     cdpBrowser.close().catch(() => {});
-    relay?.close();
+    void requestGoLoginProfileStop(session);
     const sc = screencastSessions.get(assignedSlot);
     if (sc) {
       if (sc.keepaliveTimer) { clearInterval(sc.keepaliveTimer); sc.keepaliveTimer = null; }
@@ -3172,6 +3113,15 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
   return session;
 }
 
+/**
+ * Tạo một profile GoLogin cho mỗi proxy đã chọn rồi mở Orbita theo từng slot.
+ *
+ * @param {string} requestBody JSON từ giao diện Mac 2.
+ * @return {Promise<{results: object[], warnings: string[]}>} Kết quả mở các slot.
+ * @throws {Error} Khi thiếu token hoặc GoLogin desktop chưa chạy.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
 async function launchGoLoginBrowsers(requestBody) {
   autoRefill.stopRequested = false;
   autoRefill.enabled = true;
@@ -3185,7 +3135,14 @@ async function launchGoLoginBrowsers(requestBody) {
   const captchaApiKey = body.captchaApiKey ?? '';
   const completeText  = body.completeText  ?? '';
   const timeLimit     = Math.max(0, Number(body.timeLimit)  || 0);
+  const delayStart    = Math.max(0, Number(body.delayStart) || 0);
   const delayStop     = Math.max(0, Number(body.delayStop)  || 0);
+  const antiFingerprint = {
+    canvas: Boolean(body.antiFpCanvas),
+    clientRects: Boolean(body.antiFpClientRects),
+    webgl: Boolean(body.antiFpWebgl),
+    webrtc: Boolean(body.antiFpWebrtc),
+  };
   let scriptSteps = null;
   if (scriptPath) { try { scriptSteps = await loadScript(scriptPath); } catch {} }
   const autofillRecords = parseAutofillRecords(body.autofillData);
@@ -3205,22 +3162,20 @@ async function launchGoLoginBrowsers(requestBody) {
   const hideUntilTarget = Boolean(body.hideUntilTarget ?? body.hideBrowser);
   const hideUntilLead = Boolean(body.hideUntilLead);
 
+  const goLoginToken = readGoLoginToken(body.goLoginToken || '');
+  if (!goLoginToken) throw new Error('Thiếu GoLogin API token. Hãy nhập token trong Thiết lập > Browser.');
+  await requireGoLoginDesktop();
+  if (!await findOrbitaExecutable()) throw new Error('Chưa cài Orbita. Hãy mở GoLogin desktop để tải trình duyệt.');
+
   // Dọn dẹp các session cũ đã đóng hoặc zombie trước khi khởi chạy
   await pruneDeadGoLoginSessions();
 
-  const profiles = await getGoLoginProfiles();
-  if (profiles.length === 0) {
-    return { results: [], warnings: ['Không tìm thấy profile GoLogin. Hãy Run profile trong GoLogin app ít nhất 1 lần trước.'] };
-  }
-
-  const count = Math.min(concurrency, profiles.length);
+  const count = concurrency;
   const results = [], warnings = [];
-  if (concurrency > profiles.length) {
-    warnings.push(`Chỉ có ${profiles.length} profile GoLogin trên máy (đã mở ${count} profile). Để chạy ${concurrency} luồng cùng lúc, vui lòng tạo thêm profile trong GoLogin app (hoặc chuyển sang chế độ Google Chrome).`);
-  }
 
   // Thu thập proxy: ưu tiên từ request (txtDashboardProxy), bỏ qua proxy đã dùng
   const candidateProxies = [];
+  const hasProxyInput = Boolean(body.proxyList?.trim() || proxyQueue.available.length);
   const proxyType = body.proxyType ?? 'socks5';
   const usedProxyLines = new Set(proxyQueue.used.map((l) => l.trim()));
   if (body.proxyList) {
@@ -3229,7 +3184,7 @@ async function launchGoLoginBrowsers(requestBody) {
       if (usedProxyLines.has(line.trim())) continue;
       try {
         const p = parseProxyLine(line, i + 1, proxyType);
-        if (p && !candidateProxies.some(ex => ex.server === p.server)) {
+        if (p && !candidateProxies.some(existingProxy => proxyIdentity(existingProxy) === proxyIdentity(p))) {
           candidateProxies.push(p);
         }
       } catch {}
@@ -3242,7 +3197,7 @@ async function launchGoLoginBrowsers(requestBody) {
       if (candidateProxies.length >= count) break;
       try {
         const p = parseProxyLine(line.trim(), candidateProxies.length + 1, proxyType);
-        if (p && !isProxyCurrentlyActive(p) && !candidateProxies.some(ex => ex.server === p.server)) {
+        if (p && !isProxyCurrentlyActive(p) && !candidateProxies.some(existingProxy => proxyIdentity(existingProxy) === proxyIdentity(p))) {
           p._queueLine = line;
           candidateProxies.push(p);
         }
@@ -3265,23 +3220,9 @@ async function launchGoLoginBrowsers(requestBody) {
   const occupiedSlots = new Set([...activeBrowsers].map(s => s.slot || (s.tileIndex + 1)));
 
   for (let i = 0; i < count; i++) {
-    const profileId = profiles[i];
     const slotOfferUrl = (offerUrls && offerUrls.length > 0) ? offerUrls[i % offerUrls.length] : websiteUrl;
     const offerNum = (offerUrls && offerUrls.length > 0) ? (i % offerUrls.length) + 1 : 1;
     const normOfferUrl = slotOfferUrl ? safeNormalizeUrl(slotOfferUrl) : '';
-
-    // Dọn dẹp session cũ của profile này ngay trước khi tính slot
-    for (const s of [...activeBrowsers]) {
-      if (s.isGoLogin && s.profileId === profileId) {
-        if (s._monitorInterval) {
-          clearInterval(s._monitorInterval);
-          s._monitorInterval = null;
-        }
-        s.isClosed = true;
-        releaseProxyLock(s.proxy, s.exitIp);
-        activeBrowsers.delete(s);
-      }
-    }
 
     let slot = 1;
     while (occupiedSlots.has(slot)) slot++;
@@ -3300,7 +3241,7 @@ async function launchGoLoginBrowsers(requestBody) {
 
       let verifiedIp = null;
       try {
-        verifiedIp = await checkExitIpViaSocks(candidate);
+        verifiedIp = await checkProxyExitIp(candidate);
       } catch {}
 
       if (!verifiedIp) {
@@ -3328,17 +3269,13 @@ async function launchGoLoginBrowsers(requestBody) {
       activeExitIpLocks.add(verifiedIp);
       usedExitIps.add(keyWithUrl);
 
-      if (assignedProxy._queueLine) {
-        const qIdx = proxyQueue.available.indexOf(assignedProxy._queueLine);
-        if (qIdx !== -1) {
-          proxyQueue.available.splice(qIdx, 1);
-          proxyQueue.used.push(assignedProxy._queueLine);
-          void saveProxyQueue();
-        }
-      }
       break;
     }
 
+    if (!assignedProxy && hasProxyInput) {
+      warnings.push(`Slot ${slot}: Không còn proxy hợp lệ; không mở bằng IP thật của máy.`);
+      continue;
+    }
     if (!assignedProxy) {
       actualExitIp = 'Direct';
       const directKey = normOfferUrl ? `Direct::${normOfferUrl}` : 'Direct';
@@ -3355,7 +3292,6 @@ async function launchGoLoginBrowsers(requestBody) {
     }
 
     gologinWorkers.push({
-      profileId,
       slot,
       tileIndex,
       assignedProxy,
@@ -3371,8 +3307,18 @@ async function launchGoLoginBrowsers(requestBody) {
       const staggerMs = Math.max(800, (delayStart > 0 ? delayStart * 1000 : 800));
       await new Promise(r => setTimeout(r, workerIdx * staggerMs));
     }
-    if (autoRefill.stopRequested || !autoRefill.enabled) return;
+    if (autoRefill.stopRequested || !autoRefill.enabled) {
+      releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
+      if (worker.actualExitIp === 'Direct') activeExitIpLocks.delete('Direct');
+      return;
+    }
     try {
+      worker.profileId = await createGoLoginProfile(goLoginToken, buildGoLoginProfileRequest({
+        slot: worker.slot,
+        proxy: worker.assignedProxy,
+        websiteUrl: worker.slotOfferUrl,
+        antiFingerprint,
+      }));
       await openBrowserViaGoLogin({
         tileIndex: worker.tileIndex,
         slot: worker.slot,
@@ -3393,7 +3339,15 @@ async function launchGoLoginBrowsers(requestBody) {
         hideUntilTarget,
         hideUntilLead,
       });
-      results.push({ status: 'ok', slot: worker.slot, offer: worker.offerNum });
+      results.push({ status: 'ok', slot: worker.slot, offer: worker.offerNum, profileId: worker.profileId });
+      if (worker.assignedProxy?._queueLine) {
+        const queueIndex = proxyQueue.available.indexOf(worker.assignedProxy._queueLine);
+        if (queueIndex !== -1) {
+          proxyQueue.available.splice(queueIndex, 1);
+          proxyQueue.used.push(worker.assignedProxy._queueLine);
+          void saveProxyQueue();
+        }
+      }
       if (worker.assignedProxy && worker.actualExitIp) {
         const pKey = createProxyUsageKey(worker.assignedProxy, 1, worker.slotOfferUrl);
         usageHistory.proxies[pKey] = {
@@ -3409,6 +3363,13 @@ async function launchGoLoginBrowsers(requestBody) {
         void persistProxyUsageHistory(usageHistory).catch(() => {});
       }
     } catch (err) {
+      if (worker.profileId) {
+        const failedSession = [...activeBrowsers].find((session) => session.profileId === worker.profileId);
+        await failedSession?.browser?.close?.().catch(() => {});
+        await stopGoLoginProfile(worker.profileId).catch(() => {});
+        await deleteGoLoginProfile(goLoginToken, worker.profileId)
+          .catch((cleanupError) => warnings.push(`Profile ${worker.profileId} cần xóa thủ công: ${cleanupError.message}`));
+      }
       if (worker.assignedProxy) {
         releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
         const pKey = createProxyUsageKey(worker.assignedProxy, 1, worker.slotOfferUrl);
@@ -3810,8 +3771,9 @@ function requestProxyIpInfo(proxy) {
  * trình thoát — nó nằm chờ trên CDP pipe và vẫn hiện icon dưới Dock. Phải gọi close().
  *
  * @return {Promise<{results: string[], warnings: string[]}>} Số trình duyệt đã đóng.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @throws {Error} Khi hệ thống không thể xử lý thao tác đóng phiên.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
  */
 export async function closeActiveBrowsers() {
   const sessions = [...activeBrowsers];
@@ -3838,7 +3800,6 @@ export async function closeActiveBrowsers() {
       session._autofillTimer = null;
     }
   }
-  const token = readGoLoginToken();
   await Promise.allSettled(sessions.map(async (session) => {
     session.suppressAutoRefill = true;
     session.isClosed = true;
@@ -3846,18 +3807,7 @@ export async function closeActiveBrowsers() {
       if (session.browser && typeof session.browser.close === 'function') {
         await session.browser.close().catch(() => {});
       }
-      try {
-        await fetch('http://127.0.0.1:36912/browser/stop-profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profileId: session.profileId }),
-          signal: AbortSignal.timeout(2000),
-        }).catch(() => null);
-      } catch {}
-      await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.profileId}`]).catch(() => {});
-      const profileDir = join(homedir(), 'Library', 'Application Support', 'Gologin', 'profiles', session.profileId);
-      const lock = join(profileDir, 'SingletonLock');
-      try { if (existsSync(lock)) unlinkSync(lock); } catch {}
+      await requestGoLoginProfileStop(session);
       return;
     }
     try {
@@ -3871,21 +3821,7 @@ export async function closeActiveBrowsers() {
     }
   }));
 
-  // Đảm bảo daemon dừng tất cả profile đang mở
-  try {
-    const allProfiles = await getGoLoginProfiles();
-    for (const pid of allProfiles) {
-      fetch('http://127.0.0.1:36912/browser/stop-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profileId: pid }),
-        signal: AbortSignal.timeout(1500),
-      }).catch(() => null);
-    }
-  } catch {}
-
-  // Force kill fallback để bảo đảm không còn cửa sổ trình duyệt nào sót lại trên màn hình
-  await executeFile('pkill', ['-9', '-f', 'Orbita-Browser']).catch(() => {});
+  // Chỉ đóng những phiên app quản lý; không đụng vào Orbita do người dùng tự mở.
   await executeFile('pkill', ['-9', '-f', 'chrome-regular-builds']).catch(() => {});
   await executeFile('pkill', ['-9', '-f', 'user-data-dir.*chrome-profiles']).catch(() => {});
   await executeFile('pkill', ['-9', '-f', 'user-data-dir.*AutoLeadPC']).catch(() => {});
@@ -3898,7 +3834,7 @@ export async function closeActiveBrowsers() {
     s.isClosed = true;
     if (s._monitorInterval) { clearInterval(s._monitorInterval); s._monitorInterval = null; }
     if (s._autofillTimer) { clearInterval(s._autofillTimer); s._autofillTimer = null; }
-    await s.context?.close?.().catch(() => {});
+    await (s.browser ?? s.context)?.close?.().catch(() => {});
   }
 
   activeBrowsers.clear();

@@ -7,6 +7,15 @@ echo "=== Compiling native Swift binary ==="
 TMP_BIN="/tmp/AutoLeadPCMac_bin"
 swiftc -O -parse-as-library AutoLeadPCMacApp.swift -o "$TMP_BIN"
 
+# Tạo một bundle Mac từ source chung, gồm phần tạo profile GoLogin.
+# @param $1 Tên bundle .app.
+# @param $2 Số instance.
+# @param $3 Cổng giao diện.
+# @param $4 Bundle ID.
+# @param $5 Tên hiển thị.
+# @return Bundle đã đóng gói và ký tại thư mục source.
+# @author ductv <ductv@getflycrm.com>
+# @since 2026-10-19
 build_app_bundle() {
   local APP_NAME="$1"
   local INSTANCE_ID="$2"
@@ -86,7 +95,7 @@ EOF
     cp -p autoleadpc-icon.svg "$RESOURCES_DIR/autoleadpc-icon.svg"
   fi
 
-  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs gologin-profile.mjs gologin-profile.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
   if [ -f "script.mjs" ]; then
     cp -p script.mjs "$LAUNCHER_DIR/"
   fi
