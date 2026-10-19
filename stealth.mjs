@@ -439,8 +439,11 @@ export function stealthInitScript(cfg) {
 }
 
 /**
- * Áp các override tận gốc qua CDP cho một tab, kèm worker và iframe khác tiến trình của tab đó.
- * Với worker chỉ đặt được số nhân CPU (có thể trễ); phần còn lại do Worker wrapper trong stealthInitScript lo.
+ * Áp các override tận gốc qua CDP cho một tab.
+ *
+ * Không auto-attach vào iframe/worker con: chế độ đó bắt con chờ phiên này cho chạy tiếp, và nếu
+ * lệnh cho chạy tiếp không tới (Chrome mới bỏ dần chế độ non-flatten) thì iframe/worker đứng mãi.
+ * Iframe khác site và worker đã có lớp JS dự phòng trong stealthInitScript.
  *
  * @param {import('playwright').BrowserContext} context Context của phiên.
  * @param {import('playwright').Page} page Tab cần áp.
@@ -449,26 +452,18 @@ export function stealthInitScript(cfg) {
  */
 export async function applyNativeOverrides(context, page, { userAgentOverride, hardwareConcurrency }) {
   const session = await context.newCDPSession(page);
-  await session.send('Emulation.setUserAgentOverride', userAgentOverride);
+  try {
+    await session.send('Emulation.setUserAgentOverride', userAgentOverride);
+  } catch (error) {
+    // fullVersion đã deprecated: bản Chrome nào từ chối thì gửi lại không có trường này.
+    const metadata = userAgentOverride.userAgentMetadata;
+    if (!metadata?.fullVersion) throw error;
+    const { fullVersion, ...rest } = metadata;
+    await session.send('Emulation.setUserAgentOverride', { ...userAgentOverride, userAgentMetadata: rest });
+  }
   if (hardwareConcurrency) {
     await session.send('Emulation.setHardwareConcurrencyOverride', { hardwareConcurrency }).catch(() => {});
   }
-  let messageId = 1;
-  session.on('Target.attachedToTarget', async ({ sessionId, targetInfo, waitingForDebugger }) => {
-    const send = (method, params = {}) => session.send('Target.sendMessageToTarget', {
-      sessionId,
-      message: JSON.stringify({ id: messageId++, method, params }),
-    }).catch(() => {});
-    try {
-      if (targetInfo.type === 'iframe') {
-        await send('Emulation.setUserAgentOverride', userAgentOverride);
-      }
-      if (hardwareConcurrency) await send('Emulation.setHardwareConcurrencyOverride', { hardwareConcurrency });
-    } finally {
-      if (waitingForDebugger) await send('Runtime.runIfWaitingForDebugger');
-    }
-  });
-  await session.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: false });
 }
 
 // ── Biến thể máy theo phiên: mỗi cửa sổ là một cấu hình máy thật khác nhau ──────────────
