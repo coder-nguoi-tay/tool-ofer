@@ -48,16 +48,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         webView.uiDelegate = self
         self.webView = webView
 
-        let windowWidth: CGFloat = instanceId == "2" ? 960 : 620
-        let windowHeight: CGFloat = instanceId == "2" ? 720 : 660
+        let windowWidth: CGFloat = 980
+        let windowHeight: CGFloat = 740
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.minSize = NSSize(width: instanceId == "2" ? 880 : 560, height: instanceId == "2" ? 640 : 610)
-        window.title = "\(appTitle) - Cổng \(port)"
+        window.minSize = NSSize(width: 880, height: 640)
+        window.title = "\(appTitle)"
         window.center()
         window.contentView = webView
         window.makeKeyAndOrderFront(nil)

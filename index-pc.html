@@ -1210,6 +1210,7 @@
     <div class="win-tab-headers" id="mainTabHeaders">
       <div class="win-tab active" data-tab="Dashboard" onclick="switchTab('Dashboard')">Dashboard</div>
       <div class="win-tab" data-tab="tabRunning" onclick="switchTab('tabRunning')">tabRunning (<span id="tabRunCount">0</span>)</div>
+      <div class="win-tab" data-tab="ScreenView" onclick="switchTab('ScreenView')" title="Xem màn hình trực tiếp các luồng trình duyệt">📺 Xem màn hình</div>
       <div class="win-tab" data-tab="ToffersLeads" onclick="switchTab('ToffersLeads')">🎯 Leads (<span id="tabLeadPointHeader">-- pt</span>)</div>
       <div class="win-tab" data-tab="Script" onclick="switchTab('Script')">Script</div>
       <div class="win-tab" data-tab="RRS" onclick="switchTab('RRS')">RRS</div>
@@ -1296,11 +1297,11 @@
               </label>
               <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-weight:bold;color:#0055aa;font-size:12px;">
                 <input type="radio" name="dashBrowserRadio" id="dashRadioGologin" value="Gologin" checked onchange="syncBrowserChoice('Gologin')">
-                🛡️ Chrome GoLogin (Orbita)
+                🛡️ Chrome GoLogin (profile cục bộ)
               </label>
             </div>
             <div id="dashBrowserBadge" style="font-size:11px;font-weight:bold;padding:3px 10px;border-radius:3px;background:#28a745;color:#fff;">
-              🛡️ Đang chọn: Chrome GoLogin (Orbita)
+              🛡️ Đang chọn: Chrome GoLogin (profile cục bộ)
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -1976,11 +1977,7 @@
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonAdspower" onchange="syncBrowserChoice('AdsPower')"> Chrome AdsPower</label>
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonGologinCMD2" onchange="syncBrowserChoice('Gologin')"> Chrome Gologin</label>
           </div>
-          <div id="gologin-token-group" style="display:none;">
-            <label for="txtGoLoginToken">GoLogin API token</label>
-            <input type="password" id="txtGoLoginToken" autocomplete="off" style="width:260px;max-width:100%;">
-            <span style="font-size:11px;color:#555;">Mở và đăng nhập GoLogin desktop. App sẽ tạo profile mới từ proxy của từng luồng.</span>
-          </div>
+          <div style="font-size:11px;color:#555;">Tạo profile cục bộ từ zero_profile. Cần Chrome đã cài trên máy; không cần GoLogin API token.</div>
         </fieldset>
 
         <fieldset class="win-group">
@@ -2338,6 +2335,20 @@
 
     // Tab switching (tbcTool)
     function switchTab(tabId) {
+      if (tabId === 'ScreenView') {
+        switchTab('tabRunning');
+        if (!_screenViewActive) toggleScreenView();
+        document.querySelectorAll('#mainTabHeaders .win-tab').forEach(t => t.classList.remove('active'));
+        const screenTab = document.querySelector('#mainTabHeaders .win-tab[data-tab="ScreenView"]');
+        if (screenTab) screenTab.classList.add('active');
+        return;
+      }
+      if (tabId === 'tabRunning') {
+        if (_screenViewActive) toggleScreenView();
+      } else if (_screenViewActive) {
+        _stopThumbPolling();
+      }
+
       document.querySelectorAll('#mainTabHeaders .win-tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
       const targetHeader = document.querySelector(`#mainTabHeaders .win-tab[data-tab="${tabId}"]`);
@@ -3333,7 +3344,7 @@
         if (isGoLogin) {
           badge.style.background = '#28a745';
           badge.style.color = '#fff';
-          badge.textContent = '🛡️ Đang chọn: Chrome GoLogin (Orbita)';
+          badge.textContent = '🛡️ Đang chọn: Chrome GoLogin (profile cục bộ)';
         } else if (isChrome) {
           badge.style.background = '#0078d7';
           badge.style.color = '#fff';
@@ -3346,8 +3357,6 @@
       }
 
       // Update GoLogin token group in Settings
-      const tokenGroup = document.getElementById('gologin-token-group');
-      if (tokenGroup) tokenGroup.style.display = isGoLogin ? '' : 'none';
 
       // Persist to localStorage
       try {
@@ -3379,7 +3388,6 @@
       syncBrowserChoice(selectedMode, false);
 
       if (data) {
-        if (data.TokensGologin) document.getElementById('txtGoLoginToken').value = data.TokensGologin;
         if (data.Canvas !== undefined) document.getElementById('CheckBoxCanvas').checked = data.Canvas;
         if (data.ClientRects !== undefined) document.getElementById('CheckboxClientRects').checked = data.ClientRects;
         if (data.WebGLImage !== undefined) document.getElementById('CheckBoxWebGLImage').checked = data.WebGLImage;
@@ -3407,7 +3415,6 @@
 
       const payload = {
         browserMode,
-        TokensGologin: document.getElementById('txtGoLoginToken')?.value.trim() || '',
         Canvas: document.getElementById('CheckBoxCanvas')?.checked ?? false,
         ClientRects: document.getElementById('CheckboxClientRects')?.checked ?? true,
         WebGLImage: document.getElementById('CheckBoxWebGLImage')?.checked ?? true,
@@ -3511,8 +3518,12 @@
       const isGoLogin = !isExplicitChrome;
 
       if (isGoLogin) {
-        document.getElementById('lbStatus').textContent = 'Đang mở GoLogin (Orbita)...';
-        switchTab('tabRunning');
+        document.getElementById('lbStatus').textContent = 'Đang tạo profile cục bộ và mở Chrome...';
+        if (hideUntilTarget || hideUntilLead) {
+          switchTab('ScreenView');
+        } else {
+          switchTab('tabRunning');
+        }
         fetchRunningState();
 
         const res = await api('/launch-gologin', {
@@ -3527,7 +3538,6 @@
             requestedCount: concurrency,
             proxyList: proxyLines,
             proxyType,
-            goLoginToken: document.getElementById('txtGoLoginToken')?.value.trim() || '',
             scriptPath,
             timeLimit,
             delayStart,
@@ -3545,7 +3555,7 @@
             enableLeadCheck,
             leadCheckInterval: 15,
             leadCheckMaxAttempts: 1,
-            leadCheckScreen: 5,
+            leadCheckScreen: 4,
             hideUntilTarget,
             hideUntilLead,
           })
@@ -3557,14 +3567,18 @@
           showWinAlert('Thông báo: ' + res.warnings.join('\n'));
           document.getElementById('lbStatus').textContent = res.warnings[0];
         } else {
-          document.getElementById('lbStatus').textContent = `GoLogin: mở ${res.results?.length || 0} profile thành công.`;
+          document.getElementById('lbStatus').textContent = res.message || `GoLogin: mở ${res.results?.length || 0} profile thành công.`;
         }
         fetchRunningState();
         return;
       }
 
       document.getElementById('lbStatus').textContent = 'Starting Chrome...';
-      switchTab('tabRunning');
+      if (hideUntilTarget || hideUntilLead) {
+        switchTab('ScreenView');
+      } else {
+        switchTab('tabRunning');
+      }
       fetchRunningState();
 
       const streamCount = Math.max(concurrency, offerUrls.length >= 2 ? offerUrls.length : 1);
@@ -3602,7 +3616,7 @@
               enableLeadCheck,
               leadCheckInterval: 15,
               leadCheckMaxAttempts: 1,
-              leadCheckScreen: 5,
+              leadCheckScreen: 4,
               hideUntilTarget,
               hideBrowser: hideUntilTarget,
               hideUntilLead,
@@ -3641,7 +3655,7 @@
             enableLeadCheck,
             leadCheckInterval: 15,
             leadCheckMaxAttempts: 1,
-            leadCheckScreen: 5,
+            leadCheckScreen: 4,
             hideUntilTarget,
             hideBrowser: hideUntilTarget,
             hideUntilLead,
@@ -4463,11 +4477,17 @@
         grid.style.display = 'block';
         table.style.display = 'none';
         btn.textContent = '📋 Xem bảng';
+        document.querySelectorAll('#mainTabHeaders .win-tab').forEach(t => t.classList.remove('active'));
+        const screenTab = document.querySelector('#mainTabHeaders .win-tab[data-tab="ScreenView"]');
+        if (screenTab) screenTab.classList.add('active');
         _startThumbPolling();
       } else {
         grid.style.display = 'none';
         table.style.display = '';
         btn.textContent = '📺 Xem màn hình';
+        document.querySelectorAll('#mainTabHeaders .win-tab').forEach(t => t.classList.remove('active'));
+        const runTab = document.querySelector('#mainTabHeaders .win-tab[data-tab="tabRunning"]');
+        if (runTab) runTab.classList.add('active');
         _stopThumbPolling();
       }
     }
@@ -4498,7 +4518,8 @@
       for (const slot of existingSlots) {
         if (!currentSlots.has(slot)) tilesDiv.querySelector(`[data-slot="${slot}"]`)?.remove();
       }
-      for (const { slot, ip } of _screenSlots) {
+      for (const entry of _screenSlots) {
+        const { slot, ip, leadCheckStatus, completedScreens, pageJumps, offerNumber, currentAction } = entry;
         let tile = tilesDiv.querySelector(`[data-slot="${slot}"]`);
         if (!tile) {
           tile = document.createElement('div');
@@ -4527,9 +4548,25 @@
         }
         const footer = tile.querySelector('.screen-tile-footer');
         if (footer) {
-          footer.textContent = ip ? `🌐 ${ip}` : `🌐 Đang kết nối...`;
+          let statusHtml = '';
+          if (leadCheckStatus === 'confirmed') {
+            statusHtml = `<span style="color:#22c55e;font-weight:600;">✅ Có lead (Màn ${(completedScreens || 0) + 1})</span>`;
+          } else if (leadCheckStatus === 'checking') {
+            statusHtml = `<span style="color:#f59e0b;font-weight:600;">⏳ Chờ lead Màn 4 (15s)...</span>`;
+          } else if (completedScreens > 0) {
+            statusHtml = `<span style="color:#38bdf8;">📄 Màn ${completedScreens + 1}/4 (Nhảy ${pageJumps || completedScreens})</span>`;
+          } else {
+            statusHtml = `<span style="color:#94a3b8;">${currentAction || 'Đang mở offer...'}</span>`;
+          }
+          footer.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+              <span>🌐 <b>${ip || 'Đang kết nối...'}</b></span>
+              <span style="font-size:10px;background:#1e293b;padding:1px 5px;border-radius:3px;">Offer ${offerNumber || 1}</span>
+            </div>
+            <div style="font-size:11px;">${statusHtml}</div>
+          `;
         }
-        tile.title = ip ? `Slot ${slot} (${ip}) — Nhấp để mở màn hình tương tác` : `Slot ${slot} — Nhấp để mở màn hình tương tác`;
+        tile.title = ip ? `Slot ${slot} (${ip}) — Nhấp để mở màn hình tương tác full` : `Slot ${slot} — Nhấp để mở màn hình tương tác full`;
         // Refresh ảnh bằng cache-buster
         const img = tile.querySelector('img');
         if (img) img.src = `/screen/snapshot/${slot}?t=${Date.now()}`;
@@ -4916,7 +4953,17 @@
     // Cập nhật danh sách slot từ fetchRunningState
     const _origFetch = window._screenStateHook;
     function _updateScreenSlots(sessions) {
-      _screenSlots = sessions.filter(s => s.slot).map(s => ({ slot: s.slot, ip: s.exitIp || '' }));
+      _screenSlots = sessions.filter(s => s.slot).map(s => ({
+        slot: s.slot,
+        ip: s.exitIp || '',
+        leadCheckStatus: s.leadCheckStatus || null,
+        leadCheckMessage: s.leadCheckMessage || null,
+        badgeText: s.badgeText || null,
+        offerNumber: s.offerNumber || 1,
+        completedScreens: s.completedScreens || 0,
+        pageJumps: s.pageJumps || 0,
+        currentAction: s.currentAction || s.status || '',
+      }));
     }
 
     // ─── TOFFERS.TOP LEADS & POINT DASHBOARD ───

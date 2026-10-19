@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, get as requestHttp } from 'node:http';
 import { createConnection as netCreateConnection } from 'node:net';
 import { get as requestHttps } from 'node:https';
 import { access, cp, mkdir, readFile, readdir, readlink, rename, rm, unlink, writeFile } from 'node:fs/promises';
@@ -14,8 +14,15 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import {
   installChromeVersions,
 } from './chrome-versions.mjs';
-import { startAuthenticatedSocksRelay } from './relay.mjs';
+import { startAuthenticatedHttpRelay, startAuthenticatedSocksRelay } from './relay.mjs';
 import { buildGoLoginProfileRequest, createGoLoginProfile, deleteGoLoginProfile } from './gologin-profile.mjs';
+import {
+  cleanupLocalProfile,
+  prepareLocalZeroProfile,
+  resolveBrowserExecutable,
+  spawnLocalProfileBrowser,
+  stopLocalProfileBrowser,
+} from './local-profile-engine.mjs';
 import {
   applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, stealthInitScript,
 } from './stealth.mjs';
@@ -1917,7 +1924,7 @@ function dispatchOneTaskToAgent(agent, settings) {
     deviceProfile: chosenProfile,
     leadConfig: {
       enabled: settings.enableLeadCheck !== false,
-      checkScreen: Number(settings.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 5,
+      checkScreen: Number(settings.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 4,
       apiUrl: settings.leadCheckApiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
       cookie: settings.leadCheckCookie || DEFAULT_LEAD_CONFIG.cookie,
       datas: settings.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
@@ -2505,7 +2512,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           datas: body.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
           intervalSeconds: Number(body.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
           maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
-          checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 5,
+          checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 4,
         };
         const chosenDeviceProfile = getNextDeviceProfile();
         if (delayStart > 0) {
@@ -2630,30 +2637,6 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
 }
 
 /**
- * Lấy API token GoLogin từ request, Settings.ini hoặc cấu hình cục bộ của bản app.
- *
- * @param {string} requestToken Token vừa nhập trên giao diện.
- * @return {string} Token API hoặc chuỗi rỗng nếu chưa cấu hình.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-19
- */
-function readGoLoginToken(requestToken = '') {
-  if (requestToken.trim()) return requestToken.trim();
-  try {
-    const settingsPath = join(getAutoLeadPCDir(), 'Config', 'Settings', 'Settings.ini');
-    const text = readFileSync(settingsPath, 'utf8');
-    const m = text.match(/^TokensGologin=(.+)/mi);
-    if (m?.[1]?.trim()) return m[1].trim();
-  } catch {}
-  try {
-    const saved = JSON.parse(readFileSync(join(appDataDirectory, 'gologin.json'), 'utf8'));
-    return typeof saved.token === 'string' ? saved.token.trim() : '';
-  } catch {
-    return '';
-  }
-}
-
-/**
  * Xác nhận daemon GoLogin đang chạy trước khi tạo profile trên tài khoản.
  *
  * @return {Promise<void>} Hoàn tất khi cổng daemon có phản hồi HTTP.
@@ -2745,7 +2728,12 @@ async function pruneDeadGoLoginSessions() {
       releaseProxyLock(s.proxy, s.exitIp);
       if (!s.proxy) activeExitIpLocks.delete('Direct');
       activeBrowsers.delete(s);
-      void requestGoLoginProfileStop(s);
+      if (s.isLocalEngine) {
+        void s._relay?.close().catch(() => {});
+        void stopLocalProfileBrowser(s._proc, s.profilePath);
+      } else {
+        void requestGoLoginProfileStop(s);
+      }
       console.log(`[GoLogin] Đã tự dọn session đóng cho profile ${s.profileId} (Slot ${s.slot}).`);
     }
   }
@@ -2769,6 +2757,421 @@ async function checkProxyExitIp(proxyObj) {
 }
 
 /**
+ * Mở Chrome bằng profile cục bộ từ zero_profile theo vòng đời của bản PC gốc.
+ * Áp dụng các tùy chọn fingerprint mà app Mac hỗ trợ qua CDP.
+ *
+ * @param {object} options Tham số luồng, proxy, slot, autofill, antiFingerprint và script.
+ * @return {Promise<object>} Session trình duyệt đã kết nối.
+ * @throws {Error} Khi không tìm thấy trình duyệt hoặc không thể kết nối CDP.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+async function openBrowserViaLocalEngine({
+  tileIndex, slot, proxy, verifiedExitIp, websiteUrl, offer = 1,
+  autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
+  captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
+  hideUntilTarget = false, hideUntilLead = false, antiFingerprint = {}, deviceProfile = 'windows',
+  totalCount = 10,
+}) {
+  const assignedSlot = slot ?? (tileIndex + 1);
+  const screen = await readScreenSize();
+  const tile = tileAt(tileIndex ?? (assignedSlot - 1), totalCount || 10, screen);
+
+  let timezoneId;
+  let ipCountry;
+  let ipLat = 0, ipLng = 0;
+  if (proxy) {
+    try {
+      const ipInfo = await requestProxyIpInfo(proxy).catch(() => requestProxyIpInfo(proxy));
+      if (typeof ipInfo.timezone === 'string' && ipInfo.timezone.includes('/')) timezoneId = ipInfo.timezone;
+      if (typeof ipInfo.country === 'string') ipCountry = ipInfo.country;
+      if (typeof ipInfo.loc === 'string') {
+        const parts = ipInfo.loc.split(',').map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) [ipLat, ipLng] = parts;
+      }
+    } catch {}
+  }
+
+  const { locale, languages } = localeForCountry(ipCountry);
+  const relay = proxy?.username
+    ? await (proxy.server.startsWith('socks5://') ? startAuthenticatedSocksRelay(proxy) : startAuthenticatedHttpRelay(proxy))
+    : null;
+  const proxyUrl = relay?.proxy?.server ?? proxy?.server ?? null;
+
+  let profilePath;
+  try {
+    profilePath = await prepareLocalZeroProfile({
+      slot: assignedSlot,
+      locale,
+      languages,
+      bookmarks,
+    });
+  } catch (error) {
+    await relay?.close();
+    throw error;
+  }
+
+  // Chọn build Chrome tốt nhất từ danh sách đã cài hoặc mặc định
+  let executablePath = null;
+  let chromeVersion = '150.0.7871.187';
+  try {
+    const builds = await listInstalledChromeChannels();
+    if (builds.length > 0) {
+      const chosen = builds[tileIndex % builds.length] || builds[0];
+      executablePath = chosen.executablePath;
+      chromeVersion = chosen.version;
+    }
+  } catch {}
+  if (!executablePath) executablePath = resolveBrowserExecutable();
+
+  let proc, wsUrl;
+  try {
+    ({ proc, wsUrl } = await spawnLocalProfileBrowser({
+      profilePath,
+      proxyUrl,
+      tile,
+      locale,
+      executablePath,
+    }));
+  } catch (err) {
+    await relay?.close();
+    await cleanupLocalProfile(profilePath);
+    throw err;
+  }
+
+  let cdpBrowser;
+  try {
+    cdpBrowser = await Promise.race([
+      chromium.connectOverCDP(wsUrl),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('CDP connect timeout 15s')), 15000)),
+    ]);
+  } catch (err) {
+    await relay?.close();
+    await stopLocalProfileBrowser(proc, profilePath);
+    throw err;
+  }
+
+  const context = cdpBrowser.contexts()[0];
+  if (!context) {
+    await cdpBrowser.close().catch(() => {});
+    await relay?.close();
+    await stopLocalProfileBrowser(proc, profilePath);
+    throw new Error('Chromium không tạo context mặc định để kết nối.');
+  }
+
+  // Giả lập thiết bị + chống fingerprint native
+  const sessionSeed = Math.floor(Math.random() * 0x7fffffff) || 1;
+  const profileKey = DEVICE_PROFILES[deviceProfile] ? deviceProfile : 'windows';
+  const dp = createDeviceVariant(profileKey, DEVICE_PROFILES[profileKey], sessionSeed, { width: tile.width, height: tile.height });
+  const stealthConfig = buildStealthConfig(dp, antiFingerprint, sessionSeed);
+  let initPage;
+  let detectedIp = null;
+  try {
+  await context.addInitScript(stealthInitScript, stealthConfig);
+  const nativeOverrides = {
+    userAgentOverride: buildUserAgentOverride(dp, { version: chromeVersion }, languages),
+    hardwareConcurrency: dp.spoof.hardwareConcurrency,
+  };
+
+  initPage = context.pages()[0] || await context.newPage();
+  await applyNativeOverrides(context, initPage, nativeOverrides);
+  context.on('page', (p) => void applyNativeOverrides(context, p, nativeOverrides));
+
+  if (proxy) {
+    try {
+      for (const checkUrl of browserIpCheckUrls) {
+        try {
+          const resp = await initPage.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
+          if (!resp?.ok()) continue;
+          const content = await initPage.locator('body').innerText();
+          const match = content.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+          if (match) {
+            detectedIp = match[0];
+            break;
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  if (proxy && !detectedIp) {
+    throw new Error('Không xác minh được IP proxy trong trình duyệt.');
+  }
+  if (proxy && verifiedExitIp && detectedIp !== verifiedExitIp) {
+    throw new Error(`IP proxy trong trình duyệt (${detectedIp}) khác IP đã kiểm tra (${verifiedExitIp}).`);
+  }
+  if (!proxy) detectedIp = 'Direct';
+  } catch (error) {
+    await cdpBrowser.close().catch(() => {});
+    await relay?.close();
+    await stopLocalProfileBrowser(proc, profilePath);
+    throw error;
+  }
+
+  const session = {
+    browser: context,
+    _cdpBrowser: cdpBrowser,
+    _proc: proc,
+    _relay: relay,
+    profilePath,
+    tileIndex: tileIndex ?? (assignedSlot - 1),
+    slot: assignedSlot,
+    chromeVersion: `PC Zero-Profile (${chromeVersion})`,
+    deviceProfile: profileKey,
+    suppressAutoRefill: false,
+    proxy: proxy ?? null,
+    proxyKey: proxy?.server ?? `local_slot_${assignedSlot}`,
+    proxyServer: proxy?.server ?? `local_slot_${assignedSlot}`,
+    exitIp: detectedIp,
+    offer,
+    offerNumber: offer,
+    streamRole: offer,
+    streamLabel: `Offer ${offer}`,
+    websiteUrl: websiteUrl || '',
+    profileId: `local_${assignedSlot}`,
+    isGoLogin: true,
+    isLocalEngine: true,
+    hideUntilTarget: Boolean(hideUntilTarget),
+    hideUntilLead: Boolean(hideUntilLead),
+    hasShownWindow: false,
+    leadCheckStatus: null,
+    leadCheckMessage: null,
+    updateBadge: (text) => { session.badgeText = text; },
+  };
+  activeBrowsers.add(session);
+
+  let cdpSession = null;
+  let cdpWindowId = null;
+
+  if (hideUntilTarget || hideUntilLead) {
+    try {
+      cdpSession = await context.newCDPSession(initPage);
+      const win = await cdpSession.send('Browser.getWindowForTarget');
+      cdpWindowId = win.windowId;
+      await cdpSession.send('Browser.setWindowBounds', {
+        windowId: cdpWindowId,
+        bounds: { windowState: 'minimized' },
+      });
+      const modeText = hideUntilLead ? 'chỉ hiện khi có lead' : 'chỉ hiện khi vào trang đích';
+      console.log(`[LocalEngine] Slot ${assignedSlot}: Chạy ngầm (ẩn cửa sổ), ${modeText}.`);
+      session.addBrowserLog?.({ type: 'navigate', detail: `Chạy ngầm (ẩn cửa sổ), ${modeText}...` });
+    } catch (err) {
+      console.warn('[LocalEngine] Lỗi ẩn cửa sổ ban đầu:', err.message);
+    }
+  }
+
+  session.showWindow = async (force = false) => {
+    if ((!hideUntilTarget && !hideUntilLead) || session.hasShownWindow) return;
+    if (hideUntilLead && !force) return;
+    session.hasShownWindow = true;
+    try {
+      const activePage = session.mainPage || (context.pages().filter(p => !p.isClosed())[0]);
+      if (!cdpSession && activePage) {
+        cdpSession = await context.newCDPSession(activePage);
+      }
+      if (cdpSession) {
+        if (!cdpWindowId) {
+          const win = await cdpSession.send('Browser.getWindowForTarget');
+          cdpWindowId = win.windowId;
+        }
+        await cdpSession.send('Browser.setWindowBounds', {
+          windowId: cdpWindowId,
+          bounds: {
+            left: tile.left,
+            top: tile.top,
+            width: tile.width,
+            height: tile.height,
+            windowState: 'normal',
+          },
+        });
+        if (activePage) await activePage.bringToFront().catch(() => {});
+        const reasonText = hideUntilLead ? 'Đã có lead thành công' : 'Đã vào trang đích an toàn';
+        console.log(`[LocalEngine] Slot ${assignedSlot}: ${reasonText}, hiển thị trình duyệt.`);
+        session.addBrowserLog?.({ type: 'navigate', detail: `${reasonText}, hiển thị cửa sổ trình duyệt.` });
+      }
+    } catch (err) {
+      console.warn('[LocalEngine] Lỗi hiển thị cửa sổ:', err.message);
+    }
+  };
+
+  const assignedEmail = dequeueNextEmail();
+  if (assignedEmail) session.assignedEmail = assignedEmail;
+
+  attachBrowserLogger(context, session);
+
+  context.on('close', () => {
+    session.isClosed = true;
+    if (session.leadCheckStatus === 'confirmed' && session.exitIp) {
+      saveAndRecordLeadIpStats({
+        ip: session.exitIp,
+        screen: Math.max(session.screenReached || 1, session.currentScreen || 1, (session.completedScreens || 0) + 1),
+        completedScreens: session.completedScreens || 0,
+        jumpCount: Math.max(session.pageJumps || 0, session.completedScreens || 0),
+        offerNumber: session.offerNumber ?? session.streamRole ?? 1,
+        proxy: session.proxyServer || session.proxyKey,
+        websiteUrl: session.websiteUrl,
+      });
+    }
+    activeBrowsers.delete(session);
+    releaseProxyLock(proxy ?? null, session.exitIp);
+    if (!proxy) activeExitIpLocks.delete('Direct');
+    cdpBrowser.close().catch(() => {});
+    void relay?.close().catch(() => {});
+    session._localStopPromise = stopLocalProfileBrowser(proc, profilePath);
+
+    const sc = screencastSessions.get(assignedSlot);
+    if (sc) {
+      if (sc.keepaliveTimer) { clearInterval(sc.keepaliveTimer); sc.keepaliveTimer = null; }
+      sc.cdpClient.detach().catch(() => {});
+      try { sc.sseResponse.end(); } catch {}
+      screencastSessions.delete(assignedSlot);
+    }
+    console.log(`[LocalEngine] Profile Slot ${assignedSlot} đã đóng.`);
+
+    if (!session.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested) {
+      const baseDelay = (autoRefill.sequential || session.closingDueToNoLead) ? 5000 : 0;
+      queueAutomaticRefill(baseDelay + delayStop * 1000);
+    }
+  });
+
+  session.mainPage = initPage;
+
+  if (websiteUrl) {
+    await Promise.race([
+      initPage.goto(websiteUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
+      new Promise(r => setTimeout(r, navigationTimeout + 2000)),
+    ]);
+    if (!hideUntilLead) {
+      await session.showWindow();
+    }
+    await initPage.bringToFront().catch(() => {});
+  }
+
+  closeChromeWhenLastTabCloses(session);
+  watchTrafficBlockedPage(session);
+
+  if (completeText) {
+    const needle = completeText.toLowerCase();
+    const completeTimer = setInterval(async () => {
+      if (initPage.isClosed()) { clearInterval(completeTimer); return; }
+      const found = await initPage.evaluate((n) => (document.body?.innerText || '').toLowerCase().includes(n), needle).catch(() => false);
+      if (found) {
+        clearInterval(completeTimer);
+        limitRunCount += 1;
+        session.addLog?.({ time: new Date().toISOString(), type: 'complete_text', detail: `Text hoàn tất "${completeText}" (${limitRunCount}${limitRunMax > 0 ? '/' + limitRunMax : ''}).` });
+        if (limitRunMax > 0 && limitRunCount >= limitRunMax) void tgNotify(`🎉 <b>Hoàn thành!</b> Đạt ${limitRunCount}/${limitRunMax} leads. Luồng đã dừng.`);
+        session.suppressAutoRefill = false;
+        await session.browser?.close?.().catch(() => {});
+      }
+    }, 2000);
+    context.on('close', () => clearInterval(completeTimer));
+  }
+
+  if (timeLimit > 0) {
+    const timeLimitTimer = setTimeout(async () => {
+      session.addLog?.({ time: new Date().toISOString(), type: 'time_limit', detail: `Hết timeout phiên (${timeLimit}s), đóng trình duyệt.` });
+      await session.browser?.close?.().catch(() => {});
+    }, timeLimit * 1000);
+    context.on('close', () => clearTimeout(timeLimitTimer));
+  }
+
+  if (scriptSteps?.length > 0) {
+    void (async () => {
+      await initPage.waitForLoadState('domcontentloaded', { timeout: navigationTimeout }).catch(() => {});
+      const record = session.currentRecord ?? autofillRecords[0] ?? {};
+      await runScript(initPage, scriptSteps, record, {
+        captchaApiKey,
+        scriptDir: scriptPath ? dirname(scriptPath) : '',
+        logger: (entry) => session.addLog?.({ time: new Date().toISOString(), ...entry }),
+      });
+    })();
+  }
+
+  const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
+  if (websiteUrl) {
+    attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
+      autoSubmit,
+      enableLeadCheck: leadConfig.enabled !== false,
+      leadCheckScreen: leadConfig.checkScreen || 4,
+      onLog: (entry) => {
+        if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
+          if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
+            void session.showWindow?.(entry.type === 'lead_confirmed');
+          }
+        }
+        session.addBrowserLog?.(entry);
+      },
+      onRecordPicked: (record) => {
+        if (!session.hideUntilLead) {
+          void session.showWindow?.();
+        }
+        if (session.assignedEmail && record) {
+          record.email = session.assignedEmail;
+          record.emailaddress = session.assignedEmail;
+          record.mail = session.assignedEmail;
+          record.assignedEmail = session.assignedEmail;
+        }
+        session.currentRecord = record;
+        const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordKey(r) === autofillRecordKey(record));
+        if (idx !== -1) {
+          autofillQueue.available.splice(idx, 1);
+          autofillQueue.used.push(record);
+          void saveAutofillQueue();
+        }
+        void markAutofillRecordUsed(record);
+      },
+      onScreen5Reached: (sess, p) => { void startLeadVerification(sess, leadConfig); },
+      onEmailSubmitted: (sess, p) => { void startLeadVerification(sess, leadConfig); },
+      onScreenAdvanced: (sess, screen, jumps) => {
+        if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
+          saveAndRecordLeadIpStats({
+            ip: sess.exitIp,
+            screen,
+            completedScreens: sess.completedScreens,
+            jumpCount: jumps,
+            offerNumber: sess.offerNumber ?? sess.streamRole ?? 1,
+            proxy: sess.proxyServer || sess.proxyKey,
+            websiteUrl: sess.websiteUrl,
+          });
+        }
+      },
+      onPageJump: (sess, jumps, url) => {
+        if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
+          saveAndRecordLeadIpStats({
+            ip: sess.exitIp,
+            screen: Math.max(sess.screenReached || 1, sess.currentScreen || 1, (sess.completedScreens || 0) + 1),
+            completedScreens: sess.completedScreens || 0,
+            jumpCount: jumps,
+            offerNumber: sess.offerNumber ?? sess.streamRole ?? 1,
+            proxy: sess.proxyServer || sess.proxyKey,
+            websiteUrl: sess.websiteUrl,
+          });
+        }
+      },
+      onStuck: (p) => {
+        if (session.mainPage && p !== session.mainPage) return;
+        if (session.aiAssistRunning) return;
+        const currentUrl = p.url?.() || '';
+        if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:') || currentUrl.includes('api.ipify.org')) return;
+        const now = Date.now();
+        if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 4000)) return;
+        session.lastAiUrl = currentUrl;
+        session.lastAiTime = now;
+        const currentRecord = session.currentRecord ?? autofillRecords[0] ?? {};
+        if (session.assignedEmail && currentRecord) {
+          currentRecord.email = session.assignedEmail;
+          currentRecord.emailaddress = session.assignedEmail;
+          currentRecord.mail = session.assignedEmail;
+          currentRecord.assignedEmail = session.assignedEmail;
+        }
+        void runAiAssist(p, currentRecord, session, { onLog: (e) => session.addLog?.(e) });
+      },
+    });
+  }
+
+  return session;
+}
+
+/**
  * Mở profile GoLogin đã tạo bằng API, xác minh proxy trong Orbita rồi gắn Playwright.
  *
  * @param {object} options ID profile, proxy, slot và dữ liệu tự động hóa của phiên.
@@ -2780,14 +3183,14 @@ async function checkProxyExitIp(proxyObj) {
 async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifiedExitIp, websiteUrl, offer = 1,
   autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
   captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
-  hideUntilTarget = false, hideUntilLead = false }) {
+  hideUntilTarget = false, hideUntilLead = false, totalCount = 10 }) {
 
   const orbitaBin = await findOrbitaExecutable();
   if (!orbitaBin) throw new Error('Không tìm thấy Orbita browser. Hãy mở GoLogin app để tải về (hoặc đăng nhập GoLogin).');
 
   const assignedSlot = slot ?? (tileIndex + 1);
   const screen = await readScreenSize();
-  const tile = tileAt(tileIndex ?? (assignedSlot - 1), 1, screen);
+  const tile = tileAt(tileIndex ?? (assignedSlot - 1), totalCount || 10, screen);
   const orbitaVersion = await getOrbitaVersion();
 
   const proxyUrl = proxy?.server ?? null;
@@ -2968,6 +3371,10 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
       screencastSessions.delete(assignedSlot);
     }
     console.log(`[GoLogin] Profile ${profileId} (Slot ${assignedSlot}) đã đóng.`);
+    if (!session.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested) {
+      const baseDelay = (autoRefill.sequential || session.closingDueToNoLead) ? 5000 : 0;
+      queueAutomaticRefill(baseDelay + delayStop * 1000);
+    }
   });
 
   // Điều hướng tới URL offer
@@ -3033,7 +3440,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
     attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
       autoSubmit,
       enableLeadCheck: leadConfig.enabled !== false,
-      leadCheckScreen: leadConfig.checkScreen || 5,
+      leadCheckScreen: leadConfig.checkScreen || 4,
       onLog: (entry) => {
         if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
           if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
@@ -3114,7 +3521,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
 }
 
 /**
- * Tạo một profile GoLogin cho mỗi proxy đã chọn rồi mở Orbita theo từng slot.
+ * Tạo profile cục bộ từ zero_profile cho mỗi proxy rồi mở Chrome theo từng slot.
  *
  * @param {string} requestBody JSON từ giao diện Mac 2.
  * @return {Promise<{results: object[], warnings: string[]}>} Kết quả mở các slot.
@@ -3129,6 +3536,11 @@ async function launchGoLoginBrowsers(requestBody) {
   const concurrency = Math.min(10, parseInt(body.requestedCount ?? body.concurrency) || 1);
   const websiteUrl = body.websiteUrl || '';
   const offerUrls = body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 || body.websiteUrl2 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : [websiteUrl].filter(Boolean));
+
+  // Lưu cấu hình autoRefill cho GoLogin mode để khi slot trống tự động bù đúng chế độ
+  autoRefill.settings = { ...body, browserMode: 'Gologin' };
+  autoRefill.targetCount = concurrency;
+  void saveAutoRefillSettings();
 
   // Parse autofill/script params giống launchRequestedBrowsers
   const scriptPath    = body.scriptPath    ?? '';
@@ -3157,15 +3569,10 @@ async function launchGoLoginBrowsers(requestBody) {
     datas: body.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
     intervalSeconds: Number(body.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
     maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
-    checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 5,
+    checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 4,
   };
   const hideUntilTarget = Boolean(body.hideUntilTarget ?? body.hideBrowser);
   const hideUntilLead = Boolean(body.hideUntilLead);
-
-  const goLoginToken = readGoLoginToken(body.goLoginToken || '');
-  if (!goLoginToken) throw new Error('Thiếu GoLogin API token. Hãy nhập token trong Thiết lập > Browser.');
-  await requireGoLoginDesktop();
-  if (!await findOrbitaExecutable()) throw new Error('Chưa cài Orbita. Hãy mở GoLogin desktop để tải trình duyệt.');
 
   // Dọn dẹp các session cũ đã đóng hoặc zombie trước khi khởi chạy
   await pruneDeadGoLoginSessions();
@@ -3178,9 +3585,10 @@ async function launchGoLoginBrowsers(requestBody) {
   const hasProxyInput = Boolean(body.proxyList?.trim() || proxyQueue.available.length);
   const proxyType = body.proxyType ?? 'socks5';
   const usedProxyLines = new Set(proxyQueue.used.map((l) => l.trim()));
+  const candidatePoolTarget = Math.max(count * 3, count + 20);
   if (body.proxyList) {
     for (const [i, line] of body.proxyList.split(/\r?\n/).entries()) {
-      if (candidateProxies.length >= count) break;
+      if (candidateProxies.length >= candidatePoolTarget) break;
       if (usedProxyLines.has(line.trim())) continue;
       try {
         const p = parseProxyLine(line, i + 1, proxyType);
@@ -3192,9 +3600,9 @@ async function launchGoLoginBrowsers(requestBody) {
   }
 
   // Nếu chưa đủ proxy cho các luồng, tự động rút từ proxyQueue.available
-  if (candidateProxies.length < count) {
+  if (candidateProxies.length < candidatePoolTarget) {
     for (const line of proxyQueue.available) {
-      if (candidateProxies.length >= count) break;
+      if (candidateProxies.length >= candidatePoolTarget) break;
       try {
         const p = parseProxyLine(line.trim(), candidateProxies.length + 1, proxyType);
         if (p && !isProxyCurrentlyActive(p) && !candidateProxies.some(existingProxy => proxyIdentity(existingProxy) === proxyIdentity(p))) {
@@ -3232,9 +3640,9 @@ async function launchGoLoginBrowsers(requestBody) {
     let assignedProxy = null;
     let actualExitIp = null;
 
-    // Duyệt qua candidateProxies để tìm một proxy sống và chưa bị trùng IP (tối đa 5 lần thử)
+    // Duyệt qua candidateProxies để tìm một proxy sống và chưa bị trùng IP (tối đa 20 lần thử)
     let checkAttempts = 0;
-    while (candidateProxies.length > 0 && checkAttempts++ < 5) {
+    while (candidateProxies.length > 0 && checkAttempts++ < 20) {
       const candidate = candidateProxies.shift();
       if (isProxyCurrentlyActive(candidate)) continue;
       acquireProxyLock(candidate);
@@ -3313,16 +3721,9 @@ async function launchGoLoginBrowsers(requestBody) {
       return;
     }
     try {
-      worker.profileId = await createGoLoginProfile(goLoginToken, buildGoLoginProfileRequest({
-        slot: worker.slot,
-        proxy: worker.assignedProxy,
-        websiteUrl: worker.slotOfferUrl,
-        antiFingerprint,
-      }));
-      await openBrowserViaGoLogin({
+      const launchedSession = await openBrowserViaLocalEngine({
         tileIndex: worker.tileIndex,
         slot: worker.slot,
-        profileId: worker.profileId,
         proxy: worker.assignedProxy,
         verifiedExitIp: worker.actualExitIp,
         websiteUrl: worker.slotOfferUrl,
@@ -3338,8 +3739,18 @@ async function launchGoLoginBrowsers(requestBody) {
         scriptPath,
         hideUntilTarget,
         hideUntilLead,
+        antiFingerprint,
+        deviceProfile: body.deviceProfile || 'macos',
+        totalCount: concurrency,
       });
-      results.push({ status: 'ok', slot: worker.slot, offer: worker.offerNum, profileId: worker.profileId });
+
+      results.push({
+        status: 'ok',
+        slot: worker.slot,
+        offer: worker.offerNum,
+        mode: 'local-zero-profile',
+        profileId: launchedSession.profileId || worker.profileId,
+      });
       if (worker.assignedProxy?._queueLine) {
         const queueIndex = proxyQueue.available.indexOf(worker.assignedProxy._queueLine);
         if (queueIndex !== -1) {
@@ -3356,20 +3767,13 @@ async function launchGoLoginBrowsers(requestBody) {
           exitIp: worker.actualExitIp,
           websiteUrl: worker.slotOfferUrl,
           offerNumber: worker.offerNum,
-          profileId: worker.profileId,
+          profileId: launchedSession.profileId,
           attemptedAt: new Date().toISOString(),
           completedAt: new Date().toISOString(),
         };
         void persistProxyUsageHistory(usageHistory).catch(() => {});
       }
     } catch (err) {
-      if (worker.profileId) {
-        const failedSession = [...activeBrowsers].find((session) => session.profileId === worker.profileId);
-        await failedSession?.browser?.close?.().catch(() => {});
-        await stopGoLoginProfile(worker.profileId).catch(() => {});
-        await deleteGoLoginProfile(goLoginToken, worker.profileId)
-          .catch((cleanupError) => warnings.push(`Profile ${worker.profileId} cần xóa thủ công: ${cleanupError.message}`));
-      }
       if (worker.assignedProxy) {
         releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
         const pKey = createProxyUsageKey(worker.assignedProxy, 1, worker.slotOfferUrl);
@@ -3544,15 +3948,28 @@ export function queueAutomaticRefill(delayMs = 0) {
       }
     }
 
-    const result = await launchRequestedBrowsers(JSON.stringify({
-      ...activeSettings,
-      offerUrls: configuredOffers,
-      websiteUrl: configuredOffers[0] || activeSettings.websiteUrl,
-      websiteUrl2: configuredOffers[1] || activeSettings.websiteUrl2,
-      websiteUrl3: configuredOffers[2] || activeSettings.websiteUrl3,
-      websiteUrl4: configuredOffers[3] || activeSettings.websiteUrl4,
-      requestedCount: localNeeded,
-    }), { layoutTarget: seqTarget, assignedStreamRoles });
+    let result;
+    if (activeSettings.browserMode === 'Gologin') {
+      result = await launchGoLoginBrowsers(JSON.stringify({
+        ...activeSettings,
+        offerUrls: configuredOffers,
+        websiteUrl: configuredOffers[0] || activeSettings.websiteUrl,
+        websiteUrl2: configuredOffers[1] || activeSettings.websiteUrl2,
+        websiteUrl3: configuredOffers[2] || activeSettings.websiteUrl3,
+        websiteUrl4: configuredOffers[3] || activeSettings.websiteUrl4,
+        requestedCount: localNeeded,
+      }));
+    } else {
+      result = await launchRequestedBrowsers(JSON.stringify({
+        ...activeSettings,
+        offerUrls: configuredOffers,
+        websiteUrl: configuredOffers[0] || activeSettings.websiteUrl,
+        websiteUrl2: configuredOffers[1] || activeSettings.websiteUrl2,
+        websiteUrl3: configuredOffers[2] || activeSettings.websiteUrl3,
+        websiteUrl4: configuredOffers[3] || activeSettings.websiteUrl4,
+        requestedCount: localNeeded,
+      }), { layoutTarget: seqTarget, assignedStreamRoles });
+    }
     autoRefill.message = activeBrowsers.size >= seqTarget
       ? `Đã bù đủ ${activeBrowsers.size}/${seqTarget} trình duyệt.`
       : result.warnings.at(-1) ?? `Hiện mở ${activeBrowsers.size}/${seqTarget}; không còn proxy phù hợp để bù.`;
@@ -3741,8 +4158,10 @@ function requestProxyIpInfo(proxy) {
     ? new SocksProxyAgent(proxyUrl)
     : new HttpsProxyAgent(proxyUrl);
 
-  return new Promise((resolve, reject) => {
-    const proxyRequest = requestHttps(checkUrl, { agent, timeout: 4000 }, (response) => {
+  const fetchJson = (urlStr, timeoutMs = 4000) => new Promise((resolve, reject) => {
+    const isHttps = urlStr.startsWith('https:');
+    const reqFn = isHttps ? requestHttps : requestHttp;
+    const proxyRequest = reqFn(urlStr, { agent, timeout: timeoutMs }, (response) => {
       let responseBody = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { responseBody += chunk; });
@@ -3759,8 +4178,21 @@ function requestProxyIpInfo(proxy) {
         }
       });
     });
-    proxyRequest.on('timeout', () => proxyRequest.destroy(new Error('Timeout tra IP sau 4 giây.')));
+    proxyRequest.on('timeout', () => proxyRequest.destroy(new Error(`Timeout tra IP sau ${timeoutMs}ms.`)));
     proxyRequest.on('error', reject);
+  });
+
+  return fetchJson(checkUrl, 4000).catch(async () => {
+    // Fallback qua ip-api.com khi ipinfo.io bị quá tải hoặc lỗi
+    const ipApi = await fetchJson('http://ip-api.com/json', 5000);
+    return {
+      ip: ipApi.query,
+      country: ipApi.countryCode,
+      city: ipApi.city,
+      region: ipApi.regionName,
+      timezone: ipApi.timezone,
+      loc: `${ipApi.lat},${ipApi.lon}`,
+    };
   });
 }
 
@@ -3803,6 +4235,14 @@ export async function closeActiveBrowsers() {
   await Promise.allSettled(sessions.map(async (session) => {
     session.suppressAutoRefill = true;
     session.isClosed = true;
+    if (session.isLocalEngine) {
+      if (session.browser && typeof session.browser.close === 'function') {
+        await session.browser.close().catch(() => {});
+      }
+      await session._relay?.close().catch(() => {});
+      await (session._localStopPromise ?? stopLocalProfileBrowser(session._proc, session.profilePath));
+      return;
+    }
     if (session.isGoLogin && session.profileId) {
       if (session.browser && typeof session.browser.close === 'function') {
         await session.browser.close().catch(() => {});
@@ -3825,6 +4265,7 @@ export async function closeActiveBrowsers() {
   await executeFile('pkill', ['-9', '-f', 'chrome-regular-builds']).catch(() => {});
   await executeFile('pkill', ['-9', '-f', 'user-data-dir.*chrome-profiles']).catch(() => {});
   await executeFile('pkill', ['-9', '-f', 'user-data-dir.*AutoLeadPC']).catch(() => {});
+  await executeFile('pkill', ['-9', '-f', 'user-data-dir.*Profiles/gologin_']).catch(() => {});
 
   // Pass 2: bắt các browser vừa được add vào activeBrowsers trong lúc pass 1 đang chạy
   await new Promise((r) => setTimeout(r, 800));
@@ -4405,6 +4846,7 @@ async function startLeadVerification(session, leadConfig) {
 
     const logs = browserSessionLogs.get(session);
     if (logs) {
+      const targetScreen = session.completedScreens || leadConfig.checkScreen || 4;
       logs.push({
         time: new Date().toISOString(),
         offer: session.offerNumber ?? session.streamRole ?? 1,
@@ -4622,7 +5064,7 @@ async function openBrowserWithInstalledChrome({
   attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
     autoSubmit,
     enableLeadCheck: leadConfig.enabled !== false,
-    leadCheckScreen: leadConfig.checkScreen || 5,
+    leadCheckScreen: leadConfig.checkScreen || 4,
     onLog: (entry) => {
       if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
         if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
@@ -5620,7 +6062,7 @@ async function startLocalInterface() {
   const server = createServer(async (request, response) => {
     console.log('[HTTP]', request.method, request.url);
     if (request.method === 'GET' && (request.url === '/' || request.url === '/pc' || request.url === '/mac')) {
-      const servePc = request.url === '/pc' || (request.url === '/' && instanceId === '2');
+      const servePc = request.url !== '/mac';
       const targetHtmlPath = servePc ? userInterfacePcPath : userInterfacePath;
       const htmlContent = existsSync(targetHtmlPath) ? readFileSync(targetHtmlPath, 'utf8') : (servePc ? interfacePcHtml : interfaceHtml);
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
@@ -5855,7 +6297,6 @@ async function startLocalInterface() {
           ChromeFirefox: getBool('ChromeFirefox'),
           ChromeAdsPower: getBool('ChromeAdsPower'),
           ChromeGologin: getBool('ChromeGologin'),
-          TokensGologin: getStr('TokensGologin'),
           Canvas: getBool('Canvas'),
           ClientRects: getBool('ClientRects'),
           WebGLImage: getBool('WebGLImage'),
@@ -5880,7 +6321,7 @@ async function startLocalInterface() {
         const filePath = join(baseDir, 'Config', 'Settings', 'Settings.ini');
         const b = (val) => val ? 'True' : 'False';
         const bm = body.browserMode || 'Chrome';
-        const content = `[Browser]\nChrome=${b(bm === 'Chrome')}\nChromeAdsPower=${b(bm === 'AdsPower')}\nChromeFirefox=${b(bm === 'Firefox')}\nChromeGologin=${b(bm === 'Gologin')}\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[TokensGologin]\nTokensGologin=${body.TokensGologin || ''}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\n`;
+        const content = `[Browser]\nChrome=${b(bm === 'Chrome')}\nChromeAdsPower=${b(bm === 'AdsPower')}\nChromeFirefox=${b(bm === 'Firefox')}\nChromeGologin=${b(bm === 'Gologin')}\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[TokensGologin]\nTokensGologin=${(existsSync(filePath) ? (readFileSync(filePath, 'utf8').match(/^TokensGologin=(.*)$/mi) || ['', ''])[1] : '')}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\n`;
         const dir = dirname(filePath);
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
@@ -6927,9 +7368,11 @@ async function startLocalInterface() {
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
       if (!session) { response.writeHead(404); response.end(); return; }
 
-      // Phục hồi cửa sổ nếu đang ở chế độ ẩn để đảm bảo compositor Chrome hoạt động
+      // Không ép bung cửa sổ ra Desktop khi người dùng đang xem trực tiếp trên giao diện app (Screen View)
       try {
-        if (session.showWindow) void session.showWindow(true);
+        if (session.showWindow && !session.hideUntilTarget && !session.hideUntilLead) {
+          void session.showWindow(false);
+        }
       } catch {}
 
       // Nếu slot đang có SSE cũ → ngắt trước

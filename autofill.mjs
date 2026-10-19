@@ -240,6 +240,47 @@ export function generateFallbackEmail(r = {}) {
 }
 
 /**
+ * Tạo một bản ghi dữ liệu mẫu đầy đủ để tự động điền form khi hàng đợi rỗng.
+ *
+ * @return {object} Bản ghi mẫu với tên, email, phone, zip, địa chỉ chuẩn Mỹ.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+export function createFallbackAutofillRecord() {
+  const randNum = Math.floor(1000 + Math.random() * 9000);
+  const firstNames = ['James', 'Robert', 'John', 'Michael', 'David', 'William', 'Richard', 'Joseph', 'Thomas', 'Charles', 'Mary', 'Patricia', 'Jennifer', 'Linda', 'Elizabeth', 'Barbara', 'Susan', 'Jessica', 'Sarah', 'Karen'];
+  const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'Moore', 'Jackson', 'Martin'];
+  const fn = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const ln = lastNames[Math.floor(Math.random() * lastNames.length)];
+  const email = `${fn.toLowerCase()}.${ln.toLowerCase()}${randNum}@gmail.com`;
+  const phone = `814${Math.floor(2000000 + Math.random() * 7999999)}`;
+  return {
+    firstname: fn,
+    lastname: ln,
+    fullname: `${fn} ${ln}`,
+    email,
+    phone,
+    areacode: '814',
+    address: '4125 N Inspiration Loop',
+    addressline1: '4125 N Inspiration Loop',
+    streetaddress: '4125 N Inspiration Loop',
+    city: 'Wasilla',
+    state: 'AK',
+    stateorprovince: 'AK',
+    zipcode: '99654',
+    zip: '99654',
+    country: 'United States',
+    sex: 'Male',
+    age: '32',
+    birthmonth: '04',
+    birthday: '15',
+    birthyear: '1992',
+    dob: '04/15/1992',
+    dateofbirth: '04/15/1992',
+  };
+}
+
+/**
  * Danh sách mã vùng điện thoại mặc định cho lead (đầu 814 và 817).
  */
 export const DEFAULT_PHONE_AREA_CODES = ['814', '817'];
@@ -1183,6 +1224,11 @@ export async function findSubmitButton(frame) {
           const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
           if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) {
             return { valid: false, reason: 'legal_noise' };
+          }
+
+          // 1.1 Bỏ qua nút Reload / Tải lại của trang lỗi mạng Chrome (chrome-error://)
+          if (/^reload$|^tải lại$/i.test(text) || el.id === 'reload-button' || (el.classList && el.classList.contains('reload-button'))) {
+            return { valid: false, reason: 'browser_reload_error' };
           }
 
           // 2. Kiểm tra từ khóa menu / đăng nhập / tài khoản / liên hệ
@@ -2572,14 +2618,14 @@ export async function humanType(field, text, page = null, options = {}) {
  * @since 2026-10-15
  */
 export function attachAutofill(context, records, allowedOrigin, session = {}, options = {}) {
-  if (!records.length) return;
+  const effectiveRecords = Array.isArray(records) && records.length > 0 ? records : [createFallbackAutofillRecord()];
   const trackedPages = new WeakSet();
 
   // Chọn 1 bản ghi duy nhất cho toàn bộ phiên này để nhất quán xuyên suốt các trang/bước/frame
-  if (session.recordIndex === undefined || session.recordIndex < 0 || session.recordIndex >= records.length) {
-    session.recordIndex = randomInt(records.length);
+  if (session.recordIndex === undefined || session.recordIndex < 0 || session.recordIndex >= effectiveRecords.length) {
+    session.recordIndex = randomInt(effectiveRecords.length);
   }
-  const record = records[session.recordIndex];
+  const record = effectiveRecords[session.recordIndex];
   if (session.assignedEmail && record) {
     record.email = session.assignedEmail;
     record.emailaddress = session.assignedEmail;
@@ -2606,7 +2652,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       if (session.screen5LeadCheckTriggered || session.leadCheckTriggered) {
         return;
       }
-      const checkScreenTarget = Number(options.leadCheckScreen) || 5;
+      const checkScreenTarget = Number(options.leadCheckScreen) || 4;
       if (session.completedScreens >= checkScreenTarget) {
         session.screen5LeadCheckTriggered = true;
         session.leadCheckTriggered = true;
@@ -2627,7 +2673,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     }
 
     const currentUrl = page.url();
-    if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:')) return;
+    if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:') || currentUrl.startsWith('chrome-error:')) return;
 
     if (!session.initialFormUrl) {
       session.initialFormUrl = currentUrl;
@@ -2637,11 +2683,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
     if (session.lastObservedUrl && session.lastObservedUrl !== currentUrl) {
       session.pageJumps = (session.pageJumps || 0) + 1;
-      if ((session.completedScreens || 0) < session.pageJumps) {
-        session.completedScreens = session.pageJumps;
-        session.currentScreen = session.completedScreens + 1;
-      }
-      session.screenReached = Math.max(session.screenReached || 1, session.currentScreen || 1);
+      session.screenReached = Math.max(session.screenReached || 1, (session.completedScreens || 0) + 1);
       options.onPageJump?.(session, session.pageJumps, currentUrl);
     }
     if (isRealBrowser && session.lastObservedUrl !== currentUrl) {
@@ -3462,18 +3504,20 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         session.isAtScreen5 = true;
       }
 
-      // Nếu đang ở Jump Page (sau Màn 4/5) và chưa kiểm tra lead:
+      // Nếu đang ở Jump Page (sau Màn 4) và chưa kiểm tra lead:
       // TẠM DỪNG, KHÔNG CLICK NÚT NHẬN THƯỞNG, GỌI KIỂM TRA LEAD TRÙNG IP!
-      if (screenInfo?.isJumpPage && options.enableLeadCheck !== false && !session.screen5LeadVerified) {
+      const checkScreenTarget = Number(options.leadCheckScreen) || 4;
+      const isRealJumpPage = Boolean(screenInfo?.isJumpPage && (session.completedScreens >= checkScreenTarget));
+      if (isRealJumpPage && options.enableLeadCheck !== false && !session.screen5LeadVerified) {
         if (!session.screen5LeadCheckTriggered) {
           session.screen5LeadCheckTriggered = true;
           session.leadCheckTriggered = true;
           session.leadCheckStatus = 'checking';
           session.leadCheckReason = 'jump_page';
-          console.log(`[LeadCheck] Đang ở Jump Page nhận thưởng (sau Màn ${session.completedScreens || 4}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+          console.log(`[LeadCheck] Đang ở Jump Page nhận thưởng (sau Màn ${session.completedScreens || checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
           options.onLog?.({
             type: 'jump_page_lead_check',
-            detail: `Đã tới Jump Page nhận thưởng sau khi điền form. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
+            detail: `Đã tới Jump Page nhận thưởng sau khi điền ${session.completedScreens || checkScreenTarget} màn. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
           });
           if (typeof options.onEmailSubmitted === 'function') {
             options.onEmailSubmitted(session, page);
@@ -3484,9 +3528,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         return; // Dừng lại ở Jump Page, đợi kết quả kiểm tra lead!
       }
 
-      // Nếu đã đạt đến số màn quy định (màn 4 hoặc 5) và chưa xác nhận lead: tạm dừng chờ lead
-      const checkScreenTarget = Number(options.leadCheckScreen) || 5;
-      const isTargetReached = (session.completedScreens >= checkScreenTarget) || (session.completedScreens >= 4 && (screenInfo?.isJumpPage || screenInfo?.isScreen5));
+      // Nếu đã đạt đến số màn quy định (mục tiêu: Màn 4) và chưa xác nhận lead: tạm dừng chờ lead
+      const isTargetReached = (session.completedScreens >= checkScreenTarget);
       if (options.enableLeadCheck !== false && isTargetReached && !session.screen5LeadVerified) {
         if (!session.screen5LeadCheckTriggered) {
           session.screen5LeadCheckTriggered = true;
@@ -3509,7 +3552,54 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
       // Kiểm tra và chủ động bấm nút submit/tiếp tục nếu có tùy chọn autoSubmit
       if (hasUnfilledRequiredOrErrorField?.unfilled) {
-        console.log(`[Autofill] Lưu ý: trường ${hasUnfilledRequiredOrErrorField.id} (${hasUnfilledRequiredOrErrorField.type}) có thể chưa có dữ liệu khớp, vẫn chủ động bấm submit để tiếp tục luồng.`);
+        console.log(`[Autofill] Phát hiện trường bắt buộc chưa điền hoặc bị lỗi: ${hasUnfilledRequiredOrErrorField.id} (${hasUnfilledRequiredOrErrorField.type}). Đang thử điền cứu trợ...`);
+        try {
+          const rescueFilled = await frame.evaluate((fieldInfo, rec) => {
+            const el = (fieldInfo.id && document.getElementById(fieldInfo.id)) ||
+                       (fieldInfo.id && document.querySelector(`[name="${fieldInfo.id}"]`)) ||
+                       document.querySelector('input[required]:not([type="hidden"]), select[required]');
+            if (!el) return false;
+            if (el.type === 'checkbox') {
+              el.checked = true;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            }
+            if (el.tagName === 'SELECT') {
+              const opts = Array.from(el.options).filter((o) => o.value && !/select|choose/i.test(o.text));
+              if (opts.length > 0) {
+                el.value = opts[0].value;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+              }
+              return false;
+            }
+            const meta = `${el.name || ''} ${el.id || ''} ${el.placeholder || ''} ${el.type || ''}`.toLowerCase();
+            let fillVal = '';
+            if (/email/i.test(meta)) fillVal = rec.email || `${rec.firstname || 'james'}.${rec.lastname || 'smith'}${Math.floor(1000 + Math.random() * 9000)}@gmail.com`;
+            else if (/phone|tel|mobile/i.test(meta)) fillVal = rec.phone || '8149143396';
+            else if (/zip|postal/i.test(meta)) fillVal = rec.zipcode || '99654';
+            else if (/city/i.test(meta)) fillVal = rec.city || 'Wasilla';
+            else if (/first/i.test(meta)) fillVal = rec.firstname || 'James';
+            else if (/last/i.test(meta)) fillVal = rec.lastname || 'Smith';
+            else if (/address|street/i.test(meta)) fillVal = rec.address || '4125 N Inspiration Loop';
+            else if (/birth|dob/i.test(meta)) fillVal = rec.dob || '04/15/1992';
+            else fillVal = rec.firstname || 'James';
+
+            if (fillVal) {
+              el.value = fillVal;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            }
+            return false;
+          }, hasUnfilledRequiredOrErrorField, record).catch(() => false);
+
+          if (rescueFilled) {
+            session.autofillFields = (session.autofillFields ?? 0) + 1;
+            filledInThisPass += 1;
+          }
+        } catch {}
       }
 
       if (options.autoSubmit !== false) {
@@ -3564,7 +3654,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               btn.dataset.uxSubmitted = '1';
               btn.dataset.uxSubmitCount = String(clickCount + 1);
               btn.dataset.uxLastFields = String(currentFields);
-              return { shouldClick: true, text, tag, id };
+              return { shouldClick: true, text, tag, id, clickCount: clickCount + 1 };
             }, session.autofillFields ?? 0).catch(() => null);
 
             if (btnInfo?.shouldClick) {
@@ -3682,11 +3772,14 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 }
               }
 
-              session.completedScreens = (session.completedScreens || 0) + 1;
-              session.currentScreen = session.completedScreens + 1;
-              session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
-              session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
-              options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
+              const isFirstClickOnThisScreen = !btnInfo?.clickCount || btnInfo.clickCount <= 1;
+              if (isFirstClickOnThisScreen) {
+                session.completedScreens = (session.completedScreens || 0) + 1;
+                session.currentScreen = session.completedScreens + 1;
+                session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
+                session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
+                options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
+              }
 
               // Kiểm tra xem màn vừa submit có phải là màn điền email hay không
               const wasEmailScreenSubmit = frameHasEmail || session.screenHasEmail || screenInfo?.hasEmailInput || (session.emailFilled && !session.emailScreenSubmitted);
@@ -3698,11 +3791,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               }
 
               // Luồng kiểm tra lead: tiếp tục điền qua các màn khảo sát / câu hỏi,
-              // chỉ bắt đầu chờ kiểm tra lead khi đến Màn 4 hoặc 5 (hoặc Jump Page)!
-              const checkScreenTarget = Number(options.leadCheckScreen) || 5;
-              const isLeadCheckTrigger = (session.completedScreens >= checkScreenTarget) ||
-                                         (screenInfo?.isJumpPage && !session.screen5LeadVerified) ||
-                                         (session.completedScreens >= 4 && (screenInfo?.isScreen5 || screenInfo?.isJumpPage));
+              // chỉ bắt đầu chờ kiểm tra lead khi hoàn thành đủ 4 màn (Màn 4)!
+              const checkScreenTarget = Number(options.leadCheckScreen) || 4;
+              const isLeadCheckTrigger = (session.completedScreens >= checkScreenTarget);
 
               if (options.enableLeadCheck !== false && isLeadCheckTrigger && !session.screen5LeadVerified) {
                 if (!session.screen5LeadCheckTriggered) {
@@ -3773,10 +3864,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 session.emailScreenNumber = session.completedScreens;
               }
 
-              const checkScreenTarget = Number(options.leadCheckScreen) || 5;
-              const isLeadCheckTrigger = (session.completedScreens >= checkScreenTarget) ||
-                                         (screenInfo?.isJumpPage && !session.screen5LeadVerified) ||
-                                         (session.completedScreens >= 4 && (screenInfo?.isScreen5 || screenInfo?.isJumpPage));
+              const checkScreenTarget = Number(options.leadCheckScreen) || 4;
+              const isLeadCheckTrigger = (session.completedScreens >= checkScreenTarget);
               if (options.enableLeadCheck !== false && isLeadCheckTrigger && !session.screen5LeadVerified) {
                 if (!session.screen5LeadCheckTriggered) {
                   session.screen5LeadCheckTriggered = true;
@@ -3955,11 +4044,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             if (session.lastTrackedNavUrl && session.lastTrackedNavUrl.split('#')[0] !== cleanU) {
               session.lastTrackedNavUrl = u;
               session.pageJumps = (session.pageJumps || 0) + 1;
-              if ((session.completedScreens || 0) < session.pageJumps) {
-                session.completedScreens = session.pageJumps;
-                session.currentScreen = session.completedScreens + 1;
-              }
-              session.screenReached = Math.max(session.screenReached || 1, session.currentScreen || 1);
+              session.screenReached = Math.max(session.screenReached || 1, (session.completedScreens || 0) + 1);
               options.onPageJump?.(session, session.pageJumps, u);
             } else if (!session.lastTrackedNavUrl) {
               session.lastTrackedNavUrl = u;

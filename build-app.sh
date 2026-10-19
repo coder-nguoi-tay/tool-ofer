@@ -95,7 +95,12 @@ EOF
     cp -p autoleadpc-icon.svg "$RESOURCES_DIR/autoleadpc-icon.svg"
   fi
 
-  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs gologin-profile.mjs gologin-profile.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md GOLOGIN.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs gologin-profile.mjs gologin-profile.test.mjs local-profile-engine.mjs local-profile-engine.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md GOLOGIN.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  if [ -d "Config/Browser" ]; then
+    mkdir -p "$LAUNCHER_DIR/Config"
+    cp -R Config/Browser "$LAUNCHER_DIR/Config/"
+    rm -rf "$LAUNCHER_DIR/Config/Browser/zero_profile/Default/Network"
+  fi
   if [ -f "script.mjs" ]; then
     cp -p script.mjs "$LAUNCHER_DIR/"
   fi
@@ -113,52 +118,38 @@ EOF
   echo "✓ Hoàn tất $APP_NAME"
 }
 
-# 1. Build Bản 1 (Port 3210)
-build_app_bundle "AutoLeadPC Mac 1.app" "1" 3210 "com.autoleadpc.mac.1" "AutoLeadPC Mac 1"
-
-# 2. Build Bản 2 (Port 3211 - Giao diện Windows PC)
-build_app_bundle "AutoLeadPC Mac 2.app" "2" 3211 "com.autoleadpc.mac.2" "AutoLeadPC (PC Edition)"
-
-# 3. Build default bundle "AutoLeadPC Mac.app" (Port 3210)
-# (Tránh lỗi Text file busy nếu bản hiện tại đang mở bằng cách rm binary trước)
-rm -f "AutoLeadPC Mac.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
-build_app_bundle "AutoLeadPC Mac.app" "1" 3210 "com.autoleadpc.mac" "AutoLeadPC Mac"
+# Chỉ build 1 bản ứng dụng duy nhất, chuẩn xác nhất (Port 3210 - Giao diện PC đầy đủ)
+rm -f "AutoLeadPC.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
+build_app_bundle "AutoLeadPC.app" "1" 3210 "com.autoleadpc.mac" "AutoLeadPC"
 
 rm -f "$TMP_BIN"
 
 # Deploy to ~/Downloads and ~/Downloads/AutoLeadPC-mac
-echo "Deploying to ~/Downloads/ and ~/Downloads/AutoLeadPC-mac/ ..."
+echo "Dọn dẹp các bản cũ và triển khai bản duy nhất vào ~/Downloads/ ..."
 mkdir -p "$HOME/Downloads/AutoLeadPC-mac"
-rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app" "$HOME/Downloads/AutoLeadPC Mac.app"
-rm -rf "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 - Chrome.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac.app"
 
-cp -R "AutoLeadPC Mac 1.app" "$HOME/Downloads/"
-cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/"
-cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app"
-cp -R "AutoLeadPC Mac.app" "$HOME/Downloads/"
-cp -R "AutoLeadPC Mac 1.app" "$HOME/Downloads/AutoLeadPC-mac/"
-cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC-mac/"
-cp -R "AutoLeadPC Mac 2.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 - Chrome.app"
-cp -R "AutoLeadPC Mac.app" "$HOME/Downloads/AutoLeadPC-mac/"
+# Xoá triệt để tất cả các bản phân mảnh cũ
+rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" \
+       "$HOME/Downloads/AutoLeadPC Mac 2.app" \
+       "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app" \
+       "$HOME/Downloads/AutoLeadPC Mac 3.app" \
+       "$HOME/Downloads/AutoLeadPC Wine.app" \
+       "$HOME/Downloads/AutoLeadPC Mac.app" \
+       "$HOME/Downloads/AutoLeadPC.app" \
+       "$HOME/Downloads/AutoLeadPC-mac/"*.app
 
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 1.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 2.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 1.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 - Chrome.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC" 2>/dev/null || true
+cp -R "AutoLeadPC.app" "$HOME/Downloads/AutoLeadPC.app"
+cp -R "AutoLeadPC.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC.app"
+
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC.app" 2>/dev/null || true
 
 # Tạo gói zip tiện gửi hoặc sao lưu
-rm -f "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.zip" 2>/dev/null || true
-(cd "$HOME/Downloads" && zip -rq "AutoLeadPC Mac 2 - Chrome.zip" "AutoLeadPC Mac 2 - Chrome.app")
-
+rm -f "$HOME/Downloads/AutoLeadPC.zip" "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.zip" 2>/dev/null || true
+(cd "$HOME/Downloads" && zip -rq "AutoLeadPC.zip" "AutoLeadPC.app")
 
 echo "=========================================="
-echo "Build thành công 2 bản AutoLeadPC cho Mac:"
-echo "1. AutoLeadPC Mac 1.app (Cổng 3210)"
-echo "2. AutoLeadPC Mac 2.app (Cổng 3211)"
-echo "Đã lưu tại: $HOME/Downloads/"
+echo "Build thành công 1 bản AutoLeadPC duy nhất:"
+echo "AutoLeadPC.app (Cổng 3210, Giao diện PC chuẩn)"
+echo "Đã lưu tại: $HOME/Downloads/AutoLeadPC.app"
 echo "=========================================="

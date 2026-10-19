@@ -1,0 +1,6 @@
+Browser check::Check iphey::https://iphey.com/
+Browser check::Check browserscan::https://www.browserscan.net/
+Browser check::Check IP proxy::https://api.ipaddress.com/myip?format=json
+Browser check::Check IP::https://ipinfo.io/json
+Browser check::Check Blacklist::https://check.spamhaus.org/
+Browser check::pixelscant::https://pixelscan.net/fingerprint-check
