@@ -37,16 +37,6 @@ export function buildBrandLists(fullVersion, brand = 'Google Chrome') {
   return { brands: make(false), fullVersionList: make(true) };
 }
 
-/**
- * Chrome đã giảm User-Agent: chỉ giữ số phiên bản chính, các số sau là 0.
- *
- * @param {string} fullVersion Phiên bản đầy đủ.
- * @return {string} Ví dụ 155.0.0.0.
- */
-export function reducedChromeVersion(fullVersion) {
-  return `${String(fullVersion).split('.')[0]}.0.0.0`;
-}
-
 /** Tên brand Client Hints theo kênh Chrome đã cài. */
 export function chromeBrandForChannel(channel) {
   return /testing|cft/i.test(String(channel ?? '')) ? 'Google Chrome for Testing' : 'Google Chrome';
@@ -602,6 +592,8 @@ export function createDeviceVariant(profileKey, base, seed, minViewport = null) 
     variant.screen = { width: device.width, height: device.height };
     variant.uaData.platformVersion = pick(androidVersions);
     variant.uaData.model = device.model;
+    const androidMajor = variant.uaData.platformVersion.split('.')[0];
+    variant.ua = (v) => `Mozilla/5.0 (Linux; Android ${androidMajor}; ${device.model}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Mobile Safari/537.36`;
     Object.assign(variant.spoof, {
       dpr: device.dpr, hardwareConcurrency: device.cores, deviceMemory: pick([4, 8, 8]),
       webglVendor: device.vendor, webglRenderer: device.gpu,

@@ -17,8 +17,7 @@ import {
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import {
-  applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, reducedChromeVersion,
-  stealthInitScript,
+  applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, stealthInitScript,
 } from './stealth.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig } from './ai-assist.mjs';
@@ -93,13 +92,13 @@ let limitRunMax = 0;
 const desktopWebglParams = { 3379: 16384, 34024: 16384, 3386: [32767, 32767] }; // MAX_TEXTURE_SIZE, MAX_RENDERBUFFER_SIZE, MAX_VIEWPORT_DIMS
 
 /**
- * Thiết bị giả lập. UA theo chuẩn đã giảm của Chrome (Chrome/155.0.0.0), phiên bản đầy đủ chỉ
- * nằm trong Client Hints (uaData). Chuỗi GPU theo đúng định dạng ANGLE mà Chrome trên từng hệ điều hành trả.
+ * Thiết bị giả lập. UA mang số phiên bản đầy đủ của bản Chrome đang mở (mỗi cửa sổ một phiên bản riêng),
+ * khớp với fullVersionList trong Client Hints. Chuỗi GPU theo đúng định dạng ANGLE mà Chrome trên từng hệ điều hành trả.
  */
 export const DEVICE_PROFILES = {
   windows: {
     label: 'Windows Desktop',
-    ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${reducedChromeVersion(v)} Safari/537.36`,
+    ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
     screen: { width: 1920, height: 1080, availHeight: 1032, frameHeight: 87 },
     uaData: { platform: 'Windows', platformVersion: '15.0.0', architecture: 'x86', bitness: '64', model: '' },
@@ -114,7 +113,7 @@ export const DEVICE_PROFILES = {
   macos: {
     label: 'macOS Desktop',
     // Chrome trên Apple Silicon vẫn gửi "Intel Mac OS X 10_15_7"; kiến trúc thật nằm trong Client Hints.
-    ua: (v) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${reducedChromeVersion(v)} Safari/537.36`,
+    ua: (v) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 2,
     screen: { width: 1440, height: 900, availTop: 25, availHeight: 875, frameHeight: 79 },
     uaData: { platform: 'macOS', platformVersion: '14.6.1', architecture: 'arm', bitness: '64', model: '' },
@@ -128,7 +127,7 @@ export const DEVICE_PROFILES = {
   },
   linux: {
     label: 'Linux Desktop',
-    ua: (v) => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${reducedChromeVersion(v)} Safari/537.36`,
+    ua: (v) => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
     screen: { width: 1920, height: 1080, availHeight: 1053, frameHeight: 77 },
     uaData: { platform: 'Linux', platformVersion: '6.8.0', architecture: 'x86', bitness: '64', model: '' },
@@ -142,8 +141,7 @@ export const DEVICE_PROFILES = {
   },
   android: {
     label: 'Android (Chrome)',
-    // Chrome Android giảm UA thành "Android 10; K"; model và bản Android thật nằm trong Client Hints.
-    ua: (v) => `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${reducedChromeVersion(v)} Mobile Safari/537.36`,
+    ua: (v) => `Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Mobile Safari/537.36`,
     viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2.625,
     screen: { width: 412, height: 915 },
     uaData: { platform: 'Android', platformVersion: '14.0.0', architecture: '', bitness: '', model: 'Pixel 8' },

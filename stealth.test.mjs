@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildBrandLists, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, reducedChromeVersion,
-  stealthInitScript,
+  buildBrandLists, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, stealthInitScript,
 } from './stealth.mjs';
 import { DEVICE_PROFILES } from './app.mjs';
 
@@ -15,10 +14,6 @@ test('buildBrandLists khớp sec-ch-ua thật của Chrome/Brave', () => {
   assert.deepEqual(buildBrandLists('141.0.7390.37').fullVersionList[1], { brand: 'Not?A_Brand', version: '8.0.0.0' });
 });
 
-test('reducedChromeVersion giữ bản chính', () => {
-  assert.equal(reducedChromeVersion('155.0.8037.98'), '155.0.0.0');
-});
-
 test('localeForCountry chọn ngôn ngữ theo quốc gia IP', () => {
   assert.deepEqual(localeForCountry('US'), { locale: 'en-US', languages: ['en-US', 'en'] });
   assert.deepEqual(localeForCountry('de'), { locale: 'de-DE', languages: ['de-DE', 'de', 'en-US', 'en'] });
@@ -27,7 +22,7 @@ test('localeForCountry chọn ngôn ngữ theo quốc gia IP', () => {
 
 test('buildUserAgentOverride đồng bộ UA, platform và Client Hints', () => {
   const params = buildUserAgentOverride(DEVICE_PROFILES.windows, { version: '155.0.8037.98', channel: 'stable' }, ['en-US', 'en']);
-  assert.match(params.userAgent, /Chrome\/155\.0\.0\.0 /);
+  assert.match(params.userAgent, /Chrome\/155\.0\.8037\.98 /, 'UA phải mang số phiên bản đầy đủ');
   assert.equal(params.platform, 'Win32');
   assert.equal(params.acceptLanguage, 'en-US,en');
   assert.equal(params.userAgentMetadata.platform, 'Windows');
@@ -78,6 +73,8 @@ test('createDeviceVariant giữ các thông số đồng bộ với nhau', () =>
     assert.ok(win.spoof.webglRenderer.startsWith(`ANGLE (${win.spoof.webglVendor.slice(13, -1)},`), 'Vendor và renderer GPU phải cùng hãng');
     const android = createDeviceVariant('android', DEVICE_PROFILES.android, seed);
     assert.deepEqual(android.viewport, { width: android.screen.width, height: android.screen.height });
+    assert.ok(android.ua('150.0.7871.187').includes(`Android ${android.uaData.platformVersion.split('.')[0]}; ${android.uaData.model})`), 'UA Android phải khớp model và bản Android');
+    assert.ok(android.ua('150.0.7871.187').includes('Chrome/150.0.7871.187'));
     const ios = createDeviceVariant('ios', DEVICE_PROFILES.ios, seed);
     assert.match(ios.ua('150.0.7871.187'), /iPhone OS \d+(_\d+)* like Mac OS X.*CriOS\/150\.0\.7871\.187/);
     assert.doesNotMatch(ios.ua('150.0.7871.187'), /OS 2\d_/, 'WebKit đóng băng UA ở 18_6, không có iOS 26 trong UA');
