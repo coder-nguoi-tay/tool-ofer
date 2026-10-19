@@ -687,7 +687,7 @@
             const deviceLabels = { windows:'Windows', macos:'macOS', linux:'Linux', android:'Android', ipad:'iPad', ios:'iPhone' };
             const deviceIcon = deviceIcons[session.deviceProfile] ?? '🖥';
             const deviceLabel = deviceLabels[session.deviceProfile] ?? session.deviceProfile ?? 'Desktop';
-            const tooltipText = `IP Exit: ${session.exitIp}\nCửa sổ ${session.slot} (Chrome ${session.version})\nThiết bị: ${deviceLabel}\nProxy: ${session.proxy || 'Trực tiếp'}${session.assignedEmail ? '\nEmail: ' + session.assignedEmail : ''}${session.leadCheckMessage ? '\n' + session.leadCheckMessage : ''}`;
+            const tooltipText = `IP Exit: ${session.exitIp}\nCửa sổ ${session.slot} (Chrome ${session.version})\nThiết bị: ${session.deviceSummary || deviceLabel}\nProxy: ${session.proxy || 'Trực tiếp'}${session.assignedEmail ? '\nEmail: ' + session.assignedEmail : ''}${session.leadCheckMessage ? '\n' + session.leadCheckMessage : ''}`;
 
             return `
               <div class="chrome-session-card">
@@ -704,7 +704,7 @@
                   <div class="chrome-card-top">
                     <span class="chrome-card-slot">Cửa sổ ${session.slot}</span>
                     <span class="chrome-card-version">v${session.version}</span>
-                    <span style="font-size:11px;margin-left:4px;" title="${deviceLabel}">${deviceIcon}</span>
+                    <span style="font-size:11px;margin-left:4px;" title="${session.deviceSummary || deviceLabel}">${deviceIcon}</span>
                     ${session.streamLabel ? `<span style="background:${session.streamRole === 2 ? '#8b5cf6' : '#2563eb'};color:#fff;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-left:auto;">${session.streamLabel}</span>` : ''}
                   </div>
                   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">

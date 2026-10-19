@@ -119,8 +119,6 @@ export function buildUserAgentOverride(deviceProfile, build, languages) {
  */
 export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1) {
   const spoof = deviceProfile.spoof;
-  const anyNoise = Boolean(antiFingerprint.canvas || antiFingerprint.clientRects || antiFingerprint.webgl
-    || antiFingerprint.fonts || antiFingerprint.webrtc || antiFingerprint.apiFakeIP);
   return {
     platform: spoof.platform,
     vendor: spoof.vendor,
@@ -134,12 +132,14 @@ export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1
     screen: deviceProfile.screen && !deviceProfile.isMobile
       ? { availTop: deviceProfile.screen.availTop ?? 0, availHeight: deviceProfile.screen.availHeight ?? deviceProfile.screen.height, frameHeight: deviceProfile.screen.frameHeight ?? 85 }
       : null,
+    // Canvas/ClientRects/WebGL/Audio luôn có nhiễu theo seed để mỗi phiên là một máy khác nhau;
+    // nhiễu đo chữ (Fonts) vẫn theo tuỳ chọn vì làm lệch bố cục chữ vẽ trên canvas.
     noise: {
-      canvas: Boolean(antiFingerprint.canvas),
-      clientRects: Boolean(antiFingerprint.clientRects),
-      webgl: Boolean(antiFingerprint.webgl),
+      canvas: true,
+      clientRects: true,
+      webgl: true,
       fonts: Boolean(antiFingerprint.fonts),
-      audio: anyNoise,
+      audio: true,
     },
     seed: (Number(seed) >>> 0) || 1,
   };
@@ -436,4 +436,160 @@ export async function applyNativeOverrides(context, page, { userAgentOverride, h
     }
   });
   await session.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: false });
+}
+
+// ── Biến thể máy theo phiên: mỗi cửa sổ là một cấu hình máy thật khác nhau ──────────────
+const macChips = [
+  { gpu: 'Apple M1', cores: [8] }, { gpu: 'Apple M1 Pro', cores: [8, 10] }, { gpu: 'Apple M1 Max', cores: [10] },
+  { gpu: 'Apple M2', cores: [8] }, { gpu: 'Apple M2 Pro', cores: [10, 12] }, { gpu: 'Apple M3', cores: [8] },
+  { gpu: 'Apple M3 Pro', cores: [11, 12] }, { gpu: 'Apple M4', cores: [10] }, { gpu: 'Apple M4 Pro', cores: [12, 14] },
+];
+// Kích thước CSS px; availTop là thanh menu (máy có tai thỏ cao hơn).
+const macScreens = [
+  { width: 1440, height: 900, dpr: 2, availTop: 25 }, { width: 1470, height: 956, dpr: 2, availTop: 37 },
+  { width: 1512, height: 982, dpr: 2, availTop: 37 }, { width: 1710, height: 1112, dpr: 2, availTop: 37 },
+  { width: 1728, height: 1117, dpr: 2, availTop: 37 }, { width: 1920, height: 1080, dpr: 1, availTop: 25 },
+  { width: 2560, height: 1440, dpr: 1, availTop: 25 }, { width: 2240, height: 1260, dpr: 2, availTop: 25 },
+];
+const macVersions = ['14.7.6', '15.5.0', '15.6.1', '15.7.1', '26.0.1', '26.1.0', '26.2.0'];
+
+const d3d = (vendor, name, id) => ({
+  vendor: `Google Inc. (${vendor})`,
+  renderer: `ANGLE (${vendor}, ${name} (0x0000${id}) Direct3D11 vs_5_0 ps_5_0, D3D11)`,
+});
+const windowsGpus = [
+  { ...d3d('NVIDIA', 'NVIDIA GeForce RTX 3060', '2504'), cores: [8, 12, 16] },
+  { ...d3d('NVIDIA', 'NVIDIA GeForce RTX 3070', '2484'), cores: [12, 16] },
+  { ...d3d('NVIDIA', 'NVIDIA GeForce RTX 4060', '2882'), cores: [12, 16, 20] },
+  { ...d3d('NVIDIA', 'NVIDIA GeForce RTX 2060', '1F08'), cores: [8, 12] },
+  { ...d3d('NVIDIA', 'NVIDIA GeForce GTX 1650', '1F82'), cores: [4, 8] },
+  { ...d3d('NVIDIA', 'NVIDIA GeForce GTX 1660 SUPER', '21C4'), cores: [6, 12] },
+  { ...d3d('Intel', 'Intel(R) UHD Graphics 620', '5917'), cores: [4, 8] },
+  { ...d3d('Intel', 'Intel(R) UHD Graphics 770', '4680'), cores: [12, 16, 20] },
+  { ...d3d('Intel', 'Intel(R) Iris(R) Xe Graphics', '9A49'), cores: [8, 12] },
+  { ...d3d('AMD', 'AMD Radeon RX 6600', '73FF'), cores: [12, 16] },
+];
+// Kích thước CSS px sau khi chia tỉ lệ hiển thị của Windows.
+const windowsScreens = [
+  { width: 1920, height: 1080, dpr: 1 }, { width: 1536, height: 864, dpr: 1.25 }, { width: 1366, height: 768, dpr: 1 },
+  { width: 1280, height: 720, dpr: 1.5 }, { width: 2560, height: 1440, dpr: 1 }, { width: 1600, height: 900, dpr: 1 },
+  { width: 1920, height: 1200, dpr: 1 }, { width: 2048, height: 1152, dpr: 1.25 },
+];
+const windowsVersions = ['10.0.0', '15.0.0', '19.0.0'];
+
+const linuxGpus = [
+  { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)', cores: [8, 12] },
+  { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6)', cores: [4, 8] },
+  { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Mesa Intel(R) Xe Graphics (TGL GT2), OpenGL 4.6)', cores: [8, 12] },
+  { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon RX 6600 (radeonsi navi23 LLVM 15.0.7), OpenGL 4.6)', cores: [12, 16] },
+  { vendor: 'Google Inc. (NVIDIA Corporation)', renderer: 'ANGLE (NVIDIA Corporation, NVIDIA GeForce GTX 1650/PCIe/SSE2, OpenGL 4.5.0)', cores: [8, 12] },
+];
+const linuxScreens = [
+  { width: 1920, height: 1080, dpr: 1 }, { width: 1366, height: 768, dpr: 1 }, { width: 2560, height: 1440, dpr: 1 },
+  { width: 1920, height: 1200, dpr: 1 },
+];
+const linuxVersions = ['6.5.0', '6.8.0', '6.11.0', '6.14.0'];
+
+const androidDevices = [
+  { model: 'Pixel 8', gpu: 'Mali-G715', vendor: 'ARM', cores: 9, width: 412, height: 915, dpr: 2.625 },
+  { model: 'Pixel 7', gpu: 'Mali-G710', vendor: 'ARM', cores: 8, width: 412, height: 915, dpr: 2.625 },
+  { model: 'Pixel 6a', gpu: 'Mali-G78', vendor: 'ARM', cores: 8, width: 412, height: 915, dpr: 2.625 },
+  { model: 'SM-S911B', gpu: 'Adreno (TM) 740', vendor: 'Qualcomm', cores: 8, width: 360, height: 780, dpr: 3 },
+  { model: 'SM-S921B', gpu: 'Samsung Xclipse 940', vendor: 'Samsung Electronics Co., Ltd.', cores: 10, width: 360, height: 780, dpr: 3 },
+  { model: 'SM-A546B', gpu: 'Mali-G68', vendor: 'ARM', cores: 8, width: 384, height: 832, dpr: 2.8125 },
+];
+const androidVersions = ['13.0.0', '14.0.0', '15.0.0', '16.0.0'];
+
+const iphoneScreens = [
+  { width: 390, height: 844, cores: 6 }, { width: 393, height: 852, cores: 6 }, { width: 430, height: 932, cores: 6 },
+  { width: 375, height: 812, cores: 6 }, { width: 402, height: 874, cores: 6 },
+];
+const iosVersions = ['17_6_1', '18_1', '18_3_2', '18_6', '26_0_1', '26_1'];
+
+/** PRNG xác định theo seed (mulberry32): cùng seed luôn ra cùng một máy. */
+function seededRandom(seed) {
+  let state = (Number(seed) >>> 0) || 1;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Sinh một máy cụ thể từ profile chung: chip/GPU, số nhân CPU, RAM, màn hình, tỉ lệ hiển thị
+ * và phiên bản hệ điều hành được bốc ngẫu nhiên trong các cấu hình có thật, đồng bộ với nhau.
+ *
+ * @param {string} profileKey Khoá trong DEVICE_PROFILES.
+ * @param {object} base Profile gốc.
+ * @param {number} seed Seed của phiên.
+ * @param {{width: number, height: number}|null} minViewport Khung nhìn tối thiểu màn hình phải chứa được.
+ * @return {object} Profile mới (không sửa base) kèm `summary` mô tả máy.
+ */
+export function createDeviceVariant(profileKey, base, seed, minViewport = null) {
+  const random = seededRandom(seed);
+  const pick = (list) => list[Math.floor(random() * list.length)];
+  const fits = (list) => {
+    if (!minViewport) return list;
+    const fitting = list.filter((item) => item.width >= minViewport.width && item.height >= minViewport.height);
+    return fitting.length > 0 ? fitting : [list.reduce((a, b) => (a.width * a.height >= b.width * b.height ? a : b))];
+  };
+  const variant = { ...base, screen: { ...base.screen }, spoof: { ...base.spoof }, uaData: base.uaData && { ...base.uaData } };
+
+  if (profileKey === 'macos') {
+    const chip = pick(macChips);
+    const screen = pick(fits(macScreens));
+    variant.deviceScaleFactor = screen.dpr;
+    variant.screen = { width: screen.width, height: screen.height, availTop: screen.availTop, availHeight: screen.height - screen.availTop, frameHeight: 79 };
+    variant.uaData.platformVersion = pick(macVersions);
+    Object.assign(variant.spoof, {
+      dpr: screen.dpr, hardwareConcurrency: pick(chip.cores), deviceMemory: 8,
+      webglRenderer: `ANGLE (Apple, ANGLE Metal Renderer: ${chip.gpu}, Unspecified Version)`,
+    });
+    variant.summary = `macOS ${variant.uaData.platformVersion} · ${chip.gpu} · ${variant.spoof.hardwareConcurrency} nhân · ${screen.width}x${screen.height}@${screen.dpr}x`;
+  } else if (profileKey === 'windows' || profileKey === 'linux') {
+    const isWindows = profileKey === 'windows';
+    const gpu = pick(isWindows ? windowsGpus : linuxGpus);
+    const screen = pick(fits(isWindows ? windowsScreens : linuxScreens));
+    const osVersion = pick(isWindows ? windowsVersions : linuxVersions);
+    const taskbar = isWindows ? (osVersion === '10.0.0' ? 40 : 48) : 27;
+    variant.deviceScaleFactor = screen.dpr;
+    variant.screen = { width: screen.width, height: screen.height, availHeight: screen.height - taskbar, frameHeight: isWindows ? 87 : 77 };
+    variant.uaData.platformVersion = osVersion;
+    Object.assign(variant.spoof, {
+      dpr: screen.dpr, hardwareConcurrency: pick(gpu.cores), deviceMemory: pick([4, 8, 8, 8]),
+      webglVendor: gpu.vendor, webglRenderer: gpu.renderer,
+    });
+    const osName = isWindows ? (osVersion === '10.0.0' ? 'Windows 10' : 'Windows 11') : `Linux ${osVersion}`;
+    variant.summary = `${osName} · ${gpu.renderer.replace(/^ANGLE \([^,]+, /, '').replace(/ \(0x.*$| Direct3D.*$|,.*$/, '')} · ${variant.spoof.hardwareConcurrency} nhân · ${screen.width}x${screen.height}@${screen.dpr}x`;
+  } else if (profileKey === 'android') {
+    const device = pick(androidDevices);
+    variant.viewport = { width: device.width, height: device.height };
+    variant.deviceScaleFactor = device.dpr;
+    variant.screen = { width: device.width, height: device.height };
+    variant.uaData.platformVersion = pick(androidVersions);
+    variant.uaData.model = device.model;
+    Object.assign(variant.spoof, {
+      dpr: device.dpr, hardwareConcurrency: device.cores, deviceMemory: pick([4, 8, 8]),
+      webglVendor: device.vendor, webglRenderer: device.gpu,
+    });
+    variant.summary = `Android ${variant.uaData.platformVersion.split('.')[0]} · ${device.model} · ${device.gpu} · ${device.width}x${device.height}@${device.dpr}x`;
+  } else if (profileKey === 'ios') {
+    const screen = pick(iphoneScreens);
+    const osVersion = pick(iosVersions);
+    variant.viewport = { width: screen.width, height: screen.height };
+    variant.screen = { width: screen.width, height: screen.height };
+    variant.ua = (v) => `Mozilla/5.0 (iPhone; CPU iPhone OS ${osVersion} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`;
+    variant.spoof.hardwareConcurrency = screen.cores;
+    variant.summary = `iOS ${osVersion.replace(/_/g, '.')} · iPhone ${screen.width}x${screen.height}@3x`;
+  } else if (profileKey === 'ipad') {
+    const osVersion = pick(iosVersions);
+    variant.ua = (v) => `Mozilla/5.0 (iPad; CPU OS ${osVersion} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`;
+    variant.summary = `iPadOS ${osVersion.replace(/_/g, '.')} · ${base.screen.width}x${base.screen.height}@2x`;
+  } else {
+    variant.summary = base.label;
+  }
+  return variant;
 }

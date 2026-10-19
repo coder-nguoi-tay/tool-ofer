@@ -17,7 +17,8 @@ import {
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
 import {
-  applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, localeForCountry, reducedChromeVersion, stealthInitScript,
+  applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, reducedChromeVersion,
+  stealthInitScript,
 } from './stealth.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig } from './ai-assist.mjs';
@@ -3469,6 +3470,7 @@ function getAutoRefillStatus() {
         slot: session.slot ?? (session.tileIndex + 1),
         version: session.chromeVersion,
         deviceProfile: session.deviceProfile ?? 'windows',
+        deviceSummary: session.deviceSummary ?? null,
         exitIp: session.exitIp ?? (session.isGoLogin ? 'GoLogin' : null),
         proxy: session.proxyServer ?? session.proxyKey ?? null,
         assignedEmail: session.assignedEmail ?? null,
@@ -4358,7 +4360,11 @@ async function openBrowserWithInstalledChrome({
   const relay = proxy.server.startsWith('socks5://') && proxy.username
     ? await startAuthenticatedSocksRelay(proxy)
     : null;
-  const dp = DEVICE_PROFILES[deviceProfile] ?? DEVICE_PROFILES.windows;
+  // Mỗi phiên một seed: từ đó bốc ra một máy cụ thể (chip/GPU, nhân CPU, màn hình, bản OS) và nhiễu canvas/audio riêng.
+  const sessionSeed = Math.floor(Math.random() * 0x7fffffff) || 1;
+  const tileViewport = { width: tile.width, height: Math.max(600, tile.height - 85) };
+  const profileKey = DEVICE_PROFILES[deviceProfile] ? deviceProfile : 'windows';
+  const dp = createDeviceVariant(profileKey, DEVICE_PROFILES[profileKey], sessionSeed, { width: tileViewport.width, height: tileViewport.height + 90 });
   // Ngôn ngữ khớp quốc gia của IP, cùng nguồn với múi giờ.
   const { locale, languages } = localeForCountry(ipCountry);
   const geolocation = antiFingerprint.apiFakeIP && (ipLat || ipLng)
@@ -4367,7 +4373,7 @@ async function openBrowserWithInstalledChrome({
   let context;
   let verifiedExitIp = null;
   // Chạy ẩn hoàn toàn — người dùng xem qua Screen View trong giao diện AutoLead
-  const headlessViewport = dp.viewport ?? { width: tile.width, height: Math.max(600, tile.height - 85) };
+  const headlessViewport = dp.viewport ?? tileViewport;
   try {
     context = await chromium.launchPersistentContext(userDataDirectory, {
       executablePath: build.executablePath,
@@ -4418,6 +4424,7 @@ async function openBrowserWithInstalledChrome({
     tileIndex,
     chromeVersion: build.version,
     deviceProfile,
+    deviceSummary: dp.summary,
     suppressAutoRefill: false,
     proxyKey,
     proxyServer: proxy.server,
@@ -4451,7 +4458,7 @@ async function openBrowserWithInstalledChrome({
   attachBrowserLogger(context, session);
 
   // Giả lập thiết bị + chống fingerprint: một script duy nhất chạy trong mọi frame, hàm vá trông như native.
-  const stealthConfig = buildStealthConfig(dp, antiFingerprint, Math.floor(Math.random() * 0x7fffffff) || 1);
+  const stealthConfig = buildStealthConfig(dp, antiFingerprint, sessionSeed);
   await context.addInitScript(stealthInitScript, stealthConfig);
   // UA, Client Hints, navigator.platform, số nhân CPU, ngôn ngữ: đổi tận gốc qua CDP cho từng tab và iframe khác site.
   const nativeOverrides = {

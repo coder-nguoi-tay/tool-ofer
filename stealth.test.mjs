@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildBrandLists, buildStealthConfig, buildUserAgentOverride, localeForCountry, reducedChromeVersion, stealthInitScript,
+  buildBrandLists, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, reducedChromeVersion,
+  stealthInitScript,
 } from './stealth.mjs';
 import { DEVICE_PROFILES } from './app.mjs';
 
@@ -50,4 +51,34 @@ test('stealthInitScript tự chứa, tuần tự hoá được', () => {
   assert.doesNotThrow(() => new Function(`(${stealthInitScript.toString()})`));
   assert.equal(JSON.parse(JSON.stringify(config)).seed, 42);
   assert.equal(config.noise.audio, true);
+  // Nhiễu canvas/audio/rects/WebGL luôn bật để mỗi phiên khác nhau.
+  const plain = buildStealthConfig(DEVICE_PROFILES.macos, {}, 7);
+  assert.deepEqual(plain.noise, { canvas: true, clientRects: true, webgl: true, fonts: false, audio: true });
+});
+
+test('createDeviceVariant: cùng seed cùng máy, khác seed ra nhiều máy khác nhau', () => {
+  for (const key of Object.keys(DEVICE_PROFILES)) {
+    const a = createDeviceVariant(key, DEVICE_PROFILES[key], 123);
+    const b = createDeviceVariant(key, DEVICE_PROFILES[key], 123);
+    assert.equal(a.summary, b.summary, `Seed cố định phải ra cùng máy (${key})`);
+    const summaries = new Set(Array.from({ length: 40 }, (_, i) => createDeviceVariant(key, DEVICE_PROFILES[key], i + 1).summary));
+    assert.ok(summaries.size >= 4, `${key} phải có nhiều biến thể, chỉ có ${summaries.size}`);
+  }
+  assert.equal(DEVICE_PROFILES.macos.spoof.webglRenderer, 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)', 'Không được sửa profile gốc');
+});
+
+test('createDeviceVariant giữ các thông số đồng bộ với nhau', () => {
+  for (let seed = 1; seed <= 60; seed += 1) {
+    const mac = createDeviceVariant('macos', DEVICE_PROFILES.macos, seed, { width: 1200, height: 800 });
+    assert.ok(mac.screen.width >= 1200 && mac.screen.height >= 800, 'Màn hình phải chứa được khung nhìn');
+    assert.equal(mac.deviceScaleFactor, mac.spoof.dpr);
+    assert.equal(mac.screen.availHeight, mac.screen.height - mac.screen.availTop);
+    assert.match(mac.spoof.webglRenderer, /^ANGLE \(Apple, ANGLE Metal Renderer: Apple M\d/);
+    const win = createDeviceVariant('windows', DEVICE_PROFILES.windows, seed);
+    assert.ok(win.spoof.webglRenderer.startsWith(`ANGLE (${win.spoof.webglVendor.slice(13, -1)},`), 'Vendor và renderer GPU phải cùng hãng');
+    const android = createDeviceVariant('android', DEVICE_PROFILES.android, seed);
+    assert.deepEqual(android.viewport, { width: android.screen.width, height: android.screen.height });
+    const ios = createDeviceVariant('ios', DEVICE_PROFILES.ios, seed);
+    assert.match(ios.ua('150.0.7871.187'), /iPhone OS \d+(_\d+)* like Mac OS X.*CriOS\/150\.0\.7871\.187/);
+  }
 });
