@@ -95,7 +95,7 @@ EOF
     cp -p autoleadpc-icon.svg "$RESOURCES_DIR/autoleadpc-icon.svg"
   fi
 
-  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs gologin-profile.mjs gologin-profile.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs gologin-profile.mjs gologin-profile.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md GOLOGIN.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
   if [ -f "script.mjs" ]; then
     cp -p script.mjs "$LAUNCHER_DIR/"
   fi
