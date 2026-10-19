@@ -2635,6 +2635,15 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
     // Tự nhiên hóa nhịp độ quan sát trang khi vừa chuyển sang URL mới (trên trình duyệt thật):
     const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
+    if (session.lastObservedUrl && session.lastObservedUrl !== currentUrl) {
+      session.pageJumps = (session.pageJumps || 0) + 1;
+      if ((session.completedScreens || 0) < session.pageJumps) {
+        session.completedScreens = session.pageJumps;
+        session.currentScreen = session.completedScreens + 1;
+      }
+      session.screenReached = Math.max(session.screenReached || 1, session.currentScreen || 1);
+      options.onPageJump?.(session, session.pageJumps, currentUrl);
+    }
     if (isRealBrowser && session.lastObservedUrl !== currentUrl) {
       session.lastObservedUrl = currentUrl;
       const observationPause = Math.floor(Math.random() * 300) + 350; // 350ms - 650ms
@@ -2644,6 +2653,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         await humanWheelScroll(page, Math.floor(Math.random() * 80) + 120);
         await naturalMouseDrift(page, 1);
       } catch {}
+    } else {
+      session.lastObservedUrl = currentUrl;
     }
 
 
@@ -3661,6 +3672,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
               session.completedScreens = (session.completedScreens || 0) + 1;
               session.currentScreen = session.completedScreens + 1;
+              session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
+              session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
+              options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
 
               // Kiểm tra xem màn vừa submit có phải là màn điền email hay không
               const wasEmailScreenSubmit = frameHasEmail || session.screenHasEmail || screenInfo?.hasEmailInput || (session.emailFilled && !session.emailScreenSubmitted);
@@ -3736,6 +3750,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               session.autofillFields = (session.autofillFields ?? 0) + 1;
               session.completedScreens = (session.completedScreens || 0) + 1;
               session.currentScreen = session.completedScreens + 1;
+              session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
+              session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
+              options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
 
               const wasEmailScreenFallback = frameHasEmail || session.screenHasEmail || screenInfo?.hasEmailInput || (session.emailFilled && !session.emailScreenSubmitted);
               if (wasEmailScreenFallback) {
@@ -3904,13 +3921,31 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     if (typeof page.on === 'function') {
       page.on('domcontentloaded', scan);
       page.on('load', scan);
-      page.on('framenavigated', () => {
+      page.on('framenavigated', (navFrame) => {
         const u = typeof page.url === 'function' ? page.url() : '';
         if (isSpamAdUrl(u)) {
           console.log(`[Autofill] Điều hướng đến link rác (${u}), tự động đóng.`);
           page.close?.().catch(() => {});
           return;
         }
+        try {
+          const isMain = !navFrame || (typeof page.mainFrame === 'function' && navFrame === page.mainFrame());
+          if (isMain && u && !u.startsWith('about:') && !u.startsWith('chrome:')) {
+            const cleanU = u.split('#')[0];
+            if (session.lastTrackedNavUrl && session.lastTrackedNavUrl.split('#')[0] !== cleanU) {
+              session.lastTrackedNavUrl = u;
+              session.pageJumps = (session.pageJumps || 0) + 1;
+              if ((session.completedScreens || 0) < session.pageJumps) {
+                session.completedScreens = session.pageJumps;
+                session.currentScreen = session.completedScreens + 1;
+              }
+              session.screenReached = Math.max(session.screenReached || 1, session.currentScreen || 1);
+              options.onPageJump?.(session, session.pageJumps, u);
+            } else if (!session.lastTrackedNavUrl) {
+              session.lastTrackedNavUrl = u;
+            }
+          }
+        } catch {}
         void scan();
       });
       page.on('frameattached', scan);

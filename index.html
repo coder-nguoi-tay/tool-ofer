@@ -345,6 +345,7 @@
           <div style="display:flex;gap:8px;">
             <button id="pq-import-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Nhập từ danh sách</button>
             <button id="pq-reset-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Đặt lại</button>
+            <button id="pq-clear-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;color:#dc2626;border-color:#fca5a5;">Xóa hết proxy</button>
           </div>
         </div>
         <div id="pq-used-box" style="max-height:160px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;display:none;">
@@ -1412,6 +1413,17 @@
         body: JSON.stringify({ proxyList }),
       }).then((r) => r.json());
       status.textContent = res.message ?? 'Đã đặt lại.';
+      await refreshProxyQueue();
+    });
+
+    document.querySelector('#pq-clear-btn')?.addEventListener('click', async () => {
+      if (!confirm('Bạn có chắc muốn xóa toàn bộ proxy trong hàng đợi?')) return;
+      const res = await fetch('/proxy-queue/clear', { method: 'POST' }).then((r) => r.json());
+      const proxyListEl = document.querySelector('[name="proxyList"]');
+      if (proxyListEl) proxyListEl.value = '';
+      const proxyListEl2 = document.querySelector('#proxy-list');
+      if (proxyListEl2) proxyListEl2.value = '';
+      status.textContent = res.message ?? 'Đã xóa tất cả proxy.';
       await refreshProxyQueue();
     });
 

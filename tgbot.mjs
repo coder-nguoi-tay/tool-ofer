@@ -1,18 +1,13 @@
 /**
- * Telegram bot để điều khiển AutoLeadPC từ xa.
- * Config: ~/Library/Application Support/AutoLeadPC-2/telegram-config.json
- * {
- *   "botToken": "123456:ABC...",
- *   "allowedUserId": 123456789,
- *   "notifyChatId": 123456789   (tùy chọn, mặc định = allowedUserId)
- * }
+ * Telegram bot — điều khiển AutoLeadPC + AI agent chat tự nhiên.
+ * Config: ~/Library/Application Support/AutoLeadPC/telegram-config.json
+ * { "botToken": "...", "allowedUserId": 123456789, "notifyChatId": 123456789 }
  */
 
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-// Tính lại dataDirName để tránh circular import với app.mjs
 const instanceId = process.env.AUTOLEADPC_INSTANCE || '1';
 const instanceSuffix = instanceId !== '1' ? `-${instanceId}` : '';
 const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${instanceSuffix}`;
@@ -20,25 +15,19 @@ const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${instanceSuff
 const APP_PORT = Number(process.env.AUTOLEADPC_PORT) || 3210;
 const APP_BASE = `http://127.0.0.1:${APP_PORT}`;
 
-let cfg = null; // { botToken, allowedUserId, notifyChatId }
+let cfg = null;
 let lastUpdateId = 0;
 let notifyChatId = null;
 
-// Trạng thái để phát hiện thay đổi (dùng cho push notification)
 let lastActiveCount = 0;
 let lastLimitRunCount = 0;
-let lastLimitRunMax = 0;
-let stuckSince = null; // Date khi activeCount = 0 với enabled = true
+let stuckSince = null;
 let lowProxyNotified = false;
 let sessionLeadsAtBotStart = 0;
 let botStartTime = Date.now();
 
-// ─── Gửi thông báo push ra Telegram ─────────────────────────────────────────
-
-export async function tgNotify(text) {
-  if (!cfg || !notifyChatId) return;
-  await tgPost('sendMessage', { chat_id: notifyChatId, text, parse_mode: 'HTML' }).catch(() => {});
-}
+// Lịch sử chat để AI nhớ ngữ cảnh (tối đa 10 lượt)
+const chatHistory = [];
 
 // ─── Telegram API ─────────────────────────────────────────────────────────────
 
@@ -51,8 +40,29 @@ async function tgPost(method, body = {}) {
   return r.json();
 }
 
-async function send(chatId, text) {
-  await tgPost('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML' }).catch(() => {});
+// Gửi tin + nút inline tùy chọn
+// buttons: [[{ text, cb }]] — mảng hàng, mỗi hàng là mảng nút
+async function send(chatId, text, buttons = null) {
+  const body = { chat_id: chatId, text, parse_mode: 'HTML' };
+  if (buttons?.length) {
+    body.reply_markup = {
+      inline_keyboard: buttons.map((row) =>
+        row.map((b) => ({ text: b.text, callback_data: b.cb }))
+      ),
+    };
+  }
+  return tgPost('sendMessage', body).catch(() => {});
+}
+
+async function answerCallback(id, text = '') {
+  await tgPost('answerCallbackQuery', { callback_query_id: id, text }).catch(() => {});
+}
+
+// ─── Push notification (dùng từ app.mjs) ─────────────────────────────────────
+
+export async function tgNotify(text, buttons = null) {
+  if (!cfg || !notifyChatId) return;
+  await send(notifyChatId, text, buttons);
 }
 
 // ─── Local app API ────────────────────────────────────────────────────────────
@@ -60,6 +70,14 @@ async function send(chatId, text) {
 async function appGet(path) {
   const r = await fetch(`${APP_BASE}${path}`);
   return r.json();
+}
+
+async function readAutoRefillSettings() {
+  try {
+    const p = join(homedir(), 'Library', 'Application Support', dataDirName, 'autorefill-settings.json');
+    const raw = JSON.parse(await readFile(p, 'utf8'));
+    return raw?.settings ? raw : null;
+  } catch { return null; }
 }
 
 async function appPost(path, body = {}) {
@@ -71,56 +89,84 @@ async function appPost(path, body = {}) {
   return r.json();
 }
 
-// ─── AI Agent mode (Claude API) ───────────────────────────────────────────────
+// ─── Inline keyboard presets ──────────────────────────────────────────────────
 
-const AI_SYSTEM_PROMPT = `Bạn là trợ lý điều khiển app AutoLeadPC qua Telegram.
-App AutoLeadPC tự động điền form leads, chạy trên Mac, dùng proxy và email.
+const BTN_MAIN = [
+  [{ text: '📊 Status', cb: 'status' }, { text: '▶ Run', cb: 'run' }],
+  [{ text: '⏸ Pause', cb: 'pause' }, { text: '🛑 Stop', cb: 'stop' }],
+  [{ text: '📦 Proxy', cb: 'proxy' }, { text: '🛒 Mua Proxy', cb: 'buy' }],
+];
 
-Các hành động bạn CÓ THỂ thực hiện (trả về JSON):
-- status: xem trạng thái hiện tại
-- run: bật/bật lại tự bù slot
+const BTN_RUNNING = [
+  [{ text: '📊 Status', cb: 'status' }, { text: '⏸ Pause', cb: 'pause' }],
+  [{ text: '🛑 Stop', cb: 'stop' }, { text: '📦 Proxy', cb: 'proxy' }],
+];
+
+const BTN_STOPPED = [
+  [{ text: '▶ Run lại', cb: 'run' }, { text: '📊 Status', cb: 'status' }],
+  [{ text: '🛒 Mua Proxy', cb: 'buy' }, { text: '📦 Proxy', cb: 'proxy' }],
+];
+
+// ─── AI Agent ─────────────────────────────────────────────────────────────────
+
+const AI_SYSTEM = `Bạn là trợ lý AI quản lý app AutoLeadPC qua Telegram — app tự động điền form leads trên Mac, dùng proxy và email queue.
+
+Bạn có thể thực hiện các hành động sau:
+- status: xem trạng thái đầy đủ
+- run [n]: bật tự bù (n = số luồng, mặc định giữ nguyên)
 - stop: dừng tất cả
-- pause: tạm dừng (không kill session đang chạy)
-- buy_proxy: mua thêm proxy từ 711proxy
+- pause: tạm dừng mở slot mới (không kill session đang chạy)
 - proxy: xem hàng đợi proxy
 - email: xem hàng đợi email
-- done: xem số leads hoàn thành
+- buy_proxy: mua thêm proxy từ 711proxy
+- done: xem leads hoàn thành
+- speed: tốc độ leads/giờ
 - reset: reset bộ đếm leads
-- speed: xem tốc độ leads/giờ
-- log: xem log gần nhất
-- reply: chỉ trả lời, không làm gì
+- log: log session gần nhất
+- reply: chỉ trả lời bằng text, không thực hiện hành động
 
-Trả về JSON: { "action": "<tên hành động>", "message": "<câu trả lời tiếng Việt ngắn gọn>" }
-Không giải thích thêm ngoài JSON.`;
+Trả về JSON duy nhất theo format:
+{
+  "action": "<action>",
+  "params": { "count": <số nếu cần> },
+  "message": "<câu trả lời tiếng Việt thân thiện ngắn gọn>",
+  "suggestions": ["<nút gợi ý 1>", "<nút gợi ý 2>"]
+}
 
-async function aiDecide(userText, currentState) {
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) return null;
+"suggestions" là tối đa 3 hành động gợi ý tiếp theo phù hợp với ngữ cảnh.
+Chỉ trả về JSON, không giải thích thêm.`;
 
-  const contextStr = currentState
-    ? `Trạng thái hiện tại: active=${currentState.activeCount}/${currentState.targetCount}, enabled=${currentState.enabled}, leads=${currentState.limitRun?.count ?? 0}/${currentState.limitRun?.max ?? 0}, message="${currentState.message}"`
+async function aiChat(userText, appState) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+
+  const ctx = appState
+    ? `[App hiện tại: active=${appState.activeCount}/${appState.targetCount}, enabled=${appState.enabled}, proxy=${appState._proxyAvail ?? '?'}, leads=${appState.limitRun?.count ?? 0}/${appState.limitRun?.max ?? 0}]`
     : '';
+
+  // Thêm vào history
+  chatHistory.push({ role: 'user', content: `${ctx}\n${userText}` });
+  if (chatHistory.length > 10) chatHistory.splice(0, 2);
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
+        'x-api-key': key,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5',
-        max_tokens: 256,
-        system: AI_SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: `${contextStr}\n\nTin nhắn từ người dùng: "${userText}"`,
-        }],
+        max_tokens: 512,
+        system: AI_SYSTEM,
+        messages: chatHistory,
       }),
     });
     const data = await res.json();
     const raw = data.content?.[0]?.text ?? '';
+    // Lưu reply vào history
+    chatHistory.push({ role: 'assistant', content: raw });
     const json = raw.match(/\{[\s\S]*\}/)?.[0];
     return json ? JSON.parse(json) : null;
   } catch {
@@ -128,231 +174,353 @@ async function aiDecide(userText, currentState) {
   }
 }
 
+// Chuyển suggestion text → inline button
+function suggestionsToButtons(suggestions = []) {
+  const MAP = {
+    'status': { text: '📊 Status', cb: 'status' },
+    'run': { text: '▶ Run', cb: 'run' },
+    'stop': { text: '🛑 Stop', cb: 'stop' },
+    'pause': { text: '⏸ Pause', cb: 'pause' },
+    'proxy': { text: '📦 Proxy', cb: 'proxy' },
+    'email': { text: '📧 Email', cb: 'email' },
+    'buy_proxy': { text: '🛒 Mua Proxy', cb: 'buy' },
+    'done': { text: '✅ Leads', cb: 'done' },
+    'speed': { text: '⚡ Speed', cb: 'speed' },
+    'log': { text: '📋 Log', cb: 'log' },
+    'reset': { text: '🔄 Reset', cb: 'reset' },
+    'clear_log': { text: '🗑 Xóa Log', cb: 'clear_log' },
+  };
+  const btns = suggestions.map((s) => MAP[s] || MAP[s.toLowerCase()]).filter(Boolean);
+  if (!btns.length) return null;
+  // Chia thành hàng 3
+  const rows = [];
+  for (let i = 0; i < btns.length; i += 3) rows.push(btns.slice(i, i + 3));
+  return rows;
+}
+
 // ─── Xử lý lệnh ──────────────────────────────────────────────────────────────
 
-async function handleCommand(chatId, userId, text) {
+async function execCommand(chatId, userId, cmdText) {
   if (userId !== cfg.allowedUserId) return;
+  if (notifyChatId === null) notifyChatId = chatId;
 
-  // lưu chat id để push sau này
-  if (notifyChatId === null) {
-    notifyChatId = chatId;
-    cfg.notifyChatId = chatId;
-  }
-
-  const cmd = text.trim().split(/\s+/);
+  const cmd = cmdText.trim().split(/\s+/);
   const name = cmd[0].toLowerCase();
 
-  if (name === '/status' || name === '/s') {
+  if (name === '/status' || name === 'status') {
     const [state, pq, eq] = await Promise.all([
-      appGet('/state'),
-      appGet('/proxy-queue'),
-      appGet('/email-queue'),
+      appGet('/state'), appGet('/proxy-queue'), appGet('/email-queue'),
     ]);
     const running = state.enabled && !state.stopRequested;
-    const elapsedMin = Math.round((Date.now() - botStartTime) / 60000);
-    const leadsNow = state.limitRun?.count ?? 0;
-    const speedPerHour = elapsedMin > 0
-      ? Math.round(((leadsNow - sessionLeadsAtBotStart) / elapsedMin) * 60)
-      : 0;
+    const elapsed = Math.max(1, Math.round((Date.now() - botStartTime) / 60000));
+    const leads = state.limitRun?.count ?? 0;
+    const speed = Math.round(((leads - sessionLeadsAtBotStart) / elapsed) * 60);
     await send(chatId,
       `<b>📊 Trạng thái</b>\n` +
       `▶ Luồng: ${state.activeCount}/${state.targetCount} ${running ? '🟢' : '🔴'}\n` +
-      `📦 Proxy: ${pq.available ?? pq} còn / ${(pq.used ?? 0)} dùng\n` +
+      `📦 Proxy: ${pq.available} còn / ${pq.used} dùng\n` +
       `📧 Email: ${eq.available} còn / ${eq.used} dùng\n` +
-      `✅ Leads hôm nay: ${leadsNow}${state.limitRun?.max > 0 ? '/' + state.limitRun.max : ''}\n` +
-      `⚡ Tốc độ: ~${speedPerHour} leads/giờ\n` +
-      `💬 ${state.message || ''}`
+      `✅ Leads: ${leads}${state.limitRun?.max > 0 ? '/' + state.limitRun.max : ''}\n` +
+      `⚡ Tốc độ: ~${speed} leads/giờ\n` +
+      `💬 ${state.message || ''}`,
+      running ? BTN_RUNNING : BTN_STOPPED,
     );
 
-  } else if (name === '/run' || name === '/resume') {
-    const res = await appPost('/auto-refill', { enabled: true });
-    await send(chatId, `🟢 ${res.results?.[0] || 'Đã bật tự bù.'}`);
-
-  } else if (name === '/stop') {
-    await appPost('/stop');
-    await send(chatId, '🔴 Đã gửi lệnh dừng tất cả.');
-
-  } else if (name === '/pause') {
-    // Tắt tự bù nhưng không kill session đang chạy
-    await appPost('/auto-refill', { enabled: false });
-    await send(chatId, '⏸ Đã tạm dừng mở slot mới. Các trình duyệt đang chạy vẫn tiếp tục.');
-
-  } else if (name === '/proxy') {
-    const pq = await appGet('/proxy-queue');
-    await send(chatId,
-      `<b>📦 Hàng đợi Proxy</b>\n` +
-      `Còn: ${pq.available}\nĐang dùng: ${pq.used}\n` +
-      `Dual stream: ${pq.dualStream ? '✅' : '❌'}`
-    );
-
-  } else if (name === '/email') {
-    const eq = await appGet('/email-queue');
-    await send(chatId,
-      `<b>📧 Hàng đợi Email</b>\nCòn: ${eq.available}\nĐang dùng: ${eq.used}`
-    );
-
-  } else if (name === '/done') {
-    const state = await appGet('/state');
-    const count = state.limitRun?.count ?? 0;
-    const max = state.limitRun?.max ?? 0;
-    await send(chatId, `✅ Leads hoàn thành: <b>${count}</b>${max > 0 ? `/${max}` : ''}`);
-
-  } else if (name === '/limit') {
+  } else if (name === '/run' || name === 'run') {
     const n = parseInt(cmd[1], 10);
-    if (!n || n < 0) {
-      await send(chatId, 'Dùng: /limit <số> — ví dụ /limit 100');
+    if (!n) {
+      // Không có số → hiện menu chọn số luồng
+      const state = await appGet('/state').catch(() => ({}));
+      const cur = state.targetCount || 0;
+      await send(chatId,
+        `▶ <b>Chọn số luồng muốn chạy</b>${cur > 0 ? ` (hiện tại: ${cur})` : ''}:`,
+        [
+          [{ text: '1 luồng', cb: 'run_1' }, { text: '2 luồng', cb: 'run_2' }, { text: '3 luồng', cb: 'run_3' }],
+          [{ text: '5 luồng', cb: 'run_5' }, { text: '8 luồng', cb: 'run_8' }, { text: '10 luồng', cb: 'run_10' }],
+          [{ text: '15 luồng', cb: 'run_15' }, { text: '20 luồng', cb: 'run_20' }, { text: `Giữ nguyên (${cur || '?'})`, cb: 'run_0' }],
+        ],
+      );
+      return;
+    }
+    const saved = await readAutoRefillSettings();
+    if (saved?.settings) {
+      // Fire-and-forget /launch (nó chạy lâu, không await)
+      fetch(`${APP_BASE}/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...saved.settings, requestedCount: n }),
+      }).catch(() => {});
+      await send(chatId,
+        `⏳ Đang khởi động <b>${n} luồng</b>…\nGõ /status sau vài giây để xem tiến trình.`,
+        [[{ text: '📊 Status', cb: 'status' }, { text: '🛑 Stop', cb: 'stop' }]],
+      );
     } else {
-      // Cập nhật limit qua launch với limitRun (cần settings hiện tại)
-      await send(chatId, `Hiện tại limit phải set từ UI khi Launch. Dùng /status để xem count.`);
+      await appPost('/auto-refill', { enabled: true, targetCount: n });
+      await send(chatId,
+        `⚠️ Chưa có cấu hình lưu sẵn.\nVui lòng nhấn <b>Start</b> trong app 1 lần, sau đó <b>/run</b> từ Telegram sẽ tự chạy.`,
+        [[{ text: '📊 Status', cb: 'status' }]],
+      );
     }
 
-  } else if (name === '/buy' || name === '/711buy') {
+  } else if (name === '/run_keep') {
+    const saved = await readAutoRefillSettings();
+    const keepN = (saved?.targetCount) || 1;
+    if (saved?.settings) {
+      fetch(`${APP_BASE}/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...saved.settings, requestedCount: keepN }),
+      }).catch(() => {});
+      await send(chatId,
+        `⏳ Đang khởi động <b>${keepN} luồng</b> (giữ nguyên)…`,
+        [[{ text: '📊 Status', cb: 'status' }, { text: '🛑 Stop', cb: 'stop' }]],
+      );
+    } else {
+      await appPost('/auto-refill', { enabled: true });
+      const cur = await appGet('/state').catch(() => ({}));
+      await send(chatId, `🟢 Đã bật — <b>${cur.targetCount} luồng</b>.`,
+        [[{ text: '📊 Status', cb: 'status' }, { text: '🛑 Stop', cb: 'stop' }]],
+      );
+    }
+
+  } else if (name === '/stop' || name === 'stop') {
+    await appPost('/stop');
+    await send(chatId, '🔴 Đã dừng tất cả.', BTN_STOPPED);
+
+  } else if (name === '/pause' || name === 'pause') {
+    await appPost('/auto-refill', { enabled: false });
+    await send(chatId,
+      '⏸ Đã tạm dừng mở slot mới. Session đang chạy vẫn tiếp tục.',
+      [[{ text: '▶ Tiếp tục', cb: 'run' }, { text: '🛑 Stop hẳn', cb: 'stop' }, { text: '📊 Status', cb: 'status' }]],
+    );
+
+  } else if (name === '/proxy' || name === 'proxy') {
+    const pq = await appGet('/proxy-queue');
+    await send(chatId,
+      `<b>📦 Proxy</b>\nCòn: <b>${pq.available}</b> / Dùng: ${pq.used}\nDual stream: ${pq.dualStream ? '✅' : '❌'}`,
+      pq.available < 20
+        ? [[{ text: '🛒 Mua thêm proxy', cb: 'buy' }, { text: '📊 Status', cb: 'status' }]]
+        : [[{ text: '📊 Status', cb: 'status' }]],
+    );
+
+  } else if (name === '/email' || name === 'email') {
+    const eq = await appGet('/email-queue');
+    await send(chatId,
+      `<b>📧 Email</b>\nCòn: <b>${eq.available}</b> / Dùng: ${eq.used}`,
+      [[{ text: '📊 Status', cb: 'status' }]],
+    );
+
+  } else if (name === '/done' || name === 'done') {
+    const state = await appGet('/state');
+    const c = state.limitRun?.count ?? 0, m = state.limitRun?.max ?? 0;
+    await send(chatId, `✅ Leads: <b>${c}</b>${m > 0 ? `/${m}` : ''}`,
+      [[{ text: '⚡ Speed', cb: 'speed' }, { text: '📊 Status', cb: 'status' }]],
+    );
+
+  } else if (name === '/speed' || name === 'speed') {
+    const state = await appGet('/state');
+    const leads = state.limitRun?.count ?? 0;
+    const elapsed = Math.max(1, Math.round((Date.now() - botStartTime) / 60000));
+    const speed = Math.round(((leads - sessionLeadsAtBotStart) / elapsed) * 60);
+    await send(chatId,
+      `⚡ ~<b>${speed} leads/giờ</b>\n(${leads - sessionLeadsAtBotStart} leads trong ${elapsed} phút)`,
+      [[{ text: '✅ Leads', cb: 'done' }, { text: '📊 Status', cb: 'status' }]],
+    );
+
+  } else if (name === '/buy' || name === 'buy') {
     const ar = await appGet('/711proxy/autorefill');
     if (!ar || ar.error) {
-      await send(chatId, '⚠️ Chưa cấu hình 711proxy auto-refill.');
+      await send(chatId, '⚠️ Chưa cấu hình 711proxy auto-refill.', BTN_MAIN);
       return;
     }
     const res = await appPost('/711proxy/generate', {
-      count: ar.count ?? 50,
-      region: ar.region ?? 'US',
-      sessTime: ar.sessTime ?? 20,
-      sessAuto: ar.sessAuto ?? false,
+      count: ar.count ?? 50, region: ar.region ?? 'US',
+      sessTime: ar.sessTime ?? 20, sessAuto: ar.sessAuto ?? false,
     });
     const added = res.added ?? res.proxyCount ?? '?';
-    await send(chatId, `🛒 Đã mua proxy: +${added} proxy được thêm vào hàng đợi.`);
-
-  } else if (name === '/speed') {
-    const state = await appGet('/state');
-    const leadsNow = state.limitRun?.count ?? 0;
-    const elapsedMin = Math.round((Date.now() - botStartTime) / 60000) || 1;
-    const speed = Math.round(((leadsNow - sessionLeadsAtBotStart) / elapsedMin) * 60);
-    await send(chatId, `⚡ Tốc độ: ~${speed} leads/giờ (${leadsNow - sessionLeadsAtBotStart} leads trong ${elapsedMin} phút)`);
-
-  } else if (name === '/reset') {
-    await appPost('/limit-run/reset');
-    sessionLeadsAtBotStart = 0;
-    botStartTime = Date.now();
-    await send(chatId, '🔄 Đã reset bộ đếm leads về 0.');
-
-  } else if (name === '/log') {
-    const state = await appGet('/state');
-    const sessions = (await appGet('/browser-logs').catch(() => ({ sessions: [] }))).sessions ?? [];
-    const last3 = sessions.slice(0, 3).map((s, i) => {
-      const lastLog = s.logs?.slice(-1)[0];
-      return `${i + 1}. [${s.ip ?? '?'}] ${lastLog?.type ?? 'n/a'}: ${String(lastLog?.detail ?? lastLog?.url ?? '').slice(0, 60)}`;
-    });
-    await send(chatId,
-      `<b>📋 Log gần nhất</b>\n${last3.join('\n') || 'Chưa có session.'}\n\n💬 ${state.message}`
+    await send(chatId, `🛒 Đã mua <b>${added} proxy</b> từ 711proxy.`,
+      [[{ text: '📦 Xem proxy', cb: 'proxy' }, { text: '📊 Status', cb: 'status' }]],
     );
 
-  } else if (name === '/help' || name === '/start') {
+  } else if (name === '/reset' || name === 'reset') {
+    await appPost('/limit-run/reset');
+    sessionLeadsAtBotStart = 0; botStartTime = Date.now();
+    await send(chatId, '🔄 Reset bộ đếm leads về 0.', [[{ text: '📊 Status', cb: 'status' }]]);
+
+  } else if (name === '/log' || name === 'log') {
+    const [state, logs] = await Promise.all([
+      appGet('/state'),
+      appGet('/browser-logs').catch(() => ({ sessions: [] })),
+    ]);
+    const sessions = logs.sessions ?? [];
+    const lines = sessions.slice(0, 3).map((s, i) => {
+      const last = s.logs?.slice(-1)[0];
+      return `${i + 1}. [${s.ip ?? '?'}] ${last?.type ?? 'n/a'}: ${String(last?.detail ?? last?.url ?? '').slice(0, 60)}`;
+    });
+    await send(chatId,
+      `<b>📋 Log</b>\n${lines.join('\n') || 'Chưa có session.'}\n\n💬 ${state.message}`,
+      [[{ text: '📊 Status', cb: 'status' }, { text: '▶ Run', cb: 'run' }, { text: '🗑 Xóa Log', cb: 'clear_log' }]],
+    );
+
+  } else if (name === '/clear-log' || name === '/clearlog' || name === 'clear_log') {
+    const res = await appPost('/browser-logs/clear');
+    await send(chatId,
+      res.success ? '🗑 Đã xóa toàn bộ log và file HTML.' : `⚠️ Lỗi: ${res.error}`,
+      [[{ text: '📋 Log', cb: 'log' }, { text: '📊 Status', cb: 'status' }]],
+    );
+
+  } else if (name === '/help' || name === '/start' || name === 'help') {
     const hasAi = !!process.env.ANTHROPIC_API_KEY;
     await send(chatId,
-      `<b>🤖 AutoLeadPC Bot</b>${hasAi ? ' <i>(AI mode bật)</i>' : ''}\n\n` +
-      `/status — Trạng thái đầy đủ\n` +
-      `/run — Bật tự bù slot\n` +
-      `/pause — Tạm dừng (không kill session)\n` +
-      `/stop — Dừng tất cả\n` +
-      `/proxy — Hàng đợi proxy\n` +
-      `/email — Hàng đợi email\n` +
-      `/done — Leads hoàn thành\n` +
-      `/speed — Tốc độ leads/giờ\n` +
-      `/buy — Mua thêm proxy 711\n` +
-      `/reset — Reset bộ đếm leads\n` +
-      `/log — Log session gần nhất\n\n` +
-      (hasAi ? '💬 Hoặc chat tự nhiên — AI sẽ hiểu và thực hiện.' : '💡 Set ANTHROPIC_API_KEY để bật chế độ chat tự nhiên.')
+      `<b>🤖 AutoLeadPC Bot</b>${hasAi ? ' <i>+ AI</i>' : ''}\n\n` +
+      (hasAi
+        ? '💬 Chat tự nhiên — AI hiểu và thực hiện.\nHoặc dùng các lệnh:\n\n'
+        : 'Các lệnh:\n\n') +
+      `/status /run [n] /pause /stop\n/proxy /email /buy\n/done /speed /reset /log`,
+      BTN_MAIN,
     );
 
   } else if (!name.startsWith('/')) {
-    // Tin nhắn tự nhiên → AI agent xử lý
-    let state = null;
-    try { state = await appGet('/state'); } catch {}
+    // Tin nhắn tự nhiên → keyword match trước, AI sau nếu có key
+    const t = cmdText.toLowerCase();
 
-    const decision = await aiDecide(text, state);
-    if (!decision) {
-      await send(chatId, '🤔 Không hiểu yêu cầu. Gõ /help để xem danh sách lệnh.');
+    // Keyword matching tiếng Việt (không cần API key)
+    const KW = [
+      { pat: /\b(chạy|run|bật|start|khởi động|mở)\b.*(\d+)/, action: (m) => `/run ${m[2]}` },
+      { pat: /\b(chạy|run|bật|start|mở)\b(?!.*\d)/, action: () => '/run' },
+      { pat: /\b(dừng|stop|tắt|kết thúc|ngừng)\b/, action: () => '/stop' },
+      { pat: /\b(tạm dừng|pause|nghỉ)\b/, action: () => '/pause' },
+      { pat: /\b(proxy|proxies)\b.*\b(còn|bao nhiêu|status|xem)\b|\b(xem|bao nhiêu)\b.*\bproxy\b/, action: () => '/proxy' },
+      { pat: /\b(mua|buy|nạp|thêm)\b.*\bproxy\b|\bproxy\b.*\b(mua|buy|nạp)\b/, action: () => '/buy' },
+      { pat: /\b(email)\b.*\b(còn|bao nhiêu|xem)\b|\b(xem|bao nhiêu)\b.*\bemail\b/, action: () => '/email' },
+      { pat: /\b(lead|leads|kết quả|hoàn thành|done)\b/, action: () => '/done' },
+      { pat: /\b(tốc độ|speed|nhanh|chậm)\b/, action: () => '/speed' },
+      { pat: /\b(log|nhật ký|lịch sử)\b.*\b(xem|xóa|clear)\b|\b(xóa|clear)\b.*\blog\b/, action: (m, txt) => txt.includes('xóa') || txt.includes('clear') ? '/clear-log' : '/log' },
+      { pat: /\b(trạng thái|status|tình trạng|đang làm gì|thế nào)\b/, action: () => '/status' },
+      { pat: /\b(reset|đặt lại)\b.*\b(lead|bộ đếm|count)\b/, action: () => '/reset' },
+    ];
+
+    let matched = null;
+    for (const { pat, action } of KW) {
+      const m = t.match(pat);
+      if (m) { matched = action(m, t); break; }
+    }
+
+    if (matched) {
+      await execCommand(chatId, userId, matched);
       return;
     }
 
-    const aiMsg = decision.message || '';
-    // Thực hiện action AI quyết định
-    switch (decision.action) {
-      case 'status':   await handleCommand(chatId, userId, '/status'); break;
-      case 'run':      await handleCommand(chatId, userId, '/run'); break;
-      case 'stop':     await handleCommand(chatId, userId, '/stop'); break;
-      case 'pause':    await handleCommand(chatId, userId, '/pause'); break;
-      case 'buy_proxy': await handleCommand(chatId, userId, '/buy'); break;
-      case 'proxy':    await handleCommand(chatId, userId, '/proxy'); break;
-      case 'email':    await handleCommand(chatId, userId, '/email'); break;
-      case 'done':     await handleCommand(chatId, userId, '/done'); break;
-      case 'speed':    await handleCommand(chatId, userId, '/speed'); break;
-      case 'reset':    await handleCommand(chatId, userId, '/reset'); break;
-      case 'log':      await handleCommand(chatId, userId, '/log'); break;
-      default:
-        if (aiMsg) await send(chatId, aiMsg);
+    // Không match keyword → thử AI
+    let state = null;
+    try {
+      const [s, pq] = await Promise.all([appGet('/state'), appGet('/proxy-queue')]);
+      state = { ...s, _proxyAvail: pq.available };
+    } catch {}
+
+    const decision = await aiChat(cmdText, state);
+    if (!decision) {
+      await send(chatId,
+        '🤔 Không hiểu yêu cầu. Chọn thao tác bên dưới hoặc gõ /help:',
+        BTN_MAIN,
+      );
+      return;
     }
-    // Nếu AI có message riêng (giải thích) + action → gửi thêm
-    if (aiMsg && !['reply', 'status', 'proxy', 'email', 'done', 'speed', 'log'].includes(decision.action)) {
-      await send(chatId, `💬 ${aiMsg}`);
+
+    // Thực hiện action
+    const actionMap = {
+      status: '/status', run: decision.params?.count ? `/run ${decision.params.count}` : '/run',
+      stop: '/stop', pause: '/pause', proxy: '/proxy', email: '/email',
+      buy_proxy: '/buy', done: '/done', speed: '/speed', reset: '/reset', log: '/log', clear_log: '/clear-log',
+    };
+    if (decision.action !== 'reply' && actionMap[decision.action]) {
+      await execCommand(chatId, userId, actionMap[decision.action]);
+    }
+
+    // Gửi message của AI + gợi ý
+    if (decision.message && decision.action !== 'status') {
+      const suggBtns = suggestionsToButtons(decision.suggestions ?? []);
+      await send(chatId, `💬 ${decision.message}`, suggBtns);
+    } else if (decision.action === 'reply') {
+      const suggBtns = suggestionsToButtons(decision.suggestions ?? []);
+      await send(chatId, decision.message || '...', suggBtns || BTN_MAIN);
     }
   }
 }
 
-// ─── Auto push notifications ──────────────────────────────────────────────────
+// ─── Xử lý callback (nút bấm) ────────────────────────────────────────────────
+
+async function handleCallback(chatId, userId, callbackId, data) {
+  await answerCallback(callbackId);
+  // run_N → /run N
+  if (data.startsWith('run_')) {
+    const n = parseInt(data.slice(4), 10);
+    await execCommand(chatId, userId, n > 0 ? `/run ${n}` : '/run_keep');
+  } else {
+    await execCommand(chatId, userId, data);
+  }
+}
+
+// ─── Push notifications ───────────────────────────────────────────────────────
 
 async function checkAndNotify() {
   if (!notifyChatId) return;
-
   try {
     const [state, pq] = await Promise.all([appGet('/state'), appGet('/proxy-queue')]);
-
     const active = state.activeCount ?? 0;
     const enabled = state.enabled && !state.stopRequested;
     const proxyAvail = pq.available ?? 0;
     const limitCount = state.limitRun?.count ?? 0;
     const limitMax = state.limitRun?.max ?? 0;
 
-    // Cảnh báo proxy thấp (< 10)
     if (proxyAvail < 10 && proxyAvail > 0 && !lowProxyNotified) {
       lowProxyNotified = true;
-      await tgNotify(`⚠️ <b>Proxy sắp hết!</b> Còn ${proxyAvail} proxy trong hàng đợi. Dùng /buy để mua thêm.`);
-    } else if (proxyAvail >= 15) {
-      lowProxyNotified = false; // reset để notify lại lần sau
-    }
+      await tgNotify(
+        `⚠️ <b>Proxy sắp hết!</b> Còn ${proxyAvail} proxy.`,
+        [[{ text: '🛒 Mua thêm ngay', cb: 'buy' }, { text: '📊 Status', cb: 'status' }]],
+      );
+    } else if (proxyAvail >= 15) lowProxyNotified = false;
 
-    // Cảnh báo proxy = 0
     if (proxyAvail === 0 && enabled && lastActiveCount > 0) {
-      await tgNotify(`🚫 <b>Hết proxy!</b> Không còn proxy nào. Luồng sẽ dừng khi hết session hiện tại.`);
+      await tgNotify(
+        `🚫 <b>Hết proxy!</b> Luồng sẽ dừng khi xong session hiện tại.`,
+        [[{ text: '🛒 Mua proxy', cb: 'buy' }, { text: '🛑 Stop', cb: 'stop' }]],
+      );
     }
 
-    // Phát hiện stuck: enabled nhưng 0 active > 10 phút
     if (enabled && active === 0) {
       if (!stuckSince) stuckSince = Date.now();
       else if (Date.now() - stuckSince > 10 * 60 * 1000) {
-        await tgNotify(`⚠️ <b>Có thể bị stuck!</b> Tự bù đang bật nhưng 0 trình duyệt hoạt động trong 10+ phút.\nDùng /run để thử khởi động lại.`);
-        stuckSince = Date.now() + 15 * 60 * 1000; // chờ 15p mới báo lại
+        await tgNotify(
+          `⚠️ <b>Có thể bị stuck!</b> 0 luồng đang chạy trong 10+ phút.`,
+          [[{ text: '▶ Chạy lại', cb: 'run' }, { text: '🛑 Stop', cb: 'stop' }, { text: '📊 Status', cb: 'status' }]],
+        );
+        stuckSince = Date.now() + 15 * 60 * 1000;
       }
-    } else {
-      stuckSince = null;
-    }
+    } else stuckSince = null;
 
-    // Thông báo khi đạt limit
     if (limitMax > 0 && limitCount >= limitMax && lastLimitRunCount < limitMax) {
-      await tgNotify(`🎉 <b>Hoàn thành!</b> Đã đạt ${limitCount}/${limitMax} leads. Luồng đã tự dừng.`);
+      await tgNotify(
+        `🎉 <b>Xong!</b> Đạt ${limitCount}/${limitMax} leads.`,
+        [[{ text: '▶ Chạy tiếp', cb: 'run' }, { text: '🔄 Reset', cb: 'reset' }, { text: '📊 Status', cb: 'status' }]],
+      );
     }
 
-    // Thông báo mỗi 50 leads (nếu không có limit)
     if (limitMax === 0 && limitCount > 0 && limitCount % 50 === 0 && limitCount !== lastLimitRunCount) {
-      await tgNotify(`✅ Đã hoàn thành <b>${limitCount} leads</b>. ⚡ Tốc độ: ~${Math.round(((limitCount - sessionLeadsAtBotStart) / Math.max(1, (Date.now() - botStartTime) / 60000)) * 60)} leads/giờ`);
+      const elapsed = Math.max(1, (Date.now() - botStartTime) / 60000);
+      const speed = Math.round(((limitCount - sessionLeadsAtBotStart) / elapsed) * 60);
+      await tgNotify(
+        `✅ <b>${limitCount} leads</b> hoàn thành. ⚡ ~${speed}/giờ`,
+        [[{ text: '📊 Status', cb: 'status' }, { text: '⚡ Speed', cb: 'speed' }]],
+      );
     }
 
     lastActiveCount = active;
     lastLimitRunCount = limitCount;
-    lastLimitRunMax = limitMax;
-  } catch {} // poll lỗi → im lặng
+  } catch {}
 }
 
-// ─── Polling loop ─────────────────────────────────────────────────────────────
+// ─── Poll loop ────────────────────────────────────────────────────────────────
 
 async function pollUpdates() {
   try {
@@ -360,10 +528,16 @@ async function pollUpdates() {
     if (!data.ok || !data.result) return;
     for (const upd of data.result) {
       lastUpdateId = upd.update_id;
+
+      if (upd.callback_query) {
+        const cq = upd.callback_query;
+        await handleCallback(cq.message.chat.id, cq.from.id, cq.id, cq.data);
+        continue;
+      }
+
       const msg = upd.message;
       if (!msg?.text) continue;
-      const text = msg.text.split('@')[0]; // strip /cmd@botname
-      await handleCommand(msg.chat.id, msg.from.id, text);
+      await execCommand(msg.chat.id, msg.from.id, msg.text.split('@')[0]);
     }
   } catch {
     await new Promise((r) => setTimeout(r, 3000));
@@ -380,33 +554,26 @@ export async function startTelegramBot() {
     cfg = raw;
     notifyChatId = raw.notifyChatId ?? null;
     console.log('[TGBot] Đã khởi động, allowedUserId:', cfg.allowedUserId);
-  } catch {
-    return; // file không tồn tại → không bật bot
-  }
+  } catch { return; }
 
-  // Lấy lead count ban đầu để tính speed chính xác
   try {
     const state = await appGet('/state');
     sessionLeadsAtBotStart = state.limitRun?.count ?? 0;
     lastLimitRunCount = sessionLeadsAtBotStart;
   } catch {}
 
-  // Long poll loop
-  const poll = async () => {
-    try {
-      await pollUpdates();
-    } catch {}
-    setTimeout(poll, 1000);
-  };
+  const poll = async () => { try { await pollUpdates(); } catch {} setTimeout(poll, 1000); };
   void poll();
 
-  // Push notification check mỗi 30s
   setInterval(checkAndNotify, 30_000);
 
-  // Thông báo bot đã sẵn sàng
-  // (chờ 3s cho notifyChatId được set từ message đầu tiên, hoặc dùng config)
   if (cfg.notifyChatId) {
     notifyChatId = cfg.notifyChatId;
-    await tgNotify(`🤖 <b>AutoLeadPC đã khởi động</b> lúc ${new Date().toLocaleTimeString('vi-VN')}\nGõ /status để xem trạng thái.`);
+    const state = await appGet('/state').catch(() => null);
+    const running = state?.enabled && !state?.stopRequested;
+    await tgNotify(
+      `🤖 <b>AutoLeadPC đã khởi động</b> lúc ${new Date().toLocaleTimeString('vi-VN')}`,
+      running ? BTN_RUNNING : BTN_STOPPED,
+    );
   }
 }

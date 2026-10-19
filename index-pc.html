@@ -1441,6 +1441,7 @@
               <input type="password" id="inp711Pass" placeholder="Mật khẩu" style="width:130px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;" autocomplete="current-password">
             </div>
             <button type="button" class="win-btn win-btn-primary" style="font-size:12px;" onclick="proxy711Login()">Đăng nhập</button>
+            <button type="button" class="win-btn" id="btn711Whitelist" style="font-size:12px;" onclick="proxy711UpdateWhitelist()" title="Tự động thêm IP mạng hiện tại vào whitelist 711proxy">Thêm IP Whitelist</button>
             <span id="lbl711Balance" style="font-size:12px;color:#555;align-self:center;min-width:80px;"></span>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px;">
@@ -1488,6 +1489,7 @@
                 <span id="lbProxyUsed">0</span> used
               </span>
               <button type="button" class="win-btn" style="padding:2px 10px;margin-left:4px;gap:4px;" onclick="resetProxyQueue()" title="Reset lại trạng thái các proxy trong danh sách về ban đầu">🔄 Reset hàng đợi</button>
+              <button type="button" class="win-btn" style="padding:2px 10px;margin-left:4px;gap:4px;color:#b91c1c;" onclick="clearProxyQueue()" title="Xóa toàn bộ proxy trong hàng đợi và ô nhập để nạp danh sách mới">🗑️ Xóa hết proxy</button>
             </div>
           </div>
           <textarea id="txtDashboardProxy" class="win-textarea" style="width:100%;height:140px;" placeholder="Dán danh sách proxy vào đây (định dạng: IP:Port hoặc IP:Port:User:Pass, mỗi dòng 1 proxy)..."></textarea>
@@ -2262,6 +2264,7 @@
 
           <div style="display:flex;gap:6px;align-items:center;">
             <span id="leadLastUpdatedText" style="font-size:10px;color:#64748b;">Chưa cập nhật</span>
+            <button type="button" class="win-btn" onclick="exportLeadStatsJson()" style="padding:2px 8px;font-size:11px;" title="Tải file JSON danh sách IP có lead kèm số màn và số lần nhảy trang">📥 Xuất Lead IP</button>
             <button type="button" class="win-btn win-btn-primary" id="btnRefreshToffersLeads" onclick="fetchToffersLeads(true)" style="padding:2px 12px;font-size:11px;gap:4px;">🔄 Làm mới</button>
             <button type="button" class="win-btn" onclick="toggleLeadCookieConfig()" style="padding:2px 8px;font-size:11px;">⚙️ Cookie</button>
           </div>
@@ -2286,19 +2289,20 @@
               <tr>
                 <th style="width:36px;text-align:center;">#</th>
                 <th style="width:75px;">ID</th>
-                <th style="width:240px;">Tên Offer</th>
-                <th style="width:75px;text-align:center;">Point</th>
-                <th style="width:130px;">Địa chỉ IP</th>
+                <th style="width:230px;">Tên Offer</th>
+                <th style="width:70px;text-align:center;">Point</th>
+                <th style="width:125px;">Địa chỉ IP</th>
+                <th style="width:165px;text-align:center;">Tiến trình (Màn / Nhảy)</th>
                 <th style="width:55px;text-align:center;">Geo</th>
-                <th style="width:150px;">Thời gian Lead</th>
-                <th style="width:160px;">Click ID</th>
-                <th style="width:130px;">Thành viên</th>
+                <th style="width:140px;">Thời gian Lead</th>
+                <th style="width:140px;">Click ID</th>
+                <th style="width:120px;">Thành viên</th>
                 <th style="width:55px;text-align:center;">Net</th>
               </tr>
             </thead>
             <tbody id="dgvToffersLeadsBody">
               <tr>
-                <td colspan="10" style="text-align:center;padding:30px;color:#64748b;">
+                <td colspan="11" style="text-align:center;padding:30px;color:#64748b;">
                   <div style="font-size:24px;margin-bottom:6px;">⏳</div>
                   <div>Đang tải dữ liệu từ toffers.top...</div>
                 </td>
@@ -2795,12 +2799,36 @@
       if (res && res.ok) {
         document.getElementById('inp711Pass').value = '';
         document.getElementById('lbl711Balance').textContent = 'Đã đăng nhập ✓';
+        if (res.whitelist && res.whitelist.ok) {
+          document.getElementById('lbl711Status').textContent = `Đã whitelist IP ${res.whitelist.ip} ✓`;
+        }
         proxy711FetchBalance();
       } else {
         document.getElementById('lbl711Balance').textContent = '';
         showWinAlert('Lỗi đăng nhập: ' + (res?.error || 'Không xác định'));
       }
     }
+
+    async function proxy711UpdateWhitelist() {
+      const btn = document.getElementById('btn711Whitelist');
+      if (btn) btn.disabled = true;
+      document.getElementById('lbl711Status').textContent = 'Đang kiểm tra & cập nhật IP whitelist...';
+      try {
+        const res = await api('/711proxy/update-whitelist', { method: 'POST' });
+        if (res && res.ok) {
+          document.getElementById('lbl711Status').textContent = `Whitelist thành công IP ${res.ip} ✓`;
+          showWinAlert(`Đã thêm IP ${res.ip} vào whitelist 711proxy thành công! Giờ bạn có thể tạo proxy bình thường.`);
+        } else {
+          document.getElementById('lbl711Status').textContent = 'Lỗi whitelist';
+          showWinAlert(res?.error || 'Không thể cập nhật whitelist.');
+        }
+      } catch (err) {
+        showWinAlert('Lỗi: ' + (err.message || err));
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+    window.proxy711UpdateWhitelist = proxy711UpdateWhitelist;
 
     async function proxy711FetchBalance() {
       const res = await api('/711proxy/balance');
@@ -2860,6 +2888,22 @@
       document.getElementById('lbStatus').textContent = res.message || 'Reset proxy complete.';
       await loadProxyQueue();
     }
+
+    async function clearProxyQueue() {
+      if (!confirm('Bạn có chắc chắn muốn xóa hết tất cả proxy trong hàng đợi không?')) return;
+      try {
+        const res = await api('/proxy-queue/clear', { method: 'POST' });
+        document.getElementById('txtDashboardProxy').value = '';
+        document.getElementById('lbProxyCount').textContent = '0';
+        document.getElementById('lbProxyUsed').textContent = '0';
+        document.getElementById('lbStatus').textContent = res?.message || 'Đã xóa tất cả proxy.';
+        await loadProxyQueue();
+        showWinAlert(res?.message || 'Đã xóa hết tất cả proxy trong hàng đợi thành công.');
+      } catch (err) {
+        showWinAlert('Lỗi xóa proxy: ' + (err.message || err));
+      }
+    }
+    window.clearProxyQueue = clearProxyQueue;
 
     async function loadProxyType(type) {
       const map = {
@@ -3677,6 +3721,10 @@
       const state = await api('/state');
       if (!state || state.error) return;
 
+      if (state.leadStats) {
+        window.cachedLeadStats = Object.assign(window.cachedLeadStats || {}, state.leadStats);
+      }
+
       const sessions = state.chromeSessions || [];
       _updateScreenSlots(sessions);
       document.getElementById('tabRunCount').textContent = sessions.length;
@@ -3684,7 +3732,7 @@
 
       // Update Tab Running Stat Chips
       const totalThreads = sessions.length;
-      const totalLeads = sessions.filter(s => s.leadCheckStatus === 'matched').length;
+      const totalLeads = sessions.filter(s => s.leadCheckStatus === 'matched' || s.leadCheckStatus === 'confirmed').length;
       const totalAi = sessions.filter(s => s.aiRunning).length;
       const elTh = document.getElementById('runStatThreads');
       if (elTh) elTh.textContent = totalThreads;
@@ -3767,11 +3815,12 @@
       tbody.innerHTML = '';
       visibleSessions.forEach((s, idx) => {
         const tr = document.createElement('tr');
-        const leadBadge = s.leadCheckStatus === 'matched' 
-          ? '<span class="run-status-pill status-lead">🎯 Lead</span>'
+        const screenLabel = `Màn ${s.currentScreen || ((s.completedScreens || 0) + 1)} • ${s.pageJumps || 0} nhảy`;
+        const leadBadge = s.leadCheckStatus === 'confirmed' || s.leadCheckStatus === 'matched' 
+          ? `<span class="run-status-pill status-lead" title="Đã có lead! Đang ở ${screenLabel}">🎯 ${screenLabel}</span>`
           : s.leadCheckStatus === 'checking'
           ? '<span class="run-status-pill status-checking"><span class="spin-dot"></span> Checking</span>'
-          : '<span class="run-status-pill status-idle">--</span>';
+          : `<span class="run-status-pill status-idle" title="Tiến trình hiện tại: ${screenLabel}">${screenLabel}</span>`;
 
         const actionText = s.aiRunning
           ? `<span class="run-ai-pill">🤖 AI</span> <span class="run-action-text">${escHtml(s.action || 'Đang hỗ trợ điền form')}</span>`
@@ -4898,6 +4947,9 @@
 
         if (res && res.success) {
           toffersLeadsData = res.results || [];
+          if (res.leadStats) {
+            window.cachedLeadStats = Object.assign(window.cachedLeadStats || {}, res.leadStats);
+          }
           renderToffersLeads(res);
           resetLeadCountdown();
         } else {
@@ -4918,6 +4970,9 @@
     window.fetchToffersLeads = fetchToffersLeads;
 
     function renderToffersLeads(data) {
+      if (data.leadStats) {
+        window.cachedLeadStats = Object.assign(window.cachedLeadStats || {}, data.leadStats);
+      }
       const point = (data.point !== null && data.point !== undefined) ? data.point : '--';
       const results = data.results || [];
 
@@ -4984,7 +5039,7 @@
       if (list.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="10" style="text-align:center;padding:30px;color:#64748b;">
+            <td colspan="11" style="text-align:center;padding:30px;color:#64748b;">
               <div style="font-size:24px;margin-bottom:6px;">📭</div>
               <div>${toffersLeadsData.length === 0 ? 'Chưa có lead nào được ghi nhận trên toffers.top' : 'Không tìm thấy lead phù hợp với từ khóa'}</div>
             </td>
@@ -4992,6 +5047,8 @@
         `;
         return;
       }
+
+      const leadStats = window.cachedLeadStats || {};
 
       tbody.innerHTML = list.map((item, idx) => {
         const timeStr = item.timelead ? new Date(Number(item.timelead) * 1000).toLocaleString('vi-VN') : '--';
@@ -5002,6 +5059,19 @@
           ? `<span style="display:inline-block;padding:1px 6px;border-radius:3px;background:#dcfce7;color:#15803d;font-weight:700;font-size:11px;">+${item.point}</span>`
           : `<span style="display:inline-block;padding:1px 6px;border-radius:3px;background:#f1f5f9;color:#64748b;font-size:11px;">${item.point || '0'}</span>`;
 
+        const cleanIp = String(item.ip || '').trim().replace(/:\d+$/, '').trim();
+        const ipStat = leadStats[cleanIp] || leadStats[String(item.ip || '').trim()] || null;
+        let progressBadge = `<span style="color:#94a3b8;font-size:11px;">--</span>`;
+        if (ipStat) {
+          const screenNum = ipStat.screen || ipStat.completedScreens || 0;
+          const jumpNum = ipStat.jumpCount || ipStat.pageJumps || 0;
+          progressBadge = `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:4px;background:#e0f2fe;color:#0369a1;font-weight:600;font-size:11px;border:1px solid #bae6fd;" title="IP đã điền đến màn ${screenNum} và chuyển/nhảy trang ${jumpNum} lần">
+            <span>📄 Màn ${screenNum}</span>
+            <span style="color:#0284c7;">•</span>
+            <span>🔀 ${jumpNum} nhảy</span>
+          </span>`;
+        }
+
         return `
           <tr style="cursor:default;">
             <td style="text-align:center;color:#64748b;font-size:11px;">${idx + 1}</td>
@@ -5009,6 +5079,7 @@
             <td style="font-weight:600;color:#0f172a;" title="${escHtml(item.nameoff || '')}">${escHtml(item.nameoff || '--')}</td>
             <td style="text-align:center;">${pointBadge}</td>
             <td><code style="font-weight:bold;color:#1e293b;font-size:11px;background:#f1f5f9;padding:1px 4px;border-radius:2px;">${escHtml(item.ip || '')}</code></td>
+            <td style="text-align:center;">${progressBadge}</td>
             <td style="text-align:center;font-size:11px;" title="${escHtml(item.geo || '')}">${flag} ${escHtml(item.geo || '')}</td>
             <td style="color:#475569;font-size:11px;">${timeStr}</td>
             <td style="color:#64748b;font-size:10px;font-family:monospace;" title="${escHtml(item.clickid || '')}">${escHtml(item.clickid ? item.clickid.slice(0, 16) + '...' : '--')}</td>
@@ -5019,6 +5090,31 @@
       }).join('');
     }
     window.filterToffersLeadsTable = filterToffersLeadsTable;
+
+    async function exportLeadStatsJson() {
+      try {
+        const res = await api('/lead-stats');
+        const stats = (res && res.stats) ? res.stats : (window.cachedLeadStats || {});
+        const count = (res && res.count !== undefined) ? res.count : Object.keys(stats).length;
+        if (count === 0 && Object.keys(stats).length === 0) {
+          showWinAlert('Hiện chưa có dữ liệu IP lead nào được lưu.');
+          return;
+        }
+
+        const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(stats, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute('href', dataStr);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        downloadAnchor.setAttribute('download', `autolead-lead-ip-stats-${dateStr}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+      } catch (err) {
+        console.error('Lỗi xuất dữ liệu Lead IP:', err);
+        showWinAlert('Lỗi xuất dữ liệu: ' + (err.message || err));
+      }
+    }
+    window.exportLeadStatsJson = exportLeadStatsJson;
 
     function toggleLeadAutoRefresh(enabled) {
       if (leadAutoRefreshTimer) {

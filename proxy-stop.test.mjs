@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { autoRefill, closeActiveBrowsers, queueAutomaticRefill, getDeadOrBlockedReason, watchTrafficBlockedPage } from './app.mjs';
+import { autoRefill, closeActiveBrowsers, queueAutomaticRefill, getDeadOrBlockedReason, watchTrafficBlockedPage, proxyQueue, clearAllProxyQueue } from './app.mjs';
 
 test('closeActiveBrowsers sets stopRequested and disables autoRefill completely', async () => {
   autoRefill.enabled = true;
@@ -81,4 +81,19 @@ test('watchTrafficBlockedPage does not re-enable autoRefill if stopRequested is 
   assert.equal(autoRefill.stopRequested, true, 'stopRequested must stay true');
   assert.equal(autoRefill.enabled, false, 'enabled must stay false');
   assert.equal(fakeSession.suppressAutoRefill, true, 'suppressAutoRefill must be set to true');
+});
+
+test('clearAllProxyQueue completely empties available and used queues and resets state', async () => {
+  proxyQueue.available = ['1.1.1.1:8080', '2.2.2.2:8080'];
+  proxyQueue.used = ['3.3.3.3:8080'];
+
+  const result = await clearAllProxyQueue();
+
+  assert.equal(result.success, true);
+  assert.equal(result.count, 3);
+  assert.equal(result.available, 0);
+  assert.equal(result.used, 0);
+  assert.equal(proxyQueue.available.length, 0);
+  assert.equal(proxyQueue.used.length, 0);
+  assert.match(result.message, /Đã xóa hết tất cả 3 proxy/);
 });

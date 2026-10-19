@@ -60,6 +60,11 @@ import {
   isLeadPresent,
   normalizeIpAddress,
   LeadApiError,
+  leadIpStatsMap,
+  recordLeadIpStats,
+  getLeadIpStats,
+  initLeadIpStats,
+  clearLeadIpStats,
 } from './lead-check.mjs';
 
 process.on('uncaughtException', (err) => {
@@ -686,6 +691,36 @@ async function loadAutoRefillSettings() {
 }
 
 const toffersConfigPath = join(appDataDirectory, 'toffers-config.json');
+export const leadStatsPath = join(appDataDirectory, 'lead-stats.json');
+let saveLeadStatsTimer = null;
+
+export async function loadLeadStats() {
+  try {
+    const raw = JSON.parse(await readFile(leadStatsPath, 'utf8'));
+    initLeadIpStats(raw);
+    console.log(`[LeadStats] Đã tải ${leadIpStatsMap.size} IP có lead từ ${leadStatsPath}`);
+  } catch {}
+}
+
+export function queueSaveLeadStats() {
+  if (saveLeadStatsTimer) return;
+  saveLeadStatsTimer = setTimeout(async () => {
+    saveLeadStatsTimer = null;
+    try {
+      const data = Object.fromEntries(leadIpStatsMap);
+      await mkdir(appDataDirectory, { recursive: true });
+      await writeFile(leadStatsPath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[LeadStats] Lỗi khi lưu lead-stats.json:', err.message);
+    }
+  }, 500);
+}
+
+export function saveAndRecordLeadIpStats(entry) {
+  const res = recordLeadIpStats(entry);
+  if (res) queueSaveLeadStats();
+  return res;
+}
 
 export let latestToffersOverview = {
   success: false,
@@ -798,10 +833,10 @@ const autofillQueuePath = join(appDataDirectory, 'autofill-queue.json');
 const autofillQueue = { available: /** @type {object[]} */ ([]), used: /** @type {object[]} */ ([]) };
 const proxyQueuePath = join(appDataDirectory, 'proxy-queue.json');
 /** Hàng đợi proxy: available = chưa dùng, used = đã dùng (raw lines gốc). */
-const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
+export const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
 export const emailQueuePath = join(appDataDirectory, 'email-queue.json');
 const proxy711ConfigPath = join(appDataDirectory, '711proxy-config.json');
-const proxy711 = { username: '', token: '', tokenExpiry: 0 };
+const proxy711 = { username: '', passwd: '', token: '', tokenExpiry: 0 };
 const proxy711AutoRefillConfigPath = join(appDataDirectory, '711proxy-autorefill.json');
 const proxy711AutoRefill = { enabled: false, region: 'US', count: 50, sessTime: 20, sessAuto: false };
 let proxy711AutoRefilling = false;
@@ -810,6 +845,7 @@ async function loadProxy711Config() {
   try {
     const d = JSON.parse(await readFile(proxy711ConfigPath, 'utf8'));
     if (d.username) proxy711.username = d.username;
+    if (d.passwd) proxy711.passwd = d.passwd;
     if (d.token) proxy711.token = d.token;
     if (d.tokenExpiry) proxy711.tokenExpiry = Number(d.tokenExpiry);
   } catch {}
@@ -818,9 +854,62 @@ async function loadProxy711Config() {
 async function saveProxy711Config() {
   await writeFile(proxy711ConfigPath, JSON.stringify({
     username: proxy711.username,
+    passwd: proxy711.passwd || '',
     token: proxy711.token,
     tokenExpiry: proxy711.tokenExpiry,
   })).catch(() => {});
+}
+
+async function ensure711Token() {
+  if (proxy711.token && Date.now() < proxy711.tokenExpiry) {
+    return proxy711.token;
+  }
+  if (proxy711.username && proxy711.passwd) {
+    try {
+      return await fetch711Token(proxy711.username, proxy711.passwd);
+    } catch {}
+  }
+  return null;
+}
+
+export async function add711IpWhitelist(ip, token = null) {
+  if (!ip) throw new Error('Cần địa chỉ IP để thêm vào whitelist.');
+  const curToken = token || await ensure711Token();
+  if (!curToken) {
+    throw new Error(`Chưa đăng nhập 711proxy. Vui lòng đăng nhập 711proxy trên app để tự động thêm IP ${ip} vào whitelist.`);
+  }
+
+  const res = await fetch('https://server.711proxy.com/whitelist/', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${curToken}`,
+    },
+    body: JSON.stringify({ ip: [ip], status: true }),
+  });
+
+  const text = await res.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch {}
+
+  if (data?.code === 41010 || data?.error?.toLowerCase().includes('token')) {
+    proxy711.token = '';
+    proxy711.tokenExpiry = 0;
+    await saveProxy711Config();
+    if (proxy711.username && proxy711.passwd) {
+      const freshToken = await fetch711Token(proxy711.username, proxy711.passwd).catch(() => null);
+      if (freshToken) {
+        return add711IpWhitelist(ip, freshToken);
+      }
+    }
+    throw new Error(`Token 711proxy hết hạn (41010). Vui lòng đăng nhập lại rồi thêm IP ${ip} vào whitelist.`);
+  }
+
+  if (res.ok || (data && !data.error && data.code === 0)) {
+    return { ok: true, ip, data };
+  }
+
+  throw new Error(data?.message || data?.error || `HTTP ${res.status}: ${text.slice(0, 200)}`);
 }
 
 async function loadProxy711AutoRefillConfig() {
@@ -854,10 +943,33 @@ async function autoRefillProxyIfNeeded() {
     genUrl.searchParams.set('sessType', 'sticky');
     genUrl.searchParams.set('sessTime', String(proxy711AutoRefill.sessTime));
     genUrl.searchParams.set('sessAuto', proxy711AutoRefill.sessAuto ? '1' : '0');
-    const res = await fetch(genUrl.toString());
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = await res.text();
-    if (!text.trim() || text.includes('"code"')) throw new Error(text.slice(0, 200));
+
+    let text;
+    try {
+      const res = await fetch(genUrl.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      text = await res.text();
+      if (!text.trim() || text.includes('"code"')) throw new Error(text.slice(0, 200));
+    } catch (e) {
+      if (e.message.toLowerCase().includes('whitelist')) {
+        const ipRes = await fetch('https://api.ipify.org?format=json').catch(() => null);
+        const ip = ipRes ? (await ipRes.json().catch(() => ({}))).ip : null;
+        const token = await ensure711Token();
+        if (ip && token) {
+          await add711IpWhitelist(ip, token);
+          await new Promise((r) => setTimeout(r, 2000));
+          const retryRes = await fetch(genUrl.toString());
+          if (!retryRes.ok) throw new Error(`HTTP ${retryRes.status}: ${await retryRes.text()}`);
+          text = await retryRes.text();
+          if (!text.trim() || text.includes('"code"')) throw new Error(text.slice(0, 200));
+        } else {
+          throw new Error(`IP ${ip || 'hiện tại'} chưa có trong whitelist 711proxy. Vui lòng đăng nhập lại 711proxy để tự động thêm whitelist.`);
+        }
+      } else {
+        throw e;
+      }
+    }
+
     const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const proxyLines = rawLines.map((l) => {
       if (/^https?:\/\//i.test(l)) return l;
@@ -897,6 +1009,7 @@ async function fetch711Token(username, passwd) {
     try { data = JSON.parse(text); } catch { continue; }
     if (data.results) {
       proxy711.username = username;
+      proxy711.passwd = passwd;
       proxy711.token = data.results;
       proxy711.tokenExpiry = Date.now() + 3_600_000;
       await saveProxy711Config();
@@ -1697,6 +1810,31 @@ async function loadProxyQueue() {
 /** Lưu hàng đợi proxy xuống file. */
 async function saveProxyQueue() {
   await writeFile(proxyQueuePath, JSON.stringify(proxyQueue)).catch(() => {});
+}
+
+/**
+ * Xóa toàn bộ proxy trong hàng đợi (cả available và used), làm sạch lịch sử và state liên quan.
+ * @return {Promise<{success: boolean, available: number, used: number, count: number, message: string}>}
+ */
+export async function clearAllProxyQueue() {
+  const count = proxyQueue.available.length + proxyQueue.used.length;
+  proxyQueue.available.length = 0;
+  proxyQueue.used.length = 0;
+  await saveProxyQueue();
+  resetMultiOfferState();
+  await saveDualStreamState();
+  try {
+    const history = await readProxyUsageHistory();
+    history.proxies = {};
+    await persistProxyUsageHistory(history);
+  } catch {}
+  return {
+    success: true,
+    available: 0,
+    used: 0,
+    count,
+    message: `Đã xóa hết tất cả ${count} proxy trong hàng đợi. Bạn có thể thêm proxy mới.`,
+  };
 }
 
 /**
@@ -2843,6 +2981,17 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
 
   context.on('close', () => {
     session.isClosed = true;
+    if (session.leadCheckStatus === 'confirmed' && session.exitIp) {
+      saveAndRecordLeadIpStats({
+        ip: session.exitIp,
+        screen: Math.max(session.screenReached || 1, session.currentScreen || 1, (session.completedScreens || 0) + 1),
+        completedScreens: session.completedScreens || 0,
+        jumpCount: Math.max(session.pageJumps || 0, session.completedScreens || 0),
+        offerNumber: session.offerNumber ?? session.streamRole ?? 1,
+        proxy: session.proxyServer || session.proxyKey,
+        websiteUrl: session.websiteUrl,
+      });
+    }
     activeBrowsers.delete(session);
     releaseProxyLock(proxy ?? null, session.exitIp);
     cdpBrowser.close().catch(() => {});
@@ -2962,6 +3111,32 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
       },
       onScreen5Reached: (sess, p) => { void startLeadVerification(sess, leadConfig); },
       onEmailSubmitted: (sess, p) => { void startLeadVerification(sess, leadConfig); },
+      onScreenAdvanced: (sess, screen, jumps) => {
+        if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
+          saveAndRecordLeadIpStats({
+            ip: sess.exitIp,
+            screen,
+            completedScreens: sess.completedScreens,
+            jumpCount: jumps,
+            offerNumber: sess.offerNumber ?? sess.streamRole ?? 1,
+            proxy: sess.proxyServer || sess.proxyKey,
+            websiteUrl: sess.websiteUrl,
+          });
+        }
+      },
+      onPageJump: (sess, jumps, url) => {
+        if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
+          saveAndRecordLeadIpStats({
+            ip: sess.exitIp,
+            screen: Math.max(sess.screenReached || 1, sess.currentScreen || 1, (sess.completedScreens || 0) + 1),
+            completedScreens: sess.completedScreens || 0,
+            jumpCount: jumps,
+            offerNumber: sess.offerNumber ?? sess.streamRole ?? 1,
+            proxy: sess.proxyServer || sess.proxyKey,
+            websiteUrl: sess.websiteUrl,
+          });
+        }
+      },
       onStuck: (p) => {
         if (session.mainPage && p !== session.mainPage) return;
         if (session.aiAssistRunning) return;
@@ -3433,6 +3608,9 @@ function updateAutoRefill(requestBody) {
     autoRefill.settings = null;
     autoRefill.targetCount = 0;
     autoRefill.queued = false;
+  } else if (body.targetCount > 0) {
+    autoRefill.targetCount = Math.min(body.targetCount, maxAliveBrowsers);
+    void saveAutoRefillSettings();
   }
   autoRefill.message = autoRefill.enabled
     ? 'Đã bật tự bù; app sẽ mở profile khác khi có slot trống.'
@@ -3469,6 +3647,10 @@ function getAutoRefillStatus() {
         autofillRecord: session.autofillRecord ?? null,
         autofillFields: session.autofillFields ?? 0,
         autofillError: session.autofillError ?? null,
+        completedScreens: session.completedScreens ?? 0,
+        currentScreen: session.currentScreen ?? ((session.completedScreens ?? 0) + 1),
+        pageJumps: session.pageJumps ?? 0,
+        screenReached: session.screenReached ?? session.currentScreen ?? 1,
         leadCheckStatus: session.leadCheckStatus ?? null,
         leadCheckMessage: session.leadCheckMessage ?? null,
         extensions: session.extensions ?? null,
@@ -3484,6 +3666,7 @@ function getAutoRefillStatus() {
         lastLog: (session.logs && session.logs.length > 0) ? session.logs[session.logs.length - 1] : null,
       }))
       .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
+    leadStats: Object.fromEntries(leadIpStatsMap),
   };
 }
 
@@ -4261,8 +4444,26 @@ async function startLeadVerification(session, leadConfig) {
   if (leadFound) {
     session.leadCheckStatus = 'confirmed';
     session.screen5LeadVerified = true;
-    session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp}! Đang tiếp tục tự điền các bước tiếp theo.`;
-    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead về! Làm tiếp...</span>`);
+    const currentScreen = Math.max(session.screenReached || 1, session.currentScreen || 1, (session.completedScreens || 0) + 1);
+    const jumpCount = Math.max(session.pageJumps || 0, session.completedScreens || 0, 1);
+
+    // Ghi nhận và lưu lại tiến trình số màn và số lần nhảy trang của IP có lead:
+    saveAndRecordLeadIpStats({
+      ip: exitIp,
+      screen: currentScreen,
+      completedScreens: session.completedScreens || 0,
+      jumpCount: jumpCount,
+      offerNumber: session.offerNumber ?? session.streamRole ?? 1,
+      proxy: session.proxyServer || session.proxyKey || '',
+      websiteUrl: session.websiteUrl || '',
+      confirmedAt: new Date().toISOString(),
+      leadAttempt: attempt,
+    });
+
+    session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp}! Đã làm đến Màn ${currentScreen}, đã nhảy trang ${jumpCount} lần. Đang tiếp tục tự điền các bước tiếp theo...`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead (Màn ${currentScreen}, nhảy ${jumpCount})</span>`);
+
+    void tgNotify(`🎉 <b>CÓ LEAD!</b>\n🌐 IP: <code>${exitIp}</code>\n📄 Đã làm đến: <b>Màn ${currentScreen}</b>\n🔀 Đã nhảy trang: <b>${jumpCount} lần</b>\n🏷️ Offer: ${session.offerNumber ?? 1}`);
 
     // Nếu đang bật chế độ ẩn chờ lead: hiển thị trình duyệt lên màn hình ngay khi có lead
     await session.showWindow?.(true);
@@ -4274,7 +4475,7 @@ async function startLeadVerification(session, leadConfig) {
         offer: session.offerNumber ?? session.streamRole ?? 1,
         type: 'lead_confirmed',
         ip: exitIp,
-        detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt} (Màn ${targetScreen}).`,
+        detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt} (Màn ${targetScreen}). Đã làm đến Màn ${currentScreen}, đã nhảy trang ${jumpCount} lần.`,
       });
       queueSaveBrowserLogs();
     }
@@ -4723,6 +4924,32 @@ async function openBrowserWithInstalledChrome({
     onEmailSubmitted: (sess, page) => {
       void startLeadVerification(sess, leadConfig);
     },
+    onScreenAdvanced: (sess, screen, jumps) => {
+      if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
+        saveAndRecordLeadIpStats({
+          ip: sess.exitIp,
+          screen,
+          completedScreens: sess.completedScreens,
+          jumpCount: jumps,
+          offerNumber: sess.offerNumber ?? sess.streamRole ?? 1,
+          proxy: sess.proxyServer || sess.proxyKey,
+          websiteUrl: sess.websiteUrl,
+        });
+      }
+    },
+    onPageJump: (sess, jumps, url) => {
+      if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
+        saveAndRecordLeadIpStats({
+          ip: sess.exitIp,
+          screen: Math.max(sess.screenReached || 1, sess.currentScreen || 1, (sess.completedScreens || 0) + 1),
+          completedScreens: sess.completedScreens || 0,
+          jumpCount: jumps,
+          offerNumber: sess.offerNumber ?? sess.streamRole ?? 1,
+          proxy: sess.proxyServer || sess.proxyKey,
+          websiteUrl: sess.websiteUrl,
+        });
+      }
+    },
     onStuck: (page) => {
       // Chỉ chạy AI Assist cho tab chính đang active, không chạy trên tab phụ/ad/trang blog
       if (session.mainPage && page !== session.mainPage) return;
@@ -4792,6 +5019,17 @@ async function openBrowserWithInstalledChrome({
   }
 
   context.on('close', () => {
+    if (session.leadCheckStatus === 'confirmed' && session.exitIp) {
+      saveAndRecordLeadIpStats({
+        ip: session.exitIp,
+        screen: Math.max(session.screenReached || 1, session.currentScreen || 1, (session.completedScreens || 0) + 1),
+        completedScreens: session.completedScreens || 0,
+        jumpCount: Math.max(session.pageJumps || 0, session.completedScreens || 0),
+        offerNumber: session.offerNumber ?? session.streamRole ?? 1,
+        proxy: session.proxyServer || session.proxyKey,
+        websiteUrl: session.websiteUrl,
+      });
+    }
     activeBrowsers.delete(session);
     releaseProxyLock(proxy, session.exitIp);
     void relay?.close();
@@ -5696,6 +5934,7 @@ async function startLocalInterface() {
   await loadPersistedBrowserLogs();
   loadAiConfig();
   await loadToffersConfig();
+  await loadLeadStats();
   startToffersBackgroundPolling(10_000);
   const interfaceHtml = readFileSync(userInterfacePath, 'utf8');
   const interfacePcHtml = existsSync(userInterfacePcPath) ? readFileSync(userInterfacePcPath, 'utf8') : interfaceHtml;
@@ -6172,7 +6411,16 @@ async function startLocalInterface() {
       if (!username || !passwd) { respondWithJson(response, 400, { error: 'Cần username và passwd.' }); return; }
       try {
         await fetch711Token(username, passwd);
-        respondWithJson(response, 200, { ok: true, username });
+        // Sau khi đăng nhập thành công, tự động thêm ngay IP hiện tại vào whitelist:
+        let whitelistResult = null;
+        try {
+          const ipRes = await fetch('https://api.ipify.org?format=json').catch(() => null);
+          const ip = ipRes ? (await ipRes.json().catch(() => ({}))).ip : null;
+          if (ip) {
+            whitelistResult = await add711IpWhitelist(ip, proxy711.token).catch((wErr) => ({ ok: false, error: wErr.message }));
+          }
+        } catch {}
+        respondWithJson(response, 200, { ok: true, username, whitelist: whitelistResult });
       } catch (e) {
         respondWithJson(response, 400, { error: e.message });
       }
@@ -6224,29 +6472,78 @@ async function startLocalInterface() {
       return;
     }
 
+    if (request.method === 'POST' && request.url === '/711proxy/update-whitelist') {
+      try {
+        const ipRes = await fetch('https://api.ipify.org?format=json');
+        const { ip } = await ipRes.json();
+        const token = await ensure711Token();
+        if (!token) {
+          respondWithJson(response, 401, {
+            error: `Chưa đăng nhập 711proxy hoặc token hết hạn. Vui lòng nhập tài khoản/mật khẩu rồi bấm 'Đăng nhập' để tự thêm IP ${ip} vào whitelist.`,
+            ip,
+          });
+          return;
+        }
+        await add711IpWhitelist(ip, token);
+        respondWithJson(response, 200, { ok: true, ip, message: `Đã thêm IP ${ip} vào whitelist 711proxy thành công!` });
+      } catch (e) {
+        respondWithJson(response, 500, { error: e.message });
+      }
+      return;
+    }
+
     if (request.method === 'POST' && request.url === '/711proxy/generate') {
       const body = JSON.parse(await readRequestBody(request));
       const region = (body.region || 'US').toUpperCase();
       const count = Math.min(Math.max(parseInt(body.count) || 50, 1), 200);
       const sessTime = Math.max(parseInt(body.sessTime) || 20, 1);
       const sessAuto = body.sessAuto ? 1 : 0;
-      const genUrl = new URL('http://global.rotgbapi.trustsource.live:8089/gen');
-      genUrl.searchParams.set('zone', 'custom');
-      genUrl.searchParams.set('ptype', '1');
-      genUrl.searchParams.set('region', region);
-      genUrl.searchParams.set('count', String(count));
-      genUrl.searchParams.set('proto', 'http');
-      genUrl.searchParams.set('stype', 'text');
-      genUrl.searchParams.set('split', '\r\n');
-      genUrl.searchParams.set('sessType', 'sticky');
-      genUrl.searchParams.set('sessTime', String(sessTime));
-      genUrl.searchParams.set('sessAuto', String(sessAuto));
-      try {
-        // Gen URL dùng IP whitelist — không cần Authorization header
+
+      async function doGenerate() {
+        const genUrl = new URL('http://global.rotgbapi.trustsource.live:8089/gen');
+        genUrl.searchParams.set('zone', 'custom');
+        genUrl.searchParams.set('ptype', '1');
+        genUrl.searchParams.set('region', region);
+        genUrl.searchParams.set('count', String(count));
+        genUrl.searchParams.set('proto', 'http');
+        genUrl.searchParams.set('stype', 'text');
+        genUrl.searchParams.set('split', '\r\n');
+        genUrl.searchParams.set('sessType', 'sticky');
+        genUrl.searchParams.set('sessTime', String(sessTime));
+        genUrl.searchParams.set('sessAuto', String(sessAuto));
         const res = await fetch(genUrl.toString());
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
         const text = await res.text();
         if (!text.trim() || text.includes('"code"')) throw new Error(text.slice(0, 300));
+        return text;
+      }
+
+      try {
+        let text;
+        try {
+          text = await doGenerate();
+        } catch (e) {
+          // Nếu lỗi whitelist → tự cập nhật IP rồi retry 1 lần
+          const errMsg = e.message.toLowerCase();
+          if (errMsg.includes('whitelist')) {
+            const ipRes = await fetch('https://api.ipify.org?format=json').catch(() => null);
+            const ip = ipRes ? (await ipRes.json().catch(() => ({}))).ip : null;
+            const token = await ensure711Token();
+            if (ip && token) {
+              try {
+                await add711IpWhitelist(ip, token);
+                await new Promise((r) => setTimeout(r, 2000));
+                text = await doGenerate(); // retry
+              } catch (wErr) {
+                throw new Error(`IP ${ip} chưa được whitelist 711proxy. Tự cập nhật whitelist thất bại (${wErr.message}). Vui lòng kiểm tra lại tài khoản hoặc vào https://dashboard.711proxy.com/whitelist/ thêm IP.`);
+              }
+            } else {
+              throw new Error(`IP ${ip || 'của bạn'} chưa có trong whitelist 711proxy. Vui lòng nhập mật khẩu tài khoản 711proxy ở trên rồi bấm "Đăng nhập" để tự động thêm IP vào whitelist (hoặc vào https://dashboard.711proxy.com/whitelist/ thêm IP).`);
+            }
+          } else {
+            throw e;
+          }
+        }
         // Chuẩn hóa: host:port → http://host:port, user:pass@host:port → http://user:pass@host:port
         const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
         const proxyLines = rawLines.map((l) => {
@@ -6264,6 +6561,7 @@ async function startLocalInterface() {
           added,
           total: proxyQueue.available.length,
           lines: proxyLines,
+          preview: proxyLines.slice(0, 3),
           message: `Đã thêm ${added} proxy vào hàng đợi (tổng ${proxyQueue.available.length} sẵn sàng).`,
         });
       } catch (e) {
@@ -6342,6 +6640,12 @@ async function startLocalInterface() {
         used: proxyQueue.used.length,
         message: `Đã đặt lại: ${proxyQueue.available.length} proxy sẵn sàng dùng lại (đã làm sạch lịch sử trùng IP).`,
       });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/proxy-queue/clear') {
+      const result = await clearAllProxyQueue();
+      respondWithJson(response, 200, result);
       return;
     }
 
@@ -6562,13 +6866,30 @@ async function startLocalInterface() {
       try {
         if (forceRefresh || hasCustomParams || isStale) {
           const overview = await refreshToffersOverview(hasCustomParams ? customCfg : null);
-          respondWithJson(response, 200, overview);
+          respondWithJson(response, 200, { ...overview, leadStats: Object.fromEntries(leadIpStatsMap) });
         } else {
-          respondWithJson(response, 200, latestToffersOverview);
+          respondWithJson(response, 200, { ...latestToffersOverview, leadStats: Object.fromEntries(leadIpStatsMap) });
         }
       } catch (err) {
         respondWithJson(response, 500, { success: false, error: err.message, code: err.code || 'UNKNOWN_ERROR' });
       }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/lead-stats') {
+      respondWithJson(response, 200, {
+        success: true,
+        stats: Object.fromEntries(leadIpStatsMap),
+        list: Array.from(leadIpStatsMap.values()),
+        count: leadIpStatsMap.size,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/lead-stats/clear') {
+      clearLeadIpStats();
+      queueSaveLeadStats();
+      respondWithJson(response, 200, { success: true, message: 'Đã xóa toàn bộ dữ liệu thống kê IP lead.' });
       return;
     }
 
@@ -7185,6 +7506,7 @@ async function startLocalInterface() {
     if (listenHost === '0.0.0.0') console.log(`[Hub] Lắng nghe trên tất cả giao diện mạng — agent có thể kết nối qua IP LAN:${port}`);
     exitWhenParentExits();
     void startTelegramBot();
+    setInterval(() => { void clearAllLogsAndHtml(); }, 5 * 60 * 1000);
     if (process.env.AUTOLEADPC_NO_OPEN === '1') return;
     try {
       await executeFile('open', [interfaceUrl]);
