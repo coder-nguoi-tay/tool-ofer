@@ -2771,8 +2771,9 @@ async function openBrowserViaLocalEngine({
   autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
   captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
   hideUntilTarget = false, hideUntilLead = false, antiFingerprint = {}, deviceProfile = 'windows',
-  totalCount = 10,
+  totalCount = 10, screenPreviewOnly = true, headless = null,
 }) {
+  const isHeadless = Boolean(headless !== null ? headless : (screenPreviewOnly || hideUntilLead || hideUntilTarget));
   const assignedSlot = slot ?? (tileIndex + 1);
   const screen = await readScreenSize();
   const tile = tileAt(tileIndex ?? (assignedSlot - 1), totalCount || 10, screen);
@@ -2832,6 +2833,7 @@ async function openBrowserViaLocalEngine({
       tile,
       locale,
       executablePath,
+      headless: isHeadless,
     }));
   } catch (err) {
     await relay?.close();
@@ -2930,6 +2932,8 @@ async function openBrowserViaLocalEngine({
     profileId: `local_${assignedSlot}`,
     isGoLogin: true,
     isLocalEngine: true,
+    inAppPreview: Boolean(screenPreviewOnly),
+    isHeadless,
     hideUntilTarget: Boolean(hideUntilTarget),
     hideUntilLead: Boolean(hideUntilLead),
     hasShownWindow: false,
@@ -2942,7 +2946,7 @@ async function openBrowserViaLocalEngine({
   let cdpSession = null;
   let cdpWindowId = null;
 
-  if (hideUntilTarget || hideUntilLead) {
+  if (!isHeadless && (hideUntilTarget || hideUntilLead)) {
     try {
       cdpSession = await context.newCDPSession(initPage);
       const win = await cdpSession.send('Browser.getWindowForTarget');
@@ -2960,6 +2964,7 @@ async function openBrowserViaLocalEngine({
   }
 
   session.showWindow = async (force = false) => {
+    if ((isHeadless || session.inAppPreview) && !force) return;
     if ((!hideUntilTarget && !hideUntilLead) || session.hasShownWindow) return;
     if (hideUntilLead && !force) return;
     session.hasShownWindow = true;
@@ -3040,10 +3045,12 @@ async function openBrowserViaLocalEngine({
       initPage.goto(websiteUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
       new Promise(r => setTimeout(r, navigationTimeout + 2000)),
     ]);
-    if (!hideUntilLead) {
+    if (!hideUntilLead && !isHeadless && !session.inAppPreview) {
       await session.showWindow();
     }
-    await initPage.bringToFront().catch(() => {});
+    if (!isHeadless && !session.inAppPreview) {
+      await initPage.bringToFront().catch(() => {});
+    }
   }
 
   closeChromeWhenLastTabCloses(session);
@@ -3093,15 +3100,17 @@ async function openBrowserViaLocalEngine({
       enableLeadCheck: leadConfig.enabled !== false,
       leadCheckScreen: leadConfig.checkScreen || 4,
       onLog: (entry) => {
-        if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
-          if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
-            void session.showWindow?.(entry.type === 'lead_confirmed');
+        if (!isHeadless && !session.inAppPreview) {
+          if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
+            if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
+              void session.showWindow?.(entry.type === 'lead_confirmed');
+            }
           }
         }
         session.addBrowserLog?.(entry);
       },
       onRecordPicked: (record) => {
-        if (!session.hideUntilLead) {
+        if (!isHeadless && !session.inAppPreview && !session.hideUntilLead) {
           void session.showWindow?.();
         }
         if (session.assignedEmail && record) {
@@ -3183,7 +3192,7 @@ async function openBrowserViaLocalEngine({
 async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifiedExitIp, websiteUrl, offer = 1,
   autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
   captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
-  hideUntilTarget = false, hideUntilLead = false, totalCount = 10 }) {
+  hideUntilTarget = false, hideUntilLead = false, totalCount = 10, screenPreviewOnly = true }) {
 
   const orbitaBin = await findOrbitaExecutable();
   if (!orbitaBin) throw new Error('Không tìm thấy Orbita browser. Hãy mở GoLogin app để tải về (hoặc đăng nhập GoLogin).');
@@ -3276,6 +3285,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
     websiteUrl: websiteUrl || '',
     profileId,
     isGoLogin: true,
+    inAppPreview: Boolean(screenPreviewOnly),
     hideUntilTarget: Boolean(hideUntilTarget),
     hideUntilLead: Boolean(hideUntilLead),
     hasShownWindow: false,
@@ -3288,7 +3298,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
   let cdpSession = null;
   let cdpWindowId = null;
 
-  if (hideUntilTarget || hideUntilLead) {
+  if (hideUntilTarget || hideUntilLead || session.inAppPreview) {
     try {
       const initPage = context.pages()[0] ?? await context.newPage();
       cdpSession = await context.newCDPSession(initPage);
@@ -3298,7 +3308,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
         windowId: cdpWindowId,
         bounds: { windowState: 'minimized' },
       });
-      const modeText = hideUntilLead ? 'chỉ hiện khi có lead' : 'chỉ hiện khi vào trang đích';
+      const modeText = hideUntilLead ? 'chỉ hiện khi có lead' : (session.inAppPreview ? 'xem trước trên app' : 'chỉ hiện khi vào trang đích');
       console.log(`[GoLogin] Slot ${assignedSlot}: Chạy ngầm (ẩn cửa sổ), ${modeText}.`);
       session.addBrowserLog?.({ type: 'navigate', detail: `Chạy ngầm (ẩn cửa sổ), ${modeText}...` });
     } catch (err) {
@@ -3307,6 +3317,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
   }
 
   session.showWindow = async (force = false) => {
+    if (session.inAppPreview && !force) return;
     if ((!hideUntilTarget && !hideUntilLead) || session.hasShownWindow) return;
     if (hideUntilLead && !force) return;
     session.hasShownWindow = true;
@@ -3387,10 +3398,12 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
       page.goto(websiteUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
       new Promise(r => setTimeout(r, navigationTimeout + 2000)),
     ]);
-    if (!hideUntilLead) {
+    if (!hideUntilLead && !session.inAppPreview) {
       await session.showWindow();
     }
-    await page.bringToFront().catch(() => {});
+    if (!session.inAppPreview) {
+      await page.bringToFront().catch(() => {});
+    }
 
   }
 
@@ -3442,15 +3455,17 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
       enableLeadCheck: leadConfig.enabled !== false,
       leadCheckScreen: leadConfig.checkScreen || 4,
       onLog: (entry) => {
-        if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
-          if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
-            void session.showWindow?.(entry.type === 'lead_confirmed');
+        if (!session.inAppPreview) {
+          if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
+            if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
+              void session.showWindow?.(entry.type === 'lead_confirmed');
+            }
           }
         }
         session.addBrowserLog?.(entry);
       },
       onRecordPicked: (record) => {
-        if (!session.hideUntilLead) {
+        if (!session.inAppPreview && !session.hideUntilLead) {
           void session.showWindow?.();
         }
         if (session.assignedEmail && record) {
@@ -3537,8 +3552,10 @@ async function launchGoLoginBrowsers(requestBody) {
   const websiteUrl = body.websiteUrl || '';
   const offerUrls = body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 || body.websiteUrl2 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : [websiteUrl].filter(Boolean));
 
+  const screenPreviewOnly = (body.screenPreviewOnly !== undefined) ? Boolean(body.screenPreviewOnly) : true;
+
   // Lưu cấu hình autoRefill cho GoLogin mode để khi slot trống tự động bù đúng chế độ
-  autoRefill.settings = { ...body, browserMode: 'Gologin' };
+  autoRefill.settings = { ...body, browserMode: 'Gologin', screenPreviewOnly };
   autoRefill.targetCount = concurrency;
   void saveAutoRefillSettings();
 
@@ -3742,6 +3759,7 @@ async function launchGoLoginBrowsers(requestBody) {
         antiFingerprint,
         deviceProfile: body.deviceProfile || 'macos',
         totalCount: concurrency,
+        screenPreviewOnly,
       });
 
       results.push({

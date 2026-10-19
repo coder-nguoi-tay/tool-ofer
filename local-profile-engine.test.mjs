@@ -64,3 +64,15 @@ test('buildLocalBrowserArgs sinh đủ các cờ dòng lệnh tương tự Secur
   assert.ok(flags.includes('--window-position=100,200'));
   assert.ok(flags.includes('--window-size=800,600'));
 });
+
+test('buildLocalBrowserArgs sinh cờ --headless=new khi bật chế độ xem trước trong app', () => {
+  const flags = buildLocalBrowserArgs({
+    profilePath: '/tmp/test_prof_headless',
+    locale: 'en-US',
+    headless: true,
+  });
+
+  assert.ok(flags.includes('--headless=new'));
+  assert.ok(flags.includes('--window-size=1280,800'));
+  assert.ok(!flags.some(f => f.startsWith('--window-position=')));
+});

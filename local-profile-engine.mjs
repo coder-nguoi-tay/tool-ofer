@@ -156,7 +156,7 @@ export async function prepareLocalZeroProfile({ slot = 1, locale = 'en-US', lang
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-19
  */
-export function buildLocalBrowserArgs({ profilePath, proxyUrl = null, tile = null, locale = 'en-US' }) {
+export function buildLocalBrowserArgs({ profilePath, proxyUrl = null, tile = null, locale = 'en-US', headless = false }) {
   const args = [
     '--remote-debugging-port=0',
     `--user-data-dir=${profilePath}`,
@@ -174,7 +174,10 @@ export function buildLocalBrowserArgs({ profilePath, proxyUrl = null, tile = nul
     '--no-default-browser-check',
   ];
 
-  if (tile) {
+  if (headless) {
+    args.push('--headless=new');
+    args.push('--window-size=1280,800');
+  } else if (tile) {
     args.push(`--window-position=${tile.left},${tile.top}`);
     args.push(`--window-size=${tile.width},${tile.height}`);
   }
@@ -217,16 +220,16 @@ export async function waitForDevToolsActivePort(profilePath, timeoutMs = 15000) 
 /**
  * Khởi tạo tiến trình trình duyệt độc lập với profile cục bộ, trả về wsUrl để Playwright kết nối.
  *
- * @param {object} options Cấu hình profile, proxy, tile, locale và executable.
+ * @param {object} options Cấu hình profile, proxy, tile, locale, executable và headless.
  * @return {Promise<{proc: object, wsUrl: string, profilePath: string}>}
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-19
  */
-export async function spawnLocalProfileBrowser({ profilePath, proxyUrl = null, tile = null, locale = 'en-US', executablePath = null }) {
+export async function spawnLocalProfileBrowser({ profilePath, proxyUrl = null, tile = null, locale = 'en-US', executablePath = null, headless = false }) {
   const bin = executablePath || resolveBrowserExecutable();
   if (!bin) throw new Error('Không tìm thấy Google Chrome hoặc Chromium trên máy để khởi chạy profile cục bộ.');
 
-  const args = buildLocalBrowserArgs({ profilePath, proxyUrl, tile, locale });
+  const args = buildLocalBrowserArgs({ profilePath, proxyUrl, tile, locale, headless });
   const proc = spawn(bin, args, { stdio: 'ignore', detached: false });
 
   proc.on('error', (err) => {
