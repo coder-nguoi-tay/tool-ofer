@@ -118,17 +118,19 @@ EOF
   echo "✓ Hoàn tất $APP_NAME"
 }
 
-# Chỉ build 1 bản ứng dụng duy nhất, chuẩn xác nhất (Port 3210 - Giao diện PC đầy đủ)
-rm -f "AutoLeadPC.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
-build_app_bundle "AutoLeadPC.app" "1" 3210 "com.autoleadpc.mac" "AutoLeadPC"
+# Build bản 1: AutoleadMac.app (Port 3210)
+rm -f "AutoleadMac.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
+build_app_bundle "AutoleadMac.app" "1" 3210 "com.autoleadmac.app" "AutoleadMac"
+
+# Build bản 2: Autolead.app (Port 3211)
+rm -f "Autolead.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
+build_app_bundle "Autolead.app" "2" 3211 "com.autolead.mac2" "Autolead"
 
 rm -f "$TMP_BIN"
 
-# Deploy to ~/Downloads and ~/Downloads/AutoLeadPC-mac
-echo "Dọn dẹp các bản cũ và triển khai bản duy nhất vào ~/Downloads/ ..."
+echo "Triển khai vào ~/Downloads/ ..."
 mkdir -p "$HOME/Downloads/AutoLeadPC-mac"
 
-# Xoá triệt để tất cả các bản phân mảnh cũ
 rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" \
        "$HOME/Downloads/AutoLeadPC Mac 2.app" \
        "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app" \
@@ -136,20 +138,28 @@ rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" \
        "$HOME/Downloads/AutoLeadPC Wine.app" \
        "$HOME/Downloads/AutoLeadPC Mac.app" \
        "$HOME/Downloads/AutoLeadPC.app" \
+       "$HOME/Downloads/AutoleadMac.app" \
        "$HOME/Downloads/AutoLeadPC-mac/"*.app
 
-cp -R "AutoLeadPC.app" "$HOME/Downloads/AutoLeadPC.app"
-cp -R "AutoLeadPC.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC.app"
+cp -R "AutoleadMac.app" "$HOME/Downloads/AutoleadMac.app"
+cp -R "Autolead.app" "$HOME/Downloads/Autolead.app"
+cp -R "AutoleadMac.app" "$HOME/Downloads/AutoLeadPC-mac/AutoleadMac.app"
+cp -R "Autolead.app" "$HOME/Downloads/AutoLeadPC-mac/Autolead.app"
 
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoleadMac.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/Autolead.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoleadMac.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/Autolead.app" 2>/dev/null || true
 
-# Tạo gói zip tiện gửi hoặc sao lưu
-rm -f "$HOME/Downloads/AutoLeadPC.zip" "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.zip" 2>/dev/null || true
-(cd "$HOME/Downloads" && zip -rq "AutoLeadPC.zip" "AutoLeadPC.app")
+rm -f "$HOME/Downloads/AutoleadMac.zip" "$HOME/Downloads/AutoLeadPC.zip" \
+      "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.zip" "$HOME/Downloads/AutoLeadPC_Mac2.zip" \
+      "$HOME/Downloads/Autolead.zip" 2>/dev/null || true
+(cd "$HOME/Downloads" && zip -rq "AutoleadMac.zip" "AutoleadMac.app")
+(cd "$HOME/Downloads" && zip -rq "Autolead.zip" "Autolead.app")
 
 echo "=========================================="
-echo "Build thành công 1 bản AutoLeadPC duy nhất:"
-echo "AutoLeadPC.app (Cổng 3210, Giao diện PC chuẩn)"
-echo "Đã lưu tại: $HOME/Downloads/AutoLeadPC.app"
+echo "Build thành công 2 bản:"
+echo "  AutoleadMac.app → Cổng 3210"
+echo "  Autolead.app    → Cổng 3211"
+echo "Đã lưu tại: $HOME/Downloads/"
 echo "=========================================="
