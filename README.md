@@ -1,6 +1,19 @@
 # AutoLeadPC Mac — Chrome
 
-Nút **Tạo profile và mở** dùng các ứng dụng Google Chrome đã cài trên máy. Mỗi cửa sổ có phiên bản, thư mục profile và proxy riêng; nếu thiếu phiên bản, app báo lỗi trước khi mở. User-Agent dùng mẫu Windows và số phiên bản đầy đủ của Chrome đang chạy.
+Nút **Tạo profile và mở** dùng các ứng dụng Google Chrome đã cài trên máy. Mỗi cửa sổ có phiên bản, thư mục profile và proxy riêng; nếu thiếu phiên bản, app báo lỗi trước khi mở. User-Agent theo profile thiết bị đã chọn và theo dạng rút gọn của Chrome thật (`Chrome/155.0.0.0`); số phiên bản đầy đủ chỉ nằm trong Client Hints.
+
+### Giả lập thiết bị và chống fingerprint
+
+Phần này nằm trong `stealth.mjs`:
+
+- **Đổi tận gốc qua CDP** cho từng tab và iframe khác site: User-Agent, Client Hints (brand GREASE giống Chrome, `platformVersion`, kiến trúc, model), `navigator.platform`, số nhân CPU, `navigator.languages` và header `Accept-Language`. Ngôn ngữ và múi giờ lấy theo quốc gia của IP proxy.
+- **Script vá trong trang**: một script duy nhất chạy ở mọi frame và trong Web Worker tạo từ blob. Hàm vá trả `[native code]` khi gọi `toString`, giữ đúng `name` và `length`. Các phần được vá: chuỗi GPU và giới hạn WebGL theo profile, `deviceMemory`, `screen.avail*` và `outerWidth/outerHeight`. Với profile iOS, script xoá thêm Client Hints và `window.chrome`.
+- **Mỗi cửa sổ là một máy khác nhau**: mỗi phiên có một seed riêng. Từ seed, app chọn ngẫu nhiên một cấu hình có thật trong profile, gồm chip/GPU, số nhân CPU, RAM, độ phân giải và tỉ lệ màn hình, phiên bản hệ điều hành. Ví dụ `macOS 15.6.1 · Apple M4 Pro · 14 nhân · 1512x982@2x`. Cấu hình này hiện khi rê chuột vào biểu tượng thiết bị trong tab **Trình duyệt**.
+- **Nhiễu Canvas, ClientRects, WebGL, Audio luôn bật** theo seed của phiên: đọc lại nhiều lần vẫn ra cùng kết quả, khác phiên thì khác nhau. Tuỳ chọn Fonts vẫn bật/tắt riêng. Canvas xuất ảnh từ một bản sao có nhiễu, không đụng vào canvas của trang. ClientRects nhân một hệ số cố định nên `right - left` vẫn bằng `width`. Audio được thêm nhiễu một lần cho mỗi buffer.
+- **WebRTC** luôn chạy với `--webrtc-ip-handling-policy=disable_non_proxied_udp` nên không lộ IP thật qua UDP. **ApiFakeIP** đặt toạ độ theo IP qua `geolocation` của Playwright và cấp luôn quyền geolocation.
+- App không chèn badge, không sửa tiêu đề trang và không tạo biến toàn cục trong trang đích. IP và trạng thái lead hiển thị trong giao diện AutoLead.
+
+Giới hạn còn lại: worker nạp từ URL thường (không phải blob) và service worker vẫn thấy `navigator.platform` thật. Danh sách font hệ thống vẫn là của máy đang chạy. Profile iPad/iPhone chạy trên Blink nên chỉ giả lập được bề mặt. Để ít lệch nhất, chọn profile trùng hệ điều hành của máy (`macos` trên Mac).
 
 Giao diện có ba tab: **Thiết lập** chứa số cửa sổ, loại proxy, website đích và dữ liệu tự điền; **Proxy** chứa danh sách và công cụ kiểm tra/xuất lịch sử; **Trình duyệt** chứa nút mở/đóng profile cùng mục tải phiên bản Chrome for Testing.
 

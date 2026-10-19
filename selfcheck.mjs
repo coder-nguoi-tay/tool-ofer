@@ -737,9 +737,9 @@ const mockVectorSurveyFrame = {
 const answeredVectorCount = await handleRadioAndSurveyOptions(mockVectorSurveyFrame);
 assert.equal(answeredVectorCount, 1);
 assert.ok(
-  clickedVectorChoiceId === '[data-autolead-choice-id="v1"]' ||
-  clickedVectorChoiceId === '[data-autolead-choice-id="v2"]' ||
-  clickedVectorChoiceId === '[data-autolead-choice-id="v3"]'
+  clickedVectorChoiceId === '[data-ux-choice-id="v1"]' ||
+  clickedVectorChoiceId === '[data-ux-choice-id="v2"]' ||
+  clickedVectorChoiceId === '[data-ux-choice-id="v3"]'
 );
 
 // Test handleRadioAndSurveyOptions: Khớp tuổi thông minh với thẻ <a> (Jeremy sinh năm 1984 -> tuổi 42 -> 35-49)
@@ -768,7 +768,7 @@ const mockAgeFrame = {
 };
 const answeredAgeCount = await handleRadioAndSurveyOptions(mockAgeFrame, birth1984Record);
 assert.equal(answeredAgeCount, 1);
-assert.equal(clickedAgeChoiceId, '[data-autolead-choice-id="age_2"]', 'Phải tự động khớp chính xác dải tuổi 35-49 dựa trên ngày sinh 1984');
+assert.equal(clickedAgeChoiceId, '[data-ux-choice-id="age_2"]', 'Phải tự động khớp chính xác dải tuổi 35-49 dựa trên ngày sinh 1984');
 
 // Test handleRadioAndSurveyOptions: Creative Homeowner Survey (Rent vs Own)
 let clickedHomeChoiceId = null;
@@ -794,7 +794,7 @@ const mockHomeFrame = {
 };
 const answeredHomeCount = await handleRadioAndSurveyOptions(mockHomeFrame, { homeowner: 'own' });
 assert.equal(answeredHomeCount, 1);
-assert.equal(clickedHomeChoiceId, '[data-autolead-choice-id="home_own"]');
+assert.equal(clickedHomeChoiceId, '[data-ux-choice-id="home_own"]');
 
 // Test handleOfferwallCards: Phát hiện và mở đồng thời tất cả các offer cards
 const clickedOfferwallCards = [];
@@ -820,8 +820,8 @@ const mockOfferwallFrame = {
 const openedOfferCount = await handleOfferwallCards(mockOfferwallFrame);
 assert.equal(openedOfferCount, 2);
 assert.deepEqual(clickedOfferwallCards, [
-  '[data-autolead-card-id="card_1"]',
-  '[data-autolead-card-id="card_2"]',
+  '[data-ux-card-id="card_1"]',
+  '[data-ux-card-id="card_2"]',
 ]);
 
 // Test findSubmitButton: Phải bỏ qua các nút offerwall
@@ -1397,8 +1397,10 @@ assert.equal(getNextDeviceProfile(), 'ios');
 resetDeviceProfileRotation();
 autoRefill.deviceProfiles = ['windows'];
 
-// 10.4 Kiểm tra sinh User-Agent khớp phiên bản Chrome cho Mobile và iOS
-assert.ok(DEVICE_PROFILES.android.ua('150.0.7871.187').includes('Chrome/150.0.7871.187'), 'Android UA phải chứa Chrome/150');
+// 10.4 Kiểm tra sinh User-Agent khớp phiên bản Chrome: Chrome desktop/Android dùng UA đã giảm (Chrome/150.0.0.0), Chrome iOS giữ số đầy đủ
+assert.ok(DEVICE_PROFILES.android.ua('150.0.7871.187').includes('Chrome/150.0.0.0'), 'Android UA phải chứa Chrome/150.0.0.0');
+assert.ok(DEVICE_PROFILES.android.ua('150.0.7871.187').includes('Android 10; K'), 'Android UA phải theo dạng đã giảm Android 10; K');
+assert.ok(DEVICE_PROFILES.windows.ua('150.0.7871.187').includes('Chrome/150.0.0.0'), 'Windows UA phải chứa Chrome/150.0.0.0');
 assert.ok(DEVICE_PROFILES.ios.ua('151.0.7922.174').includes('CriOS/151.0.7922.174'), 'iOS UA phải chứa CriOS/151');
 assert.ok(DEVICE_PROFILES.ipad.ua('152.0.7977.83').includes('CriOS/152.0.7977.83'), 'iPad UA phải chứa CriOS/152');
 
