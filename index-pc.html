@@ -3784,7 +3784,7 @@
           ? `<span class="run-email-cell" onclick="copyTextToClipboard('${escHtml(s.assignedEmail)}')" title="Nhấp để copy email">${escHtml(s.assignedEmail)}</span>`
           : '<span style="color:#94a3b8;">--</span>';
         const passCell = s.assignedPass ? `<span class="run-pass-chip" title="Mật khẩu">${escHtml(s.assignedPass)}</span>` : '<span style="color:#94a3b8;">--</span>';
-        const deviceInfo = `<span class="run-device-info">💻 ${escHtml(s.deviceProfile || 'Windows')} · ${escHtml(s.version || 'Chrome')}</span>`;
+        const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || '')}">💻 ${escHtml(s.deviceProfile || 'Windows')} · ${escHtml(s.version || 'Chrome')}</span>`;
 
         tr.innerHTML = `
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>

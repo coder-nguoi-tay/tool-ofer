@@ -80,5 +80,8 @@ test('createDeviceVariant giữ các thông số đồng bộ với nhau', () =>
     assert.deepEqual(android.viewport, { width: android.screen.width, height: android.screen.height });
     const ios = createDeviceVariant('ios', DEVICE_PROFILES.ios, seed);
     assert.match(ios.ua('150.0.7871.187'), /iPhone OS \d+(_\d+)* like Mac OS X.*CriOS\/150\.0\.7871\.187/);
+    assert.doesNotMatch(ios.ua('150.0.7871.187'), /OS 2\d_/, 'WebKit đóng băng UA ở 18_6, không có iOS 26 trong UA');
+    if (win.spoof.hardwareConcurrency >= 12) assert.equal(win.spoof.deviceMemory, 8, 'Máy nhiều nhân phải có deviceMemory 8');
+    assert.equal(buildStealthConfig(mac, {}, seed).uaData.platformVersion, mac.uaData.platformVersion, 'Init script phải biết platformVersion của máy');
   }
 });

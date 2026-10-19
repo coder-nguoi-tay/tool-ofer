@@ -126,6 +126,7 @@ export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1
     hardwareConcurrency: spoof.hardwareConcurrency ?? null,
     deviceMemory: spoof.deviceMemory ?? null,
     webkitOnly: spoof.uaPlatform === 'iOS',
+    uaData: deviceProfile.uaData ? { ...deviceProfile.uaData } : null,
     webglVendor: spoof.webglVendor,
     webglRenderer: spoof.webglRenderer,
     webglParams: spoof.webglParams ?? null,
@@ -258,6 +259,19 @@ export function stealthInitScript(cfg) {
     }
   }
 
+  // ── Client Hints giá trị cao: tab popup tải trang đầu trước khi CDP kịp áp, lúc đó Chrome trả
+  // platformVersion/architecture do Playwright tự đoán từ UA (macOS ra "10_15_7" và "x86").
+  if (cfg.uaData && typeof G.NavigatorUAData === 'function') {
+    replaceMethod(G.NavigatorUAData.prototype, 'getHighEntropyValues', (original) => function (hints) {
+      return original.call(this, hints).then((values) => {
+        for (const key of ['platformVersion', 'architecture', 'bitness', 'model']) {
+          if (key in values && cfg.uaData[key] !== undefined) values[key] = cfg.uaData[key];
+        }
+        return values;
+      });
+    });
+  }
+
   // ── Màn hình: headless có outer == inner và avail == kích thước màn hình ──
   if (cfg.screen && typeof G.Screen === 'function' && typeof G.window !== 'undefined') {
     replaceGetter(G.Screen.prototype, 'availTop', () => cfg.screen.availTop);
@@ -309,6 +323,7 @@ export function stealthInitScript(cfg) {
     const C2D = G.CanvasRenderingContext2D;
     const OC2D = G.OffscreenCanvasRenderingContext2D;
     const originalGetImageData = C2D && C2D.prototype.getImageData;
+    const originalOffscreenGetImageData = OC2D && OC2D.prototype.getImageData;
     for (const Ctx of [C2D, OC2D]) {
       if (typeof Ctx !== 'function') continue;
       replaceMethod(Ctx.prototype, 'getImageData', (original) => function (...args) {
@@ -331,6 +346,24 @@ export function stealthInitScript(cfg) {
       ctx.putImageData(image, 0, 0);
       return copy;
     };
+    const OC = G.OffscreenCanvas;
+    if (typeof OC === 'function' && originalOffscreenGetImageData) {
+      replaceMethod(OC.prototype, 'convertToBlob', (original) => function (...args) {
+        let copy = null;
+        try {
+          const { width, height } = this;
+          if (width && height && width * height <= 4096 * 4096) {
+            copy = new OC(width, height);
+            const ctx = copy.getContext('2d');
+            ctx.drawImage(this, 0, 0);
+            const image = originalOffscreenGetImageData.call(ctx, 0, 0, width, height);
+            noisify(image.data);
+            ctx.putImageData(image, 0, 0);
+          }
+        } catch { copy = null; }
+        return original.apply(copy ?? this, args);
+      });
+    }
     const HC = G.HTMLCanvasElement;
     if (typeof HC === 'function' && originalGetImageData) {
       for (const name of ['toDataURL', 'toBlob']) {
@@ -504,7 +537,8 @@ const iphoneScreens = [
   { width: 390, height: 844, cores: 6 }, { width: 393, height: 852, cores: 6 }, { width: 430, height: 932, cores: 6 },
   { width: 375, height: 812, cores: 6 }, { width: 402, height: 874, cores: 6 },
 ];
-const iosVersions = ['17_6_1', '18_1', '18_3_2', '18_6', '26_0_1', '26_1'];
+// Từ iOS 26, WebKit đóng băng phiên bản trong UA ở 18_6 nên không có 26_x.
+const iosVersions = ['17_6_1', '18_1', '18_3_2', '18_5', '18_6', '18_6'];
 
 /** PRNG xác định theo seed (mulberry32): cùng seed luôn ra cùng một máy. */
 function seededRandom(seed) {
@@ -559,9 +593,11 @@ export function createDeviceVariant(profileKey, base, seed, minViewport = null) 
     variant.screen = { width: screen.width, height: screen.height, availHeight: screen.height - taskbar, frameHeight: isWindows ? 87 : 77 };
     variant.uaData.platformVersion = osVersion;
     Object.assign(variant.spoof, {
-      dpr: screen.dpr, hardwareConcurrency: pick(gpu.cores), deviceMemory: pick([4, 8, 8, 8]),
+      dpr: screen.dpr, hardwareConcurrency: pick(gpu.cores),
       webglVendor: gpu.vendor, webglRenderer: gpu.renderer,
     });
+    // Máy từ 12 luồng trở lên gần như luôn có ≥ 8 GB (Chrome làm tròn xuống và chặn trên ở 8).
+    variant.spoof.deviceMemory = variant.spoof.hardwareConcurrency >= 12 ? 8 : pick([4, 8, 8]);
     const osName = isWindows ? (osVersion === '10.0.0' ? 'Windows 10' : 'Windows 11') : `Linux ${osVersion}`;
     variant.summary = `${osName} · ${gpu.renderer.replace(/^ANGLE \([^,]+, /, '').replace(/ \(0x.*$| Direct3D.*$|,.*$/, '')} · ${variant.spoof.hardwareConcurrency} nhân · ${screen.width}x${screen.height}@${screen.dpr}x`;
   } else if (profileKey === 'android') {

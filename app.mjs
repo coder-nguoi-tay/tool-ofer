@@ -4346,7 +4346,8 @@ async function openBrowserWithInstalledChrome({
   let ipCountry;
   let ipLat = 0, ipLng = 0;
   try {
-    const ipInfo = await requestProxyIpInfo(proxy);
+    // Thử lại một lần: thiếu thông tin IP thì múi giờ/ngôn ngữ rơi về của máy thật, lệch với IP proxy.
+    const ipInfo = await requestProxyIpInfo(proxy).catch(() => requestProxyIpInfo(proxy));
     if (typeof ipInfo.timezone === 'string' && ipInfo.timezone.includes('/')) timezoneId = ipInfo.timezone;
     if (typeof ipInfo.country === 'string') ipCountry = ipInfo.country;
     if (typeof ipInfo.loc === 'string') {
