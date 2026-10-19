@@ -1289,12 +1289,12 @@ export async function findSubmitButton(frame) {
       for (const form of forms) {
         const sub = form.querySelector('button[type="submit"], input[type="submit"], button:not([type="button"]):not([type="reset"])');
         if (sub && isVisible(sub) && !isNoiseOrNav(sub)) {
-          sub.setAttribute('data-autolead-submit-target', 'true');
+          sub.setAttribute('data-ux-submit-target', 'true');
           return true;
         }
         const anyBtn = Array.from(form.querySelectorAll('button:not([type="reset"]), [role="button"], a.btn, a.button, input[type="button"]')).find((b) => isVisible(b) && !isNoiseOrNav(b));
         if (anyBtn) {
-          anyBtn.setAttribute('data-autolead-submit-target', 'true');
+          anyBtn.setAttribute('data-ux-submit-target', 'true');
           return true;
         }
       }
@@ -1305,7 +1305,7 @@ export async function findSubmitButton(frame) {
         if (isNoiseOrNav(btn)) continue;
         const text = (btn.innerText || btn.value || btn.textContent || '').trim().toLowerCase();
         if (/continue|submit|next|get quote|get started|see results|claim|proceed|tiếp tục|xác nhận|hoàn thành|agree|start/i.test(text)) {
-          btn.setAttribute('data-autolead-submit-target', 'true');
+          btn.setAttribute('data-ux-submit-target', 'true');
           return true;
         }
       }
@@ -1314,7 +1314,7 @@ export async function findSubmitButton(frame) {
     }).catch(() => false);
 
     if (foundByDom) {
-      const targetLoc = frame.locator('[data-autolead-submit-target="true"]').first();
+      const targetLoc = frame.locator('[data-ux-submit-target="true"]').first();
       if ((await targetLoc.count().catch(() => 0)) > 0) {
         return targetLoc;
       }
@@ -1527,7 +1527,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
           groups.set(parent, []);
         }
         const uid = `btn_option_${idx}_${now}`;
-        btn.setAttribute('data-autolead-btn-option-id', uid);
+        btn.setAttribute('data-ux-btn-option-id', uid);
 
         const isSelected = btn.classList.contains('active') ||
           btn.classList.contains('selected') ||
@@ -1535,12 +1535,12 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
           btn.classList.contains('chosen') ||
           btn.getAttribute('aria-checked') === 'true' ||
           btn.getAttribute('aria-selected') === 'true' ||
-          btn.getAttribute('data-autolead-clicked') === '1' ||
+          btn.getAttribute('data-ux-clicked') === '1' ||
           (btn.tagName === 'INPUT' && btn.checked) ||
           btn.querySelector('input:checked') !== null ||
           (btn.id ? Boolean(document.querySelector(`input#${btn.id}:checked`)) : false);
 
-        const lastClickedTime = Number(btn.getAttribute('data-autolead-btn-clicked-time') || 0);
+        const lastClickedTime = Number(btn.getAttribute('data-ux-btn-clicked-time') || 0);
         const recentlyClicked = (now - lastClickedTime) < 5000;
 
         groups.get(parent).push({
@@ -1573,7 +1573,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
       const picked = group[Math.floor(Math.random() * group.length)];
       if (picked?.uid) {
         try {
-          const locator = frame.locator(`[data-autolead-btn-option-id="${picked.uid}"]`).first();
+          const locator = frame.locator(`[data-ux-btn-option-id="${picked.uid}"]`).first();
           if (locator && (await locator.count().catch(() => 0) > 0)) {
             if (typeof locator.scrollIntoViewIfNeeded === 'function') {
               await locator.scrollIntoViewIfNeeded({ timeout: 400 }).catch(() => {});
@@ -1599,8 +1599,8 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
 
             await locator.evaluate((el) => {
               const now = Date.now();
-              el.setAttribute('data-autolead-btn-clicked-time', String(now));
-              el.setAttribute('data-autolead-clicked', '1');
+              el.setAttribute('data-ux-btn-clicked-time', String(now));
+              el.setAttribute('data-ux-clicked', '1');
               el.classList.add('active', 'selected');
               el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
               el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
@@ -1790,7 +1790,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
           b.classList.contains('active') ||
           b.classList.contains('selected') ||
           b.getAttribute('aria-checked') === 'true' ||
-          b.getAttribute('data-autolead-clicked') === '1'
+          b.getAttribute('data-ux-clicked') === '1'
         );
         if (alreadyActive) return;
 
@@ -1800,7 +1800,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         const items = [];
         candidateOptions.forEach((btn, optIndex) => {
           const uid = `choice_${groupIndex}_${optIndex}_${Date.now()}`;
-          btn.setAttribute('data-autolead-choice-id', uid);
+          btn.setAttribute('data-ux-choice-id', uid);
           items.push({
             uid,
             id: btn.id || '',
@@ -1829,7 +1829,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
           const alreadyActive = standaloneVectorButtons.some((b) =>
             b.classList.contains('active') ||
             b.classList.contains('selected') ||
-            b.getAttribute('data-autolead-clicked') === '1'
+            b.getAttribute('data-ux-clicked') === '1'
           );
           if (!alreadyActive) {
             const heading = (document.querySelector('h1, h2, h3, h4, .main-question, .survey-question-text, .question, legend')?.innerText || 'vector_survey').trim();
@@ -1837,7 +1837,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
               questionTitle: heading,
               items: standaloneVectorButtons.map((btn, optIndex) => {
                 const uid = `choice_vec_${optIndex}_${Date.now()}`;
-                btn.setAttribute('data-autolead-choice-id', uid);
+                btn.setAttribute('data-ux-choice-id', uid);
                 return {
                   uid,
                   id: btn.id || '',
@@ -1857,13 +1857,13 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         const yesBtn = allButtons.find((b) => /^(yes|có|true|agree)$/i.test((b.innerText || b.textContent || '').trim()));
         const noBtn = allButtons.find((b) => /^(no|không|false|disagree)$/i.test((b.innerText || b.textContent || '').trim()));
         if (yesBtn && noBtn) {
-          const isYesActive = yesBtn.classList.contains('active') || yesBtn.classList.contains('selected') || yesBtn.getAttribute('data-autolead-clicked') === '1';
-          const isNoActive = noBtn.classList.contains('active') || noBtn.classList.contains('selected') || noBtn.getAttribute('data-autolead-clicked') === '1';
+          const isYesActive = yesBtn.classList.contains('active') || yesBtn.classList.contains('selected') || yesBtn.getAttribute('data-ux-clicked') === '1';
+          const isNoActive = noBtn.classList.contains('active') || noBtn.classList.contains('selected') || noBtn.getAttribute('data-ux-clicked') === '1';
           if (!isYesActive && !isNoActive) {
             const uidYes = `choice_yes_${Date.now()}`;
             const uidNo = `choice_no_${Date.now()}`;
-            yesBtn.setAttribute('data-autolead-choice-id', uidYes);
-            noBtn.setAttribute('data-autolead-choice-id', uidNo);
+            yesBtn.setAttribute('data-ux-choice-id', uidYes);
+            noBtn.setAttribute('data-ux-choice-id', uidNo);
             results.push({
               questionTitle: 'yes_no',
               items: [
@@ -1897,7 +1897,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
       });
 
       for (const [groupName, radios] of Object.entries(radioGroups)) {
-        const hasChecked = radios.some((r) => r.checked || r.getAttribute('data-autolead-clicked') === '1');
+        const hasChecked = radios.some((r) => r.checked || r.getAttribute('data-ux-clicked') === '1');
         if (hasChecked || radios.length < 2) continue;
 
         const container = radios[0].closest('fieldset, .form-group, .step-container, .survey-question, form, div');
@@ -1906,7 +1906,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
 
         const items = radios.map((r, optIndex) => {
           const uid = `choice_radio_${groupName}_${optIndex}_${Date.now()}`;
-          r.setAttribute('data-autolead-choice-id', uid);
+          r.setAttribute('data-ux-choice-id', uid);
           const lbl = document.querySelector(`label[for="${r.id}"]`) || r.closest('label');
           const text = (lbl?.innerText || lbl?.textContent || r.value || '').trim();
           return {
@@ -1982,7 +1982,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
 
       if (picked?.uid) {
         try {
-          const locator = frame.locator(`[data-autolead-choice-id="${picked.uid}"]`).first();
+          const locator = frame.locator(`[data-ux-choice-id="${picked.uid}"]`).first();
           if (locator && (await locator.count() > 0)) {
             if (typeof locator.scrollIntoViewIfNeeded === 'function') {
               await locator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
@@ -2012,7 +2012,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
             }
 
             await locator.evaluate((el) => {
-              el.setAttribute('data-autolead-clicked', '1');
+              el.setAttribute('data-ux-clicked', '1');
               if (el.type === 'radio') el.checked = true;
               el.classList.add('selected', 'active');
               el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2050,14 +2050,14 @@ export async function handleOfferwallCards(frame, page = null) {
       ));
       const unhandled = [];
       cards.forEach((card, idx) => {
-        if (card.getAttribute('data-autolead-opened') === '1') return;
+        if (card.getAttribute('data-ux-opened') === '1') return;
         const form = card.closest('form') || (card.tagName.toLowerCase() === 'form' ? card : null);
-        if (form && form.getAttribute('data-autolead-opened') === '1') return;
+        if (form && form.getAttribute('data-ux-opened') === '1') return;
 
         const uid = `offerwall_card_${idx}_${Date.now()}`;
-        card.setAttribute('data-autolead-card-id', uid);
-        card.setAttribute('data-autolead-opened', '1');
-        if (form) form.setAttribute('data-autolead-opened', '1');
+        card.setAttribute('data-ux-card-id', uid);
+        card.setAttribute('data-ux-opened', '1');
+        if (form) form.setAttribute('data-ux-opened', '1');
 
         const btn = card.querySelector('.offerwall-btn, button[type="submit"], button#btnSubmit, a.offerwall-btn, [data-tf-element-role="offer-btn"]');
         const destUrl = card.getAttribute('data-destination-url') || form?.getAttribute('data-destination-url') || card.querySelector('a[href]')?.getAttribute('href') || '';
@@ -2075,7 +2075,7 @@ export async function handleOfferwallCards(frame, page = null) {
 
     for (const card of cardsToOpen) {
       try {
-        const cardLoc = frame.locator(`[data-autolead-card-id="${card.uid}"]`).first();
+        const cardLoc = frame.locator(`[data-ux-card-id="${card.uid}"]`).first();
         if (await cardLoc.count() > 0) {
           const btn = cardLoc.locator('.offerwall-btn, button[type="submit"], button#btnSubmit, a.offerwall-btn, [data-tf-element-role="offer-btn"]').first();
           if ((await btn.count() > 0) && (await btn.isVisible().catch(() => false))) {
@@ -2133,14 +2133,14 @@ export async function handleNegativeSkipButtons(frame) {
     const buttons = await frame.locator(skipSelector).all();
     for (const btn of buttons) {
       if (!(await btn.isVisible().catch(() => false))) continue;
-      const alreadyClicked = await btn.getAttribute('data-autolead-clicked').catch(() => null);
+      const alreadyClicked = await btn.getAttribute('data-ux-clicked').catch(() => null);
       if (alreadyClicked === '1') continue;
 
       await btn.click({ timeout: 1500, force: true }).catch(async () => {
         await btn.evaluate((b) => b.click()).catch(() => {});
       });
       await btn.evaluate((b) => {
-        b.setAttribute('data-autolead-clicked', '1');
+        b.setAttribute('data-ux-clicked', '1');
       }).catch(() => {});
       skipped += 1;
       await new Promise((r) => setTimeout(r, 400));
@@ -2761,7 +2761,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           } else {
             if (!(await field.isVisible())) continue;
           }
-          const isMarkedFilled = (await field.getAttribute('data-autolead-filled')) === '1';
+          const isMarkedFilled = (await field.getAttribute('data-ux-filled')) === '1';
           if (isMarkedFilled) {
             const currentVal = await field.inputValue().catch(() => null);
             const hasError = await field.evaluate((el) => {
@@ -2772,7 +2772,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
             // Nếu đã fill nhưng giá trị hiện tại bị rỗng hoặc đang bị báo lỗi -> xóa mark để điền lại
             if ((currentVal !== null && currentVal.trim() === '') || hasError) {
-              await field.evaluate((el) => el.removeAttribute('data-autolead-filled')).catch(() => {});
+              await field.evaluate((el) => el.removeAttribute('data-ux-filled')).catch(() => {});
             } else {
               continue;
             }
@@ -2941,7 +2941,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
                   await field.dispatchEvent('input').catch(() => {});
                   await field.dispatchEvent('change').catch(() => {});
-                  await field.evaluate((el) => { el.dataset.autoleadFilled = '1'; }).catch(() => {});
+                  await field.evaluate((el) => { el.dataset.uxFilled = '1'; }).catch(() => {});
                   session.autofillFields = (session.autofillFields ?? 0) + 1;
                   session.autofillError = null;
                   filledInThisPass += 1;
@@ -2986,7 +2986,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 return false;
               }).catch(() => false);
               if (picked) {
-                await field.evaluate((el) => { el.dataset.autoleadFilled = '1'; }).catch(() => {});
+                await field.evaluate((el) => { el.dataset.uxFilled = '1'; }).catch(() => {});
                 session.autofillFields = (session.autofillFields ?? 0) + 1;
                 filledInThisPass += 1;
                 continue;
@@ -3166,7 +3166,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           }
 
           await field.evaluate((element) => {
-            element.dataset.autoleadFilled = '1';
+            element.dataset.uxFilled = '1';
             element.classList.remove('error');
             element.classList.add('has-value');
             const parent = element.closest('.input-group, .loco-group, .form-group');
@@ -3317,7 +3317,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               nowChecked = await cb.isChecked().catch(() => false);
             }
             if (nowChecked) {
-              await cb.evaluate((el) => { el.dataset.autoleadFilled = '1'; }).catch(() => {});
+              await cb.evaluate((el) => { el.dataset.uxFilled = '1'; }).catch(() => {});
               filledInThisPass += 1;
               session.autofillFields = (session.autofillFields ?? 0) + 1;
               options.onLog?.({
@@ -3512,9 +3512,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               const tag = (btn.tagName || '').toUpperCase();
               const id = btn.id || null;
               const now = Date.now();
-              const lastClick = Number(btn.dataset.autoleadLastSubmitTime || 0);
-              let clickCount = Number(btn.dataset.autoleadSubmitCount || 0);
-              const lastFields = Number(btn.dataset.autoleadLastFields || -1);
+              const lastClick = Number(btn.dataset.uxLastSubmitTime || 0);
+              let clickCount = Number(btn.dataset.uxSubmitCount || 0);
+              const lastFields = Number(btn.dataset.uxLastFields || -1);
 
               // Nếu số trường autofill tăng lên (vừa điền thêm trường ở bước mới), reset clickCount
               if (currentFields > lastFields && lastFields !== -1) {
@@ -3523,7 +3523,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
               // 1. Thẻ <a> chuyển link / popup: chỉ bấm 1 lần nếu mở ra tab mới ngoài (_blank)
               const isExternalNav = tag === 'A' && btn.href && !btn.href.startsWith('javascript:') && !btn.href.startsWith('#') && btn.target === '_blank';
-              if (isExternalNav && btn.dataset.autoleadSubmitted === '1') {
+              if (isExternalNav && btn.dataset.uxSubmitted === '1') {
                 return { shouldClick: false, text, tag, id, reason: 'a_already_clicked' };
               }
 
@@ -3537,10 +3537,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 return { shouldClick: false, text, tag, id, reason: 'max_clicks_reached' };
               }
 
-              btn.dataset.autoleadLastSubmitTime = String(now);
-              btn.dataset.autoleadSubmitted = '1';
-              btn.dataset.autoleadSubmitCount = String(clickCount + 1);
-              btn.dataset.autoleadLastFields = String(currentFields);
+              btn.dataset.uxLastSubmitTime = String(now);
+              btn.dataset.uxSubmitted = '1';
+              btn.dataset.uxSubmitCount = String(clickCount + 1);
+              btn.dataset.uxLastFields = String(currentFields);
               return { shouldClick: true, text, tag, id };
             }, session.autofillFields ?? 0).catch(() => null);
 
@@ -3710,10 +3710,10 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               });
               if (!forms.length) return false;
               for (const form of forms) {
-                const lastSubmit = Number(form.dataset.autoleadLastSubmitTime || 0);
+                const lastSubmit = Number(form.dataset.uxLastSubmitTime || 0);
                 const now = Date.now();
                 if (now - lastSubmit < 1200) continue;
-                form.dataset.autoleadLastSubmitTime = String(now);
+                form.dataset.uxLastSubmitTime = String(now);
                 try {
                   if (typeof form.requestSubmit === 'function') {
                     form.requestSubmit();

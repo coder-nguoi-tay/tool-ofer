@@ -16,6 +16,9 @@ import {
   installChromeVersions,
 } from './chrome-versions.mjs';
 import { startAuthenticatedSocksRelay } from './relay.mjs';
+import {
+  applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, localeForCountry, reducedChromeVersion, stealthInitScript,
+} from './stealth.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig } from './ai-assist.mjs';
 
@@ -79,53 +82,80 @@ let limitRunCount = 0;
 let limitRunMax = 0;
 
 /** @type {Map<object, Array<{time:string,type:string,[key:string]:any}>>} */
+// Giới hạn WebGL của GPU desktop thật (SwiftShader khi chạy headless chỉ báo 8192).
+const desktopWebglParams = { 3379: 16384, 34024: 16384, 3386: [32767, 32767] }; // MAX_TEXTURE_SIZE, MAX_RENDERBUFFER_SIZE, MAX_VIEWPORT_DIMS
+
+/**
+ * Thiết bị giả lập. UA theo chuẩn đã giảm của Chrome (Chrome/155.0.0.0), phiên bản đầy đủ chỉ
+ * nằm trong Client Hints (uaData). Chuỗi GPU theo đúng định dạng ANGLE mà Chrome trên từng hệ điều hành trả.
+ */
 export const DEVICE_PROFILES = {
   windows: {
     label: 'Windows Desktop',
-    ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
+    ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${reducedChromeVersion(v)} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
+    screen: { width: 1920, height: 1080, availHeight: 1032, frameHeight: 87 },
+    uaData: { platform: 'Windows', platformVersion: '15.0.0', architecture: 'x86', bitness: '64', model: '' },
     spoof: {
       platform: 'Win32', maxTouchPoints: 0, mobile: false, uaPlatform: 'Windows', dpr: 1, vendor: 'Google Inc.',
+      hardwareConcurrency: 8, deviceMemory: 8,
       webglVendor: 'Google Inc. (NVIDIA)',
-      webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+      webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002504) Direct3D11 vs_5_0 ps_5_0, D3D11)',
+      webglParams: desktopWebglParams,
     },
   },
   macos: {
     label: 'macOS Desktop',
-    ua: (v) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
+    // Chrome trên Apple Silicon vẫn gửi "Intel Mac OS X 10_15_7"; kiến trúc thật nằm trong Client Hints.
+    ua: (v) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${reducedChromeVersion(v)} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 2,
+    screen: { width: 1440, height: 900, availTop: 25, availHeight: 875, frameHeight: 79 },
+    uaData: { platform: 'macOS', platformVersion: '14.6.1', architecture: 'arm', bitness: '64', model: '' },
     spoof: {
       platform: 'MacIntel', maxTouchPoints: 0, mobile: false, uaPlatform: 'macOS', dpr: 2, vendor: 'Google Inc.',
-      webglVendor: 'Apple Inc.',
-      webglRenderer: 'Apple M1',
+      hardwareConcurrency: 8, deviceMemory: 8,
+      webglVendor: 'Google Inc. (Apple)',
+      webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)',
+      webglParams: desktopWebglParams,
     },
   },
   linux: {
     label: 'Linux Desktop',
-    ua: (v) => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
+    ua: (v) => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${reducedChromeVersion(v)} Safari/537.36`,
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
+    screen: { width: 1920, height: 1080, availHeight: 1053, frameHeight: 77 },
+    uaData: { platform: 'Linux', platformVersion: '6.8.0', architecture: 'x86', bitness: '64', model: '' },
     spoof: {
       platform: 'Linux x86_64', maxTouchPoints: 0, mobile: false, uaPlatform: 'Linux', dpr: 1, vendor: 'Google Inc.',
+      hardwareConcurrency: 8, deviceMemory: 8,
       webglVendor: 'Google Inc. (Intel)',
-      webglRenderer: 'ANGLE (Intel, Intel(R) UHD Graphics 630, OpenGL 4.5)',
+      webglRenderer: 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)',
+      webglParams: desktopWebglParams,
     },
   },
   android: {
     label: 'Android (Chrome)',
-    ua: (v) => `Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Mobile Safari/537.36`,
+    // Chrome Android giảm UA thành "Android 10; K"; model và bản Android thật nằm trong Client Hints.
+    ua: (v) => `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${reducedChromeVersion(v)} Mobile Safari/537.36`,
     viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2.625,
+    screen: { width: 412, height: 915 },
+    uaData: { platform: 'Android', platformVersion: '14.0.0', architecture: '', bitness: '', model: 'Pixel 8' },
     spoof: {
       platform: 'Linux armv8l', maxTouchPoints: 5, mobile: true, uaPlatform: 'Android', dpr: 2.625, vendor: 'Google Inc.',
-      webglVendor: 'Qualcomm',
-      webglRenderer: 'Adreno (TM) 640',
+      hardwareConcurrency: 9, deviceMemory: 8,
+      webglVendor: 'ARM',
+      webglRenderer: 'Mali-G715',
     },
   },
+  // iPad/iPhone: Chrome trên iOS là WebKit nên giả lập từ Blink chỉ ở mức bề mặt (UA, platform, màn hình).
   ipad: {
     label: 'iPad (Chrome)',
     ua: (v) => `Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`,
     viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+    screen: { width: 820, height: 1180 },
     spoof: {
       platform: 'iPad', maxTouchPoints: 5, mobile: false, uaPlatform: 'iOS', dpr: 2, vendor: 'Apple Computer, Inc.',
+      hardwareConcurrency: 8,
       webglVendor: 'Apple Inc.',
       webglRenderer: 'Apple GPU',
     },
@@ -134,8 +164,10 @@ export const DEVICE_PROFILES = {
     label: 'iPhone (Chrome)',
     ua: (v) => `Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`,
     viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
+    screen: { width: 390, height: 844 },
     spoof: {
       platform: 'iPhone', maxTouchPoints: 5, mobile: true, uaPlatform: 'iOS', dpr: 3, vendor: 'Apple Computer, Inc.',
+      hardwareConcurrency: 6,
       webglVendor: 'Apple Inc.',
       webglRenderer: 'Apple GPU',
     },
@@ -2766,15 +2798,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
     hasShownWindow: false,
     leadCheckStatus: null,
     leadCheckMessage: null,
-    updateBadge: (text) => {
-      try {
-        for (const p of context.pages()) {
-          if (!p.isClosed()) {
-            p.evaluate((t) => { const b = document.getElementById('__autolead_ip_badge'); if (b) b.innerHTML = t; }, text).catch(() => {});
-          }
-        }
-      } catch {}
-    },
+    updateBadge: (text) => { session.badgeText = text; },
   };
   activeBrowsers.add(session);
 
@@ -2869,18 +2893,6 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, token, proxy,
     }
     await page.bringToFront().catch(() => {});
 
-    // Gắn IP badge vào trang
-    await page.evaluate(({ ip, s }) => {
-      try {
-        if (!document.getElementById('__autolead_ip_badge')) {
-          const badge = document.createElement('div');
-          badge.id = '__autolead_ip_badge';
-          badge.innerHTML = `🌐 <strong>IP:</strong> ${ip} <span style="margin-left:4px;background:#1d4ed8;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;">Slot ${s}</span>`;
-          badge.style.cssText = 'position:fixed;top:8px;right:12px;z-index:2147483647;background:rgba(26,38,57,0.92);color:#fff;padding:4px 10px;border-radius:14px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;pointer-events:none;';
-          document.documentElement.appendChild(badge);
-        }
-      } catch {}
-    }, { ip: initialExitIp, s: assignedSlot }).catch(() => {});
   }
 
   closeChromeWhenLastTabCloses(session);
@@ -4185,20 +4197,7 @@ async function startLeadVerification(session, leadConfig) {
   console.log(`[LeadCheck] ${label}: Đã nộp ${targetDesc}. Bắt đầu kiểm tra lead từ toffers.top...`);
   try {
 
-  const updateBadge = (text) => {
-    try {
-      if (session.browser?.pages) {
-        for (const p of session.browser.pages()) {
-          if (!p.isClosed()) {
-            p.evaluate((t) => {
-              const b = document.getElementById('__autolead_ip_badge');
-              if (b) b.innerHTML = t;
-            }, text).catch(() => {});
-          }
-        }
-      }
-    } catch {}
-  };
+  const updateBadge = (text) => { session.updateBadge?.(text); };
 
   const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 15);
   const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 1);
@@ -4342,10 +4341,12 @@ async function openBrowserWithInstalledChrome({
   await mkdir(userDataDirectory, { recursive: true, mode: 0o700 });
 
   let timezoneId;
+  let ipCountry;
   let ipLat = 0, ipLng = 0;
   try {
     const ipInfo = await requestProxyIpInfo(proxy);
     if (typeof ipInfo.timezone === 'string' && ipInfo.timezone.includes('/')) timezoneId = ipInfo.timezone;
+    if (typeof ipInfo.country === 'string') ipCountry = ipInfo.country;
     if (typeof ipInfo.loc === 'string') {
       const parts = ipInfo.loc.split(',').map(Number);
       if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) [ipLat, ipLng] = parts;
@@ -4358,6 +4359,11 @@ async function openBrowserWithInstalledChrome({
     ? await startAuthenticatedSocksRelay(proxy)
     : null;
   const dp = DEVICE_PROFILES[deviceProfile] ?? DEVICE_PROFILES.windows;
+  // Ngôn ngữ khớp quốc gia của IP, cùng nguồn với múi giờ.
+  const { locale, languages } = localeForCountry(ipCountry);
+  const geolocation = antiFingerprint.apiFakeIP && (ipLat || ipLng)
+    ? { latitude: ipLat, longitude: ipLng, accuracy: 20 + Math.floor(Math.random() * 60) }
+    : null;
   let context;
   let verifiedExitIp = null;
   // Chạy ẩn hoàn toàn — người dùng xem qua Screen View trong giao diện AutoLead
@@ -4368,18 +4374,26 @@ async function openBrowserWithInstalledChrome({
       ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking', '--disable-component-update'],
       headless: true,
       viewport: headlessViewport,
+      ...(dp.screen && { screen: { width: dp.screen.width, height: dp.screen.height } }),
       ignoreHTTPSErrors: true,
       userAgent: dp.ua(build.version),
+      locale,
       isMobile: dp.isMobile,
       hasTouch: dp.hasTouch,
       deviceScaleFactor: dp.deviceScaleFactor ?? 1,
       proxy: relay?.proxy ?? toPlaywrightProxy(proxy),
       ...(timezoneId && { timezoneId }),
+      // Toạ độ theo IP proxy qua API của Playwright: quyền geolocation và vị trí trả về khớp nhau.
+      ...(geolocation && { geolocation, permissions: ['geolocation'] }),
       args: [
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-blink-features=AutomationControlled',
+        // WebRTC chỉ đi qua proxy: không để STUN/UDP làm lộ IP thật của máy.
+        '--webrtc-ip-handling-policy=disable_non_proxied_udp',
         '--disable-gpu',
+        // Chrome mới không tự dùng SwiftShader cho WebGL nữa; thiếu cờ này trang thấy "không có WebGL".
+        '--enable-unsafe-swiftshader',
         '--disable-dev-shm-usage',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
@@ -4419,22 +4433,8 @@ async function openBrowserWithInstalledChrome({
     extensions: extensionNames.length > 0
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
-    updateBadge: (text) => {
-      try {
-        if (context?.pages) {
-          const offerTag = `<span style="display:inline-block;background:#3b82f6;color:#ffffff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:bold;margin-right:6px;">Offer ${session.offerNumber}</span>`;
-          const decoratedText = text.includes('Offer ') ? text : `${offerTag}${text}`;
-          for (const p of context.pages()) {
-            if (!p.isClosed()) {
-              p.evaluate((t) => {
-                const b = document.getElementById('__autolead_ip_badge');
-                if (b) b.innerHTML = t;
-              }, decoratedText).catch(() => {});
-            }
-          }
-        }
-      } catch {}
-    },
+    // Trạng thái hiển thị trong giao diện AutoLead (leadCheckMessage), không ghi vào trang đích.
+    updateBadge: (text) => { session.badgeText = text; },
     addLog: (entry) => {
       if (typeof session.addBrowserLog === 'function') {
         session.addBrowserLog(entry);
@@ -4450,233 +4450,24 @@ async function openBrowserWithInstalledChrome({
   }
   attachBrowserLogger(context, session);
 
-  // Inject device spoof toàn diện: prototype override + Client Hints + devicePixelRatio + webdriver cleanup + stealth
-  await context.addInitScript(({ platform, maxTouchPoints, mobile, uaPlatform, dpr, vendor, webglVendor, webglRenderer }) => {
-    const def = (obj, prop, value) => {
-      try {
-        Object.defineProperty(obj, prop, { get: () => value, configurable: true });
-      } catch {}
-    };
-    // Override trên prototype để không bị detect qua hasOwnProperty
-    const navProto = Object.getPrototypeOf(navigator);
-    def(navProto, 'platform', platform);
-    def(navProto, 'maxTouchPoints', maxTouchPoints);
-    if (vendor) {
-      def(navProto, 'vendor', vendor);
+  // Giả lập thiết bị + chống fingerprint: một script duy nhất chạy trong mọi frame, hàm vá trông như native.
+  const stealthConfig = buildStealthConfig(dp, antiFingerprint, Math.floor(Math.random() * 0x7fffffff) || 1);
+  await context.addInitScript(stealthInitScript, stealthConfig);
+  // UA, Client Hints, navigator.platform, số nhân CPU, ngôn ngữ: đổi tận gốc qua CDP cho từng tab và iframe khác site.
+  const nativeOverrides = {
+    userAgentOverride: buildUserAgentOverride(dp, build, languages),
+    hardwareConcurrency: dp.spoof.hardwareConcurrency,
+  };
+  const overrideTasks = new WeakMap();
+  const applyDeviceOverrides = (targetPage) => {
+    if (!overrideTasks.has(targetPage)) {
+      overrideTasks.set(targetPage, applyNativeOverrides(context, targetPage, nativeOverrides)
+        .catch((error) => console.warn(`[Stealth] Không áp được override cho tab: ${error.message}`)));
     }
-    def(window, 'devicePixelRatio', dpr);
-
-    // Chặn phát hiện tự động hóa
-    def(navProto, 'webdriver', false);
-
-    // Permissions spoofing: Notification prompt tự nhiên tránh bị gắn cờ automation
-    if (navigator.permissions && typeof navigator.permissions.query === 'function') {
-      const origQuery = navigator.permissions.query.bind(navigator.permissions);
-      navigator.permissions.query = (param) => {
-        if (param && param.name === 'notifications') {
-          return Promise.resolve({ state: 'prompt', onchange: null });
-        }
-        return origQuery(param);
-      };
-    }
-
-    // WebGL Vendor & Renderer đồng bộ chuẩn theo device profile
-    if (webglVendor && webglRenderer) {
-      const spoofParam = (getParameter) => function (param) {
-        if (param === 37445) return webglVendor; // UNMASKED_VENDOR_WEBGL
-        if (param === 37446) return webglRenderer; // UNMASKED_RENDERER_WEBGL
-        return getParameter.apply(this, [param]);
-      };
-      if (window.WebGLRenderingContext) {
-        WebGLRenderingContext.prototype.getParameter = spoofParam(WebGLRenderingContext.prototype.getParameter);
-      }
-      if (window.WebGL2RenderingContext) {
-        WebGL2RenderingContext.prototype.getParameter = spoofParam(WebGL2RenderingContext.prototype.getParameter);
-      }
-    }
-
-    // Xử lý Client Hints (navigator.userAgentData)
-    if (uaPlatform === 'iOS') {
-      // Safari trên iOS / iPadOS không hỗ trợ userAgentData và không có window.chrome
-      try {
-        delete navProto.userAgentData;
-        delete navigator.userAgentData;
-      } catch {}
-      def(navProto, 'userAgentData', undefined);
-      try {
-        delete window.chrome;
-      } catch {}
-    } else if (navigator.userAgentData) {
-      const orig = navigator.userAgentData;
-      const spoofed = {
-        brands: orig.brands,
-        mobile,
-        platform: uaPlatform,
-        toJSON: () => ({ brands: orig.brands, mobile, platform: uaPlatform }),
-        getHighEntropyValues: async (hints) => {
-          const real = await orig.getHighEntropyValues(hints).catch(() => ({}));
-          return { ...real, mobile, platform: uaPlatform };
-        },
-      };
-      def(navProto, 'userAgentData', spoofed);
-    }
-
-    // Touch events cho mobile
-    if (maxTouchPoints > 0 && !('ontouchstart' in window)) {
-      window.ontouchstart = null;
-      window.TouchEvent = window.TouchEvent || function TouchEvent() {};
-    }
-  }, dp.spoof);
-
-  // Chống fingerprint theo tuỳ chọn (tương đương Canvas/ClientRects/WebGLImage/WebRTC/Fonts/ApiFakeIP trong Settings.ini bản Windows)
-  if (antiFingerprint.canvas || antiFingerprint.clientRects || antiFingerprint.webgl || antiFingerprint.webrtc || antiFingerprint.fonts || antiFingerprint.apiFakeIP) {
-    await context.addInitScript(({ canvas, clientRects, webgl, webrtc, fonts, apiFakeIP, ipLat, ipLng, webglVendor, webglRenderer, seed }) => {
-      // Nhiễu nhỏ ổn định theo seed của phiên để cùng 1 phiên luôn ra cùng kết quả, nhưng khác giữa các phiên
-      let s = seed;
-      const rand = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
-
-      if (canvas) {
-        const addNoise = (imageData) => {
-          const d = imageData.data;
-          for (let i = 0; i < d.length; i += 97) d[i] = d[i] ^ (rand() < 0.5 ? 0 : 1);
-          return imageData;
-        };
-        const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-        CanvasRenderingContext2D.prototype.getImageData = function (...args) {
-          return addNoise(origGetImageData.apply(this, args));
-        };
-        const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-        HTMLCanvasElement.prototype.toDataURL = function (...args) {
-          const ctx = this.getContext('2d');
-          if (ctx) addNoise(ctx.getImageData(0, 0, this.width, this.height));
-          return origToDataURL.apply(this, args);
-        };
-      }
-
-      if (clientRects) {
-        const jitter = (rect) => {
-          const j = (rand() - 0.5) * 0.02;
-          const DOMRectCtor = window.DOMRect || Object;
-          return new DOMRectCtor(rect.x + j, rect.y + j, rect.width, rect.height);
-        };
-        const origGetBoundingClientRect = Element.prototype.getBoundingClientRect;
-        Element.prototype.getBoundingClientRect = function () {
-          return jitter(origGetBoundingClientRect.apply(this));
-        };
-      }
-
-      if (webgl) {
-        const spoofParam = (getParameter) => function (param) {
-          if (param === 37445) return webglVendor || 'Intel Inc.'; // UNMASKED_VENDOR_WEBGL
-          if (param === 37446) return webglRenderer || 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
-          return getParameter.apply(this, [param]);
-        };
-        if (window.WebGLRenderingContext) {
-          WebGLRenderingContext.prototype.getParameter = spoofParam(WebGLRenderingContext.prototype.getParameter);
-        }
-        if (window.WebGL2RenderingContext) {
-          WebGL2RenderingContext.prototype.getParameter = spoofParam(WebGL2RenderingContext.prototype.getParameter);
-        }
-      }
-
-      // AudioContext micro-noise chống fingerprint âm thanh
-      if (window.AudioBuffer) {
-        const origGetChannelData = AudioBuffer.prototype.getChannelData;
-        AudioBuffer.prototype.getChannelData = function (channel) {
-          const buffer = origGetChannelData.apply(this, [channel]);
-          for (let i = 0; i < buffer.length; i += 97) {
-            buffer[i] += (rand() - 0.5) * 1e-7;
-          }
-          return buffer;
-        };
-      }
-      if (window.AnalyserNode) {
-        const origGetFloatFrequencyData = AnalyserNode.prototype.getFloatFrequencyData;
-        AnalyserNode.prototype.getFloatFrequencyData = function (array) {
-          origGetFloatFrequencyData.apply(this, [array]);
-          for (let i = 0; i < array.length; i += 11) {
-            array[i] += (rand() - 0.5) * 0.1;
-          }
-        };
-      }
-
-      if (webrtc) {
-        // Chặn rò IP thật qua WebRTC ICE candidate (tương đương WebRTC=True trong bản Windows)
-        try { delete window.RTCPeerConnection; } catch {}
-        try { delete window.webkitRTCPeerConnection; } catch {}
-        window.RTCPeerConnection = undefined;
-        window.webkitRTCPeerConnection = undefined;
-      }
-
-      if (fonts) {
-        // Whitelist chỉ cho phép các font web-safe phổ biến, chặn probe font hệ thống
-        const safeFonts = new Set([
-          'Arial', 'Arial Black', 'Comic Sans MS', 'Courier New', 'Georgia',
-          'Impact', 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Helvetica',
-          'sans-serif', 'serif', 'monospace', 'cursive', 'fantasy',
-          'system-ui', '-apple-system', 'BlinkMacSystemFont',
-        ]);
-        if (document.fonts) {
-          const origCheck = document.fonts.check.bind(document.fonts);
-          document.fonts.check = function (font, text) {
-            const m = font.match(/(?:^|[\s,])([A-Za-z][A-Za-z0-9 \-]+?)(?=\s*,|\s*$)/);
-            const name = m ? m[1].trim() : font;
-            return safeFonts.has(name) ? origCheck(font, text) : false;
-          };
-          document.fonts.load = () => Promise.resolve([]);
-        }
-        // Jitter measureText width để phá font-metric fingerprint
-        const origMeasureText = CanvasRenderingContext2D.prototype.measureText;
-        CanvasRenderingContext2D.prototype.measureText = function (...args) {
-          const real = origMeasureText.apply(this, args);
-          const j = (rand() - 0.5) * 0.1;
-          return new Proxy(real, {
-            get (t, p) {
-              if (p === 'width') return t.width + j;
-              const v = t[p];
-              return typeof v === 'function' ? v.bind(t) : v;
-            },
-          });
-        };
-      }
-
-      if (apiFakeIP) {
-        // Fake navigator.geolocation theo toạ độ IP proxy (ipinfo.io loc)
-        const fakeCoords = {
-          latitude: ipLat || 0,
-          longitude: ipLng || 0,
-          accuracy: 20 + Math.floor(rand() * 60),
-          altitude: null,
-          altitudeAccuracy: null,
-          heading: null,
-          speed: null,
-        };
-        const fakePos = { coords: fakeCoords, timestamp: Date.now() };
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition = (success, error, opts) => {
-            setTimeout(() => success(fakePos), 100 + Math.floor(rand() * 400));
-          };
-          navigator.geolocation.watchPosition = (success, error, opts) => {
-            setTimeout(() => success(fakePos), 100 + Math.floor(rand() * 400));
-            return Math.floor(rand() * 9999) + 1;
-          };
-          navigator.geolocation.clearWatch = () => {};
-        }
-      }
-    }, {
-      canvas: Boolean(antiFingerprint.canvas),
-      clientRects: Boolean(antiFingerprint.clientRects),
-      webgl: Boolean(antiFingerprint.webgl),
-      webrtc: Boolean(antiFingerprint.webrtc),
-      fonts: Boolean(antiFingerprint.fonts),
-      apiFakeIP: Boolean(antiFingerprint.apiFakeIP),
-      ipLat,
-      ipLng,
-      webglVendor: dp.spoof.webglVendor,
-      webglRenderer: dp.spoof.webglRenderer,
-      seed: Math.floor(Math.random() * 0x7fffffff) || 1,
-    });
-  }
+    return overrideTasks.get(targetPage);
+  };
+  context.on('page', (newPage) => { void applyDeviceOverrides(newPage); });
+  await Promise.all(context.pages().map(applyDeviceOverrides));
 
   // Lấy từ queue available (đã kiểm tra ở launchRequestedBrowsers)
   const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
@@ -4812,6 +4603,7 @@ async function openBrowserWithInstalledChrome({
   });
   try {
     const page = context.pages()[0] ?? await context.newPage();
+    await applyDeviceOverrides(page);
     let cdpSession = null;
     let cdpWindowId = null;
 
@@ -4889,50 +4681,8 @@ async function openBrowserWithInstalledChrome({
     }
     await page.bringToFront().catch(() => {});
 
-    // Đặt tiền tố IP, thiết bị và luồng vào tiêu đề trang và gắn badge để khi xem đều thấy rõ IP, loại thiết bị và luồng
-    await page.evaluate(({ ip, deviceLabel, deviceProfile, streamLabel }) => {
-      const deviceIcons = { windows: '🪟', macos: '🍎', linux: '🐧', android: '🤖', ipad: '📟', ios: '📱' };
-      const icon = deviceIcons[deviceProfile] || '🖥';
-      const streamTag = streamLabel ? `[${streamLabel}] ` : '';
-      const prefix = `${streamTag}[${icon} IP: ${ip}] `;
-      if (document.title && !document.title.startsWith(prefix)) {
-        document.title = prefix + document.title;
-      } else if (!document.title) {
-        document.title = prefix;
-      }
-      try {
-        if (!document.getElementById('__autolead_ip_badge')) {
-          const badge = document.createElement('div');
-          badge.id = '__autolead_ip_badge';
-          const streamHtml = streamLabel ? `<span style="background:${streamLabel.includes('2') ? '#8b5cf6' : '#2563eb'};color:#fff;padding:1px 6px;border-radius:6px;font-weight:600;margin-right:4px;">${streamLabel}</span> ` : '';
-          badge.innerHTML = `${streamHtml}🌐 <strong>IP:</strong> ${ip} · ${icon} ${deviceLabel}`;
-          badge.title = `${streamLabel ? streamLabel + '\n' : ''}Chrome Session IP: ${ip}\nThiết bị: ${deviceLabel}\nAutoLeadPC`;
-          badge.style.cssText = 'position:fixed;top:8px;right:12px;z-index:2147483647;'
-            + 'background:rgba(26,38,57,0.92);color:#fff;padding:4px 10px;border-radius:14px;'
-            + 'font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;line-height:1.4;'
-            + 'box-shadow:0 2px 8px rgba(0,0,0,0.25);pointer-events:auto;user-select:none;'
-            + 'cursor:pointer;transition:all 0.2s;';
-          badge.onmouseenter = () => { badge.style.opacity = '1'; badge.style.transform = 'scale(1.05)'; };
-          badge.onmouseleave = () => { badge.style.opacity = '0.75'; badge.style.transform = 'scale(1)'; };
-          badge.style.opacity = '0.85';
-          document.documentElement.appendChild(badge);
-        }
-      } catch {}
-    }, { ip: exitIp, deviceLabel: dp.label, deviceProfile, streamLabel }).catch(() => {});
-
+    // IP, thiết bị và luồng hiển thị trong giao diện AutoLead; không chèn badge hay sửa tiêu đề trang đích vì script chống bot đọc được.
     context.on('page', (newPage) => {
-      newPage.on('domcontentloaded', () => {
-        newPage.evaluate(({ ip, deviceProfile, streamLabel }) => {
-          const deviceIcons = { windows: '🪟', macos: '🍎', linux: '🐧', android: '🤖', ipad: '📟', ios: '📱' };
-          const icon = deviceIcons[deviceProfile] || '🖥';
-          const streamTag = streamLabel ? `[${streamLabel}] ` : '';
-          const prefix = `${streamTag}[${icon} IP: ${ip}] `;
-          if (document.title && !document.title.startsWith(prefix)) {
-            document.title = prefix + document.title;
-          }
-        }, { ip: exitIp, deviceProfile, streamLabel }).catch(() => {});
-      });
-
       // Guard cho tab phụ: load quá 15s không xong → đóng tab, quay về tab chính
       const slowLoadTimer = setTimeout(async () => {
         if (newPage.isClosed() || newPage === session.mainPage) return;
@@ -5121,20 +4871,7 @@ function attachBrowserLogger(context, session) {
   session.addLog = addLog;
   session.logs = sessionItem.logs;
 
-  // Tiêm listener click vào mọi trang (kể cả trang mở sau)
-  context.exposeFunction('__alpc_log', addLog).catch(() => {});
-  context.addInitScript(() => {
-    document.addEventListener('click', (e) => {
-      const el = e.target;
-      window.__alpc_log({
-        type: 'click',
-        tag: el.tagName,
-        id: el.id || null,
-        text: (el.innerText || el.value || '').trim().slice(0, 120),
-        href: el.href || el.closest?.('a')?.href || null,
-      });
-    }, { capture: true });
-  }).catch(() => {});
+  // Click tay được ghi ở bộ điều khiển Screen View; không tiêm listener hay hàm toàn cục vào trang.
 
   // Ghi nhận điều hướng + lưu đầy đủ 100% HTML ra file đĩa riêng biệt
   function hookPage(page) {
@@ -5436,18 +5173,7 @@ export function watchTrafficBlockedPage(session) {
               queueSaveBrowserLogs();
             }
 
-            try {
-              if (session.browser?.pages) {
-                for (const p of session.browser.pages()) {
-                  if (!p.isClosed()) {
-                    p.evaluate((reason) => {
-                      const b = document.getElementById('__autolead_ip_badge');
-                      if (b) b.innerHTML = `⚠️ <strong>${reason}</strong> Đang đổi sock…`;
-                    }, deadReason).catch(() => {});
-                  }
-                }
-              }
-            } catch {}
+            session.updateBadge?.(`⚠️ <strong>${deadReason}</strong> Đang đổi sock…`);
 
             chromeBuildRotationCounter += 1;
             await page.close().catch(() => {});
@@ -5506,10 +5232,7 @@ export function watchTrafficBlockedPage(session) {
                       queueSaveBrowserLogs();
                     }
 
-                    page.evaluate((cnt) => {
-                      const b = document.getElementById('__autolead_ip_badge');
-                      if (b) b.innerHTML = `⏳ <strong>Đứng ở adtrapper:</strong> Đang tải lại lần ${cnt}/2…`;
-                    }, tracker.reloadCount).catch(() => {});
+                    session.updateBadge?.(`⏳ <strong>Đứng ở adtrapper:</strong> Đang tải lại lần ${tracker.reloadCount}/2…`);
 
                     try {
                       await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -7096,6 +6819,8 @@ async function startLocalInterface() {
             await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
           } else if (body.type === 'mouseup') {
             await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+            const clickedSession = [...activeBrowsers].find((item) => (item.slot ?? (item.tileIndex ?? -1) + 1) === slot);
+            clickedSession?.addBrowserLog?.({ type: 'click', detail: `Click tay qua Screen View tại (${targetX}, ${targetY})` });
           } else if (body.type === 'mousemove') {
             await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: targetX, y: targetY, modifiers: body.modifiers || 0 });
           } else if (body.type === 'wheel') {

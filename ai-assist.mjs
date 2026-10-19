@@ -231,7 +231,7 @@ export async function pageHasWork(page) {
       )).some((el) => {
         if (el.disabled || el.readOnly) return false;
         if (!isVisible(el)) return false;
-        if (el.getAttribute('data-autolead-ai-done') === '1') return false;
+        if (el.getAttribute('data-ux-ai-done') === '1') return false;
 
         const val = (el.value || '').trim();
         const isPlaceholderMask = /^(\+1|\+1\s*|\(___\)\s*___-____|___-__-____|[_\-\(\)\s\.\/]+|mm\/dd\/yyyy)$/i.test(val);
@@ -324,7 +324,7 @@ export async function pageHasWork(page) {
       ].join(', '))).some((el) => {
         if (el.disabled) return false;
         if (!isVisible(el)) return false;
-        if (el.getAttribute('data-autolead-clicked') === '1') return false;
+        if (el.getAttribute('data-ux-clicked') === '1') return false;
 
         if (el.type === 'submit' || el.getAttribute('data-vector-submit') === 'true' || /submit|continue|next|cta-button|rjp-cta/i.test(el.className) || (el.tagName === 'A' && el.href && el.href.includes('/next'))) {
           return true;
@@ -386,8 +386,8 @@ export async function executeAction(page, act, session = null) {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       el.dispatchEvent(new Event('blur', { bubbles: true }));
-      el.setAttribute('data-autolead-ai-done', '1');
-      el.setAttribute('data-autolead-filled', '1');
+      el.setAttribute('data-ux-ai-done', '1');
+      el.setAttribute('data-ux-filled', '1');
     }).catch(() => {});
     if (session) {
       session.autofillFields = (session.autofillFields || 0) + 1;
@@ -398,8 +398,8 @@ export async function executeAction(page, act, session = null) {
       await locator.evaluate((el) => el.click()).catch(() => {});
     });
     await locator.evaluate((el) => {
-      el.setAttribute('data-autolead-clicked', '1');
-      el.setAttribute('data-autolead-ai-done', '1');
+      el.setAttribute('data-ux-clicked', '1');
+      el.setAttribute('data-ux-ai-done', '1');
       el.classList.add('active', 'selected');
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -419,8 +419,8 @@ export async function executeAction(page, act, session = null) {
     await locator.evaluate((el) => {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.setAttribute('data-autolead-ai-done', '1');
-      el.setAttribute('data-autolead-filled', '1');
+      el.setAttribute('data-ux-ai-done', '1');
+      el.setAttribute('data-ux-filled', '1');
     }).catch(() => {});
     if (session) {
       session.autofillFields = (session.autofillFields || 0) + 1;
@@ -437,8 +437,8 @@ export async function executeAction(page, act, session = null) {
       });
     });
     await locator.evaluate((el) => {
-      el.setAttribute('data-autolead-ai-done', '1');
-      el.setAttribute('data-autolead-filled', '1');
+      el.setAttribute('data-ux-ai-done', '1');
+      el.setAttribute('data-ux-filled', '1');
       el.checked = true;
     }).catch(() => {});
     if (session) {
@@ -625,11 +625,6 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
     try {
       if (typeof session.updateBadge === 'function') {
         session.updateBadge(text);
-      } else if (page && !page.isClosed()) {
-        page.evaluate((t) => {
-          const b = document.getElementById('__autolead_ip_badge');
-          if (b) b.innerHTML = t;
-        }, text).catch(() => {});
       }
     } catch {}
   };
