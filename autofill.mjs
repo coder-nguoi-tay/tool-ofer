@@ -2665,6 +2665,18 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     for (const frame of frames) {
       if (session.leadCheckStatus === 'failed' || session.leadCheckStatus === 'checking' || (options.enableLeadCheck !== false && (session.screen5LeadCheckTriggered || session.leadCheckTriggered) && !session.screen5LeadVerified)) return;
 
+      // Frame không phản hồi (iframe quảng cáo đang tải dở, bị chặn hoặc đứng) làm frame.evaluate chờ vô hạn,
+      // kéo theo cả lượt quét kẹt và tab không bao giờ được điền tiếp. Hỏi thăm có giới hạn, không trả lời thì bỏ qua.
+      if (frame !== page && typeof frame.evaluate === 'function') {
+        session.autofillStep = `kiểm tra frame ${typeof frame.url === 'function' ? frame.url() : ''}`;
+        const responsive = await Promise.race([
+          frame.evaluate(() => true).catch(() => false),
+          new Promise((resolve) => setTimeout(() => resolve(false), 3000)),
+        ]);
+        if (!responsive) continue;
+      }
+      session.autofillStep = `điền frame ${typeof frame.url === 'function' ? frame.url() : ''}`;
+
       let filledInThisPass = 0;
       let frameHasEmail = false;
 
@@ -3830,11 +3842,19 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       if (filling || page.isClosed()) return;
       filling = true;
       const fieldsBefore = session.autofillFields ?? 0;
+      // Một lượt quét bình thường xong trong vài giây; quá 20s là đang kẹt ở một lệnh không trả về, ghi lại chỗ kẹt.
+      const stuckTimer = setTimeout(() => {
+        const detail = `Lượt tự điền chạy quá 20s, đang kẹt ở: ${session.autofillStep || 'không rõ'} (${typeof page.url === 'function' ? page.url() : ''})`;
+        console.warn(`[Autofill] ${detail}`);
+        options.onLog?.({ type: 'autofill_stuck', detail });
+      }, 20000);
+      stuckTimer.unref?.();
       try {
         await fillVisibleForms(page);
       } catch {
         // Trang có thể điều hướng hoặc đóng giữa hai lần quét.
       } finally {
+        clearTimeout(stuckTimer);
         filling = false;
       }
       const filled = (session.autofillFields ?? 0) - fieldsBefore;
