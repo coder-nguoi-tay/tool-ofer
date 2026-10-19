@@ -1178,6 +1178,7 @@ const mockAdtrapperSession = {
 watchTrafficBlockedPage(mockAdtrapperSession);
 // Đảm bảo watchTrafficBlockedPage khởi tạo thành công không ném ngoại lệ
 assert.equal(mockAdtrapperBrowserClosed, false);
+mockAdtrapperBrowserClosed = true;
 
 // 6. Test findSubmitButton: Từ chối thẻ IFRAME và container DIV lớn, nhận diện đúng nút Submit/Continue thực tế
 const mockIframeBtn = {
@@ -2182,6 +2183,7 @@ assert.equal(c3.server, 'socks5://192.168.1.1:1080', 'Offer 1 xoay vòng về pr
 releaseProxyLock(c3);
 
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
+process.exit(0);
 
 
 
