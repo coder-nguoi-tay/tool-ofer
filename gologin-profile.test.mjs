@@ -82,6 +82,37 @@ async function testGoLoginProfileDeletion() {
   assert.deepEqual(JSON.parse(capturedRequest.options.body), { profilesToDelete: ['new-profile-id'] });
 }
 
+test('GoLogin 402 báo rõ nguyên nhân và số profile', async () => {
+  const calls = [];
+  const mock = async (url, options) => {
+    calls.push(`${options.method} ${url}`);
+    if (url.endsWith('/browser/custom')) return Response.json({ message: 'Profiles limit exceeded' }, { status: 402 });
+    return Response.json({ allProfilesCount: 103, profiles: [{ name: 'AutoLeadPC Mac 2 - Slot 1' }, { name: 'AutoLeadPC Mac 2 - Slot 2' }, { name: 'Tay' }] });
+  };
+  await assert.rejects(createGoLoginProfile('sample-token', { os: 'mac' }, mock), (error) => {
+    assert.match(error.message, /HTTP 402/);
+    assert.match(error.message, /103 profile, trong đó 2 profile do AutoLeadPC tạo/);
+    assert.match(error.message, /GoLogin báo: Profiles limit exceeded/);
+    return true;
+  });
+  assert.deepEqual(calls, ['POST https://api.gologin.com/browser/custom', 'GET https://api.gologin.com/browser/v2']);
+});
+
+test('GoLogin lỗi khác kèm lời giải thích của máy chủ', async () => {
+  const mock = async () => Response.json({ message: 'Invalid token' }, { status: 401 });
+  await assert.rejects(createGoLoginProfile('bad', { os: 'mac' }, mock), /HTTP 401\): Invalid token/);
+});
+
+test('Xoá profile thử lại bằng endpoint xoá từng profile', async () => {
+  const calls = [];
+  const mock = async (url, options) => {
+    calls.push(`${options.method} ${url}`);
+    return url.endsWith('/browser') ? new Response(null, { status: 400 }) : new Response(null, { status: 204 });
+  };
+  await deleteGoLoginProfile('sample-token', 'abc', mock);
+  assert.deepEqual(calls, ['DELETE https://api.gologin.com/browser', 'DELETE https://api.gologin.com/browser/abc']);
+});
+
 test('GoLogin profile payload', testGoLoginProfilePayload);
 test('GoLogin profile creation', testGoLoginProfileCreation);
 test('GoLogin profile deletion', testGoLoginProfileDeletion);

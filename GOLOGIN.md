@@ -97,9 +97,9 @@ App gọi `POST https://api.gologin.com/browser/custom` với Bearer token. Payl
 4. App tạo một profile GoLogin cho mỗi slot qua `POST /browser/custom`.
 5. App gọi daemon `POST http://127.0.0.1:36912/browser/start-profile` với `profileId` và `sync: true`. GoLogin desktop đồng bộ profile, cấp thông tin chạy Orbita và CDP.
 6. App kết nối Playwright qua CDP, kiểm tra IP ngay trong Orbita và so sánh với IP đã kiểm tra trước khi vào website đích.
-7. Khi đóng cửa sổ, app dừng profile qua daemon GoLogin. Profile chạy thành công được giữ trong tài khoản để có thể sử dụng lại.
+7. Khi đóng cửa sổ, app dừng profile qua daemon GoLogin rồi xoá profile đó khỏi tài khoản. Mỗi lượt mở (kể cả tự bù) đều tạo profile mới và app không dùng lại profile cũ; nếu giữ lại, số profile sẽ tăng đến giới hạn gói và GoLogin trả HTTP 402.
 
-Nếu tạo profile thành công nhưng không mở/xác minh được phiên, app yêu cầu dừng rồi xóa profile đó qua `DELETE https://api.gologin.com/browser` với body `{ "profilesToDelete": ["profile-id"] }`. Nếu API từ chối xóa, cảnh báo sẽ hiển thị profile cần xóa thủ công.
+Nếu tạo profile thành công nhưng không mở/xác minh được phiên, app cũng dừng rồi xoá profile đó. App xoá qua `DELETE https://api.gologin.com/browser` với body `{ "profilesToDelete": ["profile-id"] }`; nếu bị từ chối thì thử lại `DELETE https://api.gologin.com/browser/{profileId}`. Nếu cả hai đều lỗi, cảnh báo sẽ hiển thị profile cần xoá thủ công.
 
 ## Xử lý lỗi thường gặp
 
@@ -108,7 +108,8 @@ Nếu tạo profile thành công nhưng không mở/xác minh được phiên, a
 | Thiếu GoLogin API token | Nhập token trong phần Browser của Thiết lập và lưu cấu hình. |
 | GoLogin desktop chưa chạy | Mở GoLogin desktop, đăng nhập rồi thử lại. |
 | Không tìm thấy Orbita | Để GoLogin tải/cài Orbita xong rồi thử lại. |
-| Không tạo được profile | Kiểm tra token, quyền tài khoản, kết nối Internet và giới hạn profile của GoLogin. |
+| GoLogin từ chối tạo profile (HTTP 402) | Gói GoLogin không cho tạo thêm: gói hết hạn/không có quyền API, hoặc đã chạm giới hạn số profile. Thông báo cho biết tài khoản đang có bao nhiêu profile và bao nhiêu profile do app tạo (tên `AutoLeadPC Mac 2 - Slot …`). Xoá bớt các profile đó trong GoLogin hoặc nâng/gia hạn gói rồi thử lại. |
+| Không tạo được profile (mã khác) | Thông báo kèm lời giải thích của GoLogin. Kiểm tra token, quyền tài khoản và kết nối Internet. |
 | Proxy không kết nối hoặc trả lỗi 407 | Kiểm tra giao thức, host, port, username/password và quyền truy cập proxy. |
 | IP trong Orbita khác IP đã kiểm tra | Proxy có thể đã xoay IP giữa hai lần kiểm tra; thử lại với sticky session hoặc proxy ổn định. |
 | Không có CDP URL | Kiểm tra GoLogin desktop và trạng thái profile; app sẽ thử mở lại profile tối đa ba lần. |
@@ -117,7 +118,7 @@ Nếu tạo profile thành công nhưng không mở/xác minh được phiên, a
 
 - API token được lưu theo cơ chế cài đặt hiện có trong `Settings.ini`. Hãy bảo vệ file cấu hình và không commit token lên Git.
 - Proxy credentials được gửi đến GoLogin trong cấu hình profile để Orbita dùng proxy đó.
-- Profile thành công được giữ trong tài khoản GoLogin; số profile sẽ tăng theo số luồng đã tạo. Xóa profile trong GoLogin khi không còn cần dùng.
+- Profile do app tạo được xoá khi đóng phiên. Profile còn sót lại từ các bản trước (khi app chưa xoá) vẫn nằm trong tài khoản, có tên `AutoLeadPC Mac 2 - Slot …`; hãy xoá thủ công trong GoLogin.
 - Việc đóng phiên cần GoLogin desktop cục bộ đang hoạt động để đồng bộ trạng thái profile.
 - Tài liệu API chính thức: [GoLogin API docs](https://api.gologin.com/docs).
 

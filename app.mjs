@@ -2699,7 +2699,15 @@ async function stopGoLoginProfile(profileId) {
 function requestGoLoginProfileStop(session) {
   if (!session._profileStopPromise) {
     session._profileStopPromise = stopGoLoginProfile(session.profileId)
-      .catch((error) => console.warn(`[GoLogin] Không đồng bộ được profile ${session.profileId}: ${error.message}`));
+      .catch((error) => console.warn(`[GoLogin] Không đồng bộ được profile ${session.profileId}: ${error.message}`))
+      .then(async () => {
+        // Mỗi lượt mở (kể cả tự bù) tạo profile mới và app không dùng lại profile cũ: giữ lại thì số profile tăng mãi
+        // đến giới hạn gói và GoLogin trả HTTP 402 khi tạo profile kế tiếp.
+        if (!session.goLoginToken) return;
+        await deleteGoLoginProfile(session.goLoginToken, session.profileId)
+          .then(() => console.log(`[GoLogin] Đã xoá profile ${session.profileId} (Slot ${session.slot}) sau khi đóng.`))
+          .catch((error) => console.warn(`[GoLogin] Profile ${session.profileId} cần xoá thủ công: ${error.message}`));
+      });
   }
   return session._profileStopPromise;
 }
@@ -2777,7 +2785,7 @@ async function checkProxyExitIp(proxyObj) {
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-19
  */
-async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifiedExitIp, websiteUrl, offer = 1,
+async function openBrowserViaGoLogin({ tileIndex, slot, profileId, goLoginToken = '', proxy, verifiedExitIp, websiteUrl, offer = 1,
   autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
   captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
   hideUntilTarget = false, hideUntilLead = false }) {
@@ -2872,6 +2880,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
     streamLabel: `Offer ${offer}`,
     websiteUrl: websiteUrl || '',
     profileId,
+    goLoginToken,
     isGoLogin: true,
     hideUntilTarget: Boolean(hideUntilTarget),
     hideUntilLead: Boolean(hideUntilLead),
@@ -3323,6 +3332,7 @@ async function launchGoLoginBrowsers(requestBody) {
         tileIndex: worker.tileIndex,
         slot: worker.slot,
         profileId: worker.profileId,
+        goLoginToken,
         proxy: worker.assignedProxy,
         verifiedExitIp: worker.actualExitIp,
         websiteUrl: worker.slotOfferUrl,
@@ -3365,10 +3375,15 @@ async function launchGoLoginBrowsers(requestBody) {
     } catch (err) {
       if (worker.profileId) {
         const failedSession = [...activeBrowsers].find((session) => session.profileId === worker.profileId);
-        await failedSession?.browser?.close?.().catch(() => {});
-        await stopGoLoginProfile(worker.profileId).catch(() => {});
-        await deleteGoLoginProfile(goLoginToken, worker.profileId)
-          .catch((cleanupError) => warnings.push(`Profile ${worker.profileId} cần xóa thủ công: ${cleanupError.message}`));
+        if (failedSession) {
+          // Phiên đã tạo: đóng phiên tự dừng rồi xoá profile một lần (requestGoLoginProfileStop), không xoá trùng.
+          await failedSession.browser?.close?.().catch(() => {});
+          await requestGoLoginProfileStop(failedSession);
+        } else {
+          await stopGoLoginProfile(worker.profileId).catch(() => {});
+          await deleteGoLoginProfile(goLoginToken, worker.profileId)
+            .catch((cleanupError) => warnings.push(`Profile ${worker.profileId} cần xóa thủ công: ${cleanupError.message}`));
+        }
       }
       if (worker.assignedProxy) {
         releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
