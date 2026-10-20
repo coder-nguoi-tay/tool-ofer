@@ -406,10 +406,11 @@ export async function solveSurveyCheckboxes(frame, options = {}) {
       for (const [container, items] of groups.entries()) {
         const hasChecked = items.some((it) => it.isChecked);
         const headingText = (container.querySelector('h1, h2, h3, h4, legend, .question-title, p')?.innerText || '').toLowerCase();
-        const isConsent = headingText.includes('terms') || headingText.includes('privacy') || headingText.includes('consent') || headingText.includes('agree');
+        const text = (headingText + ' ' + items.map((it) => it.text).join(' ')).toLowerCase();
+        const isConsent = /terms|privacy|consent|agree|accept|must|required/i.test(text);
 
-        // Nếu là consent/terms: bắt buộc phải tích
-        if (isConsent && !hasChecked) {
+        // Nếu là consent/terms hoặc chỉ có 1 checkbox trong container: bắt buộc phải tích
+        if ((isConsent || items.length === 1) && !hasChecked) {
           actionable.push({ type: 'consent', items });
         } else if (!hasChecked && items.length >= 2) {
           actionable.push({ type: 'multi_choice', items });
@@ -509,7 +510,7 @@ export async function clickSurveyNextButton(frame, options = {}) {
       };
 
       const rawCandidates = Array.from(document.querySelectorAll(
-        'button, input[type="submit"], input[type="button"], a.btn, [role="button"], .next-btn, .continue-btn, .btn-next'
+        'button, input[type="submit"], input[type="button"], a.btn, [role="button"], .next-btn, .continue-btn, .btn-next, .btn-option, div.button, div.btn, div.btn-option, [id*="btn-option"]'
       )).filter((el) => isVisible(el) && !isNoiseElement(el));
 
       const patterns = [
@@ -555,8 +556,8 @@ export async function clickSurveyNextButton(frame, options = {}) {
         }
       }
 
-      // Fallback: Tìm nút submit duy nhất trong form nếu có (và không phải link rác)
-      const submitBtn = document.querySelector('form button[type="submit"], button[type="submit"]');
+      // Fallback: Tìm nút submit duy nhất trong form hoặc container div nếu có (và không phải link rác)
+      const submitBtn = document.querySelector('form button[type="submit"], button[type="submit"], .btn-option, div.btn-option, div.button');
       if (submitBtn && isVisible(submitBtn) && !isNoiseElement(submitBtn)) {
         const uid = `next_btn_submit_${Date.now()}`;
         submitBtn.setAttribute('data-survey-next-uid', uid);

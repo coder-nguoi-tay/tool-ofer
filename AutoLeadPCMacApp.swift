@@ -19,15 +19,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if let portStr = Bundle.main.object(forInfoDictionaryKey: "AutoLeadPCPort") as? String, let p = Int(portStr) {
             return p
         }
-        return 3210
+        return 3211
     }
 
     private var instanceId: String {
-        return (Bundle.main.object(forInfoDictionaryKey: "AutoLeadPCInstance") as? String) ?? "1"
+        return (Bundle.main.object(forInfoDictionaryKey: "AutoLeadPCInstance") as? String) ?? "2"
     }
 
     private var appTitle: String {
-        return (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? "AutoLeadPC Mac"
+        return (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? "AutoLeadPC Mac 2 AdsPower"
     }
 
     /// Creates the main window, starts the local launcher server, and loads its interface.

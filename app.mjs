@@ -1,7 +1,7 @@
 import { createServer, get as requestHttp } from 'node:http';
 import { createConnection as netCreateConnection } from 'node:net';
 import { get as requestHttps } from 'node:https';
-import { access, cp, mkdir, readFile, readdir, readlink, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, cp, mkdir, readFile, readdir, readlink, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -15,14 +15,7 @@ import {
   installChromeVersions,
 } from './chrome-versions.mjs';
 import { startAuthenticatedHttpRelay, startAuthenticatedSocksRelay } from './relay.mjs';
-import { buildGoLoginProfileRequest, createGoLoginProfile, deleteGoLoginProfile } from './gologin-profile.mjs';
-import {
-  cleanupLocalProfile,
-  prepareLocalZeroProfile,
-  resolveBrowserExecutable,
-  spawnLocalProfileBrowser,
-  stopLocalProfileBrowser,
-} from './local-profile-engine.mjs';
+import { buildAdsPowerProfileRequest, createAdsPowerProfile, getOrCreateAdsPowerProfile, updateAdsPowerProfile, startAdsPowerProfile, stopAdsPowerProfile, deleteAdsPowerProfile, cleanupOrphanedAdsPowerProfiles, listInstalledAdsPowerKernelVersions, selectAdsPowerKernelVersions } from './adspower-profile.mjs';
 import {
   applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, stealthInitScript,
 } from './stealth.mjs';
@@ -203,6 +196,29 @@ export function getNextDeviceProfile() {
   const profile = profiles[deviceProfileRotationCounter % profiles.length];
   deviceProfileRotationCounter += 1;
   return profile;
+}
+
+/**
+ * Đọc các profile thiết bị được chọn trong Settings và lưu làm cấu hình xoay vòng.
+ *
+ * @param {object} settings Cấu hình có thể gồm Windows, Mac, Linux và Android.
+ * @return {string[]|null} ID profile đã chọn hoặc null nếu request không có các trường thiết bị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
+ */
+function syncDeviceProfilesFromSettings(settings) {
+  const settingKeys = ['Windows', 'Mac', 'Linux', 'Android'];
+  if (!settingKeys.some((key) => Object.hasOwn(settings, key))) return null;
+
+  const selectedProfiles = [
+    settings.Windows && 'windows',
+    settings.Mac && 'macos',
+    settings.Linux && 'linux',
+    settings.Android && 'android',
+  ].filter(Boolean);
+  autoRefill.deviceProfiles = selectedProfiles.length > 0 ? selectedProfiles : ['macos'];
+  void saveSavedDeviceProfiles();
+  return autoRefill.deviceProfiles;
 }
 
 /** Đặt lại bộ đếm xoay vòng thiết bị về 0 (phục vụ test). */
@@ -529,6 +545,7 @@ const instanceSuffix = instanceId !== '1' ? `-${instanceId}` : '';
 export const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${instanceSuffix}`;
 const baseDataDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC');
 export const appDataDirectory = join(homedir(), 'Library', 'Application Support', dataDirName);
+const adsPowerApiKeyPath = join(appDataDirectory, 'adspower-api-key.txt');
 export const dualStreamStatePath = join(appDataDirectory, 'dual-stream-state.json');
 
 export async function loadDualStreamState() {
@@ -596,6 +613,40 @@ export function getAutoLeadPCDir() {
   const custom = join(homedir(), '.autoleadpc');
   if (existsSync(custom)) return custom;
   return join(homedir(), 'Downloads', 'AutoLeadPC');
+}
+
+/**
+ * Đọc khóa Local API AdsPower dùng cho profile SunBrowser của các slot.
+ *
+ * @return {Promise<string>} API key đã lưu hoặc chuỗi rỗng.
+ * @throws {Error} Khi file khóa tồn tại nhưng không thể đọc.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
+ */
+async function readAdsPowerApiKey() {
+  try {
+    return (await readFile(adsPowerApiKeyPath, 'utf8')).trim();
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return '';
+  }
+}
+
+/**
+ * Lưu khóa Local API AdsPower chỉ cho tài khoản macOS đang chạy AutoLeadPC.
+ *
+ * @param {string} apiKey API key từ AdsPower > Automation > API & MCP.
+ * @return {Promise<void>} Hoàn tất ghi khóa với quyền 0600.
+ * @throws {Error} Khi khóa chứa dòng mới hoặc không thể ghi.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
+ */
+async function saveAdsPowerApiKey(apiKey) {
+  const normalizedKey = String(apiKey ?? '').trim();
+  if (/[\r\n]/.test(normalizedKey)) throw new Error('AdsPower API key không hợp lệ.');
+  await mkdir(appDataDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(adsPowerApiKeyPath, normalizedKey, { mode: 0o600 });
+  await chmod(adsPowerApiKeyPath, 0o600);
 }
 
 const remoteAgents = new Map();
@@ -721,10 +772,21 @@ async function saveAutoRefillSettings() {
   } catch {}
 }
 
+/**
+ * Khôi phục cấu hình tự bù; bỏ qua cấu hình GoLogin cũ sau khi chuyển sang AdsPower.
+ *
+ * @return {Promise<void>} Hoàn tất nạp cấu hình tương thích.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
+ */
 async function loadAutoRefillSettings() {
   try {
     const raw = JSON.parse(await readFile(autoRefillSettingsPath, 'utf8'));
     if (raw?.settings) {
+      if (raw.settings.browserMode === 'Gologin') {
+        autoRefill.message = 'Cấu hình GoLogin cũ đã bỏ qua; hãy chọn AdsPower và bấm Start.';
+        return;
+      }
       autoRefill.settings = raw.settings;
       autoRefill.targetCount = raw.targetCount || 1;
       autoRefill.sequential = raw.sequential || false;
@@ -1111,7 +1173,7 @@ export async function saveSavedDeviceProfiles() {
   }
 }
 
-const port = Number(process.env.AUTOLEADPC_PORT) || 3210;
+const port = Number(process.env.AUTOLEADPC_PORT) || 3211;
 
 /**
  * Lỗi xác minh IP qua dịch vụ độc lập; không kết luận proxy đang dùng bị hỏng.
@@ -1138,7 +1200,7 @@ class IpVerificationError extends Error {
 }
 
 /** Số profile được tạo và khởi chạy song song theo mặc định. */
-const maxConcurrentProfiles = Number(process.env.AUTOLEADPC_CONCURRENCY) || 10;
+const maxConcurrentProfiles = Math.min(30, Number(process.env.AUTOLEADPC_CONCURRENCY) || 30);
 
 /**
  * Ước tính số trình duyệt an toàn theo RAM/CPU để tham khảo.
@@ -1160,7 +1222,7 @@ export function recommendedMaxAlive(cores, totalBytes) {
   return Math.max(1, Math.min(cores, byRam));
 }
 
-const maxAliveBrowsers = Math.max(1, Math.min(10, Math.floor(Number(process.env.AUTOLEADPC_MAX_ALIVE) || 10)));
+const maxAliveBrowsers = Math.max(1, Math.min(30, Math.floor(Number(process.env.AUTOLEADPC_MAX_ALIVE) || 30)));
 
 /** Proxy SOCKS công cộng hay chậm, 10 giây của bản đầu không đủ. */
 const navigationTimeout = 30_000;
@@ -1451,6 +1513,26 @@ async function readUserAgents() {
 }
 
 /**
+ * Đọc bộ User-Agent PC tương ứng với hệ điều hành của profile đang mở.
+ *
+ * @param {string} deviceProfile Hệ điều hành đã chọn trong Settings.
+ * @return {Promise<string[]>} Các User-Agent hợp lệ, rỗng nếu chưa có cấu hình.
+ * @throws {Error} Lỗi đọc file được xem như cấu hình chưa tồn tại.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+async function readConfiguredUserAgents(deviceProfile) {
+  const fileName = ({ windows: 'useragent.txt', macos: 'useragent Mac.txt', linux: 'useragent Linux.txt', android: 'useragent Android.txt' })[deviceProfile];
+  if (!fileName) return [];
+  try {
+    const content = await readFile(join(getAutoLeadPCDir(), 'Config', 'Browser', fileName), 'utf8');
+    const configuredAgents = content.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('Mozilla/'));
+    if (configuredAgents.length || deviceProfile !== 'macos') return configuredAgents;
+  } catch {}
+  return deviceProfile === 'macos' ? readUserAgents() : [];
+}
+
+/**
  * Gửi phản hồi JSON cho giao diện.
  *
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
@@ -1555,8 +1637,8 @@ async function openBrowserThroughProxy({
  * @param {string} [websiteUrl=''] URL trang đích để phân tách phạm vi IP đã dùng.
  * @return {Promise<string>} IP thoát đã xác minh.
  * @throws {IpVerificationError|Error} Khi dịch vụ IP lỗi hoặc IP đã dùng cho trang đích này.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
  */
 export async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websiteUrl = '', checkDuplicate = true) {
   const ipPage = await browser.newPage();
@@ -1631,8 +1713,8 @@ export async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websit
  * @param {number} occurrence Thứ tự xuất hiện của cấu hình giống hệt trong danh sách.
  * @param {string} [websiteUrl=''] URL trang đích tương ứng nếu có.
  * @return {string} Khóa băm không chứa thông tin đăng nhập dạng rõ.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
  */
 export function createProxyUsageKey(proxy, occurrence, websiteUrl = '') {
   const normUrl = websiteUrl ? safeNormalizeUrl(websiteUrl) : '';
@@ -1820,6 +1902,30 @@ async function loadAutofillQueue() {
     autofillQueue.available = Array.isArray(data.available) ? data.available : [];
     autofillQueue.used = Array.isArray(data.used) ? data.used : [];
   } catch { /* file chưa tồn tại */ }
+
+  // Tự động nạp từ Config/Info/info.txt hoặc file JSON tải về nếu hàng đợi rỗng
+  if (autofillQueue.available.length === 0 && autofillQueue.used.length === 0) {
+    const candidateFiles = [
+      join(appDataDirectory, 'Config', 'Info', 'info.txt'),
+      join(process.cwd(), 'Config', 'Info', 'info.txt'),
+      join(homedir(), 'Downloads', 'json_full_da_loai_zipcode_4_ky_tu.json'),
+      join(homedir(), 'Downloads', 'du_lieu_chuyen_doi.json'),
+    ];
+    for (const filePath of candidateFiles) {
+      try {
+        const raw = await readFile(filePath, 'utf8');
+        if (raw && raw.trim()) {
+          const parsed = parseAutofillRecords(raw);
+          if (parsed && parsed.length > 0) {
+            importAutofillRecords(parsed);
+            await saveAutofillQueue();
+            console.log(`[AutofillQueue] Đã tự động nạp ${parsed.length} bản ghi thông tin từ ${filePath}`);
+            break;
+          }
+        }
+      } catch {}
+    }
+  }
 }
 
 /** Lưu hàng đợi autofill xuống file. */
@@ -2166,14 +2272,15 @@ const runExclusively = (handler) => (requestBody) => enqueueExclusively(handler,
  * Dừng lượt và tạm tắt tự bù nếu dịch vụ xác minh IP không hoạt động.
  *
  * @param {string} requestBody Nội dung JSON nhận từ giao diện.
- * @param {{layoutTarget?: number}} options Vị trí ô hiển thị các cửa sổ Chrome.
+ * @param {{layoutTarget?: number, assignedStreamRoles?: number[]}} options Vị trí ô và offer được phân cho mỗi phiên.
  * @return {Promise<{results: string[], warnings: string[]}>} Kết quả proxy thành công/thất bại và cảnh báo.
  * @throws {Error} Khi cấu hình không hợp lệ hoặc sổ proxy không đọc/ghi được.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
  */
 async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assignedStreamRoles = null } = {}) {
   const body = JSON.parse(requestBody);
+  syncDeviceProfilesFromSettings(body);
   if (templateProfileContext) {
     throw new Error('Hãy đóng cửa sổ profile mẫu RoboForm trước khi tạo profile Chrome mới.');
   }
@@ -2637,89 +2744,45 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
 }
 
 /**
- * Xác nhận daemon GoLogin đang chạy trước khi tạo profile trên tài khoản.
+ * Dừng và xóa profile tạm của phiên trình duyệt được quản lý đúng một lần.
  *
- * @return {Promise<void>} Hoàn tất khi cổng daemon có phản hồi HTTP.
- * @throws {Error} Khi GoLogin desktop chưa chạy.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-19
- */
-async function requireGoLoginDesktop() {
-  try {
-    await fetch('http://127.0.0.1:36912/', { signal: AbortSignal.timeout(2000) });
-  } catch {
-    throw new Error('Hãy mở GoLogin desktop và đăng nhập trước khi tạo profile.');
-  }
-}
-
-/**
- * Dừng một profile do app mở để GoLogin đồng bộ trạng thái trước khi xử lý tiếp.
- *
- * @param {string} profileId ID profile cần dừng.
- * @return {Promise<void>} Hoàn tất sau khi daemon phản hồi.
- * @throws {Error} Khi daemon không thể dừng profile.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-19
- */
-async function stopGoLoginProfile(profileId) {
-  const response = await fetch('http://127.0.0.1:36912/browser/stop-profile', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId }),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!response.ok) throw new Error(`GoLogin desktop không dừng được profile ${profileId} (HTTP ${response.status}).`);
-}
-
-/**
- * Yêu cầu GoLogin dừng profile của phiên đúng một lần và chờ kết quả khi cần.
- *
- * @param {object} session Phiên GoLogin do app tạo.
+ * @param {object} session Phiên AdsPower do app tạo.
  * @return {Promise<void>} Kết quả dừng profile đã được ghi log nếu thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-19
+ * @since 2026-10-20
  */
-function requestGoLoginProfileStop(session) {
+function requestManagedProfileStop(session) {
   if (!session._profileStopPromise) {
-    session._profileStopPromise = stopGoLoginProfile(session.profileId)
-      .catch((error) => console.warn(`[GoLogin] Không đồng bộ được profile ${session.profileId}: ${error.message}`));
+    session._profileStopPromise = (async () => {
+      try {
+        if (session._stopProfile) await session._stopProfile();
+      } catch (error) {
+        console.warn(`[AdsPower] Dừng profile ${session.profileId}: ${error.message}`);
+      }
+      // Giữ lại profile trong AdsPower để tái sử dụng (Profile Pool), không xóa để tránh chạm hạn ngạch daily import
+      if (session._forceDeleteProfile && session._deleteProfile) {
+        try {
+          await session._deleteProfile();
+          console.log(`[AdsPower] Đã xóa profile ${session.profileId} (Slot ${session.slot}) theo yêu cầu.`);
+        } catch (error) {
+          console.warn(`[AdsPower] Không xóa được profile ${session.profileId}: ${error.message}`);
+        }
+      }
+    })();
   }
   return session._profileStopPromise;
 }
 
-async function getOrbitaVersion() {
-  const browserDir = join(homedir(), '.gologin', 'browser');
-  try {
-    const entries = await import('node:fs/promises').then(m => m.readdir(browserDir));
-    const orbita = entries.find(e => e.startsWith('orbita-browser-') && !e.endsWith('.tar.gz'));
-    if (!orbita) return null;
-    const plist = join(browserDir, orbita, 'Orbita-Browser.app', 'Contents', 'Info.plist');
-    const { stdout } = await executeFile('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', plist]).catch(() => ({ stdout: '' }));
-    return stdout.trim() || null;
-  } catch { return null; }
-}
-
-async function findOrbitaExecutable() {
-  const browserDir = join(homedir(), '.gologin', 'browser');
-  try {
-    const entries = await readdir(browserDir);
-    const orbita = entries.find(e => e.startsWith('orbita-browser-') && !e.endsWith('.tar.gz'));
-    if (!orbita) return null;
-    const bin = join(browserDir, orbita, 'Orbita-Browser.app', 'Contents', 'MacOS', 'Orbita');
-    return existsSync(bin) ? bin : null;
-  } catch { return null; }
-}
-
 /**
- * Loại khỏi danh sách phiên GoLogin những kết nối CDP đã đóng.
+ * Loại khỏi danh sách phiên AdsPower những kết nối CDP đã đóng.
  *
  * @return {Promise<void>} Hoàn tất sau khi dọn trạng thái phiên.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-19
+ * @since 2026-10-20
  */
-async function pruneDeadGoLoginSessions() {
+async function pruneDeadManagedSessions() {
   for (const s of [...activeBrowsers]) {
-    if (s.isGoLogin && s.profileId && !s._cdpBrowser?.isConnected()) {
+    if (s.isManagedProfile && s.profileId && !s._cdpBrowser?.isConnected()) {
       if (s._monitorInterval) {
         clearInterval(s._monitorInterval);
         s._monitorInterval = null;
@@ -2728,19 +2791,15 @@ async function pruneDeadGoLoginSessions() {
       releaseProxyLock(s.proxy, s.exitIp);
       if (!s.proxy) activeExitIpLocks.delete('Direct');
       activeBrowsers.delete(s);
-      if (s.isLocalEngine) {
-        void s._relay?.close().catch(() => {});
-        void stopLocalProfileBrowser(s._proc, s.profilePath);
-      } else {
-        void requestGoLoginProfileStop(s);
-      }
-      console.log(`[GoLogin] Đã tự dọn session đóng cho profile ${s.profileId} (Slot ${s.slot}).`);
+      void requestManagedProfileStop(s);
+      console.log(`[AdsPower] Đã tự dọn session đóng cho profile ${s.profileId} (Slot ${s.slot}).`);
+      if (!s.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested) queueAutomaticRefill();
     }
   }
 }
 
 /**
- * Kiểm tra IP exit của proxy trước khi cấp profile GoLogin.
+ * Kiểm tra IP exit của proxy trước khi cấp profile AdsPower.
  *
  * @param {object} proxyObj Proxy HTTP hoặc SOCKS5 đã phân tích.
  * @return {Promise<string|null>} IP exit hoặc null nếu proxy không hoạt động.
@@ -2757,485 +2816,65 @@ async function checkProxyExitIp(proxyObj) {
 }
 
 /**
- * Mở Chrome bằng profile cục bộ từ zero_profile theo vòng đời của bản PC gốc.
- * Áp dụng các tùy chọn fingerprint mà app Mac hỗ trợ qua CDP.
- *
- * @param {object} options Tham số luồng, proxy, slot, autofill, antiFingerprint và script.
- * @return {Promise<object>} Session trình duyệt đã kết nối.
- * @throws {Error} Khi không tìm thấy trình duyệt hoặc không thể kết nối CDP.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-19
- */
-async function openBrowserViaLocalEngine({
-  tileIndex, slot, proxy, verifiedExitIp, websiteUrl, offer = 1,
-  autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
-  captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
-  hideUntilTarget = false, hideUntilLead = false, antiFingerprint = {}, deviceProfile = 'windows',
-  totalCount = 10, screenPreviewOnly = true, headless = null,
-}) {
-  const isHeadless = Boolean(headless !== null ? headless : (screenPreviewOnly || hideUntilLead || hideUntilTarget));
-  const assignedSlot = slot ?? (tileIndex + 1);
-  const screen = await readScreenSize();
-  const tile = tileAt(tileIndex ?? (assignedSlot - 1), totalCount || 10, screen);
-
-  let timezoneId;
-  let ipCountry;
-  let ipLat = 0, ipLng = 0;
-  if (proxy) {
-    try {
-      const ipInfo = await requestProxyIpInfo(proxy).catch(() => requestProxyIpInfo(proxy));
-      if (typeof ipInfo.timezone === 'string' && ipInfo.timezone.includes('/')) timezoneId = ipInfo.timezone;
-      if (typeof ipInfo.country === 'string') ipCountry = ipInfo.country;
-      if (typeof ipInfo.loc === 'string') {
-        const parts = ipInfo.loc.split(',').map(Number);
-        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) [ipLat, ipLng] = parts;
-      }
-    } catch {}
-  }
-
-  const { locale, languages } = localeForCountry(ipCountry);
-  const relay = proxy?.username
-    ? await (proxy.server.startsWith('socks5://') ? startAuthenticatedSocksRelay(proxy) : startAuthenticatedHttpRelay(proxy))
-    : null;
-  const proxyUrl = relay?.proxy?.server ?? proxy?.server ?? null;
-
-  let profilePath;
-  try {
-    profilePath = await prepareLocalZeroProfile({
-      slot: assignedSlot,
-      locale,
-      languages,
-      bookmarks,
-    });
-  } catch (error) {
-    await relay?.close();
-    throw error;
-  }
-
-  // Chọn build Chrome tốt nhất từ danh sách đã cài hoặc mặc định
-  let executablePath = null;
-  let chromeVersion = '150.0.7871.187';
-  try {
-    const builds = await listInstalledChromeChannels();
-    if (builds.length > 0) {
-      const chosen = builds[tileIndex % builds.length] || builds[0];
-      executablePath = chosen.executablePath;
-      chromeVersion = chosen.version;
-    }
-  } catch {}
-  if (!executablePath) executablePath = resolveBrowserExecutable();
-
-  let proc, wsUrl;
-  try {
-    ({ proc, wsUrl } = await spawnLocalProfileBrowser({
-      profilePath,
-      proxyUrl,
-      tile,
-      locale,
-      executablePath,
-      headless: isHeadless,
-    }));
-  } catch (err) {
-    await relay?.close();
-    await cleanupLocalProfile(profilePath);
-    throw err;
-  }
-
-  let cdpBrowser;
-  try {
-    cdpBrowser = await Promise.race([
-      chromium.connectOverCDP(wsUrl),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('CDP connect timeout 15s')), 15000)),
-    ]);
-  } catch (err) {
-    await relay?.close();
-    await stopLocalProfileBrowser(proc, profilePath);
-    throw err;
-  }
-
-  const context = cdpBrowser.contexts()[0];
-  if (!context) {
-    await cdpBrowser.close().catch(() => {});
-    await relay?.close();
-    await stopLocalProfileBrowser(proc, profilePath);
-    throw new Error('Chromium không tạo context mặc định để kết nối.');
-  }
-
-  // Giả lập thiết bị + chống fingerprint native
-  const sessionSeed = Math.floor(Math.random() * 0x7fffffff) || 1;
-  const profileKey = DEVICE_PROFILES[deviceProfile] ? deviceProfile : 'windows';
-  const dp = createDeviceVariant(profileKey, DEVICE_PROFILES[profileKey], sessionSeed, { width: tile.width, height: tile.height });
-  const stealthConfig = buildStealthConfig(dp, antiFingerprint, sessionSeed);
-  let initPage;
-  let detectedIp = null;
-  try {
-  await context.addInitScript(stealthInitScript, stealthConfig);
-  const nativeOverrides = {
-    userAgentOverride: buildUserAgentOverride(dp, { version: chromeVersion }, languages),
-    hardwareConcurrency: dp.spoof.hardwareConcurrency,
-  };
-
-  initPage = context.pages()[0] || await context.newPage();
-  await applyNativeOverrides(context, initPage, nativeOverrides);
-  context.on('page', (p) => void applyNativeOverrides(context, p, nativeOverrides));
-
-  if (proxy) {
-    try {
-      for (const checkUrl of browserIpCheckUrls) {
-        try {
-          const resp = await initPage.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
-          if (!resp?.ok()) continue;
-          const content = await initPage.locator('body').innerText();
-          const match = content.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
-          if (match) {
-            detectedIp = match[0];
-            break;
-          }
-        } catch {}
-      }
-    } catch {}
-  }
-  if (proxy && !detectedIp) {
-    throw new Error('Không xác minh được IP proxy trong trình duyệt.');
-  }
-  if (proxy && verifiedExitIp && detectedIp !== verifiedExitIp) {
-    throw new Error(`IP proxy trong trình duyệt (${detectedIp}) khác IP đã kiểm tra (${verifiedExitIp}).`);
-  }
-  if (!proxy) detectedIp = 'Direct';
-  } catch (error) {
-    await cdpBrowser.close().catch(() => {});
-    await relay?.close();
-    await stopLocalProfileBrowser(proc, profilePath);
-    throw error;
-  }
-
-  const session = {
-    browser: context,
-    _cdpBrowser: cdpBrowser,
-    _proc: proc,
-    _relay: relay,
-    profilePath,
-    tileIndex: tileIndex ?? (assignedSlot - 1),
-    slot: assignedSlot,
-    chromeVersion: `PC Zero-Profile (${chromeVersion})`,
-    deviceProfile: profileKey,
-    suppressAutoRefill: false,
-    proxy: proxy ?? null,
-    proxyKey: proxy?.server ?? `local_slot_${assignedSlot}`,
-    proxyServer: proxy?.server ?? `local_slot_${assignedSlot}`,
-    exitIp: detectedIp,
-    offer,
-    offerNumber: offer,
-    streamRole: offer,
-    streamLabel: `Offer ${offer}`,
-    websiteUrl: websiteUrl || '',
-    profileId: `local_${assignedSlot}`,
-    isGoLogin: true,
-    isLocalEngine: true,
-    inAppPreview: Boolean(screenPreviewOnly),
-    isHeadless,
-    hideUntilTarget: Boolean(hideUntilTarget),
-    hideUntilLead: Boolean(hideUntilLead),
-    hasShownWindow: false,
-    leadCheckStatus: null,
-    leadCheckMessage: null,
-    updateBadge: (text) => { session.badgeText = text; },
-  };
-  activeBrowsers.add(session);
-
-  let cdpSession = null;
-  let cdpWindowId = null;
-
-  if (!isHeadless && (hideUntilTarget || hideUntilLead)) {
-    try {
-      cdpSession = await context.newCDPSession(initPage);
-      const win = await cdpSession.send('Browser.getWindowForTarget');
-      cdpWindowId = win.windowId;
-      await cdpSession.send('Browser.setWindowBounds', {
-        windowId: cdpWindowId,
-        bounds: { windowState: 'minimized' },
-      });
-      const modeText = hideUntilLead ? 'chỉ hiện khi có lead' : 'chỉ hiện khi vào trang đích';
-      console.log(`[LocalEngine] Slot ${assignedSlot}: Chạy ngầm (ẩn cửa sổ), ${modeText}.`);
-      session.addBrowserLog?.({ type: 'navigate', detail: `Chạy ngầm (ẩn cửa sổ), ${modeText}...` });
-    } catch (err) {
-      console.warn('[LocalEngine] Lỗi ẩn cửa sổ ban đầu:', err.message);
-    }
-  }
-
-  session.showWindow = async (force = false) => {
-    if ((isHeadless || session.inAppPreview) && !force) return;
-    if ((!hideUntilTarget && !hideUntilLead) || session.hasShownWindow) return;
-    if (hideUntilLead && !force) return;
-    session.hasShownWindow = true;
-    try {
-      const activePage = session.mainPage || (context.pages().filter(p => !p.isClosed())[0]);
-      if (!cdpSession && activePage) {
-        cdpSession = await context.newCDPSession(activePage);
-      }
-      if (cdpSession) {
-        if (!cdpWindowId) {
-          const win = await cdpSession.send('Browser.getWindowForTarget');
-          cdpWindowId = win.windowId;
-        }
-        await cdpSession.send('Browser.setWindowBounds', {
-          windowId: cdpWindowId,
-          bounds: {
-            left: tile.left,
-            top: tile.top,
-            width: tile.width,
-            height: tile.height,
-            windowState: 'normal',
-          },
-        });
-        if (activePage) await activePage.bringToFront().catch(() => {});
-        const reasonText = hideUntilLead ? 'Đã có lead thành công' : 'Đã vào trang đích an toàn';
-        console.log(`[LocalEngine] Slot ${assignedSlot}: ${reasonText}, hiển thị trình duyệt.`);
-        session.addBrowserLog?.({ type: 'navigate', detail: `${reasonText}, hiển thị cửa sổ trình duyệt.` });
-      }
-    } catch (err) {
-      console.warn('[LocalEngine] Lỗi hiển thị cửa sổ:', err.message);
-    }
-  };
-
-  const assignedEmail = dequeueNextEmail();
-  if (assignedEmail) session.assignedEmail = assignedEmail;
-
-  attachBrowserLogger(context, session);
-
-  context.on('close', () => {
-    session.isClosed = true;
-    if (session.leadCheckStatus === 'confirmed' && session.exitIp) {
-      saveAndRecordLeadIpStats({
-        ip: session.exitIp,
-        screen: Math.max(session.screenReached || 1, session.currentScreen || 1, (session.completedScreens || 0) + 1),
-        completedScreens: session.completedScreens || 0,
-        jumpCount: Math.max(session.pageJumps || 0, session.completedScreens || 0),
-        offerNumber: session.offerNumber ?? session.streamRole ?? 1,
-        proxy: session.proxyServer || session.proxyKey,
-        websiteUrl: session.websiteUrl,
-      });
-    }
-    activeBrowsers.delete(session);
-    releaseProxyLock(proxy ?? null, session.exitIp);
-    if (!proxy) activeExitIpLocks.delete('Direct');
-    cdpBrowser.close().catch(() => {});
-    void relay?.close().catch(() => {});
-    session._localStopPromise = stopLocalProfileBrowser(proc, profilePath);
-
-    const sc = screencastSessions.get(assignedSlot);
-    if (sc) {
-      if (sc.keepaliveTimer) { clearInterval(sc.keepaliveTimer); sc.keepaliveTimer = null; }
-      sc.cdpClient.detach().catch(() => {});
-      try { sc.sseResponse.end(); } catch {}
-      screencastSessions.delete(assignedSlot);
-    }
-    console.log(`[LocalEngine] Profile Slot ${assignedSlot} đã đóng.`);
-
-    if (!session.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested) {
-      const baseDelay = (autoRefill.sequential || session.closingDueToNoLead) ? 5000 : 0;
-      queueAutomaticRefill(baseDelay + delayStop * 1000);
-    }
-  });
-
-  session.mainPage = initPage;
-
-  if (websiteUrl) {
-    await Promise.race([
-      initPage.goto(websiteUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
-      new Promise(r => setTimeout(r, navigationTimeout + 2000)),
-    ]);
-    if (!hideUntilLead && !isHeadless && !session.inAppPreview) {
-      await session.showWindow();
-    }
-    if (!isHeadless && !session.inAppPreview) {
-      await initPage.bringToFront().catch(() => {});
-    }
-  }
-
-  closeChromeWhenLastTabCloses(session);
-  watchTrafficBlockedPage(session);
-
-  if (completeText) {
-    const needle = completeText.toLowerCase();
-    const completeTimer = setInterval(async () => {
-      if (initPage.isClosed()) { clearInterval(completeTimer); return; }
-      const found = await initPage.evaluate((n) => (document.body?.innerText || '').toLowerCase().includes(n), needle).catch(() => false);
-      if (found) {
-        clearInterval(completeTimer);
-        limitRunCount += 1;
-        session.addLog?.({ time: new Date().toISOString(), type: 'complete_text', detail: `Text hoàn tất "${completeText}" (${limitRunCount}${limitRunMax > 0 ? '/' + limitRunMax : ''}).` });
-        if (limitRunMax > 0 && limitRunCount >= limitRunMax) void tgNotify(`🎉 <b>Hoàn thành!</b> Đạt ${limitRunCount}/${limitRunMax} leads. Luồng đã dừng.`);
-        session.suppressAutoRefill = false;
-        await session.browser?.close?.().catch(() => {});
-      }
-    }, 2000);
-    context.on('close', () => clearInterval(completeTimer));
-  }
-
-  if (timeLimit > 0) {
-    const timeLimitTimer = setTimeout(async () => {
-      session.addLog?.({ time: new Date().toISOString(), type: 'time_limit', detail: `Hết timeout phiên (${timeLimit}s), đóng trình duyệt.` });
-      await session.browser?.close?.().catch(() => {});
-    }, timeLimit * 1000);
-    context.on('close', () => clearTimeout(timeLimitTimer));
-  }
-
-  if (scriptSteps?.length > 0) {
-    void (async () => {
-      await initPage.waitForLoadState('domcontentloaded', { timeout: navigationTimeout }).catch(() => {});
-      const record = session.currentRecord ?? autofillRecords[0] ?? {};
-      await runScript(initPage, scriptSteps, record, {
-        captchaApiKey,
-        scriptDir: scriptPath ? dirname(scriptPath) : '',
-        logger: (entry) => session.addLog?.({ time: new Date().toISOString(), ...entry }),
-      });
-    })();
-  }
-
-  const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
-  if (websiteUrl) {
-    attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
-      autoSubmit,
-      enableLeadCheck: leadConfig.enabled !== false,
-      leadCheckScreen: leadConfig.checkScreen || 4,
-      onLog: (entry) => {
-        if (!isHeadless && !session.inAppPreview) {
-          if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
-            if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
-              void session.showWindow?.(entry.type === 'lead_confirmed');
-            }
-          }
-        }
-        session.addBrowserLog?.(entry);
-      },
-      onRecordPicked: (record) => {
-        if (!isHeadless && !session.inAppPreview && !session.hideUntilLead) {
-          void session.showWindow?.();
-        }
-        if (session.assignedEmail && record) {
-          record.email = session.assignedEmail;
-          record.emailaddress = session.assignedEmail;
-          record.mail = session.assignedEmail;
-          record.assignedEmail = session.assignedEmail;
-        }
-        session.currentRecord = record;
-        const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordKey(r) === autofillRecordKey(record));
-        if (idx !== -1) {
-          autofillQueue.available.splice(idx, 1);
-          autofillQueue.used.push(record);
-          void saveAutofillQueue();
-        }
-        void markAutofillRecordUsed(record);
-      },
-      onScreen5Reached: (sess, p) => { void startLeadVerification(sess, leadConfig); },
-      onEmailSubmitted: (sess, p) => { void startLeadVerification(sess, leadConfig); },
-      onScreenAdvanced: (sess, screen, jumps) => {
-        if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
-          saveAndRecordLeadIpStats({
-            ip: sess.exitIp,
-            screen,
-            completedScreens: sess.completedScreens,
-            jumpCount: jumps,
-            offerNumber: sess.offerNumber ?? sess.streamRole ?? 1,
-            proxy: sess.proxyServer || sess.proxyKey,
-            websiteUrl: sess.websiteUrl,
-          });
-        }
-      },
-      onPageJump: (sess, jumps, url) => {
-        if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
-          saveAndRecordLeadIpStats({
-            ip: sess.exitIp,
-            screen: Math.max(sess.screenReached || 1, sess.currentScreen || 1, (sess.completedScreens || 0) + 1),
-            completedScreens: sess.completedScreens || 0,
-            jumpCount: jumps,
-            offerNumber: sess.offerNumber ?? sess.streamRole ?? 1,
-            proxy: sess.proxyServer || sess.proxyKey,
-            websiteUrl: sess.websiteUrl,
-          });
-        }
-      },
-      onStuck: (p) => {
-        if (session.mainPage && p !== session.mainPage) return;
-        if (session.aiAssistRunning) return;
-        const currentUrl = p.url?.() || '';
-        if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:') || currentUrl.includes('api.ipify.org')) return;
-        const now = Date.now();
-        if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 4000)) return;
-        session.lastAiUrl = currentUrl;
-        session.lastAiTime = now;
-        const currentRecord = session.currentRecord ?? autofillRecords[0] ?? {};
-        if (session.assignedEmail && currentRecord) {
-          currentRecord.email = session.assignedEmail;
-          currentRecord.emailaddress = session.assignedEmail;
-          currentRecord.mail = session.assignedEmail;
-          currentRecord.assignedEmail = session.assignedEmail;
-        }
-        void runAiAssist(p, currentRecord, session, { onLog: (e) => session.addLog?.(e) });
-      },
-    });
-  }
-
-  return session;
-}
-
-/**
- * Mở profile GoLogin đã tạo bằng API, xác minh proxy trong Orbita rồi gắn Playwright.
+ * Mở profile AdsPower, xác minh IP rồi gắn luồng Playwright hiện có.
  *
  * @param {object} options ID profile, proxy, slot và dữ liệu tự động hóa của phiên.
  * @return {Promise<object>} Session trình duyệt đã kết nối.
- * @throws {Error} Khi Orbita, daemon, CDP hoặc IP proxy không khớp.
+ * @throws {Error} Khi trình duyệt, CDP hoặc IP proxy không khớp.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-19
+ * @since 2026-10-20
  */
-async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifiedExitIp, websiteUrl, offer = 1,
+async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verifiedExitIp, websiteUrl, offer = 1,
   autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null,
   captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
-  hideUntilTarget = false, hideUntilLead = false, totalCount = 10, screenPreviewOnly = true }) {
-
-  const orbitaBin = await findOrbitaExecutable();
-  if (!orbitaBin) throw new Error('Không tìm thấy Orbita browser. Hãy mở GoLogin app để tải về (hoặc đăng nhập GoLogin).');
+  hideUntilTarget = false, hideUntilLead = false, totalCount = 10, screenPreviewOnly = false,
+  deviceProfile = 'windows', browserVersion = '155', antiFingerprint = {}, deleteProfile = null, startProfile, stopProfile,
+  offerUrls = [], threadCount = 1, multiTab = true }) {
 
   const assignedSlot = slot ?? (tileIndex + 1);
   const screen = await readScreenSize();
   const tile = tileAt(tileIndex ?? (assignedSlot - 1), totalCount || 10, screen);
-  const orbitaVersion = await getOrbitaVersion();
 
   const proxyUrl = proxy?.server ?? null;
   const initialExitIp = verifiedExitIp || 'Direct';
 
-  // Desktop cấp run token hợp lệ, khởi động Orbita và trả về CDP URL.
-  let goLoginResp = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    goLoginResp = await fetch('http://127.0.0.1:36912/browser/start-profile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profileId, sync: true }),
-      signal: AbortSignal.timeout(45000),
-    }).then((response) => response.ok ? response.json() : null).catch(() => null);
-    if (goLoginResp?.wsUrl) break;
-    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
+  // AdsPower cấp CDP URL cho profile SunBrowser vừa mở (chạy ẩn ban đầu ngoài màn hình, bấm mới hiện ra Desktop).
+  const browserWebSocketUrl = await startProfile({ launchArgs: ['--window-position=-20000,-20000', '--start-minimized'] });
+  if (!browserWebSocketUrl) throw new Error('AdsPower không trả CDP URL.');
 
-  if (!goLoginResp?.wsUrl) {
-    throw new Error('GoLogin desktop chưa mở được profile vừa tạo hoặc không trả CDP URL.');
-  }
-
-  // Kết nối Playwright vào Orbita đang chạy qua CDP (timeout 15s).
+  // Kết nối Playwright vào SunBrowser đang chạy qua CDP (timeout 15s).
   const cdpBrowser = await Promise.race([
-    chromium.connectOverCDP(goLoginResp.wsUrl),
+    chromium.connectOverCDP(browserWebSocketUrl),
     new Promise((_, reject) => setTimeout(() => reject(new Error('CDP connect timeout 15s')), 15000)),
   ]);
-  console.log(`[GoLogin] CDP connected. Contexts: ${cdpBrowser.contexts().length}`);
+  console.log(`[AdsPower] CDP connected. Contexts: ${cdpBrowser.contexts().length}`);
   const context = cdpBrowser.contexts()[0];
   if (!context) {
     await cdpBrowser.close().catch(() => {});
-    await stopGoLoginProfile(profileId).catch(() => {});
-    throw new Error('Orbita không có profile mặc định để kết nối.');
+    await stopProfile(profileId).catch(() => {});
+    throw new Error('SunBrowser không có profile mặc định để kết nối.');
   }
 
-  // Kiểm tra IP ngay trong Orbita: proxy cấu hình trên cloud phải thật sự áp dụng.
+  // Thu nhỏ và ẩn ngay lập tức qua CDP và AppleScript để đảm bảo không hiện trên màn hình lúc khởi chạy
+  let cdpSession = null;
+  let cdpWindowId = null;
+  try {
+    const activePage = context.pages().filter(p => !p.isClosed())[0];
+    if (activePage) {
+      cdpSession = await context.newCDPSession(activePage);
+      const win = await cdpSession.send('Browser.getWindowForTarget');
+      cdpWindowId = win.windowId;
+      await cdpSession.send('Browser.setWindowBounds', {
+        windowId: cdpWindowId,
+        bounds: { left: -20000, top: -20000, windowState: 'minimized' },
+      });
+      execFile('osascript', ['-e', 'tell application "System Events" to set visible of every process whose name is "SunBrowser" to false'], () => {});
+    }
+  } catch {}
+
+  const profileKey = DEVICE_PROFILES[deviceProfile] ? deviceProfile : 'windows';
+
+  // Kiểm tra IP ngay trong SunBrowser: proxy của profile phải thật sự áp dụng.
   let detectedIp = null;
   let ipCheckPage = null;
   try {
@@ -3254,25 +2893,31 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
         // Dịch vụ IP đầu tiên lỗi thì thử dịch vụ còn lại.
       }
     }
-    if (!detectedIp) throw new Error('Không xác minh được IP trong Orbita.');
+    if (!detectedIp) throw new Error('Không xác minh được IP trong trình duyệt.');
     if (proxy && detectedIp !== verifiedExitIp) {
-      throw new Error(`Proxy trong Orbita ra IP ${detectedIp}, khác IP đã kiểm tra ${verifiedExitIp}.`);
+      throw new Error(`Proxy trong trình duyệt ra IP ${detectedIp}, khác IP đã kiểm tra ${verifiedExitIp}.`);
     }
   } catch (error) {
     await cdpBrowser.close().catch(() => {});
-    await stopGoLoginProfile(profileId).catch(() => {});
+    await stopProfile(profileId).catch(() => {});
+    if (deleteProfile) await deleteProfile().catch(() => {});
     throw error;
   } finally {
     await ipCheckPage?.close().catch(() => {});
   }
+
+  const osDisplay = ({ windows: 'Windows 11', macos: 'macOS 14', linux: 'Linux', android: 'Android 13' })[deviceProfile] || 'Windows 11';
+  const osShort = ({ windows: 'Win 11', macos: 'macOS', linux: 'Linux', android: 'Android' })[deviceProfile] || 'Win 11';
+  const chromeVer = browserVersion ? `Chrome ${browserVersion}` : `Chrome ${cdpBrowser.version().replace(/^Chrome\//i, '')}`;
 
   const session = {
     browser: context,
     _cdpBrowser: cdpBrowser,
     tileIndex: tileIndex ?? (assignedSlot - 1),
     slot: assignedSlot,
-    chromeVersion: orbitaVersion ?? 'GoLogin',
-    deviceProfile: 'macos',
+    chromeVersion: chromeVer,
+    deviceProfile: osDisplay,
+    deviceSummary: `${osDisplay} · ${chromeVer} · Anti-Detect Active`,
     suppressAutoRefill: false,
     proxy: proxy ?? null,
     proxyKey: proxyUrl ?? profileId,
@@ -3284,43 +2929,130 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
     streamLabel: `Offer ${offer}`,
     websiteUrl: websiteUrl || '',
     profileId,
-    isGoLogin: true,
+    browserWebSocketUrl,
+    _deleteProfile: deleteProfile,
+    isManagedProfile: true,
+    isAdsPower: true,
+    _stopProfile: () => stopProfile(profileId),
     inAppPreview: Boolean(screenPreviewOnly),
     hideUntilTarget: Boolean(hideUntilTarget),
     hideUntilLead: Boolean(hideUntilLead),
     hasShownWindow: false,
+    isWindowVisible: false,
     leadCheckStatus: null,
     leadCheckMessage: null,
     updateBadge: (text) => { session.badgeText = text; },
+    closeAuxiliaryBrowsers: () => closeAuxiliaryBrowserSessions(session),
   };
   activeBrowsers.add(session);
 
-  let cdpSession = null;
-  let cdpWindowId = null;
+  const displayIp = detectedIp || initialExitIp;
+  const titlePrefix = `[${displayIp}] [S${assignedSlot}|${osShort}|${chromeVer}]`;
 
-  if (hideUntilTarget || hideUntilLead || session.inAppPreview) {
+  // InitScript chạy ngay khi tài liệu vừa được tạo, áp dụng cho mọi page & frame
+  await context.addInitScript(({ prefix, ip, slot, os, chrome }) => {
     try {
-      const initPage = context.pages()[0] ?? await context.newPage();
+      // 1. Luôn ghim [IP] lên đầu document.title để luôn nhìn thấy trên thanh tab
+      const applyTitle = () => {
+        try {
+          let t = document.title || '';
+          if (t.startsWith(`[${ip}]`)) return;
+          t = t.replace(/^\[.*?\]\s*/g, '').replace(/^\[.*?\]\s*/g, '').trim();
+          document.title = `${prefix} ${t || 'Web'}`;
+        } catch {}
+      };
+      applyTitle();
+      document.addEventListener('DOMContentLoaded', applyTitle);
+      window.addEventListener('load', applyTitle);
+      const obs = new MutationObserver(applyTitle);
+      const target = document.querySelector('title') || document.head || document.documentElement;
+      if (target) {
+        obs.observe(target, { subtree: true, characterData: true, childList: true });
+      }
+
+      // 2. Thanh thông tin nổi ghim cố định ở mép trên cùng của trang web
+      const injectTopBar = () => {
+        try {
+          if (document.getElementById('__autolead_ip_bar')) return;
+          const bar = document.createElement('div');
+          bar.id = '__autolead_ip_bar';
+          bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:24px;background:rgba(15,23,42,0.94);color:#38bdf8;font-family:system-ui,-apple-system,sans-serif;font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:space-between;padding:0 12px;z-index:2147483647;pointer-events:none;box-shadow:0 2px 6px rgba(0,0,0,0.5);border-bottom:1px solid #0284c7;letter-spacing:0.2px;';
+          bar.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="background:#0284c7;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;">SLOT ${slot}</span>
+              <span style="color:#22c55e;">🌐 IP: <b style="color:#fff;font-size:12px;">${ip}</b></span>
+              <span style="color:#64748b;">|</span>
+              <span style="color:#cbd5e1;">💻 ${os}</span>
+              <span style="color:#64748b;">|</span>
+              <span style="color:#38bdf8;">${chrome}</span>
+            </div>
+            <div style="color:#f59e0b;font-size:10.5px;">AutoLeadPC AdsPower</div>
+          `;
+          (document.body || document.documentElement).appendChild(bar);
+        } catch {}
+      };
+      if (document.body) injectTopBar();
+      else document.addEventListener('DOMContentLoaded', injectTopBar);
+    } catch {}
+  }, { prefix: titlePrefix, ip: displayIp, slot: assignedSlot, os: osDisplay, chrome: chromeVer }).catch(() => {});
+
+  const watchAndEnforcePageTitle = (p) => {
+    const enforce = async () => {
+      try {
+        if (!p || p.isClosed()) return;
+        await p.evaluate(({ prefix, ip }) => {
+          let t = document.title || '';
+          if (!t.startsWith(`[${ip}]`)) {
+            t = t.replace(/^\[.*?\]\s*/g, '').replace(/^\[.*?\]\s*/g, '').trim();
+            document.title = `${prefix} ${t || 'Web'}`;
+          }
+        }, { prefix: titlePrefix, ip: displayIp }).catch(() => {});
+      } catch {}
+    };
+    p.on('load', enforce);
+    p.on('domcontentloaded', enforce);
+    void enforce();
+  };
+
+  context.on('page', watchAndEnforcePageTitle);
+  for (const existingPage of context.pages()) {
+    watchAndEnforcePageTitle(existingPage);
+  }
+
+  // Gắn thêm lớp stealthInitScript để đảm bảo loại bỏ hoàn toàn dấu vết automation và thêm lớp nhiễu phụ trợ
+  try {
+    const dp = DEVICE_PROFILES[deviceProfile] || DEVICE_PROFILES.windows;
+    const stealthConfig = buildStealthConfig(dp, antiFingerprint, assignedSlot);
+    await context.addInitScript(stealthInitScript, stealthConfig);
+  } catch (err) {
+    console.warn('[AdsPower] Lỗi gắn stealth script:', err.message);
+  }
+
+  // Luôn thu nhỏ cửa sổ về chạy ngầm trong app (ScreenView) ngay khi khởi chạy.
+  // Cửa sổ Desktop chỉ hiện ra khi người dùng chủ động bấm nút hoặc khi có lead (nếu chọn hideUntilLead).
+  try {
+    const initPage = context.pages()[0] ?? await context.newPage();
+    if (!cdpSession && initPage) {
       cdpSession = await context.newCDPSession(initPage);
-      const win = await cdpSession.send('Browser.getWindowForTarget');
-      cdpWindowId = win.windowId;
+    }
+    if (cdpSession) {
+      if (!cdpWindowId) {
+        const win = await cdpSession.send('Browser.getWindowForTarget');
+        cdpWindowId = win.windowId;
+      }
       await cdpSession.send('Browser.setWindowBounds', {
         windowId: cdpWindowId,
-        bounds: { windowState: 'minimized' },
+        bounds: { left: -20000, top: -20000, windowState: 'minimized' },
       });
-      const modeText = hideUntilLead ? 'chỉ hiện khi có lead' : (session.inAppPreview ? 'xem trước trên app' : 'chỉ hiện khi vào trang đích');
-      console.log(`[GoLogin] Slot ${assignedSlot}: Chạy ngầm (ẩn cửa sổ), ${modeText}.`);
-      session.addBrowserLog?.({ type: 'navigate', detail: `Chạy ngầm (ẩn cửa sổ), ${modeText}...` });
-    } catch (err) {
-      console.warn('[GoLogin] Lỗi ẩn cửa sổ ban đầu:', err.message);
+      session.isWindowVisible = false;
+      console.log(`[AdsPower] Slot ${assignedSlot}: Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện).`);
+      session.addBrowserLog?.({ type: 'navigate', detail: 'Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện)...' });
     }
+  } catch (err) {
+    console.warn('[AdsPower] Lỗi thu nhỏ cửa sổ ban đầu:', err.message);
   }
 
   session.showWindow = async (force = false) => {
-    if (session.inAppPreview && !force) return;
-    if ((!hideUntilTarget && !hideUntilLead) || session.hasShownWindow) return;
-    if (hideUntilLead && !force) return;
-    session.hasShownWindow = true;
     try {
       const activePage = session.mainPage || (context.pages().filter(p => !p.isClosed())[0]);
       if (!cdpSession && activePage) {
@@ -3342,12 +3074,43 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
           },
         });
         if (activePage) await activePage.bringToFront().catch(() => {});
-        const reasonText = hideUntilLead ? 'Đã có lead thành công' : 'Đã vào trang đích an toàn';
-        console.log(`[GoLogin] Slot ${assignedSlot}: ${reasonText}, hiển thị trình duyệt.`);
-        session.addBrowserLog?.({ type: 'navigate', detail: `${reasonText}, hiển thị cửa sổ trình duyệt.` });
+        session.hasShownWindow = true;
+        session.isWindowVisible = true;
+        console.log(`[AdsPower] Slot ${assignedSlot}: Đã hiển thị cửa sổ trình duyệt ra Desktop.`);
+        session.addBrowserLog?.({ type: 'navigate', detail: 'Đã hiển thị cửa sổ trình duyệt ra Desktop.' });
+        execFile('osascript', ['-e', 'tell application "System Events" to set visible of every process whose name is "SunBrowser" to true\ntell application "System Events" to set frontmost of every process whose name is "SunBrowser" to true'], () => {});
       }
     } catch (err) {
-      console.warn('[GoLogin] Lỗi hiển thị cửa sổ:', err.message);
+      console.warn('[AdsPower] Lỗi hiển thị cửa sổ:', err.message);
+    }
+  };
+
+  session.hideWindow = async () => {
+    try {
+      const activePage = session.mainPage || (context.pages().filter(p => !p.isClosed())[0]);
+      if (!cdpSession && activePage) {
+        cdpSession = await context.newCDPSession(activePage);
+      }
+      if (cdpSession) {
+        if (!cdpWindowId) {
+          const win = await cdpSession.send('Browser.getWindowForTarget');
+          cdpWindowId = win.windowId;
+        }
+        await cdpSession.send('Browser.setWindowBounds', {
+          windowId: cdpWindowId,
+          bounds: {
+            left: -20000,
+            top: -20000,
+            windowState: 'minimized',
+          },
+        });
+        session.isWindowVisible = false;
+        console.log(`[AdsPower] Slot ${assignedSlot}: Đã thu nhỏ cửa sổ về chạy ngầm.`);
+        session.addBrowserLog?.({ type: 'navigate', detail: 'Đã thu nhỏ cửa sổ về chạy ngầm.' });
+        execFile('osascript', ['-e', 'tell application "System Events" to set visible of every process whose name is "SunBrowser" to false'], () => {});
+      }
+    } catch (err) {
+      console.warn('[AdsPower] Lỗi thu nhỏ cửa sổ:', err.message);
     }
   };
 
@@ -3356,7 +3119,9 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
 
   attachBrowserLogger(context, session);
 
-  context.on('close', () => {
+  const handleSessionClosed = () => {
+    if (session._hasCleanedUp) return;
+    session._hasCleanedUp = true;
     session.isClosed = true;
     if (session.leadCheckStatus === 'confirmed' && session.exitIp) {
       saveAndRecordLeadIpStats({
@@ -3373,7 +3138,7 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
     releaseProxyLock(proxy ?? null, session.exitIp);
     if (!proxy) activeExitIpLocks.delete('Direct');
     cdpBrowser.close().catch(() => {});
-    void requestGoLoginProfileStop(session);
+    void requestManagedProfileStop(session);
     const sc = screencastSessions.get(assignedSlot);
     if (sc) {
       if (sc.keepaliveTimer) { clearInterval(sc.keepaliveTimer); sc.keepaliveTimer = null; }
@@ -3381,30 +3146,65 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
       try { sc.sseResponse.end(); } catch {}
       screencastSessions.delete(assignedSlot);
     }
-    console.log(`[GoLogin] Profile ${profileId} (Slot ${assignedSlot}) đã đóng.`);
+    console.log(`[AdsPower] Profile ${profileId} (Slot ${assignedSlot}) đã đóng.`);
     if (!session.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested) {
       const baseDelay = (autoRefill.sequential || session.closingDueToNoLead) ? 5000 : 0;
       queueAutomaticRefill(baseDelay + delayStop * 1000);
     }
-  });
+  };
 
-  // Điều hướng tới URL offer
-  const pages = context.pages();
+  context.on('close', handleSessionClosed);
+  cdpBrowser.on('disconnected', handleSessionClosed);
+
+  // Điều hướng tới URL offer - hỗ trợ đa luồng dạng đa tab
+  const pages = context.pages().filter(p => !p.isClosed());
   const page = pages.length > 0 ? pages[0] : await context.newPage();
   session.mainPage = page;
+  page._tabIndex = 0;
+  page._offerNumber = offer;
+  page._assignedRecord = (recordPool && recordPool.length > 0) ? recordPool[0] : (autofillRecords[0] ?? {});
 
-  if (websiteUrl) {
+  const tabUrlsToOpen = [];
+  if (Array.isArray(offerUrls) && offerUrls.length > 0) {
+    tabUrlsToOpen.push(...offerUrls);
+  } else if (websiteUrl) {
+    tabUrlsToOpen.push(websiteUrl);
+  }
+  if (multiTab && threadCount > tabUrlsToOpen.length) {
+    const baseCount = tabUrlsToOpen.length || 1;
+    while (tabUrlsToOpen.length < threadCount) {
+      tabUrlsToOpen.push(tabUrlsToOpen[tabUrlsToOpen.length % baseCount] || websiteUrl);
+    }
+  }
+
+  const primaryUrl = tabUrlsToOpen[0] || websiteUrl;
+  if (primaryUrl) {
     await Promise.race([
-      page.goto(websiteUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
+      page.goto(primaryUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
       new Promise(r => setTimeout(r, navigationTimeout + 2000)),
     ]);
-    if (!hideUntilLead && !session.inAppPreview) {
-      await session.showWindow();
-    }
-    if (!session.inAppPreview) {
+    if (session.isWindowVisible) {
       await page.bringToFront().catch(() => {});
     }
+  }
 
+  // Mở các tab còn lại trong cùng trình duyệt cho chế độ đa luồng đa tab
+  if (tabUrlsToOpen.length > 1) {
+    for (let t = 1; t < tabUrlsToOpen.length; t++) {
+      const tabUrl = tabUrlsToOpen[t];
+      try {
+        const extraPage = await context.newPage();
+        extraPage._tabIndex = t;
+        extraPage._offerNumber = (t % (offerUrls.length || 1)) + 1;
+        extraPage._assignedRecord = (recordPool && recordPool.length > 0) ? (recordPool[t % recordPool.length] || recordPool[0]) : (autofillRecords[t % autofillRecords.length] || autofillRecords[0] || {});
+        if (tabUrl) {
+          void extraPage.goto(tabUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {});
+        }
+        console.log(`[MultiTab] Slot ${assignedSlot}: Đã mở Tab ${t + 1} cho đa luồng (${tabUrl}).`);
+      } catch (tabErr) {
+        console.warn(`[MultiTab] Không mở được Tab ${t + 1}:`, tabErr.message);
+      }
+    }
   }
 
   closeChromeWhenLastTabCloses(session);
@@ -3428,9 +3228,8 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
   }
 
   if (timeLimit > 0) {
-    const timeLimitTimer = setTimeout(async () => {
-      session.addLog?.({ time: new Date().toISOString(), type: 'time_limit', detail: `Hết timeout phiên (${timeLimit}s), đóng trình duyệt.` });
-      await session.browser?.close?.().catch(() => {});
+    const timeLimitTimer = setTimeout(() => {
+      session.addLog?.({ time: new Date().toISOString(), type: 'time_limit', detail: `Đã chạy ${timeLimit}s; giữ trình duyệt mở khi tác vụ vẫn đang hoạt động.` });
     }, timeLimit * 1000);
     context.on('close', () => clearTimeout(timeLimitTimer));
   }
@@ -3455,19 +3254,13 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
       enableLeadCheck: leadConfig.enabled !== false,
       leadCheckScreen: leadConfig.checkScreen || 4,
       onLog: (entry) => {
-        if (!session.inAppPreview) {
-          if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
-            if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
-              void session.showWindow?.(entry.type === 'lead_confirmed');
-            }
-          }
+        if (session.hideUntilLead && entry && entry.type === 'lead_confirmed') {
+          void session.showWindow?.(true);
         }
         session.addBrowserLog?.(entry);
       },
       onRecordPicked: (record) => {
-        if (!session.inAppPreview && !session.hideUntilLead) {
-          void session.showWindow?.();
-        }
+        // Giữ nguyên trạng thái chạy ngầm trong app, không tự ý bung cửa sổ Desktop
         if (session.assignedEmail && record) {
           record.email = session.assignedEmail;
           record.emailaddress = session.assignedEmail;
@@ -3483,8 +3276,12 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
         }
         void markAutofillRecordUsed(record);
       },
-      onScreen5Reached: (sess, p) => { void startLeadVerification(sess, leadConfig); },
-      onEmailSubmitted: (sess, p) => { void startLeadVerification(sess, leadConfig); },
+      onScreen5Reached: (sess, p) => {
+        if (sess?.emailFilled) void startLeadVerification(sess, leadConfig);
+      },
+      onEmailSubmitted: (sess, p) => {
+        if (sess?.emailFilled) void startLeadVerification(sess, leadConfig);
+      },
       onScreenAdvanced: (sess, screen, jumps) => {
         if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
           saveAndRecordLeadIpStats({
@@ -3512,15 +3309,15 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
         }
       },
       onStuck: (p) => {
-        if (session.mainPage && p !== session.mainPage) return;
-        if (session.aiAssistRunning) return;
+        // Tab nào cũng phải chạy! Không chặn p !== session.mainPage
+        if (p._aiAssistRunning) return;
         const currentUrl = p.url?.() || '';
         if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:') || currentUrl.includes('api.ipify.org')) return;
         const now = Date.now();
-        if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 4000)) return;
-        session.lastAiUrl = currentUrl;
-        session.lastAiTime = now;
-        const currentRecord = session.currentRecord ?? autofillRecords[0] ?? {};
+        if (p._lastAiUrl === currentUrl && (now - (p._lastAiTime || 0) < 4000)) return;
+        p._lastAiUrl = currentUrl;
+        p._lastAiTime = now;
+        const currentRecord = p._assignedRecord ?? session.currentRecord ?? autofillRecords[0] ?? {};
         if (session.assignedEmail && currentRecord) {
           currentRecord.email = session.assignedEmail;
           currentRecord.emailaddress = session.assignedEmail;
@@ -3536,28 +3333,42 @@ async function openBrowserViaGoLogin({ tileIndex, slot, profileId, proxy, verifi
 }
 
 /**
- * Tạo profile cục bộ từ zero_profile cho mỗi proxy rồi mở Chrome theo từng slot.
+ * Tạo profile AdsPower riêng cho từng luồng rồi khởi chạy SunBrowser.
  *
  * @param {string} requestBody JSON từ giao diện Mac 2.
+ * @param {boolean} isAutomaticRefill Giữ mục tiêu và cấu hình gốc khi chỉ bù slot trống.
+ * @param {number[]|null} assignedStreamRoles Offer đã được bộ bù slot phân chia.
  * @return {Promise<{results: object[], warnings: string[]}>} Kết quả mở các slot.
- * @throws {Error} Khi thiếu token hoặc GoLogin desktop chưa chạy.
+ * @throws {Error} Khi thiếu API key hoặc không thể chuẩn bị profile.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-19
+ * @since 2026-10-20
  */
-async function launchGoLoginBrowsers(requestBody) {
-  autoRefill.stopRequested = false;
-  autoRefill.enabled = true;
+async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
-  const concurrency = Math.min(10, parseInt(body.requestedCount ?? body.concurrency) || 1);
+  const apiToken = await readAdsPowerApiKey();
+  if (!apiToken) throw new Error('Nhập AdsPower API key trong Settings > Browser trước khi chạy.');
+  const installedAdsPowerKernelVersions = await listInstalledAdsPowerKernelVersions();
+  if (!isAutomaticRefill) {
+    autoRefill.stopRequested = false;
+    autoRefill.enabled = true;
+  }
+  const concurrency = Math.min(maxAliveBrowsers, parseInt(body.requestedCount ?? body.concurrency) || 1);
   const websiteUrl = body.websiteUrl || '';
   const offerUrls = body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 || body.websiteUrl2 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : [websiteUrl].filter(Boolean));
+  const multiTab = body.multiTab !== false; // Mặc định chạy đa luồng là đa tab trong 1 trình duyệt
 
-  const screenPreviewOnly = (body.screenPreviewOnly !== undefined) ? Boolean(body.screenPreviewOnly) : true;
+  const screenPreviewOnly = Boolean(body.screenPreviewOnly);
 
-  // Lưu cấu hình autoRefill cho GoLogin mode để khi slot trống tự động bù đúng chế độ
-  autoRefill.settings = { ...body, browserMode: 'Gologin', screenPreviewOnly };
-  autoRefill.targetCount = concurrency;
-  void saveAutoRefillSettings();
+  // Lưu mục tiêu của lượt Start; lần bù chỉ mở số slot còn thiếu.
+  if (!isAutomaticRefill) {
+    autoRefill.settings = { ...body, browserMode: 'AdsPower', screenPreviewOnly };
+    autoRefill.targetCount = concurrency;
+    void saveAutoRefillSettings();
+  }
+
+  // Tự động dọn dẹp các profile tạm mồ côi trước khi mở slot để không chạm hạn mức 12 profile
+  const activeProfileIds = new Set([...activeBrowsers].map((s) => s.profileId).filter(Boolean));
+  await cleanupOrphanedAdsPowerProfiles(apiToken, activeProfileIds, fetch, 10).catch(() => {});
 
   // Parse autofill/script params giống launchRequestedBrowsers
   const scriptPath    = body.scriptPath    ?? '';
@@ -3571,7 +3382,16 @@ async function launchGoLoginBrowsers(requestBody) {
     clientRects: Boolean(body.antiFpClientRects),
     webgl: Boolean(body.antiFpWebgl),
     webrtc: Boolean(body.antiFpWebrtc),
+    fonts: Boolean(body.antiFpFonts),
+    apiFakeIP: Boolean(body.antiFpApiFakeIP),
   };
+  const enabledDeviceProfiles = [
+    body.Windows && 'windows',
+    body.Mac && 'macos',
+    body.Linux && 'linux',
+    body.Android && 'android',
+  ].filter(Boolean);
+  if (enabledDeviceProfiles.length === 0) enabledDeviceProfiles.push('macos');
   let scriptSteps = null;
   if (scriptPath) { try { scriptSteps = await loadScript(scriptPath); } catch {} }
   const autofillRecords = parseAutofillRecords(body.autofillData);
@@ -3592,7 +3412,7 @@ async function launchGoLoginBrowsers(requestBody) {
   const hideUntilLead = Boolean(body.hideUntilLead);
 
   // Dọn dẹp các session cũ đã đóng hoặc zombie trước khi khởi chạy
-  await pruneDeadGoLoginSessions();
+  await pruneDeadManagedSessions();
 
   const count = concurrency;
   const results = [], warnings = [];
@@ -3641,12 +3461,12 @@ async function launchGoLoginBrowsers(requestBody) {
       .filter(Boolean)
   );
 
-  const gologinWorkers = [];
+  const managedWorkers = [];
   const occupiedSlots = new Set([...activeBrowsers].map(s => s.slot || (s.tileIndex + 1)));
 
   for (let i = 0; i < count; i++) {
-    const slotOfferUrl = (offerUrls && offerUrls.length > 0) ? offerUrls[i % offerUrls.length] : websiteUrl;
-    const offerNum = (offerUrls && offerUrls.length > 0) ? (i % offerUrls.length) + 1 : 1;
+    const offerNum = assignedStreamRoles?.[i] ?? ((i % Math.max(1, offerUrls.length)) + 1);
+    const slotOfferUrl = offerUrls[offerNum - 1] || websiteUrl;
     const normOfferUrl = slotOfferUrl ? safeNormalizeUrl(slotOfferUrl) : '';
 
     let slot = 1;
@@ -3716,18 +3536,43 @@ async function launchGoLoginBrowsers(requestBody) {
       usedExitIps.add(directKey);
     }
 
-    gologinWorkers.push({
+    const chosenDeviceProfile = enabledDeviceProfiles[deviceProfileRotationCounter % enabledDeviceProfiles.length];
+    deviceProfileRotationCounter += 1;
+    managedWorkers.push({
       slot,
       tileIndex,
       assignedProxy,
       actualExitIp,
       slotOfferUrl,
       offerNum,
+      deviceProfile: chosenDeviceProfile,
+      threadCount: count,
+      multiTab,
+      offerUrls,
     });
   }
 
-  // Khởi chạy song song (Parallel) các luồng GoLogin với giãn cách nhẹ giữa các lần gọi daemon
-  await Promise.all(gologinWorkers.map(async (worker, workerIdx) => {
+  // Dùng cùng cách lọc phiên bản đang bận và xoay vòng như Chrome thường.
+  const occupiedAdsPowerKernelVersions = new Set([...activeBrowsers]
+    .filter((session) => session.isAdsPower && !session.isClosed)
+    .map((session) => /SunBrowser (\d+)/.exec(session.chromeVersion || '')?.[1])
+    .filter(Boolean));
+  const availableAdsPowerKernelVersions = selectAdsPowerKernelVersions(
+    installedAdsPowerKernelVersions, occupiedAdsPowerKernelVersions, chromeBuildRotationCounter, managedWorkers.length,
+  );
+  const launchableWorkers = managedWorkers.filter((worker) => {
+    worker.browserVersion = availableAdsPowerKernelVersions.shift();
+    if (worker.browserVersion) {
+      return true;
+    }
+    warnings.push(`Slot ${worker.slot}: Không còn phiên bản SunBrowser riêng. Hãy cài thêm kernel AdsPower hoặc giảm số slot đồng thời.`);
+    releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
+    if (worker.actualExitIp === 'Direct') activeExitIpLocks.delete('Direct');
+    return false;
+  });
+
+  // Khởi chạy song song các profile với giãn cách nhẹ giữa các lần gọi daemon.
+  await Promise.all(launchableWorkers.map(async (worker, workerIdx) => {
     if (workerIdx > 0) {
       const staggerMs = Math.max(800, (delayStart > 0 ? delayStart * 1000 : 800));
       await new Promise(r => setTimeout(r, workerIdx * staggerMs));
@@ -3738,13 +3583,30 @@ async function launchGoLoginBrowsers(requestBody) {
       return;
     }
     try {
-      const launchedSession = await openBrowserViaLocalEngine({
+      const profileOptions = {
+        slot: worker.slot,
+        proxy: worker.assignedProxy,
+        exitIp: worker.actualExitIp,
+        websiteUrl: worker.slotOfferUrl,
+        antiFingerprint,
+        deviceProfile: worker.deviceProfile,
+        browserVersion: worker.browserVersion,
+        resolution: `${DEVICE_PROFILES[worker.deviceProfile]?.screen?.width ?? 1920}x${DEVICE_PROFILES[worker.deviceProfile]?.screen?.height ?? 1080}`,
+      };
+      const profileId = await getOrCreateAdsPowerProfile(apiToken, buildAdsPowerProfileRequest(profileOptions), activeProfileIds, worker.slot);
+      activeProfileIds.add(profileId);
+      worker.profileId = profileId;
+      const launchedSession = await openAdsPowerBrowser({
         tileIndex: worker.tileIndex,
         slot: worker.slot,
+        profileId,
         proxy: worker.assignedProxy,
         verifiedExitIp: worker.actualExitIp,
         websiteUrl: worker.slotOfferUrl,
         offer: worker.offerNum,
+        offerUrls: worker.offerUrls || offerUrls,
+        threadCount: worker.threadCount || count,
+        multiTab: worker.multiTab ?? multiTab,
         autofillRecords,
         autoSubmit: body.autoSubmitForm !== false,
         leadConfig,
@@ -3756,8 +3618,12 @@ async function launchGoLoginBrowsers(requestBody) {
         scriptPath,
         hideUntilTarget,
         hideUntilLead,
+        deviceProfile: worker.deviceProfile,
+        browserVersion: worker.browserVersion,
         antiFingerprint,
-        deviceProfile: body.deviceProfile || 'macos',
+        deleteProfile: () => deleteAdsPowerProfile(apiToken, profileId),
+        startProfile: (opts) => startAdsPowerProfile(apiToken, profileId, opts),
+        stopProfile: () => stopAdsPowerProfile(apiToken, profileId),
         totalCount: concurrency,
         screenPreviewOnly,
       });
@@ -3766,9 +3632,10 @@ async function launchGoLoginBrowsers(requestBody) {
         status: 'ok',
         slot: worker.slot,
         offer: worker.offerNum,
-        mode: 'local-zero-profile',
+        mode: 'adspower-sunbrowser',
         profileId: launchedSession.profileId || worker.profileId,
       });
+      chromeBuildRotationCounter += 1;
       if (worker.assignedProxy?._queueLine) {
         const queueIndex = proxyQueue.available.indexOf(worker.assignedProxy._queueLine);
         if (queueIndex !== -1) {
@@ -3792,6 +3659,12 @@ async function launchGoLoginBrowsers(requestBody) {
         void persistProxyUsageHistory(usageHistory).catch(() => {});
       }
     } catch (err) {
+      if (worker.profileId) {
+        await stopAdsPowerProfile(apiToken, worker.profileId).catch(() => {});
+        await deleteAdsPowerProfile(apiToken, worker.profileId).catch((cleanupError) => {
+          console.warn(`[Browser] Không xóa được profile ${worker.profileId}: ${cleanupError.message}`);
+        });
+      }
       if (worker.assignedProxy) {
         releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
         const pKey = createProxyUsageKey(worker.assignedProxy, 1, worker.slotOfferUrl);
@@ -3820,6 +3693,9 @@ async function launchUserRequestedBrowsers(requestBody) {
   autoRefill.stopRequested = false;
   autoRefill.enabled = true;
   const body = JSON.parse(requestBody);
+  if (body.browserMode === 'AdsPower' || body.useAdsPower) {
+    return launchAdsPowerBrowsers(requestBody);
+  }
   const activeBeforeLaunch = activeBrowsers.size;
   const result = await launchRequestedBrowsers(requestBody);
   const countParam = (body.requestedCount !== undefined && body.requestedCount !== '')
@@ -3967,8 +3843,8 @@ export function queueAutomaticRefill(delayMs = 0) {
     }
 
     let result;
-    if (activeSettings.browserMode === 'Gologin') {
-      result = await launchGoLoginBrowsers(JSON.stringify({
+    if (activeSettings.browserMode === 'AdsPower') {
+      const refillRequestBody = JSON.stringify({
         ...activeSettings,
         offerUrls: configuredOffers,
         websiteUrl: configuredOffers[0] || activeSettings.websiteUrl,
@@ -3976,7 +3852,8 @@ export function queueAutomaticRefill(delayMs = 0) {
         websiteUrl3: configuredOffers[2] || activeSettings.websiteUrl3,
         websiteUrl4: configuredOffers[3] || activeSettings.websiteUrl4,
         requestedCount: localNeeded,
-      }));
+      });
+      result = await launchAdsPowerBrowsers(refillRequestBody, true, assignedStreamRoles);
     } else {
       result = await launchRequestedBrowsers(JSON.stringify({
         ...activeSettings,
@@ -4034,6 +3911,7 @@ function updateAutoRefill(requestBody) {
  * @since 2026-10-15
  */
 function getAutoRefillStatus() {
+  void pruneDeadManagedSessions().catch(() => {});
   return {
     enabled: autoRefill.enabled,
     sequential: autoRefill.sequential,
@@ -4041,38 +3919,55 @@ function getAutoRefillStatus() {
     targetCount: autoRefill.targetCount,
     message: autoRefill.message,
     chromeSessions: [...activeBrowsers]
-      .filter((session) => !session.isClosed && session.chromeVersion && (session.exitIp || session.isGoLogin))
-      .map((session) => ({
-        slot: session.slot ?? (session.tileIndex + 1),
-        version: session.chromeVersion,
-        deviceProfile: session.deviceProfile ?? 'windows',
-        deviceSummary: session.deviceSummary ?? null,
-        exitIp: session.exitIp ?? (session.isGoLogin ? 'GoLogin' : null),
-        proxy: session.proxyServer ?? session.proxyKey ?? null,
-        assignedEmail: session.assignedEmail ?? null,
-        assignedPass: session.assignedPass ?? (session.currentRecord?.pass || session.currentRecord?.password || '******'),
-        assignedRecover: session.assignedRecover ?? (session.currentRecord?.recover || session.currentRecord?.recoveryEmail || '--'),
-        autofillRecord: session.autofillRecord ?? null,
-        autofillFields: session.autofillFields ?? 0,
-        autofillError: session.autofillError ?? null,
-        completedScreens: session.completedScreens ?? 0,
-        currentScreen: session.currentScreen ?? ((session.completedScreens ?? 0) + 1),
-        pageJumps: session.pageJumps ?? 0,
-        screenReached: session.screenReached ?? session.currentScreen ?? 1,
-        leadCheckStatus: session.leadCheckStatus ?? null,
-        leadCheckMessage: session.leadCheckMessage ?? null,
-        extensions: session.extensions ?? null,
-        streamRole: session.streamRole ?? 1,
-        streamLabel: session.streamLabel ?? '',
-        offerNumber: session.offerNumber ?? session.streamRole ?? 1,
-        websiteUrl: session.websiteUrl ?? null,
-        aiRunning: Boolean(session.aiAssistRunning),
-        aiStatus: session.aiAssistRunning ? 'Đang phân tích form bằng AI...' : (session.autofillFields ? `Đã điền ${session.autofillFields} trường` : 'Sẵn sàng'),
-        action: session.aiAssistRunning
-          ? '🤖 AI đang phân tích & điền form'
-          : (session.lastActionText || (session.autofillFields ? `Đã điền ${session.autofillFields} ô` : (session.websiteUrl ? 'Đang duyệt' : 'Running'))),
-        lastLog: (session.logs && session.logs.length > 0) ? session.logs[session.logs.length - 1] : null,
-      }))
+      .filter((session) => !session.isClosed && session.chromeVersion && (session.exitIp || session.isManagedProfile))
+      .map((session) => {
+        const livePages = session.browser?.pages ? session.browser.pages().filter(p => !p.isClosed()) : [];
+        const tabCount = Math.max(1, livePages.length);
+        const tabsInfo = livePages.map((p, idx) => ({
+          index: idx,
+          url: (typeof p.url === 'function' ? p.url() : '') || '',
+          aiRunning: Boolean(p._aiAssistRunning || p._aiFormFixing),
+        }));
+        const anyTabAiRunning = Boolean(session.aiAssistRunning || livePages.some(p => p._aiAssistRunning || p._aiFormFixing));
+        const aiRunningCount = livePages.filter(p => p._aiAssistRunning || p._aiFormFixing).length;
+
+        return {
+          slot: session.slot ?? (session.tileIndex + 1),
+          version: session.chromeVersion,
+          deviceProfile: session.deviceProfile ?? 'windows',
+          deviceSummary: session.deviceSummary ?? null,
+          isWindowVisible: Boolean(session.isWindowVisible),
+          exitIp: session.exitIp ?? (session.isManagedProfile ? session.chromeVersion : null),
+          proxy: session.proxyServer ?? session.proxyKey ?? null,
+          assignedEmail: session.assignedEmail ?? null,
+          assignedPass: session.assignedPass ?? (session.currentRecord?.pass || session.currentRecord?.password || '******'),
+          assignedRecover: session.assignedRecover ?? (session.currentRecord?.recover || session.currentRecord?.recoveryEmail || '--'),
+          autofillRecord: session.autofillRecord ?? null,
+          autofillFields: session.autofillFields ?? 0,
+          autofillError: session.autofillError ?? null,
+          completedScreens: session.completedScreens ?? 0,
+          currentScreen: session.currentScreen ?? ((session.completedScreens ?? 0) + 1),
+          pageJumps: session.pageJumps ?? 0,
+          screenReached: session.screenReached ?? session.currentScreen ?? 1,
+          leadCheckStatus: session.leadCheckStatus ?? null,
+          leadCheckMessage: session.leadCheckMessage ?? null,
+          extensions: session.extensions ?? null,
+          streamRole: session.streamRole ?? 1,
+          streamLabel: session.streamLabel ?? '',
+          offerNumber: session.offerNumber ?? session.streamRole ?? 1,
+          websiteUrl: session.websiteUrl ?? null,
+          tabCount,
+          tabs: tabsInfo,
+          aiRunning: anyTabAiRunning,
+          aiStatus: anyTabAiRunning
+            ? (tabCount > 1 ? `Đang phân tích form bằng AI (${aiRunningCount || 1}/${tabCount} tabs)...` : 'Đang phân tích form bằng AI...')
+            : (session.autofillFields ? `Đã điền ${session.autofillFields} trường` : 'Sẵn sàng'),
+          action: anyTabAiRunning
+            ? (tabCount > 1 ? `🤖 AI đang chạy trên ${aiRunningCount || 1}/${tabCount} tabs` : '🤖 AI đang phân tích & điền form')
+            : (session.lastActionText || (session.autofillFields ? `Đã điền ${session.autofillFields} ô` : (session.websiteUrl ? 'Đang duyệt' : 'Running'))),
+          lastLog: (session.logs && session.logs.length > 0) ? session.logs[session.logs.length - 1] : null,
+        };
+      })
       .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
     leadStats: Object.fromEntries(leadIpStatsMap),
   };
@@ -4160,26 +4055,29 @@ export function buildProxyCheckReport(checked) {
 }
 
 /**
- * Yêu cầu ipinfo qua proxy và trả về thông tin địa chỉ IP bên ngoài.
+ * Yêu cầu ipinfo qua proxy hoặc mạng trực tiếp và trả thông tin địa chỉ IP bên ngoài.
  *
- * @param {object} proxy Cấu hình proxy đã được phân tích.
+ * @param {object|null} proxy Cấu hình proxy đã phân tích; null để tra IP trực tiếp.
  * @return {Promise<object>} Thông tin JSON do ipinfo trả về.
  * @throws {Error} Khi proxy không kết nối được hoặc endpoint trả mã lỗi.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-08
  */
-function requestProxyIpInfo(proxy) {
-  const proxyUrl = new URL(proxy.server);
-  if (proxy.username) proxyUrl.username = proxy.username;
-  if (proxy.password) proxyUrl.password = proxy.password;
-  const agent = proxyUrl.protocol === 'socks5:'
-    ? new SocksProxyAgent(proxyUrl)
-    : new HttpsProxyAgent(proxyUrl);
+function requestProxyIpInfo(proxy = null) {
+  let agent;
+  if (proxy) {
+    const proxyUrl = new URL(proxy.server);
+    if (proxy.username) proxyUrl.username = proxy.username;
+    if (proxy.password) proxyUrl.password = proxy.password;
+    agent = proxyUrl.protocol === 'socks5:'
+      ? new SocksProxyAgent(proxyUrl)
+      : new HttpsProxyAgent(proxyUrl);
+  }
 
   const fetchJson = (urlStr, timeoutMs = 4000) => new Promise((resolve, reject) => {
     const isHttps = urlStr.startsWith('https:');
     const reqFn = isHttps ? requestHttps : requestHttp;
-    const proxyRequest = reqFn(urlStr, { agent, timeout: timeoutMs }, (response) => {
+    const proxyRequest = reqFn(urlStr, { ...(agent ? { agent } : {}), timeout: timeoutMs }, (response) => {
       let responseBody = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { responseBody += chunk; });
@@ -4253,19 +4151,11 @@ export async function closeActiveBrowsers() {
   await Promise.allSettled(sessions.map(async (session) => {
     session.suppressAutoRefill = true;
     session.isClosed = true;
-    if (session.isLocalEngine) {
+    if (session.isManagedProfile && session.profileId) {
       if (session.browser && typeof session.browser.close === 'function') {
         await session.browser.close().catch(() => {});
       }
-      await session._relay?.close().catch(() => {});
-      await (session._localStopPromise ?? stopLocalProfileBrowser(session._proc, session.profilePath));
-      return;
-    }
-    if (session.isGoLogin && session.profileId) {
-      if (session.browser && typeof session.browser.close === 'function') {
-        await session.browser.close().catch(() => {});
-      }
-      await requestGoLoginProfileStop(session);
+      await requestManagedProfileStop(session);
       return;
     }
     try {
@@ -4279,11 +4169,10 @@ export async function closeActiveBrowsers() {
     }
   }));
 
-  // Chỉ đóng những phiên app quản lý; không đụng vào Orbita do người dùng tự mở.
+  // Chỉ đóng những phiên Chrome mà app quản lý.
   await executeFile('pkill', ['-9', '-f', 'chrome-regular-builds']).catch(() => {});
   await executeFile('pkill', ['-9', '-f', 'user-data-dir.*chrome-profiles']).catch(() => {});
   await executeFile('pkill', ['-9', '-f', 'user-data-dir.*AutoLeadPC']).catch(() => {});
-  await executeFile('pkill', ['-9', '-f', 'user-data-dir.*Profiles/gologin_']).catch(() => {});
 
   // Pass 2: bắt các browser vừa được add vào activeBrowsers trong lúc pass 1 đang chạy
   await new Promise((r) => setTimeout(r, 800));
@@ -4294,11 +4183,19 @@ export async function closeActiveBrowsers() {
     if (s._monitorInterval) { clearInterval(s._monitorInterval); s._monitorInterval = null; }
     if (s._autofillTimer) { clearInterval(s._autofillTimer); s._autofillTimer = null; }
     await (s.browser ?? s.context)?.close?.().catch(() => {});
+    if (s.isManagedProfile && s.profileId) {
+      await requestManagedProfileStop(s).catch(() => {});
+    }
   }
 
   activeBrowsers.clear();
   activeProxyLocks.clear();
   activeExitIpLocks.clear();
+
+  const adsPowerToken = await readAdsPowerApiKey().catch(() => null);
+  if (adsPowerToken) {
+    void cleanupOrphanedAdsPowerProfiles(adsPowerToken, new Set(), fetch, 10).catch(() => {});
+  }
 
   return {
     results: [sessions.length > 0
@@ -4306,6 +4203,62 @@ export async function closeActiveBrowsers() {
       : 'Đã đóng toàn bộ trình duyệt trên màn hình và dừng hẳn.'],
     warnings: [],
     autoRefillEnabled: false,
+  };
+}
+
+/**
+ * Đóng riêng trình duyệt của một slot mà không tắt tự bù cho các slot còn lại.
+ *
+ * @param {number} slot Số slot cần đóng.
+ * @param {Iterable<object>} [browserSessions=activeBrowsers] Danh sách phiên đang mở.
+ * @return {Promise<{success: boolean, slot: number}>} Trạng thái đóng phiên.
+ * @throws {Error} Khi slot không tồn tại hoặc không thể đóng trình duyệt.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
+ */
+export async function closeBrowserBySlot(slot, browserSessions = activeBrowsers) {
+  const session = [...browserSessions].find((item) => !item.isClosed && (item.slot ?? (item.tileIndex ?? -1) + 1) === slot);
+  if (!session) throw new Error(`Không tìm thấy trình duyệt ở Slot ${slot}.`);
+
+  const browser = session.browser ?? session.context;
+  if (!browser || typeof browser.close !== 'function') {
+    throw new Error(`Không thể đóng trình duyệt ở Slot ${slot}.`);
+  }
+  session.suppressAutoRefill = true;
+  try {
+    await browser.close();
+  } catch (error) {
+    session.suppressAutoRefill = false;
+    throw error;
+  }
+  for (const timerName of ['_monitorInterval', '_autofillTimer']) {
+    if (session[timerName]) {
+      clearInterval(session[timerName]);
+      session[timerName] = null;
+    }
+  }
+  session.isClosed = true;
+  if (session.isManagedProfile && session.profileId) {
+    await requestManagedProfileStop(session);
+  }
+  return { success: true, slot };
+}
+
+/**
+ * Đóng mọi trình duyệt phụ đang chạy, giữ nguyên trình duyệt đang ở bước Take the Deal.
+ * @param {object} activeSession Phiên trình duyệt cần tiếp tục giữ mở.
+ * @return {Promise<{closed: number, failed: number}>} Số trình duyệt đã đóng và số lần đóng lỗi.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
+ */
+async function closeAuxiliaryBrowserSessions(activeSession) {
+  const auxiliarySessions = [...activeBrowsers].filter((session) => session !== activeSession && !session.isClosed);
+  const results = await Promise.allSettled(auxiliarySessions.map((session) =>
+    closeBrowserBySlot(session.slot ?? ((session.tileIndex ?? -1) + 1))
+  ));
+  return {
+    closed: results.filter((result) => result.status === 'fulfilled').length,
+    failed: results.filter((result) => result.status === 'rejected').length,
   };
 }
 
@@ -4515,11 +4468,17 @@ function compareChromeVersions(left, right) {
  *
  * @param {string} userDataDirectory Thư mục profile Chrome đích.
  * @param {{version: string}} build Bản Chrome sẽ mở profile đích.
+ * @param {string} [templateProfileDirectory=chromeTemplateProfileDirectory] Thư mục profile mẫu.
  * @return {Promise<string|null>} Null nếu đã chép, hoặc lý do không chép để hiện trên giao diện.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-14
+ * @throws {Error} Khi không thể chép dữ liệu profile mẫu vào profile mới.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
  */
-async function seedChromeProfileFromTemplate(userDataDirectory, build) {
+export async function seedChromeProfileFromTemplate(
+  userDataDirectory,
+  build,
+  templateProfileDirectory = chromeTemplateProfileDirectory,
+) {
   try {
     await access(join(userDataDirectory, 'Local State'));
     return 'profile này tạo trước khi có profile mẫu nên không được chép';
@@ -4528,19 +4487,19 @@ async function seedChromeProfileFromTemplate(userDataDirectory, build) {
   }
   let templateVersion;
   try {
-    const metadata = JSON.parse(await readFile(join(chromeTemplateProfileDirectory, chromeTemplateMetadataName), 'utf8'));
+    const metadata = JSON.parse(await readFile(join(templateProfileDirectory, chromeTemplateMetadataName), 'utf8'));
     templateVersion = metadata.chromeVersion;
-    await access(join(chromeTemplateProfileDirectory, 'Local State'));
+    await access(join(templateProfileDirectory, 'Local State'));
   } catch {
     return 'chưa có profile mẫu; bấm "Cài RoboForm cho profile mới"';
   }
-  if ((await listProfileExtensionNames(chromeTemplateProfileDirectory)).length === 0) {
-    return 'profile mẫu chưa cài extension nào';
+  if (!existsSync(join(templateProfileDirectory, 'Default', 'Extensions', roboFormExtensionId))) {
+    return 'profile mẫu chưa cài RoboForm';
   }
   if (compareChromeVersions(templateVersion, build.version) > 0) {
     return `profile mẫu tạo bằng Chrome ${templateVersion}, mới hơn Chrome ${build.version}`;
   }
-  await cp(chromeTemplateProfileDirectory, userDataDirectory, {
+  await cp(templateProfileDirectory, userDataDirectory, {
     recursive: true,
     filter: (source) => !chromeTemplateSkippedNames.has(basename(source)),
   });
@@ -4561,7 +4520,13 @@ async function seedChromeProfileFromTemplate(userDataDirectory, build) {
  */
 export function isManagedChromeProfilePath(candidate) {
   if (typeof candidate !== 'string' || candidate.includes('..')) return false;
-  return [chromeProfileDirectory, chromeProfileCacheDirectory].some((root) => {
+  const roots = [
+    chromeProfileDirectory,
+    chromeProfileCacheDirectory,
+    join(baseDataDirectory, 'chrome-profiles'),
+    join(homedir(), 'Library', 'Caches', 'AutoLeadPC', 'chrome-profiles'),
+  ];
+  return roots.some((root) => {
     const storeRoot = root.endsWith('/') ? root : root + '/';
     return candidate.startsWith(storeRoot) && candidate.length > storeRoot.length;
   });
@@ -4743,7 +4708,7 @@ async function openTemplateProfile() {
     results: [
       `Đã mở profile mẫu bằng Chrome ${build.version} (không qua proxy).`,
       'Bấm "Thêm vào Chrome" để cài RoboForm, đăng nhập RoboForm, rồi đóng cửa sổ này.',
-      'Từ đó, mỗi profile Chrome mới mà app tạo sẽ có sẵn RoboForm. Profile đã tạo trước đây không thay đổi.',
+      'Từ đó, profile mới trên mọi phiên bản Chrome local tương thích mà app tạo sẽ có sẵn RoboForm. Profile đã tạo trước đây không thay đổi.',
     ],
     warnings,
   };
@@ -4759,11 +4724,17 @@ async function openTemplateProfile() {
  * @param {object} session Phiên Chrome đang chạy.
  * @param {object} leadConfig Cấu hình API và thời gian chờ.
  * @return {Promise<void>} Hoàn tất quy trình kiểm tra lead.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
  */
 async function startLeadVerification(session, leadConfig) {
   if (session.leadCheckRunning || leadConfig.enabled === false) return;
+  // BẢO VỆ CHẶN CHECK LEAD ẢO: Tuyệt đối không chuyển sang checking khi chưa điền Gmail
+  if (!session.emailFilled) {
+    const slotNum = session.tileIndex !== undefined ? (session.tileIndex + 1) : (session.slot || 1);
+    console.log(`[LeadCheck] Slot ${slotNum}: Ô Gmail/Email chưa được điền hợp lệ (session.emailFilled = false). Bỏ qua kích hoạt chờ kiểm tra lead, tiếp tục làm form.`);
+    return;
+  }
   session.leadCheckRunning = true;
   session.leadCheckStatus = 'checking';
 
@@ -4781,8 +4752,8 @@ async function startLeadVerification(session, leadConfig) {
 
   const updateBadge = (text) => { session.updateBadge?.(text); };
 
-  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 15);
-  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 1);
+  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 30);
+  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 2);
 
   const attemptText = maxAttempts > 1 ? `${maxAttempts} lần x ${intervalSeconds}s` : `1 lần ${intervalSeconds}s`;
   session.leadCheckMessage = `Đã nộp ${targetDesc}; bắt đầu chờ kiểm tra lead (${attemptText})...`;
@@ -4795,7 +4766,7 @@ async function startLeadVerification(session, leadConfig) {
 
   while (attempt < maxAttempts) {
     attempt += 1;
-    // Chờ trọn vẹn intervalSeconds (15s) cho mỗi lần kiểm tra, đếm ngược trực tiếp trên badge và message
+    // Chờ trọn vẹn intervalSeconds cho mỗi lần kiểm tra, đếm ngược trực tiếp trên badge và message
     for (let sec = intervalSeconds; sec > 0; sec--) {
       if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
         return; // Phiên đã bị đóng bởi người dùng
@@ -4886,7 +4857,7 @@ async function startLeadVerification(session, leadConfig) {
     session.closingDueToNoLead = true;
     const reasonText = hasApiError
       ? `Lỗi gọi API toffers.top (${lastApiErrorMessage})`
-      : `Không có lead về cho IP ${exitIp} sau ${intervalSeconds}s kiểm tra`;
+      : `Không có lead về cho IP ${exitIp} sau ${intervalSeconds * maxAttempts}s chờ (${maxAttempts} lần kiểm tra)`;
     session.leadCheckMessage = `❌ ${reasonText}. Tự động tắt trình duyệt để đổi sock mới...`;
     updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead. Tự tắt Chrome...</span>`);
 
@@ -4935,6 +4906,7 @@ async function openBrowserWithInstalledChrome({
   build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows', streamRole = 1, streamLabel = '', offerNumber = 1,
   scriptSteps = null, captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
   antiFingerprint = {}, checkDuplicate = true, hideUntilTarget = false, hideUntilLead = false,
+  offerUrls = [], threadCount = 1, multiTab = true,
 }) {
   const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
   const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
@@ -5043,6 +5015,7 @@ async function openBrowserWithInstalledChrome({
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
     // Trạng thái hiển thị trong giao diện AutoLead (leadCheckMessage), không ghi vào trang đích.
     updateBadge: (text) => { session.badgeText = text; },
+    closeAuxiliaryBrowsers: () => closeAuxiliaryBrowserSessions(session),
     addLog: (entry) => {
       if (typeof session.addBrowserLog === 'function') {
         session.addBrowserLog(entry);
@@ -5084,17 +5057,13 @@ async function openBrowserWithInstalledChrome({
     enableLeadCheck: leadConfig.enabled !== false,
     leadCheckScreen: leadConfig.checkScreen || 4,
     onLog: (entry) => {
-      if (entry && (entry.type === 'field_filled' || entry.type === 'submit_clicked' || entry.type === 'lead_confirmed' || entry.type === 'ai_action')) {
-        if (!session.hideUntilLead || entry.type === 'lead_confirmed') {
-          void session.showWindow?.(entry.type === 'lead_confirmed');
-        }
+      if (session.hideUntilLead && entry && entry.type === 'lead_confirmed') {
+        void session.showWindow?.(true);
       }
       session.addBrowserLog?.(entry);
     },
     onRecordPicked: (record) => {
-      if (!session.hideUntilLead) {
-        void session.showWindow?.();
-      }
+      // Không tự ý bung cửa sổ khi điền form
       if (session.assignedEmail && record) {
         record.email = session.assignedEmail;
         record.emailaddress = session.assignedEmail;
@@ -5112,10 +5081,10 @@ async function openBrowserWithInstalledChrome({
       void markAutofillRecordUsed(record);
     },
     onScreen5Reached: (sess, page) => {
-      void startLeadVerification(sess, leadConfig);
+      if (sess?.emailFilled) void startLeadVerification(sess, leadConfig);
     },
     onEmailSubmitted: (sess, page) => {
-      void startLeadVerification(sess, leadConfig);
+      if (sess?.emailFilled) void startLeadVerification(sess, leadConfig);
     },
     onScreenAdvanced: (sess, screen, jumps) => {
       if (sess.leadCheckStatus === 'confirmed' && sess.exitIp) {
@@ -5144,23 +5113,22 @@ async function openBrowserWithInstalledChrome({
       }
     },
     onStuck: (page) => {
-      // Chỉ chạy AI Assist cho tab chính đang active, không chạy trên tab phụ/ad/trang blog
-      if (session.mainPage && page !== session.mainPage) return;
-      if (session.aiAssistRunning) return;
+      // Tab nào cũng phải chạy! Không chặn page !== session.mainPage
+      if (page._aiAssistRunning) return;
 
       const currentUrl = page.url?.() || '';
       if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:') || currentUrl.includes('api.ipify.org') || currentUrl.includes('toffers.top/click')) {
         return;
       }
       const now = Date.now();
-      // Chống spam AI: Nếu cùng 1 URL vừa chạy AI trong vòng 4s thì không chạy lại dồn dập
-      if (session.lastAiUrl === currentUrl && (now - (session.lastAiTime || 0) < 4000)) {
+      // Chống spam AI theo từng tab:
+      if (page._lastAiUrl === currentUrl && (now - (page._lastAiTime || 0) < 4000)) {
         return;
       }
-      session.lastAiUrl = currentUrl;
-      session.lastAiTime = now;
+      page._lastAiUrl = currentUrl;
+      page._lastAiTime = now;
 
-      const currentRecord = session.currentRecord || (recordPool[session.recordIndex] ?? recordPool[0]);
+      const currentRecord = page._assignedRecord || session.currentRecord || (recordPool[session.recordIndex] ?? recordPool[0]);
       if (session.assignedEmail && currentRecord) {
         currentRecord.email = session.assignedEmail;
         currentRecord.emailaddress = session.assignedEmail;
@@ -5253,26 +5221,22 @@ async function openBrowserWithInstalledChrome({
     let cdpSession = null;
     let cdpWindowId = null;
 
-    if (hideUntilTarget || hideUntilLead) {
-      try {
-        cdpSession = await context.newCDPSession(page);
-        const win = await cdpSession.send('Browser.getWindowForTarget');
-        cdpWindowId = win.windowId;
-        await cdpSession.send('Browser.setWindowBounds', {
-          windowId: cdpWindowId,
-          bounds: { windowState: 'minimized' },
-        });
-        const modeText = hideUntilLead ? 'chỉ hiện khi có lead' : 'chỉ hiện khi vào trang đích';
-        console.log(`[HideBrowser] Slot ${tileIndex + 1}: Chạy ngầm (ẩn cửa sổ), ${modeText}.`);
-        session.addBrowserLog?.({ type: 'navigate', detail: `Chạy ngầm (ẩn cửa sổ), ${modeText}...` });
-      } catch (err) {
-        console.warn('[HideBrowser] Lỗi ẩn cửa sổ ban đầu:', err.message);
-      }
+    try {
+      cdpSession = await context.newCDPSession(page);
+      const win = await cdpSession.send('Browser.getWindowForTarget');
+      cdpWindowId = win.windowId;
+      await cdpSession.send('Browser.setWindowBounds', {
+        windowId: cdpWindowId,
+        bounds: { windowState: 'minimized' },
+      });
+      session.isWindowVisible = false;
+      console.log(`[HideBrowser] Slot ${tileIndex + 1}: Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện).`);
+      session.addBrowserLog?.({ type: 'navigate', detail: 'Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện)...' });
+    } catch (err) {
+      console.warn('[HideBrowser] Lỗi ẩn cửa sổ ban đầu:', err.message);
     }
 
     session.showWindow = async (force = false) => {
-      if ((!hideUntilTarget && !hideUntilLead) || session.hasShownWindow) return;
-      if (hideUntilLead && !force) return;
       session.hasShownWindow = true;
       try {
         const activePage = session.mainPage || page;
@@ -5296,13 +5260,37 @@ async function openBrowserWithInstalledChrome({
               windowState: 'normal',
             },
           });
+          session.isWindowVisible = true;
           if (!activePage.isClosed()) await activePage.bringToFront().catch(() => {});
-          const reasonText = hideUntilLead ? 'Đã có lead thành công' : 'Đã vào trang đích an toàn';
-          console.log(`[ShowWindow] Slot ${tileIndex + 1}: ${reasonText}, hiển thị trình duyệt.`);
-          session.addBrowserLog?.({ type: 'navigate', detail: `${reasonText}, hiển thị cửa sổ trình duyệt.` });
+          console.log(`[ShowWindow] Slot ${tileIndex + 1}: Hiển thị cửa sổ trình duyệt ra Desktop.`);
+          session.addBrowserLog?.({ type: 'navigate', detail: 'Hiển thị cửa sổ trình duyệt ra Desktop.' });
         }
       } catch (err) {
         console.warn('[ShowWindow] Lỗi hiển thị cửa sổ:', err.message);
+      }
+    };
+
+    session.hideWindow = async () => {
+      try {
+        const activePage = session.mainPage || page;
+        if (!cdpSession && !activePage.isClosed()) {
+          cdpSession = await context.newCDPSession(activePage);
+        }
+        if (cdpSession) {
+          if (!cdpWindowId) {
+            const win = await cdpSession.send('Browser.getWindowForTarget');
+            cdpWindowId = win.windowId;
+          }
+          await cdpSession.send('Browser.setWindowBounds', {
+            windowId: cdpWindowId,
+            bounds: { windowState: 'minimized' },
+          });
+          session.isWindowVisible = false;
+          console.log(`[HideBrowser] Slot ${tileIndex + 1}: Đã thu nhỏ cửa sổ về chạy ngầm.`);
+          session.addBrowserLog?.({ type: 'navigate', detail: 'Đã thu nhỏ cửa sổ về chạy ngầm.' });
+        }
+      } catch (err) {
+        console.warn('[HideBrowser] Lỗi thu nhỏ cửa sổ:', err.message);
       }
     };
 
@@ -5312,7 +5300,22 @@ async function openBrowserWithInstalledChrome({
     session.streamRole = streamRole;
     session.streamLabel = streamLabel;
     session.websiteUrl = websiteUrl;
-    const response = await page.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+
+    const tabUrlsToOpen = [];
+    if (Array.isArray(offerUrls) && offerUrls.length > 0) {
+      tabUrlsToOpen.push(...offerUrls);
+    } else if (websiteUrl) {
+      tabUrlsToOpen.push(websiteUrl);
+    }
+    if (multiTab && threadCount > tabUrlsToOpen.length) {
+      const baseCount = tabUrlsToOpen.length || 1;
+      while (tabUrlsToOpen.length < threadCount) {
+        tabUrlsToOpen.push(tabUrlsToOpen[tabUrlsToOpen.length % baseCount] || websiteUrl);
+      }
+    }
+
+    const primaryUrl = tabUrlsToOpen[0] || websiteUrl;
+    const response = await page.goto(primaryUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
     const finalUrl = page.url();
     if (!response || response.status() >= 400) {
       throw new Error(`website trả HTTP ${response?.status() ?? 'không có phản hồi'}`);
@@ -5321,28 +5324,48 @@ async function openBrowserWithInstalledChrome({
     if (deadReason) {
       throw new Error(`trang đích hiển thị ${deadReason}`);
     }
-    session.mainPage = page; // dùng để phân biệt tab chính vs tab phụ
-    if (!hideUntilLead) {
-      await session.showWindow();
+    session.mainPage = page;
+    page._tabIndex = 0;
+    page._offerNumber = offerNumber;
+    page._assignedRecord = (recordPool && recordPool.length > 0) ? recordPool[0] : (autofillRecords[0] ?? {});
+
+    if (session.isWindowVisible) {
+      await page.bringToFront().catch(() => {});
     }
-    await page.bringToFront().catch(() => {});
+
+    // Mở các tab còn lại trong cùng trình duyệt cho chế độ đa luồng đa tab
+    if (tabUrlsToOpen.length > 1) {
+      for (let t = 1; t < tabUrlsToOpen.length; t++) {
+        const tabUrl = tabUrlsToOpen[t];
+        try {
+          const extraPage = await context.newPage();
+          extraPage._tabIndex = t;
+          extraPage._offerNumber = (t % (offerUrls.length || 1)) + 1;
+          extraPage._assignedRecord = (recordPool && recordPool.length > 0) ? (recordPool[t % recordPool.length] || recordPool[0]) : (autofillRecords[t % autofillRecords.length] || autofillRecords[0] || {});
+          if (tabUrl) {
+            void extraPage.goto(tabUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {});
+          }
+          console.log(`[MultiTab-Chrome] Slot ${(tileIndex ?? 0) + 1}: Đã mở Tab ${t + 1} cho đa luồng (${tabUrl}).`);
+        } catch (tabErr) {
+          console.warn(`[MultiTab-Chrome] Không mở được Tab ${t + 1}:`, tabErr.message);
+        }
+      }
+    }
 
     // IP, thiết bị và luồng hiển thị trong giao diện AutoLead; không chèn badge hay sửa tiêu đề trang đích vì script chống bot đọc được.
     context.on('page', (newPage) => {
-      // Guard cho tab phụ: load quá 15s không xong → đóng tab, quay về tab chính
+      // Guard cho tab popup rác: chỉ đóng nếu là spam ad hoặc lỗi mạng rõ ràng
       const slowLoadTimer = setTimeout(async () => {
-        if (newPage.isClosed() || newPage === session.mainPage) return;
+        if (newPage.isClosed() || newPage === session.mainPage || newPage._tabIndex !== undefined) return;
         try {
-          const readyState = await newPage.evaluate(() => document.readyState).catch(() => 'complete');
-          if (readyState !== 'complete') {
-            console.log(`[SlowLoad] Tab phụ load quá 15s (${newPage.url()}), đóng và quay về tab chính.`);
-            session.addBrowserLog?.({ type: 'navigate', url: newPage.url(), title: '[Đóng - load quá 15s]', html: '' });
+          const u = newPage.url();
+          if (isSpamAdUrl(u)) {
+            console.log(`[SlowLoad] Tab quảng cáo rác (${u}), đóng tab.`);
+            session.addBrowserLog?.({ type: 'navigate', url: u, title: '[Đóng tab rác]', html: '' });
             await newPage.close().catch(() => {});
-            const remaining = context.pages().filter((p) => !p.isClosed());
-            if (remaining.length > 0) await (session.mainPage?.isClosed?.() ? remaining[0] : session.mainPage).bringToFront().catch(() => {});
           }
         } catch {}
-      }, 15000);
+      }, 30000);
       newPage.once('load', () => clearTimeout(slowLoadTimer));
       newPage.once('close', () => clearTimeout(slowLoadTimer));
 
@@ -5352,8 +5375,8 @@ async function openBrowserWithInstalledChrome({
         try {
           const deadReason = await getDeadOrBlockedReason(newPage);
           if (!deadReason) return;
-          console.log(`[DeadTab] Tab phụ lỗi "${deadReason}" (${newPage.url()}), đóng và quay về tab chính.`);
-          session.addBrowserLog?.({ type: 'traffic_blocked', detail: `Tab phụ lỗi: ${deadReason}` });
+          console.log(`[DeadTab] Tab lỗi "${deadReason}" (${newPage.url()}), đóng và giữ trình duyệt.`);
+          session.addBrowserLog?.({ type: 'traffic_blocked', detail: `Tab lỗi: ${deadReason}` });
           await newPage.close().catch(() => {});
           const remaining = context.pages().filter((p) => !p.isClosed());
           if (remaining.length > 0) await (session.mainPage?.isClosed?.() ? remaining[0] : session.mainPage).bringToFront().catch(() => {});
@@ -5380,12 +5403,10 @@ async function openBrowserWithInstalledChrome({
       }, 2000);
       context.on('close', () => clearInterval(completeTimer));
     }
-
-    // timeLimit: đóng phiên sau N giây bất kể đang ở trạng thái nào
+    // timeLimit: ghi nhận mốc thời gian; không đóng phiên khi tác vụ vẫn đang hoạt động.
     if (timeLimit > 0) {
-      const timeLimitTimer = setTimeout(async () => {
-        session.addLog?.({ time: new Date().toISOString(), type: 'time_limit', detail: `Hết timeout phiên (${timeLimit}s), đóng trình duyệt.` });
-        await session.browser?.close?.().catch(() => {});
+      const timeLimitTimer = setTimeout(() => {
+        session.addLog?.({ time: new Date().toISOString(), type: 'time_limit', detail: `Đã chạy ${timeLimit}s; giữ trình duyệt mở khi tác vụ vẫn đang hoạt động.` });
       }, timeLimit * 1000);
       context.on('close', () => clearTimeout(timeLimitTimer));
     }
@@ -5424,35 +5445,36 @@ async function openBrowserWithInstalledChrome({
 }
 
 /**
- * Kết thúc phiên Chrome khi người dùng đóng tab cuối cùng bằng dấu X.
+ * Giữ phiên Chrome hoạt động khi tab cuối đóng ngoài ý muốn, rồi theo dõi mọi tab mới.
  *
  * @param {object} session Phiên Chrome cần theo dõi các tab.
- * @return {void} Đăng ký sự kiện đóng tab cho phiên.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @return {void} Đăng ký sự kiện theo dõi và khôi phục tab cho phiên.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
  */
-function closeChromeWhenLastTabCloses(session) {
+export function closeChromeWhenLastTabCloses(session) {
   const watchedPages = new WeakSet();
 
   /**
-   * Đóng tiến trình Chrome khi không còn tab nào và giữ slot ở trạng thái đã đóng.
+   * Giữ phiên trình duyệt mở bằng tab trống nếu tab cuối cùng tự đóng.
    *
-   * @return {void} Yêu cầu đóng phiên nếu tab cuối đã biến mất.
-   * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
-   * @since 2026-10-15
+   * @return {Promise<void>} Mở tab trống khi phiên vẫn còn kết nối.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-10-21
    */
-  function closeEmptyChromeSession() {
+  async function closeEmptyChromeSession() {
     if (session.suppressAutoRefill || session.closingDueToTrafficBlocked || session.closingDueToNoLead || session.leadCheckStatus === 'failed') return;
-    for (const page of session.browser.pages()) {
-      if (!page.isClosed()) return;
+    try {
+      for (const page of session.browser.pages()) {
+        if (!page.isClosed()) return;
+      }
+      const replacementPage = await session.browser.newPage().catch(() => null);
+      if (!replacementPage || session.suppressAutoRefill) return;
+      session.mainPage = replacementPage;
+      session.addBrowserLog?.({ type: 'tab_recovered', detail: 'Tab cuối đã đóng; giữ trình duyệt mở bằng tab trống.' });
+    } catch {
+      // Khi trình duyệt mất kết nối, browser close/disconnect handlers xử lý phiên.
     }
-    if (!autoRefill.sequential) {
-      // Chế độ thường: user tự đóng tab → giảm target, không mở lại
-      session.suppressAutoRefill = true;
-      autoRefill.targetCount = Math.max(0, Math.min(autoRefill.targetCount, activeBrowsers.size - 1));
-    }
-    autoRefill.message = `Đã đóng Chrome ${session.chromeVersion} sau khi tab cuối cùng được đóng.`;
-    void session.browser.close().catch(() => {});
   }
 
   /**
@@ -5461,7 +5483,7 @@ function closeChromeWhenLastTabCloses(session) {
    * @param {object} page Tab Chrome vừa được mở.
    * @return {void} Gắn sự kiện đóng cho tab chưa theo dõi.
    * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
-   * @since 2026-10-15
+   * @since 2026-10-20
    */
   function watchTab(page) {
     if (watchedPages.has(page)) return;
@@ -5594,23 +5616,27 @@ export async function getDeadOrBlockedReason(page) {
   try {
     if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return null;
     const currentUrl = typeof page.url === 'function' ? page.url() : (page.url || '');
-    if (typeof currentUrl === 'string' && (currentUrl.startsWith('chrome-error://') || currentUrl.startsWith('about:neterror'))) {
-      return 'Lỗi mạng trình duyệt (chrome-error)';
+    if (typeof currentUrl === 'string') {
+      if (currentUrl.startsWith('chrome-error://') || currentUrl.startsWith('about:neterror')) {
+        return 'Lỗi mạng trình duyệt (chrome-error)';
+      }
     }
 
     const checkFrame = async (frame) => {
       try {
         if (!frame) return null;
         const frameUrl = typeof frame.url === 'function' ? frame.url() : (frame.url || '');
-        if (typeof frameUrl === 'string' && (frameUrl.startsWith('chrome-error://') || frameUrl.startsWith('about:neterror'))) {
-          let frameErr = '';
-          try {
-            frameErr = typeof frame.evaluate === 'function' ? await frame.evaluate(() => {
-              const el = document.getElementById('sub-frame-error-details') || document.getElementById('main-frame-error-details') || document.getElementById('sub-frame-error') || document.getElementById('main-frame-error');
-              return el ? (el.innerText || el.textContent || '').trim() : '';
-            }) : '';
-          } catch {}
-          return frameErr ? `Lỗi kết nối (${frameErr})` : 'Lỗi mạng trình duyệt (chrome-error)';
+        if (typeof frameUrl === 'string') {
+          if (frameUrl.startsWith('chrome-error://') || frameUrl.startsWith('about:neterror')) {
+            let frameErr = '';
+            try {
+              frameErr = typeof frame.evaluate === 'function' ? await frame.evaluate(() => {
+                const el = document.getElementById('sub-frame-error-details') || document.getElementById('main-frame-error-details') || document.getElementById('sub-frame-error') || document.getElementById('main-frame-error');
+                return el ? (el.innerText || el.textContent || '').trim() : '';
+              }) : '';
+            } catch {}
+            return frameErr ? `Lỗi kết nối (${frameErr})` : 'Lỗi mạng trình duyệt (chrome-error)';
+          }
         }
 
         if (typeof frame.evaluate !== 'function') return null;
@@ -5631,10 +5657,6 @@ export async function getDeadOrBlockedReason(page) {
 
           if (/traffic\s+blocked/i.test(fullText)) {
             return 'Traffic Blocked!';
-          }
-
-          if (/^\s*disabled\s*$/i.test(title) && /^\s*disabled\s*$/i.test(bodyText.trim())) {
-            return 'Disabled';
           }
 
           if (/refused to connect|từ chối kết nối|bị từ chối kết nối/i.test(fullText)) {
@@ -5728,8 +5750,8 @@ export async function hasTrafficBlocked(page) {
  *
  * @param {object} session Phiên Chrome đã mở thành công.
  * @return {void} Gắn lịch kiểm tra vào các tab của phiên.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
  */
 export function watchTrafficBlockedPage(session) {
   if (!session || session.trafficWatcherAttached) return;
@@ -5956,40 +5978,6 @@ export function watchTrafficBlockedPage(session) {
             redirectTracker.delete(page);
           }
 
-          // 3. Phát hiện redirect sang trang không có form sau khi đã điền form → tự quay lại
-          if ((session.autofillFields ?? 0) > 0 && session.initialFormUrl) {
-            const curUrl = typeof page.url === 'function' ? page.url() : '';
-            const isOriginOrBlank = !curUrl || curUrl === session.initialFormUrl
-              || curUrl.startsWith('about:') || curUrl.startsWith('chrome:');
-            if (!isOriginOrBlank) {
-              const nowMs = Date.now();
-              const hasInputs = await page.evaluate(() =>
-                document.querySelectorAll('input:not([type="hidden"]), textarea, select').length > 0
-              ).catch(() => true);
-              const isThankYou = await page.evaluate(() => {
-                const t = document.body?.innerText || '';
-                return /thank\s*you|congratulations|confirmed|your\s*submission|application\s*received|cảm\s*ơn/i.test(t);
-              }).catch(() => false)
-                || /thank[-_]?you|confirmation|success|completed|receipt/i.test(curUrl);
-
-              if (!hasInputs && !isThankYou) {
-                if (session.noFormSinceUrl === curUrl && session.noFormSince && nowMs - session.noFormSince > 3000) {
-                  // Đã đứng ở trang không có form >3s → go back
-                  console.log(`[GoBack] Trang ${curUrl} không có form sau 3s → quay lại.`);
-                  session.addBrowserLog?.({ type: 'navigate', detail: `Trang không có form sau submit (${curUrl}). Đang quay lại...` });
-                  session.noFormSinceUrl = null;
-                  session.noFormSince = null;
-                  await page.goBack({ waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
-                } else if (session.noFormSinceUrl !== curUrl) {
-                  session.noFormSinceUrl = curUrl;
-                  session.noFormSince = nowMs;
-                }
-              } else {
-                session.noFormSinceUrl = null;
-                session.noFormSince = null;
-              }
-            }
-          }
         }
       } catch {
         // Tab có thể đóng hoặc chuyển trang trong lúc kiểm tra.
@@ -6066,7 +6054,7 @@ async function startLocalInterface() {
   const interfacePcHtml = existsSync(userInterfacePcPath) ? readFileSync(userInterfacePcPath, 'utf8') : interfaceHtml;
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
-    '/launch-gologin': runExclusively(launchGoLoginBrowsers),
+    '/launch-adspower': runExclusively(launchAdsPowerBrowsers),
     '/check': checkRequestedProxies,
     '/close': closeActiveBrowsers,
     '/stop': closeActiveBrowsers,
@@ -6314,7 +6302,6 @@ async function startLocalInterface() {
           Chrome: getBool('Chrome'),
           ChromeFirefox: getBool('ChromeFirefox'),
           ChromeAdsPower: getBool('ChromeAdsPower'),
-          ChromeGologin: getBool('ChromeGologin'),
           Canvas: getBool('Canvas'),
           ClientRects: getBool('ClientRects'),
           WebGLImage: getBool('WebGLImage'),
@@ -6325,6 +6312,7 @@ async function startLocalInterface() {
           Mac: getBool('Mac'),
           Linux: getBool('Linux'),
           Android: getBool('Android'),
+          AdsPowerApiKey: await readAdsPowerApiKey(),
         });
       } catch (err) {
         respondWithJson(response, 200, {});
@@ -6335,11 +6323,12 @@ async function startLocalInterface() {
     if (request.method === 'POST' && request.url === '/pc/settings/save') {
       try {
         const body = JSON.parse(await readRequestBody(request));
+        if (body.AdsPowerApiKey !== undefined) await saveAdsPowerApiKey(body.AdsPowerApiKey);
         const baseDir = getAutoLeadPCDir();
         const filePath = join(baseDir, 'Config', 'Settings', 'Settings.ini');
         const b = (val) => val ? 'True' : 'False';
         const bm = body.browserMode || 'Chrome';
-        const content = `[Browser]\nChrome=${b(bm === 'Chrome')}\nChromeAdsPower=${b(bm === 'AdsPower')}\nChromeFirefox=${b(bm === 'Firefox')}\nChromeGologin=${b(bm === 'Gologin')}\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[TokensGologin]\nTokensGologin=${(existsSync(filePath) ? (readFileSync(filePath, 'utf8').match(/^TokensGologin=(.*)$/mi) || ['', ''])[1] : '')}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\n`;
+        const content = `[Browser]\nChrome=${b(bm === 'Chrome')}\nChromeAdsPower=${b(bm === 'AdsPower')}\nChromeFirefox=${b(bm === 'Firefox')}\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\n`;
         const dir = dirname(filePath);
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
@@ -6954,8 +6943,13 @@ async function startLocalInterface() {
         respondWithJson(response, 404, { error: `Không tìm thấy trình duyệt ở slot ${targetSlot}` });
         return;
       }
-      foundSession.leadCheckStatus = 'confirmed';
-      foundSession.leadCheckMessage = 'Đã mở khóa thủ công. Tiếp tục tự điền form.';
+      foundSession.leadCheckStatus = 'manual_unlocked';
+      foundSession.leadCheckMessage = 'Đã mở khóa thủ công sau lỗi API; chưa xác nhận có lead.';
+      foundSession.addBrowserLog?.({
+        type: 'lead_manual_resume',
+        ip: foundSession.exitIp,
+        detail: 'Đã mở khóa thủ công sau lỗi API; trạng thái lead chưa được xác nhận.',
+      });
       try { foundSession.triggerAutofillScan?.(); } catch {}
       respondWithJson(response, 200, { message: `Slot ${targetSlot} đã được mở khóa để tiếp tục điền form.` });
       return;
@@ -7284,6 +7278,27 @@ async function startLocalInterface() {
       const slot = parseInt(request.url.split('/').pop(), 10);
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
       if (!session) { response.writeHead(404); response.end(); return; }
+      const diagnostics = session.screenDiagnostics ??= {
+        windowStartedAt: Date.now(),
+        requests: 0,
+        captures: 0,
+        captureFailures: 0,
+        captureDurationTotalMs: 0,
+        captureDurationMaxMs: 0,
+      };
+      diagnostics.requests += 1;
+      if (Date.now() - diagnostics.windowStartedAt >= 10_000) {
+        const averageCaptureMs = diagnostics.captures
+          ? Math.round(diagnostics.captureDurationTotalMs / diagnostics.captures)
+          : 0;
+        console.log(`[ScreenDiag] slot=${slot} window=10s requests=${diagnostics.requests} captures=${diagnostics.captures} captureErrors=${diagnostics.captureFailures} avgCaptureMs=${averageCaptureMs} maxCaptureMs=${diagnostics.captureDurationMaxMs} pageCount=${session.browser.pages().filter(p => !p.isClosed()).length}`);
+        diagnostics.windowStartedAt = Date.now();
+        diagnostics.requests = 0;
+        diagnostics.captures = 0;
+        diagnostics.captureFailures = 0;
+        diagnostics.captureDurationTotalMs = 0;
+        diagnostics.captureDurationMaxMs = 0;
+      }
       try {
         const pages = session.browser.pages().filter(p => !p.isClosed());
         const page = (session.mainPage && !session.mainPage.isClosed()) ? session.mainPage : pages[0];
@@ -7291,9 +7306,21 @@ async function startLocalInterface() {
         // Ảnh thu nhỏ được hỏi mỗi 1,5s: chỉ chụp một lần mỗi lúc, chụp có giới hạn thời gian và trả ảnh gần nhất
         // trong lúc chờ, để các lệnh chụp không dồn lại làm Chrome đơ.
         if (!session.snapshotInFlight) {
+          const captureStartedAt = Date.now();
           session.snapshotInFlight = page.screenshot({ type: 'jpeg', quality: 65, timeout: 5000 })
-            .then((buf) => { session.lastSnapshot = buf; return buf; })
-            .catch(() => session.lastSnapshot ?? null)
+            .then((buf) => {
+              const captureDurationMs = Date.now() - captureStartedAt;
+              diagnostics.captures += 1;
+              diagnostics.captureDurationTotalMs += captureDurationMs;
+              diagnostics.captureDurationMaxMs = Math.max(diagnostics.captureDurationMaxMs, captureDurationMs);
+              session.lastSnapshot = buf;
+              return buf;
+            })
+            .catch((error) => {
+              diagnostics.captureFailures += 1;
+              console.warn(`[ScreenDiag] slot=${slot} captureError=${error.message}`);
+              return session.lastSnapshot ?? null;
+            })
             .finally(() => { session.snapshotInFlight = null; });
         }
         const buf = session.lastSnapshot ?? await session.snapshotInFlight;
@@ -7386,12 +7413,8 @@ async function startLocalInterface() {
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
       if (!session) { response.writeHead(404); response.end(); return; }
 
-      // Không ép bung cửa sổ ra Desktop khi người dùng đang xem trực tiếp trên giao diện app (Screen View)
-      try {
-        if (session.showWindow && !session.hideUntilTarget && !session.hideUntilLead) {
-          void session.showWindow(false);
-        }
-      } catch {}
+      // Trình duyệt giữ nguyên trạng thái chạy ngầm, không tự bung cửa sổ ra Desktop khi xem trực tiếp trong app
+      // Chỉ khi người dùng bấm nút hiện cửa sổ ngoài Desktop thì mới bung ra
 
       // Nếu slot đang có SSE cũ → ngắt trước
       const prev = screencastSessions.get(slot);
@@ -7619,6 +7642,57 @@ async function startLocalInterface() {
         }
         respondWithJson(response, 200, { ok: true });
       } catch (err) { respondWithJson(response, 500, { error: err.message }); }
+      return;
+    }
+
+    // ── Điều khiển hiển thị cửa sổ trình duyệt Desktop on-demand ──────────────
+    // Hiện cửa sổ trình duyệt ra màn hình Desktop cho 1 slot
+    if (request.method === 'POST' && /^\/browser\/close\/\d+$/.test(request.url)) {
+      const slot = Number(request.url.split('/').pop());
+      try {
+        respondWithJson(response, 200, await closeBrowserBySlot(slot));
+      } catch (error) {
+        respondWithJson(response, 404, { error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url.startsWith('/browser/show/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { respondWithJson(response, 404, { error: `Không tìm thấy luồng Slot ${slot}` }); return; }
+      try {
+        await session.showWindow?.(true);
+        respondWithJson(response, 200, { ok: true, slot, visible: true });
+      } catch (err) { respondWithJson(response, 500, { error: err.message }); }
+      return;
+    }
+
+    // Thu nhỏ cửa sổ trình duyệt về chạy ngầm cho 1 slot
+    if (request.method === 'POST' && request.url.startsWith('/browser/hide/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { respondWithJson(response, 404, { error: `Không tìm thấy luồng Slot ${slot}` }); return; }
+      try {
+        await session.hideWindow?.();
+        respondWithJson(response, 200, { ok: true, slot, visible: false });
+      } catch (err) { respondWithJson(response, 500, { error: err.message }); }
+      return;
+    }
+
+    // Hiện tất cả cửa sổ trình duyệt ra Desktop
+    if (request.method === 'POST' && request.url === '/browser/show-all') {
+      const liveSessions = [...activeBrowsers].filter(s => !s.isClosed);
+      await Promise.allSettled(liveSessions.map(s => s.showWindow?.(true)));
+      respondWithJson(response, 200, { ok: true, count: liveSessions.length });
+      return;
+    }
+
+    // Thu nhỏ tất cả cửa sổ trình duyệt về chạy ngầm trong app
+    if (request.method === 'POST' && request.url === '/browser/hide-all') {
+      const liveSessions = [...activeBrowsers].filter(s => !s.isClosed);
+      await Promise.allSettled(liveSessions.map(s => s.hideWindow?.()));
+      respondWithJson(response, 200, { ok: true, count: liveSessions.length });
       return;
     }
     // ─────────────────────────────────────────────────────────────────────────

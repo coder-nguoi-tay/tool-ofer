@@ -106,6 +106,8 @@ export function buildUserAgentOverride(deviceProfile, build, languages) {
  * @param {object} antiFingerprint Tuỳ chọn chống fingerprint của người dùng.
  * @param {number} seed Hạt nhiễu riêng của phiên.
  * @return {object} Cấu hình thuần JSON.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
  */
 export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1) {
   const spoof = deviceProfile.spoof;
@@ -123,12 +125,11 @@ export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1
     screen: deviceProfile.screen && !deviceProfile.isMobile
       ? { availTop: deviceProfile.screen.availTop ?? 0, availHeight: deviceProfile.screen.availHeight ?? deviceProfile.screen.height, frameHeight: deviceProfile.screen.frameHeight ?? 85 }
       : null,
-    // Canvas/ClientRects/WebGL/Audio luôn có nhiễu theo seed để mỗi phiên là một máy khác nhau;
-    // nhiễu đo chữ (Fonts) vẫn theo tuỳ chọn vì làm lệch bố cục chữ vẽ trên canvas.
+    // Mỗi mục trong Settings điều khiển riêng lớp nhiễu tương ứng.
     noise: {
-      canvas: true,
-      clientRects: true,
-      webgl: true,
+      canvas: Boolean(antiFingerprint.canvas),
+      clientRects: Boolean(antiFingerprint.clientRects),
+      webgl: Boolean(antiFingerprint.webgl),
       fonts: Boolean(antiFingerprint.fonts),
       audio: true,
     },
@@ -437,10 +438,12 @@ export function stealthInitScript(cfg) {
  *
  * @param {import('playwright').BrowserContext} context Context của phiên.
  * @param {import('playwright').Page} page Tab cần áp.
- * @param {{userAgentOverride: object, hardwareConcurrency?: number|null}} options
+ * @param {{userAgentOverride: object, hardwareConcurrency?: number|null, deviceProfile?: object, timezoneId?: string}} options
  * @return {Promise<void>}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
  */
-export async function applyNativeOverrides(context, page, { userAgentOverride, hardwareConcurrency }) {
+export async function applyNativeOverrides(context, page, { userAgentOverride, hardwareConcurrency, deviceProfile, timezoneId }) {
   const session = await context.newCDPSession(page);
   try {
     await session.send('Emulation.setUserAgentOverride', userAgentOverride);
@@ -453,6 +456,24 @@ export async function applyNativeOverrides(context, page, { userAgentOverride, h
   }
   if (hardwareConcurrency) {
     await session.send('Emulation.setHardwareConcurrencyOverride', { hardwareConcurrency }).catch(() => {});
+  }
+  if (timezoneId) {
+    await session.send('Emulation.setTimezoneOverride', { timezoneId });
+  }
+  if (deviceProfile?.isMobile && deviceProfile.viewport) {
+    const { width, height } = deviceProfile.viewport;
+    await session.send('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      screenWidth: width,
+      screenHeight: height,
+      deviceScaleFactor: deviceProfile.deviceScaleFactor,
+      mobile: true,
+    });
+    await session.send('Emulation.setTouchEmulationEnabled', {
+      enabled: true,
+      maxTouchPoints: deviceProfile.spoof.maxTouchPoints,
+    });
   }
 }
 

@@ -1,6 +1,60 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { autoRefill, closeActiveBrowsers, queueAutomaticRefill, getDeadOrBlockedReason, watchTrafficBlockedPage, proxyQueue, clearAllProxyQueue } from './app.mjs';
+import { autoRefill, closeActiveBrowsers, closeChromeWhenLastTabCloses, queueAutomaticRefill, getDeadOrBlockedReason, watchTrafficBlockedPage, proxyQueue, clearAllProxyQueue } from './app.mjs';
+
+test('đóng tab cuối AdsPower vẫn giữ cửa sổ mở bằng tab trống', async () => {
+  let onPageClose;
+  let browserCloseCount = 0;
+  let replacementPageCount = 0;
+  const page = { isClosed: () => true, on: (event, handler) => { if (event === 'close') onPageClose = handler; } };
+  const session = {
+    isManagedProfile: true,
+    suppressAutoRefill: false,
+    chromeVersion: 'AdsPower SunBrowser 155.0.8059.40',
+    browser: {
+      on: () => {},
+      pages: () => [page],
+      close: async () => { browserCloseCount += 1; },
+      newPage: async () => { replacementPageCount += 1; return { isClosed: () => false, on: () => {} }; },
+    },
+  };
+  autoRefill.sequential = false;
+  autoRefill.targetCount = 2;
+  closeChromeWhenLastTabCloses(session);
+  await onPageClose();
+  assert.equal(autoRefill.targetCount, 2);
+  assert.equal(session.suppressAutoRefill, false);
+  assert.equal(browserCloseCount, 0);
+  assert.equal(replacementPageCount, 1);
+});
+
+test('đóng tab cuối Chrome thường không tự đóng phiên khi autoRefill đang bật', async () => {
+  let onPageClose;
+  let browserCloseCount = 0;
+  let replacementPageCount = 0;
+  const page = { isClosed: () => true, on: (event, handler) => { if (event === 'close') onPageClose = handler; } };
+  const session = {
+    isManagedProfile: false,
+    suppressAutoRefill: false,
+    chromeVersion: 'Chrome 120.0.6099.109',
+    browser: {
+      on: () => {},
+      pages: () => [page],
+      close: async () => { browserCloseCount += 1; },
+      newPage: async () => { replacementPageCount += 1; return { isClosed: () => false, on: () => {} }; },
+    },
+  };
+  autoRefill.enabled = true;
+  autoRefill.stopRequested = false;
+  autoRefill.sequential = false;
+  autoRefill.targetCount = 2;
+  closeChromeWhenLastTabCloses(session);
+  await onPageClose();
+  assert.equal(autoRefill.targetCount, 2);
+  assert.equal(session.suppressAutoRefill, false);
+  assert.equal(browserCloseCount, 0);
+  assert.equal(replacementPageCount, 1);
+});
 
 test('closeActiveBrowsers sets stopRequested and disables autoRefill completely', async () => {
   autoRefill.enabled = true;
@@ -48,6 +102,15 @@ test('getDeadOrBlockedReason correctly detects proxy connection errors', async (
   };
   const reason2 = await getDeadOrBlockedReason(fakePageSocksError);
   assert.equal(reason2, 'ERR_SOCKS_CONNECTION_FAILED');
+
+  const fakeOfferPage = {
+    url: () => 'https://adswapper.g2afse.com/disabled.html',
+    mainFrame: () => null,
+    frames: () => [],
+    evaluate: async () => null,
+  };
+  const reasonOffer = await getDeadOrBlockedReason(fakeOfferPage);
+  assert.equal(reasonOffer, null, 'Should not kill browser on offer or tracking redirect pages');
 });
 
 test('watchTrafficBlockedPage does not re-enable autoRefill if stopRequested is true', async () => {

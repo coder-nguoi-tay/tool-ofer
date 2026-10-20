@@ -177,11 +177,11 @@
                 </div>
                 <div>
                   <label for="lead-check-interval" style="font-size: 11px; margin-bottom: 2px;">Chu kỳ gọi (giây)</label>
-                  <input id="lead-check-interval" name="leadCheckInterval" type="number" min="5" max="300" value="15" style="font-size: 11px; padding: 6px;">
+                  <input id="lead-check-interval" name="leadCheckInterval" type="number" min="5" max="300" value="30" style="font-size: 11px; padding: 6px;">
                 </div>
                 <div>
                   <label for="lead-check-max-attempts" style="font-size: 11px; margin-bottom: 2px;">Số lần thử tối đa</label>
-                  <input id="lead-check-max-attempts" name="leadCheckMaxAttempts" type="number" min="1" max="10" value="1" style="font-size: 11px; padding: 6px;">
+                  <input id="lead-check-max-attempts" name="leadCheckMaxAttempts" type="number" min="1" max="10" value="2" style="font-size: 11px; padding: 6px;">
                 </div>
               </div>
             </div>
@@ -241,6 +241,7 @@
                 <div style="flex:1;">
                   <label for="ai-cli-select" style="font-size:11px;">CLI Engine</label>
                   <select id="ai-cli-select" style="height:32px;font-size:11px;">
+                    <option value="codex_mcp" selected>OpenAI Codex + Playwright MCP (CDP)</option>
                     <option value="agy">agy (Google Antigravity CLI)</option>
                     <option value="codex">codex CLI</option>
                   </select>
@@ -255,6 +256,7 @@
                   </select>
                 </div>
               </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px;"><input type="checkbox" id="ai-codex-mcp" checked> Ưu tiên Codex + Playwright MCP khi chạy trên AdsPower</label>
             </div>
           </div>
         </details>
@@ -664,7 +666,9 @@
             if (session.leadCheckStatus === 'waiting') {
               leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#92400e;">⏳ Đang chờ lead (30s)...</span>';
             } else if (session.leadCheckStatus === 'confirmed') {
-              leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;">✅ Có lead về</span>';
+              leadTag = `<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;">✅ Có lead · IP ${session.exitIp || 'không rõ'}</span>`;
+            } else if (session.leadCheckStatus === 'manual_unlocked') {
+              leadTag = `<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#92400e;" title="${session.leadCheckMessage || ''}">⚠️ Đã mở khóa · IP ${session.exitIp || 'không rõ'} · chưa xác nhận lead</span>`;
             } else if (session.leadCheckStatus === 'api_error') {
               leadTag = `<span style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fee2e2;color:#991b1b;" title="${session.leadCheckMessage || 'Lỗi API lead'}">⚠️ Lỗi API lead <button type="button" class="resume-lead-btn" data-slot="${session.slot}" style="background:#dc2626;color:#fff;border:none;border-radius:3px;padding:1px 5px;font-size:9px;cursor:pointer;">Tiếp tục fill</button></span>`;
             } else if (session.leadCheckStatus === 'failed') {
@@ -706,6 +710,7 @@
                     <span class="chrome-card-slot">Cửa sổ ${session.slot}</span>
                     <span class="chrome-card-version">v${session.version}</span>
                     <span style="font-size:11px;margin-left:4px;" title="${session.deviceSummary || deviceLabel}">${deviceIcon}</span>
+                    <button type="button" onclick="event.stopPropagation(); closeBrowserSlot(${session.slot});" title="Đóng riêng trình duyệt này" style="margin-left:5px;border:1px solid #fca5a5;background:#fff1f2;color:#b91c1c;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;">✕ Đóng</button>
                     ${session.streamLabel ? `<span style="background:${session.streamRole === 2 ? '#8b5cf6' : '#2563eb'};color:#fff;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-left:auto;">${session.streamLabel}</span>` : ''}
                   </div>
                   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -744,6 +749,25 @@
         isRefreshingAutoRefillState = false;
       }
     }
+
+    /**
+     * Đóng một trình duyệt theo slot mà không dừng các slot khác.
+     * @param {number} slot Slot trình duyệt cần đóng.
+     * @return {Promise<void>} Hoàn tất khi trạng thái danh sách được làm mới.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-21
+     */
+    window.closeBrowserSlot = async function closeBrowserSlot(slot) {
+      if (!window.confirm(`Đóng riêng trình duyệt Slot ${slot}?`)) return;
+      try {
+        const response = await fetch(`/browser/close/${slot}`, { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Không thể đóng trình duyệt.');
+        await refreshAutoRefillState();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    };
 
     /**
      * Bật hoặc tắt việc tự mở profile thay thế.
@@ -895,7 +919,8 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           enabled: document.querySelector('#ai-assist-enabled')?.checked ?? true,
-          cliBinary: document.querySelector('#ai-cli-select')?.value ?? 'agy',
+          cliBinary: document.querySelector('#ai-cli-select')?.value ?? 'codex_mcp',
+          useCodexMcp: document.querySelector('#ai-codex-mcp')?.checked ?? true,
           mode: document.querySelector('#ai-mode-select')?.value ?? 'auto_on_stuck',
         }),
       }).catch(() => {});
@@ -904,7 +929,8 @@
     fetch('/ai/config').then(r => r.json()).then(cfg => {
       if (!cfg) return;
       if (document.querySelector('#ai-assist-enabled')) document.querySelector('#ai-assist-enabled').checked = cfg.enabled !== false && cfg.mode !== 'disabled';
-      if (document.querySelector('#ai-cli-select')) document.querySelector('#ai-cli-select').value = cfg.cliBinary || 'agy';
+      if (document.querySelector('#ai-cli-select')) document.querySelector('#ai-cli-select').value = cfg.cliBinary || 'codex_mcp';
+      if (document.querySelector('#ai-codex-mcp')) document.querySelector('#ai-codex-mcp').checked = cfg.useCodexMcp !== false;
       if (document.querySelector('#ai-mode-select')) document.querySelector('#ai-mode-select').value = cfg.mode || 'auto_on_stuck';
     }).catch(() => {});
 

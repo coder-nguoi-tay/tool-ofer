@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGoLoginProfileRequest, createGoLoginProfile, deleteGoLoginProfile } from './gologin-profile.mjs';
+import { buildGoLoginProfileRequest, createGoLoginProfile, deleteGoLoginProfile, parseGoLoginBookmarks, updateGoLoginProfileBookmarks } from './gologin-profile.mjs';
 
 /**
  * Xác nhận proxy 711 dạng HTTPS và các tùy chọn fingerprint tạo đúng payload GoLogin.
@@ -21,6 +21,96 @@ function testGoLoginProfilePayload() {
   assert.equal(request.canvas.mode, 'noise');
   assert.equal(request.webRTC.mode, 'public');
   assert.equal(request.startUrl, 'https://example.com');
+}
+
+/**
+ * Đảm bảo tùy chọn hệ điều hành của Settings được chuyển thành mã OS GoLogin.
+ *
+ * @return {void} Không trả giá trị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+function testGoLoginOperatingSystemMapping() {
+  assert.equal(buildGoLoginProfileRequest({ slot: 1, deviceProfile: 'windows' }).os, 'win');
+  assert.equal(buildGoLoginProfileRequest({ slot: 1, deviceProfile: 'linux' }).os, 'lin');
+  assert.equal(buildGoLoginProfileRequest({ slot: 1, deviceProfile: 'android' }).os, 'android');
+}
+
+/**
+ * Confirma User-Agent và navigator theo OS được gửi cùng profile thay vì chỉ lưu cấu hình.
+ *
+ * @return {void} Không trả giá trị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+function testConfiguredUserAgentPayload() {
+  const request = buildGoLoginProfileRequest({ slot: 1, deviceProfile: 'windows', userAgent: 'Mozilla/5.0 Chrome/123.0.0.0', resolution: '1920x1080' });
+  assert.deepEqual(request.navigator, { userAgent: 'Mozilla/5.0 Chrome/123.0.0.0', resolution: '1920x1080', language: 'en-US,en', platform: 'Win32' });
+}
+
+/**
+ * Xác nhận bật Fonts trong Settings cấu hình GoLogin font masking theo hệ điều hành.
+ *
+ * @return {void} Không trả giá trị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+function testGoLoginFontMaskingPayload() {
+  const enabledRequest = buildGoLoginProfileRequest({ slot: 1, deviceProfile: 'windows', antiFingerprint: { fonts: true } });
+  assert.equal(enabledRequest.fonts.enableMasking, true);
+  assert.equal(enabledRequest.fonts.enableDomRect, true);
+  assert.ok(enabledRequest.fonts.families.includes('Segoe UI'));
+  const disabledRequest = buildGoLoginProfileRequest({ slot: 1, deviceProfile: 'windows', antiFingerprint: { fonts: false } });
+  assert.equal('fonts' in disabledRequest, false);
+}
+
+/**
+ * Xác nhận checkbox Api Fake IP bật/tắt đúng quyền và dữ liệu vị trí trong profile.
+ *
+ * @return {void} Không trả giá trị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+function testGoLoginApiFakeIpSetting() {
+  const enabledRequest = buildGoLoginProfileRequest({ slot: 1, antiFingerprint: { apiFakeIP: true } });
+  assert.deepEqual(enabledRequest.geolocation, { mode: 'allow', enabled: true, fillBasedOnIp: true });
+  assert.deepEqual(enabledRequest.timezone, { enabled: true, fillBasedOnIp: true });
+  const disabledRequest = buildGoLoginProfileRequest({ slot: 1, antiFingerprint: { apiFakeIP: false } });
+  assert.deepEqual(disabledRequest.geolocation, { mode: 'prompt', enabled: false, fillBasedOnIp: false });
+}
+
+/**
+ * Xác nhận parser giữ bookmark đơn và phân nhóm folder theo định dạng file PC.
+ *
+ * @return {void} Không trả giá trị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+function testGoLoginBookmarkParsing() {
+  const bookmarks = parseGoLoginBookmarks('Folder::Example::https://example.com\nGoogle::https://google.com\nhttps://direct.example');
+  assert.equal(bookmarks.bookmark_bar.children[0].name, 'Folder');
+  assert.equal(bookmarks.bookmark_bar.children[0].children[0].url, 'https://example.com');
+  assert.equal(bookmarks.bookmark_bar.children[1].name, 'Google');
+  assert.equal(bookmarks.bookmark_bar.children[2].url, 'https://direct.example');
+  assert.equal(parseGoLoginBookmarks('invalid line'), null);
+}
+
+/**
+ * Xác nhận bookmark được gửi đến đúng profile qua endpoint GoLogin.
+ *
+ * @return {Promise<void>} Hoàn tất sau khi kiểm tra request mock.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+async function testGoLoginBookmarkUpdate() {
+  const bookmarks = parseGoLoginBookmarks('Example::https://example.com');
+  let captured;
+  await updateGoLoginProfileBookmarks('sample-token', 'profile-id', bookmarks, async (url, options) => {
+    captured = { url, options };
+    return new Response(null, { status: 204 });
+  });
+  assert.equal(captured.url, 'https://api.gologin.com/browser/bookmarks/many');
+  assert.deepEqual(JSON.parse(captured.options.body), { profileIds: ['profile-id'], bookmarks });
 }
 
 /**
@@ -54,6 +144,20 @@ async function testGoLoginProfileCreation() {
 }
 
 /**
+ * Kiểm tra thông báo quota API miễn phí được giải thích rõ thay vì chỉ hiện mã 403.
+ *
+ * @return {Promise<void>} Hoàn tất sau khi xác nhận nội dung lỗi.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-19
+ */
+async function testGoLoginApiQuotaError() {
+  await assert.rejects(
+    createGoLoginProfile('sample-token', { os: 'mac' }, async () => new Response('You have reached your free API requests limit. Please subscribe to continue.', { status: 403 })),
+    /hết hạn mức API miễn phí.*nâng cấp gói hoặc liên hệ GoLogin/i,
+  );
+}
+
+/**
  * Xác nhận app chỉ yêu cầu xóa ID profile vừa tạo và không gọi mạng thật.
  *
  * @return {Promise<void>} Hoàn tất sau khi kiểm tra HTTP mock.
@@ -83,5 +187,12 @@ async function testGoLoginProfileDeletion() {
 }
 
 test('GoLogin profile payload', testGoLoginProfilePayload);
+test('GoLogin operating system mapping', testGoLoginOperatingSystemMapping);
+test('GoLogin configured user-agent payload', testConfiguredUserAgentPayload);
+test('GoLogin font masking payload', testGoLoginFontMaskingPayload);
+test('GoLogin API fake IP setting', testGoLoginApiFakeIpSetting);
+test('GoLogin bookmark parsing', testGoLoginBookmarkParsing);
+test('GoLogin bookmark update', testGoLoginBookmarkUpdate);
 test('GoLogin profile creation', testGoLoginProfileCreation);
+test('GoLogin API quota error', testGoLoginApiQuotaError);
 test('GoLogin profile deletion', testGoLoginProfileDeletion);

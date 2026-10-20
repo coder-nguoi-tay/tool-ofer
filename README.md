@@ -1,8 +1,8 @@
-# AutoLeadPC Mac — Chrome
+# AutoLeadPC Mac — Chrome và AdsPower
 
-### GoLogin trên AutoLeadPC Mac 2
+### Chọn trình duyệt trên AutoLeadPC Mac 2
 
-Chọn **Chrome GoLogin (profile cục bộ)** để dùng luồng tạo profile từ `zero_profile` như bản PC gốc. App kiểm tra proxy, mở Chrome với profile riêng cho từng cửa sổ qua CDP, xác minh IP trong trình duyệt trước khi vào website, rồi dọn profile tạm khi đóng. Không cần GoLogin API token hoặc GoLogin desktop. Trên Mac, app dùng Chrome đã cài nên fingerprint không giống hoàn toàn Orbita/Security.dll của Windows. Xem [GOLOGIN.md](GOLOGIN.md) để biết cách chuẩn bị và giới hạn.
+Chọn **AdsPower** để app tạo profile SunBrowser riêng cho mỗi slot, gắn proxy, kiểm tra IP qua trình duyệt và dọn profile khi phiên đóng. Nhập AdsPower API key trong **Settings > Browser** trước khi chạy. Chế độ **Chrome** tiếp tục dùng các bản Chrome đã cài trên máy và cơ chế chia luồng, tự bù slot hiện có.
 
 Ở chế độ **Chrome**, nút **Tạo profile và mở** dùng các ứng dụng Google Chrome đã cài trên máy. Mỗi cửa sổ có phiên bản, thư mục profile và proxy riêng; nếu thiếu phiên bản, app báo lỗi trước khi mở. User-Agent theo profile thiết bị đã chọn và mang số phiên bản đầy đủ của bản Chrome đang mở (ví dụ `Chrome/154.0.8037.98`), khớp với Client Hints.
 

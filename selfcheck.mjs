@@ -24,7 +24,7 @@ import {
   ADJACENT_KEYS,
 } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
-import { parseActions, pageHasWork, executeAction, extractCleanPageStructure, detectSmartFallbackAction } from './ai-assist.mjs';
+import { parseActions, pageHasWork, executeAction, extractCleanPageStructure, detectSmartFallbackAction, inspectAndFixFormWithAi } from './ai-assist.mjs';
 import {
   buildProxyCheckReport,
   buildUsedExitIpList,
@@ -916,8 +916,8 @@ assert.equal(normalizeIpAddress('99.145.85.141'), '99.145.85.141');
 assert.equal(normalizeIpAddress(' 99.145.85.141:8080 '), '99.145.85.141');
 assert.equal(normalizeIpAddress('socks5://1.2.3.4:1080'), '1.2.3.4');
 assert.equal(normalizeIpAddress('http://5.6.7.8:8080'), '5.6.7.8');
-assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 15);
-assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 1);
+assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 30);
+assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 2);
 assert.equal(DEFAULT_LEAD_CONFIG.checkScreen, 4);
 
 const sampleApiResponse = {
@@ -2181,6 +2181,322 @@ const c3 = getNextCollisionFreeProxy(1, cycleProxies, 2);
 assert.ok(c3, 'Offer 1 phải xoay vòng lấy được proxy khi đã qua hết danh sách');
 assert.equal(c3.server, 'socks5://192.168.1.1:1080', 'Offer 1 xoay vòng về proxy đầu tiên');
 releaseProxyLock(c3);
+
+// 19. KIỂM TRA ĐỊNH DẠNG INFO.TXT DẠNG PIPE (|)
+const samplePipeInfo = 'Emmett|Gay|Male|Mr|05|11|1977|5183234117|1776 La Crosse Street|Fort Edward|NewYork|12828|5183234117|emmettgayMmV|waBeWHAYvPmqWKZ|emmettgay@outlook.com\n'
+  + 'Erich|Acevedo|Male|Mr|01|06|1949|9784156822|4027 Lafayette Avenue|Haverhill|Massachusetts|01832|9784156822|erichacevedoUfQ|vGAqpZRwTZZWb7C|erichacevedo@gmail.com';
+
+const parsedPipeRecords = parseAutofillRecords(samplePipeInfo);
+assert.equal(parsedPipeRecords.length, 2, 'Phải parse được đúng 2 bản ghi từ chuỗi pipe');
+const r1 = parsedPipeRecords[0];
+assert.equal(r1.firstname, 'Emmett');
+assert.equal(r1.lastname, 'Gay');
+assert.equal(r1.fullname, 'Emmett Gay');
+assert.equal(r1.email, 'emmettgay@outlook.com');
+assert.equal(r1.dob, '11/05/1977');
+assert.equal(r1.zipcode, '12828');
+assert.equal(r1.state, 'NewYork');
+assert.equal(r1.city, 'Fort Edward');
+assert.ok(r1.phone.startsWith('814') || r1.phone.startsWith('817'), 'Số điện thoại phải có mã vùng chuẩn hóa 814/817');
+
+// 20. KIỂM TRA NÚT SIGN UP / REGISTER KHÔNG BỊ COI LÀ NAV NOISE
+const mockSignUpBtn = {
+  tagName: 'BUTTON',
+  innerText: 'Sign Up Now',
+  className: 'btn-signup btn-primary',
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  evaluate: async (fn) => fn({
+    tagName: 'BUTTON',
+    innerText: 'Sign Up Now',
+    className: 'btn-signup btn-primary',
+    closest: (sel) => (sel === 'form' ? { tagName: 'FORM' } : null),
+    getBoundingClientRect: () => ({ width: 150, height: 45 }),
+  }),
+};
+const mockSignUpFrame = {
+  locator: (sel) => ({
+    all: async () => {
+      if (sel.includes('Sign Up')) {
+        return [mockSignUpBtn];
+      }
+      return [];
+    },
+  }),
+};
+const foundSignUp = await findSubmitButton(mockSignUpFrame);
+assert.equal(foundSignUp, mockSignUpBtn, 'findSubmitButton phải nhận diện nút Sign Up và không được lọc bỏ bởi navNoise');
+
+const mockRegisterBtn = {
+  tagName: 'BUTTON',
+  innerText: 'Register',
+  className: 'submit-btn',
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  evaluate: async (fn) => fn({
+    tagName: 'BUTTON',
+    innerText: 'Register',
+    className: 'submit-btn',
+    closest: (sel) => (sel === 'form' ? { tagName: 'FORM' } : null),
+    getBoundingClientRect: () => ({ width: 140, height: 40 }),
+  }),
+};
+const mockRegisterFrame = {
+  locator: (sel) => ({
+    all: async () => {
+      if (sel.includes('Register')) {
+        return [mockRegisterBtn];
+      }
+      return [];
+    },
+  }),
+};
+const foundRegister = await findSubmitButton(mockRegisterFrame);
+assert.equal(foundRegister, mockRegisterBtn, 'findSubmitButton phải nhận diện nút Register');
+
+// 21. KIỂM TRA KHÔNG ĐƯỢC CHECK LEAD VÀ KHÔNG ĐƯỢC TỰ Ý OUT Ở MÀN 1 (MỤC TIÊU MÀN 4)
+const mock4ScreenSession = {
+  autofillFields: 0,
+  completedScreens: 0,
+};
+let leadCheckTriggeredEarly = false;
+let mockPageClosedEarly = false;
+const mock4ScreenPage = {
+  isClosed: () => mockPageClosedEarly,
+  url: () => 'https://sweepstake.example.com/step1',
+  close: async () => { mockPageClosedEarly = true; },
+  evaluate: async (fn) => fn(),
+  frames: () => [{
+    url: () => 'https://sweepstake.example.com/step1',
+    evaluate: async (fn) => {
+      if (typeof fn === 'function') {
+        return {
+          isScreen5: false,
+          isJumpPage: false,
+          hasDob: false,
+          hasGender: false,
+          hasEmailInput: true,
+          screenSignature: '/step1##INPUT:firstname,INPUT:email',
+        };
+      }
+      return null;
+    },
+    locator: (sel) => ({
+      all: async () => [],
+      first: () => ({
+        count: async () => 0,
+        isVisible: async () => false,
+      }),
+    }),
+  }],
+};
+const mock4ScreenContext = {
+  on: () => {},
+  pages: () => [mock4ScreenPage],
+};
+
+attachAutofill(mock4ScreenContext, [r1], 'https://sweepstake.example.com', mock4ScreenSession, {
+  autoSubmit: true,
+  enableLeadCheck: true,
+  leadCheckScreen: 4,
+  onScreen5Reached: () => { leadCheckTriggeredEarly = true; },
+  onEmailSubmitted: () => { leadCheckTriggeredEarly = true; },
+});
+
+mock4ScreenSession.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 200));
+
+assert.strictEqual(leadCheckTriggeredEarly, false, 'Tuyệt đối không được kích hoạt lead check ở màn 1 khi mục tiêu là màn 4');
+assert.strictEqual(mockPageClosedEarly, false, 'Trình duyệt tuyệt đối không được tự ý out ở màn 1');
+assert.ok((mock4ScreenSession.completedScreens || 0) <= 1, 'Màn 1 không được nhảy vọt số màn lên 4');
+
+// 22. KIỂM TRA inspectAndFixFormWithAi: TỰ ĐỘNG CHẨN ĐOÁN VÀ SỬA LỖI FORM KHI CHƯA QUA ĐƯỢC
+let healedEmailValue = '';
+const mockFormErrorPage = {
+  isClosed: () => false,
+  url: () => 'https://sweepstake.example.com/step-error',
+  content: async () => '<form><input type="email" id="txtEmail" required><div class="error-message">Valid email is required</div><button type="submit">Submit</button></form>',
+  locator: (sel) => ({
+    first: () => ({
+      count: async () => 1,
+      isVisible: async () => true,
+      evaluate: async (fn) => fn({
+        tagName: 'INPUT',
+        type: 'email',
+        id: 'txtEmail',
+        dispatchEvent: () => {},
+        setAttribute: () => {},
+      }),
+      fill: async (v) => { healedEmailValue = v; },
+    }),
+  }),
+  evaluate: async () => ({
+    errors: ['Valid email is required'],
+    emailInput: { id: 'txtEmail', name: 'email', type: 'email', val: '', isEmpty: true, isInvalid: true, required: true, selector: '#txtEmail' },
+    emailMissing: true,
+    problemInputs: [{ tag: 'input', type: 'email', id: 'txtEmail', name: 'email', isEmpty: true, isInvalid: true, required: true, selector: '#txtEmail' }],
+    hasBlocker: true,
+  }),
+};
+const mockHealSession = {
+  assignedEmail: 'healed.user@gmail.com',
+  autofillFields: 0,
+};
+const healResult = await inspectAndFixFormWithAi(mockFormErrorPage, { firstname: 'John', lastname: 'Doe' }, mockHealSession, {
+  aiConfig: { mode: 'heuristic_only' },
+});
+assert.equal(healResult.status, 'healed', 'inspectAndFixFormWithAi phải tự động sửa lỗi form');
+assert.equal(healResult.fixed, true);
+assert.ok(mockHealSession.emailFilled, 'Session phải được cập nhật emailFilled = true sau khi AI sửa form');
+assert.equal(mockHealSession.assignedEmail, 'healed.user@gmail.com');
+
+// 23. KIỂM TRA CHẶN SUBMIT VÀ CHẶN CHECK LEAD KHI FORM CHƯA ĐIỀN EMAIL HOẶC BỊ LỖI
+let blockedSubmitClicked = false;
+let blockedLeadCheckTriggered = false;
+const mockBlockedSubmitBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  scrollIntoViewIfNeeded: async () => {},
+  click: async () => { blockedSubmitClicked = true; },
+  evaluate: async (fn) => fn({ tagName: 'BUTTON', id: 'btnSubmit', innerText: 'Submit', dataset: {} }),
+};
+const mockBlockedFormPage = {
+  isClosed: () => false,
+  url: () => 'https://sweepstake.example.com/step-email-blocked',
+  evaluate: async (fn, arg1) => {
+    if (arg1) return false;
+    if (typeof fn === 'function' && fn.toString().includes('screenSignature')) {
+      return { isScreen5: false, isJumpPage: false, hasEmailInput: true, screenSignature: '/step-email-blocked##INPUT:email' };
+    }
+    return {
+      unfilled: true,
+      id: 'email',
+      type: 'email',
+      reason: 'missing_or_invalid_email',
+    };
+  },
+  frames: () => [{
+    url: () => 'https://sweepstake.example.com/step-email-blocked',
+    evaluate: async (fn, arg1) => {
+      if (arg1) return false;
+      if (typeof fn === 'function' && fn.toString().includes('screenSignature')) {
+        return { isScreen5: false, isJumpPage: false, hasEmailInput: true, screenSignature: '/step-email-blocked##INPUT:email' };
+      }
+      return {
+        unfilled: true,
+        id: 'email',
+        type: 'email',
+        reason: 'missing_or_invalid_email',
+      };
+    },
+    locator: (sel) => ({
+      all: async () => {
+        if (sel.includes('button') || sel.includes('Submit')) return [mockBlockedSubmitBtn];
+        return [];
+      },
+      first: () => ({ count: async () => 0, isVisible: async () => false }),
+    }),
+  }],
+};
+const mockBlockedContext = {
+  on: () => {},
+  pages: () => [mockBlockedFormPage],
+};
+const mockBlockedSession = {
+  completedScreens: 0,
+  emailFilled: false,
+};
+attachAutofill(mockBlockedContext, [{ firstname: 'John' }], 'https://sweepstake.example.com', mockBlockedSession, {
+  autoSubmit: true,
+  enableLeadCheck: true,
+  leadCheckScreen: 1, // Kể cả khi target là màn 1
+  onEmailSubmitted: () => { blockedLeadCheckTriggered = true; },
+});
+
+mockBlockedSession.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 150));
+
+assert.strictEqual(blockedSubmitClicked, false, 'Tuyệt đối không được bấm submit khi ô email chưa điền hoặc bị lỗi');
+assert.strictEqual(mockBlockedSession.completedScreens, 0, 'completedScreens không được tăng khi form bị lỗi submit');
+assert.strictEqual(blockedLeadCheckTriggered, false, 'Tuyệt đối không được kích hoạt lead check khi email chưa điền');
+assert.notEqual(mockBlockedSession.leadCheckStatus, 'checking', 'Trạng thái không được chuyển sang checking khi email chưa điền');
+
+// 24. KIỂM TRA THẺ <a> CÂU TRẢ LỜI KHẢO SÁT CÓ LINK NHẢY TRANG
+let surveyLinkClickCount = 0;
+const mockSurveyLinkEl = {
+  tagName: 'A',
+  href: 'https://sweepstake.example.com/register?step=2&gender=female',
+  innerText: 'Female',
+  textContent: 'Female',
+  value: 'female',
+  id: 'btn-option-gender-female',
+  className: 'choice-btn option-btn',
+  getAttribute: (attr) => {
+    if (attr === 'href') return 'https://sweepstake.example.com/register?step=2&gender=female';
+    if (attr === 'data-ux-btn-option-id') return 'btn_option_gender_0';
+    return null;
+  },
+  setAttribute: () => {},
+  classList: {
+    contains: (cls) => false,
+    add: () => {},
+  },
+  click: () => { surveyLinkClickCount++; },
+};
+
+const mockSurveyFrame = {
+  evaluate: async (fn, ...args) => {
+    if (typeof fn === 'function') {
+      return [[{
+        uid: 'btn_option_gender_0',
+        id: 'btn-option-gender-female',
+        className: 'choice-btn option-btn',
+        text: 'Female',
+        isSelected: false,
+        recentlyClicked: false,
+      }]];
+    }
+    return [];
+  },
+  locator: (sel) => ({
+    first: () => ({
+      count: async () => 1,
+      scrollIntoViewIfNeeded: async () => {},
+      click: async () => { surveyLinkClickCount++; },
+      evaluate: async (fn) => fn(mockSurveyLinkEl),
+    }),
+  }),
+};
+
+const mockSurveySession = {
+  autofillFields: 0,
+  hasSubmittedCurrentScreen: false,
+};
+
+const surveyAnsCount = await handleRadioAndSurveyOptions(mockSurveyFrame, {}, mockSurveySession);
+assert.equal(surveyAnsCount, 1, 'handleRadioAndSurveyOptions phải chọn được thẻ <a> câu trả lời');
+assert.ok(mockSurveySession.autofillFields >= 1, 'autofillFields phải được tăng khi click câu trả lời thẻ <a>');
+assert.strictEqual(mockSurveySession.hasSubmittedCurrentScreen, true, 'hasSubmittedCurrentScreen phải chuyển thành true để nhảy sang bước tiếp theo');
+assert.ok(surveyLinkClickCount > 0, 'Thẻ <a> câu trả lời phải được click');
+
+// 25. KIỂM TRA NHẬN DIỆN VÀ TƯƠNG TÁC LOCOTOMATO WIDGET VÀ IFRAME
+const mockLocoSubmitBtn = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  evaluate: async (fn) => fn({ tagName: 'BUTTON', className: 'loco-btn loco-submit', innerText: 'Get Free Guide', dataset: {} }),
+};
+const mockLocoFrame = {
+  locator: (sel) => ({
+    all: async () => {
+      if (sel.includes('loco-submit') || sel.includes('Get Free Guide') || sel.includes('button')) {
+        return [mockLocoSubmitBtn];
+      }
+      return [];
+    },
+  }),
+};
+const locoSubmitFound = await findSubmitButton(mockLocoFrame);
+assert.ok(locoSubmitFound, 'findSubmitButton phải tìm được nút submit Get Free Guide của LocoTomato');
 
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 process.exit(0);

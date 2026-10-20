@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "start": "node app.mjs",
-    "test": "node selfcheck.mjs && node --test chrome-versions.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs screen-view.test.mjs survey-solver.test.mjs script.test.mjs toffers-lead.test.mjs stealth.test.mjs gologin-profile.test.mjs local-profile-engine.test.mjs",
+    "test": "node selfcheck.mjs && node --test chrome-versions.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs screen-view.test.mjs survey-solver.test.mjs script.test.mjs toffers-lead.test.mjs stealth.test.mjs adspower-profile.test.mjs codex-form-agent.test.mjs multi-tab-ai.test.mjs browser-session-lifecycle.test.mjs chrome-profile-template.test.mjs",
     "relay": "node relay.mjs"
   },
   "dependencies": {
+    "@openai/codex-sdk": "^0.163.0",
+    "@playwright/mcp": "^0.0.83",
     "https-proxy-agent": "^7.0.6",
     "playwright": "^1.56.1",
     "socks-proxy-agent": "^8.0.5"

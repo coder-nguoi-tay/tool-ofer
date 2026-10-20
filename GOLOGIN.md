@@ -1,24 +1,25 @@
-# GoLogin mode trên AutoLeadPC Mac 2
+# GoLogin trên AutoLeadPC Mac 2
 
-Chế độ **Chrome GoLogin (profile cục bộ)** dùng vòng đời profile của bản PC gốc: kiểm tra proxy, sao chép `zero_profile`, chỉnh Preferences/Bookmarks, mở trình duyệt với thư mục dữ liệu riêng và cổng CDP động, chạy automation, rồi xóa profile tạm khi đóng. Mỗi slot có profile và proxy riêng. Không cần GoLogin API token hay GoLogin desktop.
+Mac 2 tạo một profile GoLogin cloud cho mỗi luồng, gắn proxy và tùy chọn fingerprint, rồi yêu cầu GoLogin Desktop khởi chạy Orbita. Desktop cấp run token cho Orbita; app kết nối Playwright qua CDP để kiểm tra IP, mở trang đích và chạy autofill/script. Windows PC dùng `Security.dll` để khởi chạy Orbita trực tiếp; DLL đó chỉ chạy trên Windows nên Mac dùng API và daemon desktop của GoLogin cho phần khởi chạy.
 
 ## Chuẩn bị
 
-- Cài Google Chrome hoặc Chromium trên Mac.
-- Giữ `Config/Browser/zero_profile/Default/Preferences` trong thư mục launcher của app. Thiếu mẫu này, app báo lỗi và không mở profile rỗng.
-- Nhập proxy trong tab **Proxy**, chọn đúng loại HTTP hoặc SOCKS5. Dòng có thể theo dạng `host:port:user:pass` hoặc `host:port|user|pass`; app dùng relay loopback cho proxy có xác thực. Nếu không nhập proxy, app sẽ chạy Direct bằng IP của máy.
+- Đăng nhập GoLogin Desktop trên Mac và để ứng dụng chạy.
+- Mở **Settings > Browser** trong AutoLeadPC Mac 2, nhập GoLogin API token rồi lưu.
+- Chọn proxy và số luồng như bình thường. Mỗi luồng được gắn một proxy đã kiểm tra; profile GoLogin được tạo riêng cho luồng.
 
-## Luồng chạy
+Token được lưu riêng trong `~/Library/Application Support/AutoLeadPC-2/gologin-api-token.txt` với quyền đọc/ghi chỉ cho tài khoản hiện tại. Settings.ini không lưu bản sao token.
 
-1. Chọn **Chrome GoLogin (profile cục bộ)** và nhập URL, số cửa sổ, danh sách proxy.
-2. App kiểm tra IP exit và tránh dùng trùng proxy/IP theo thiết lập hiện có.
-3. Mỗi slot sao chép `zero_profile` vào `~/.autoleadpc/Profiles/gologin_*`, cập nhật ngôn ngữ, bookmark và các Preferences cần thiết.
-4. App mở Chrome bằng `--user-data-dir` và `--remote-debugging-port=0`, đọc `DevToolsActivePort`, rồi gắn Playwright qua CDP.
-5. App kiểm tra IP **trong Chrome** trước khi mở URL đích. Nếu IP khác IP proxy đã kiểm tra hoặc không xác minh được, phiên bị đóng.
-6. Khi đóng cửa sổ hoặc chọn **Đóng tất cả**, app dừng Chrome, relay proxy và xóa thư mục profile tạm.
+## Luồng và dọn dẹp
 
-## Giới hạn trên Mac
+1. App xác nhận token đã cấu hình và GoLogin Desktop phản hồi trên cổng localhost `36912`.
+2. App kiểm tra các proxy, phân luồng proxy và cấu hình OS/fingerprint.
+3. App gọi GoLogin API tạo profile cho từng slot, sau đó gọi Desktop `browser/start-profile` để nhận CDP URL.
+4. Playwright kết nối Orbita, áp dụng các override được Mac hỗ trợ, kiểm tra IP exit trong trình duyệt rồi mở trang đích.
+5. Khi đóng phiên, app yêu cầu Desktop dừng profile rồi xóa profile tạm qua API. Nếu khởi chạy lỗi, app cũng cố gắng dừng và xóa profile vừa tạo.
 
-Bản Windows gốc dùng `Security.dll` và trình duyệt Orbita riêng. Mac hiện chạy Chrome/Chromium đã cài, nên phần fingerprint do DLL/Orbita cung cấp không thể giống tuyệt đối. `orbita.config` được lưu cùng profile nhưng Chrome không đọc file này; các tùy chọn fingerprint mà app hỗ trợ được áp dụng qua CDP và script. Đây là cùng **luồng quản lý profile cục bộ**, không phải cùng engine trình duyệt.
+Canvas, ClientRects, WebGL, WebRTC và Fonts được chuyển vào cấu hình profile/stealth. Tuỳ chọn Api Fake IP bật geolocation theo IP proxy trong GoLogin; khi tắt, profile không cấp vị trí cho trang web. Timezone và ngôn ngữ vẫn tự khớp IP qua GoLogin. OS được ánh xạ từ Settings sang mã GoLogin (`win`, `mac`, `lin`, `android`).
 
-Profile này chỉ tồn tại trong thời gian chạy. GoLogin Cloud API và tài khoản GoLogin không tham gia luồng mua proxy hay mở profile này.
+## Giới hạn
+
+Luồng khởi chạy, profile riêng, proxy và tự động hóa được giữ tương ứng với chức năng PC. Cơ chế fingerprint của `Security.dll` không thể chạy trên macOS; Mac dùng thiết lập GoLogin profile cùng CDP/Playwright. Bài kiểm tra/build không tạo profile thật trên tài khoản GoLogin.

@@ -46,9 +46,9 @@ test('stealthInitScript tự chứa, tuần tự hoá được', () => {
   assert.doesNotThrow(() => new Function(`(${stealthInitScript.toString()})`));
   assert.equal(JSON.parse(JSON.stringify(config)).seed, 42);
   assert.equal(config.noise.audio, true);
-  // Nhiễu canvas/audio/rects/WebGL luôn bật để mỗi phiên khác nhau.
+  assert.deepEqual(config.noise, { canvas: true, clientRects: true, webgl: true, fonts: true, audio: true });
   const plain = buildStealthConfig(DEVICE_PROFILES.macos, {}, 7);
-  assert.deepEqual(plain.noise, { canvas: true, clientRects: true, webgl: true, fonts: false, audio: true });
+  assert.deepEqual(plain.noise, { canvas: false, clientRects: false, webgl: false, fonts: false, audio: true });
 });
 
 test('createDeviceVariant: cùng seed cùng máy, khác seed ra nhiều máy khác nhau', () => {

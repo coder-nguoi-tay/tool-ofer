@@ -1,5 +1,50 @@
 import { randomInt } from 'node:crypto';
 import { solveSurveyStep } from './survey-solver.mjs';
+import { inspectAndFixFormWithAi } from './ai-assist.mjs';
+
+const handledSurveyAnswerSignatures = new WeakMap();
+
+/**
+ * Tạo mã ổn định cho câu hỏi để nhận ra cùng đáp án sau khi trang dựng lại DOM.
+ *
+ * @param {object} frame Frame Playwright chứa câu hỏi.
+ * @param {string} questionTitle Tiêu đề câu hỏi.
+ * @param {object[]} items Các lựa chọn hiển thị.
+ * @return {string} Mã gồm đường dẫn trang, câu hỏi và các lựa chọn chuẩn hóa.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
+ */
+function buildSurveyAnswerSignature(frame, questionTitle, items) {
+  let pagePath = '';
+  try {
+    const parsedUrl = new URL(frame.url());
+    pagePath = `${parsedUrl.origin}${parsedUrl.pathname}`;
+  } catch {}
+  const normalizedQuestion = String(questionTitle ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const normalizedOptions = items.map((item) => String(item.text ?? '').replace(/\s+/g, ' ').trim().toLowerCase()).sort().join('|');
+  return `${pagePath}|${normalizedQuestion}|${normalizedOptions}`;
+}
+
+/**
+ * Ghi nhận một câu hỏi đã được xử lý để vòng quét sau không click lại cùng đáp án.
+ *
+ * @param {object} frame Frame Playwright chứa câu hỏi.
+ * @param {string} signature Mã ổn định của câu hỏi và các lựa chọn.
+ * @return {boolean} True nếu câu hỏi đã được xử lý trước đó.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
+ */
+function reserveSurveyAnswerClick(frame, signature) {
+  let handledSignatures = handledSurveyAnswerSignatures.get(frame);
+  if (!handledSignatures) {
+    handledSignatures = new Set();
+    handledSurveyAnswerSignatures.set(frame, handledSignatures);
+  }
+  if (handledSignatures.has(signature)) return true;
+  handledSignatures.add(signature);
+  if (handledSignatures.size > 500) handledSignatures.delete(handledSignatures.values().next().value);
+  return false;
+}
 
 /**
  * Đọc dữ liệu CSV hoặc JSON để mỗi form có thể chọn một bản ghi.
@@ -17,7 +62,7 @@ export function parseAutofillRecords(source) {
   if (!content) return [];
   if (content.includes('\t')) throw new Error('Hãy dùng CSV hoặc JSON; bảng phân tách bằng tab chưa được hỗ trợ.');
 
-  let records;
+    let records;
   const trimmedJson = content.replace(/,\s*$/, '').trim();
   if (trimmedJson.startsWith('[') || trimmedJson.startsWith('{')) {
     const tryCleanJson = (str) => {
@@ -54,6 +99,44 @@ export function parseAutofillRecords(source) {
         }
       }
     }
+  } else if (content.includes('|')) {
+    // 3. Hỗ trợ định dạng phân tách bằng dấu gạch đứng (|) tương tự file Config/Info/info.txt của tool PC
+    const lines = content.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    if (!lines.length) throw new Error('Dữ liệu dạng pipe (|) không có dòng dữ liệu hợp lệ.');
+
+    const firstCells = lines[0].split('|').map((c) => c.trim().replace(/^\uFEFF/, ''));
+    const isFirstLineData = firstCells.some((c) => c.includes('@')) ||
+      /^(male|female|mr|ms|mrs)$/i.test(firstCells[2] || firstCells[3] || '') ||
+      /^\d{4}$/.test(firstCells[6] || '');
+
+    const standardPipeHeaders = [
+      'firstname', 'lastname', 'gender', 'title', 'birthday', 'birthmonth', 'birthyear',
+      'phone', 'address', 'city', 'state', 'zipcode', 'phone2', 'username', 'password', 'email',
+    ];
+
+    let headers;
+    let dataLines;
+    if (isFirstLineData) {
+      headers = standardPipeHeaders.slice(0, firstCells.length);
+      while (headers.length < firstCells.length) {
+        headers.push(`field${headers.length + 1}`);
+      }
+      dataLines = lines;
+    } else {
+      headers = firstCells;
+      dataLines = lines.slice(1);
+    }
+
+    if (!dataLines.length) throw new Error('Dữ liệu tự điền cần ít nhất một bản ghi.');
+
+    records = dataLines.map((line) => {
+      const cells = line.split('|').map((c) => c.trim());
+      const rec = {};
+      headers.forEach((h, idx) => {
+        rec[h] = cells[idx] ?? '';
+      });
+      return rec;
+    });
   } else {
     const rows = [];
     let row = [];
@@ -1111,16 +1194,16 @@ export function isConsentCheckbox(metadata) {
   const name = String(metadata.name || '').toLowerCase();
   const classes = String(metadata.classes || '').toLowerCase();
   const names = Array.isArray(metadata.names) ? metadata.names.map((n) => String(n).toLowerCase()) : [];
-  const textContent = names.join(' ');
+  const textContent = `${names.join(' ')} ${id} ${name} ${classes}`;
   const dataAttributes = metadata.dataAttributes || {};
 
-  // 1. Checkbox có thuộc tính required hoặc aria-required
-  if (metadata.required || metadata.ariaRequired === 'true' || metadata.dataAttributes?.['data-required'] === 'true') {
+  // 1. Checkbox có thuộc tính required hoặc aria-required hoặc data-required
+  if (metadata.required || metadata.ariaRequired === 'true' || metadata.isRequired || metadata.dataAttributes?.['data-required'] === 'true') {
     return true;
   }
 
   // 2. Kiểm tra ID hoặc name
-  if (/digitalconsent|consent|disclosure|agree|terms|tcpa|optin|opt_in|privacy|policy|acknowledge|tos|rules|accept|confirm|legal|disclaimer|certify|authorize|authorization|sms|communication|comm|marketing|partner|offer|lead|resident|citizen|age|subscriber|subscribe/i.test(`${id} ${name}`)) {
+  if (/digitalconsent|consent|disclosure|agree|terms|tcpa|optin|opt_in|privacy|policy|acknowledge|tos|rules|accept|confirm|legal|disclaimer|certify|authorize|authorization|sms|communication|comm|marketing|partner|offer|lead|resident|citizen|age|subscriber|subscribe|continue|proceed|must/i.test(`${id} ${name}`)) {
     return true;
   }
 
@@ -1128,18 +1211,18 @@ export function isConsentCheckbox(metadata) {
   for (const [key, val] of Object.entries(dataAttributes)) {
     const keyLower = String(key).toLowerCase();
     const valLower = String(val).toLowerCase();
-    if (keyLower.includes('consent') || keyLower.includes('disclosure') || keyLower.includes('agree') || keyLower.includes('tcpa') || keyLower.includes('terms') || valLower.includes('consent') || valLower.includes('disclosure') || valLower.includes('agree') || valLower.includes('tcpa') || valLower.includes('terms')) {
+    if (/consent|disclosure|agree|accept|tcpa|terms|privacy|policy|legal|required|optin|continue|must/i.test(`${keyLower} ${valLower}`)) {
       return true;
     }
   }
 
   // 4. Kiểm tra class hoặc container class (ví dụ: .consent-box, .consent-row, .terms-check)
-  if (/consent|disclosure|tcpa|terms|privacy|policy|agree|checkbox-terms|legal|required/i.test(classes)) {
+  if (/consent|disclosure|tcpa|terms|privacy|policy|agree|accept|checkbox-terms|legal|required|mandatory|must/i.test(classes)) {
     return true;
   }
 
-  // 5. Kiểm tra văn bản nhãn / mô tả đi kèm (ví dụ: "By clicking Continue, I represent that I am 18+ years of age...")
-  if (/by clicking|i represent|18\+|i agree|i consent|i confirm|i accept|i certify|i have read|i understand|i authorize|terms of service|terms of use|terms & conditions|terms and conditions|privacy policy|privacy notice|marketing partners|express written consent|consumer disclosure|disclosure|tôi đồng ý|điều khoản|xác nhận|chính sách|automated technology|pre-recorded|text message|sms|communication|receive offers|free quote|electronic signature|e-sign|over 18|18 years|resident/i.test(textContent)) {
+  // 5. Kiểm tra văn bản nhãn / mô tả đi kèm (ví dụ: "You must accept to continue", "By clicking Continue...", v.v.)
+  if (/accept|agree|consent|terms|tcpa|privacy|policy|disclosure|must\s*(?:accept|agree|check|confirm|be)|you\s*must|required|mandatory|i\s*represent|18\+|certify|acknowledge|authorize|understand|by\s*checking|by\s*clicking|continue|proceed|resident|citizen|subscriber|opt-?in|electronic\s*signature|e-sign|automated\s*technology|sms|text\s*message|receive\s*offers|điều\s*khoản|chính\s*sách|đồng\s*ý|chấp\s*nhận|xác\s*nhận/i.test(textContent)) {
     return true;
   }
 
@@ -1169,18 +1252,20 @@ export async function findSubmitButton(frame) {
     'form input[type="submit"]',
     'input[type="button"][value*="Continue" i], input[type="button"][value*="Submit" i], input[type="button"][value*="Next" i]',
 
-    // 3. Nút bấm theo class phổ biến (bao gồm Jump Page, CTA button màn 5, màn Reward)
+    // 3. Nút bấm theo class phổ biến (bao gồm Jump Page, CTA button màn 5, màn Reward, LocoTomato Widget, div.button, .btn-option)
     'button.continue-btn, button.continue-button, button.submit-btn, button.btn-submit, button.btn-continue, button.btn-next, button.next-btn, button.next-button, button.btn-primary, button.arc-confirm-btn, button.blue-button, button.track-button, button.step-submit, button.forward-btn, button.btn-step, button.cta-button, button.rjp-cta-button, button.sjp-cta-button, button.cta-btn',
+    'button.loco-btn, button.loco-submit, button.loco-next, button[data-loco-role="submit"], button[data-loco-action="submit"], a.loco-btn, a.loco-submit, .loco-submit-btn, .loco-btn-primary, [data-loco-role="submit"]',
     'form button.btn, form button.button, form button[class*="primary"], form button[class*="submit"], form button[class*="continue"]',
     'a.continue-btn, a.continue-button, a.submit-btn, a.btn-submit, a.btn-continue, a.btn-next, a.next-btn, a.button-next, a.btn-primary, a.arc-confirm-btn, a.forward-step, a.cta-button, a.rjp-cta-button, a.sjp-cta-button, a.cta-btn',
     '[role="button"].continue-btn, [role="button"].continue-button, [role="button"].btn-continue, [role="button"].btn-next, [role="button"].next-btn, [role="button"].btn-primary, [role="button"].cta-button, [role="button"].rjp-cta-button',
     'div.continue-btn, div.continue-button, div.btn-continue, div.btn-next, div.next-btn, div.submit-btn, div.button-next, div.forward-step, .cta-button, .rjp-cta-button, .sjp-cta-button',
+    'div.btn-option, div.button, div.btn, div.inut, div.input, [id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, button.btn-option, a.btn-option',
     'a[href*="/next"], a[aria-label*="Reward" i], a[aria-label*="Get My" i], a[aria-label*="Continue" i], a[aria-label*="Claim" i], button[aria-label*="Reward" i], button[aria-label*="Get My" i]',
 
-    // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt, bao gồm Jump Page Get My Reward)
-    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Complete"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành"), button:has-text("Get My Reward"), button:has-text("Claim Reward"), button:has-text("Claim My Reward"), button:has-text("Get Reward"), button:has-text("Unlock Reward"), button:has-text("View Deals"), button:has-text("Continue to Deals"), button:has-text("View Offers"), button:has-text("See Offers"), button:has-text("Check Eligibility"), button:has-text("See Matches"), button:has-text("Show Matches"), button:has-text("Send"), button:has-text("Sign Up"), button:has-text("Register"), button:has-text("Apply Now"), button:has-text("Start"), button:has-text("Free Quote"), button:has-text("Request Quote"), button:has-text("Next Step")',
-    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Complete"), a:has-text("Explore Plans"), a:has-text("Get My Reward"), a:has-text("Claim Reward"), a:has-text("Claim My Reward"), a:has-text("Get Reward"), a:has-text("Unlock Reward"), a:has-text("View Deals"), a:has-text("Continue to Deals"), a:has-text("View Offers"), a:has-text("See Offers"), a:has-text("Check Eligibility"), a:has-text("See Matches"), a:has-text("Sign Up"), a:has-text("Register"), a:has-text("Apply Now"), a:has-text("Start")',
-    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results"), [role="button"]:has-text("Get My Reward"), [role="button"]:has-text("Claim Reward"), [role="button"]:has-text("Get Reward"), [role="button"]:has-text("Check Eligibility")',
+    // 4. Nút bấm theo text phổ biến (tiếng Anh & tiếng Việt, bao gồm Jump Page Get My Reward, Free Guide của LocoTomato)
+    'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Complete"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành"), button:has-text("Get My Reward"), button:has-text("Claim Reward"), button:has-text("Claim My Reward"), button:has-text("Get Reward"), button:has-text("Unlock Reward"), button:has-text("View Deals"), button:has-text("Continue to Deals"), button:has-text("View Offers"), button:has-text("See Offers"), button:has-text("Check Eligibility"), button:has-text("See Matches"), button:has-text("Show Matches"), button:has-text("Send"), button:has-text("Sign Up"), button:has-text("Sign-Up"), button:has-text("Sign Up Now"), button:has-text("Register"), button:has-text("Register Now"), button:has-text("Join Now"), button:has-text("Join Free"), button:has-text("Enter Now"), button:has-text("Enter to Win"), button:has-text("Start Now"), button:has-text("Apply Now"), button:has-text("Start"), button:has-text("Free Quote"), button:has-text("Request Quote"), button:has-text("Next Step"), button:has-text("Take Survey"), button:has-text("Confirm"), button:has-text("Get Free Guide"), button:has-text("Get My Free Guide"), button:has-text("Get Guide"), button:has-text("Get Guide Now"), button:has-text("Get Cash Assistance"), button:has-text("Free Guide")',
+    'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Complete"), a:has-text("Explore Plans"), a:has-text("Get My Reward"), a:has-text("Claim Reward"), a:has-text("Claim My Reward"), a:has-text("Get Reward"), a:has-text("Unlock Reward"), a:has-text("View Deals"), a:has-text("Continue to Deals"), a:has-text("View Offers"), a:has-text("See Offers"), a:has-text("Check Eligibility"), a:has-text("See Matches"), a:has-text("Sign Up"), a:has-text("Sign-Up"), a:has-text("Sign Up Now"), a:has-text("Register"), a:has-text("Register Now"), a:has-text("Join Now"), a:has-text("Enter Now"), a:has-text("Apply Now"), a:has-text("Start"), a:has-text("Take Survey"), a:has-text("Get Free Guide"), a:has-text("Get My Free Guide"), a:has-text("Get Guide"), a:has-text("Get Guide Now"), a:has-text("Get Cash Assistance"), a:has-text("Free Guide")',
+    '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results"), [role="button"]:has-text("Get My Reward"), [role="button"]:has-text("Claim Reward"), [role="button"]:has-text("Get Reward"), [role="button"]:has-text("Check Eligibility"), [role="button"]:has-text("Sign Up"), [role="button"]:has-text("Register"), [role="button"]:has-text("Join Now"), [role="button"]:has-text("Get Free Guide"), [role="button"]:has-text("Get Guide")',
     'button[id*="submit" i], button[id*="continue" i], button[id*="next" i], a[id*="submit" i], a[id*="continue" i], a[id*="next" i]',
     'button[class*="submit" i], button[class*="continue" i], button[class*="next" i], a[class*="submit" i], a[class*="continue" i], a[class*="next" i]',
     'div[class*="btn"]:has-text("Continue"), div[class*="button"]:has-text("Continue"), div[class*="btn"]:has-text("Next"), div[class*="button"]:has-text("Next"), span[class*="btn"]:has-text("Continue")',
@@ -1232,9 +1317,14 @@ export async function findSubmitButton(frame) {
           }
 
           // 2. Kiểm tra từ khóa menu / đăng nhập / tài khoản / liên hệ
-          const navNoise = /sign in|sign up|\blogin\b|\blog in\b|\bregister\b|my account|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|contact us|about us|\b(help & faq|faqs?)\b/i;
-          if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) {
-            return { valid: false, reason: 'nav_noise' };
+          // Chú ý: Nút trong form hoặc div container, nút có type="submit" hoặc nút BUTTON CTA không bị coi là navNoise!
+          const insideForm = typeof el.closest === 'function' ? el.closest('form, [role="form"], .form, .form-container, .survey-container, .quiz-container, .step-container, .card, div:has(input)') : null;
+          const isSubmitRole = tag === 'BUTTON' || (el.type || '').toLowerCase() === 'submit';
+          if (!insideForm && !isSubmitRole) {
+            const navNoise = /^(sign\s*in|login|log\s*in|my\s*account)$|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|\b(contact\s*us|about\s*us|help & faq|faqs?)\b/i;
+            if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) {
+              return { valid: false, reason: 'nav_noise' };
+            }
           }
 
           if (typeof href === 'string' && (href.startsWith('mailto:') || href.startsWith('tel:'))) {
@@ -1246,7 +1336,6 @@ export async function findSubmitButton(frame) {
           }
 
           // 3. Bỏ qua nút nằm trong header / site-level footer / nav (nếu trang có thẻ)
-          const insideForm = typeof el.closest === 'function' ? el.closest('form') : null;
           if (!insideForm) {
             const inSiteHeaderOrNav = typeof el.closest === 'function' ? el.closest('header, nav, #header, #nav, .site-header, .site-nav') : null;
             const inSiteFooter = typeof el.closest === 'function' ? el.closest('.site-footer, #footer, body > footer:not([class*="form"]):not([class*="step"]):not([class*="survey"]):not([class*="quiz"]):not([class*="modal"]):not([class*="card"])') : null;
@@ -1274,7 +1363,7 @@ export async function findSubmitButton(frame) {
           if (tag === 'BUTTON') return { valid: true };
           if (tag === 'INPUT' && ['submit', 'button', 'image'].includes((el.type || '').toLowerCase())) return { valid: true };
           if (tag === 'A' || (typeof el.getAttribute === 'function' && el.getAttribute('role') === 'button')) return { valid: true };
-          if (el.classList && (el.classList.contains('btn') || el.classList.contains('button') || /continue|next|submit/i.test(el.className || ''))) return { valid: true };
+          if (el.classList && (el.classList.contains('btn') || el.classList.contains('button') || /continue|next|submit|signup|register/i.test(el.className || ''))) return { valid: true };
 
           if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
             const style = window.getComputedStyle(el);
@@ -1314,24 +1403,28 @@ export async function findSubmitButton(frame) {
       };
 
       const isNoiseOrNav = (el) => {
+        const inForm = Boolean(el.closest('form') || el.form);
+        const isSubmitTag = (el.tagName || '').toUpperCase() === 'BUTTON' || (el.type || '').toLowerCase() === 'submit';
         const text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
         const href = (el.getAttribute ? el.getAttribute('href') : '') || '';
         const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
         const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
         if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) return true;
-        const navNoise = /sign in|sign up|\blogin\b|\blog in\b|\bregister\b|my account|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|contact us|about us|\b(help & faq|faqs?)\b/i;
-        if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) return true;
+        if (!inForm && !isSubmitTag) {
+          const navNoise = /^(sign\s*in|login|log\s*in|my\s*account)$|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|\b(contact\s*us|about\s*us|help & faq|faqs?)\b/i;
+          if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) return true;
+        }
         if (href.startsWith('mailto:') || href.startsWith('tel:')) return true;
         if (/cancel|back|previous|prev|quay lại|hủy|close|đóng|skip|bỏ qua/i.test(text)) return true;
         const inHeader = el.closest('header, nav, #header, #nav, .site-header, .site-nav');
-        if (inHeader) return true;
+        if (inHeader && !inForm) return true;
         const rect = el.getBoundingClientRect();
-        if (rect.top < 45 && document.body.scrollHeight > 500 && !el.closest('form')) return true;
+        if (rect.top < 45 && document.body.scrollHeight > 500 && !inForm) return true;
         return false;
       };
 
-      // 5.1 Tìm trong các form đang hiển thị
-      const forms = Array.from(document.querySelectorAll('form')).filter(isVisible);
+      // 5.1 Tìm trong các form hoặc container div chứa input đang hiển thị
+      const forms = Array.from(document.querySelectorAll('form, [role="form"], .form, .form-container, .survey-container, div:has(input)')).filter(isVisible);
       for (const form of forms) {
         const sub = form.querySelector('button[type="submit"], input[type="submit"], button:not([type="button"]):not([type="reset"])');
         if (sub && isVisible(sub) && !isNoiseOrNav(sub)) {
@@ -1350,7 +1443,7 @@ export async function findSubmitButton(frame) {
       for (const btn of allButtons) {
         if (isNoiseOrNav(btn)) continue;
         const text = (btn.innerText || btn.value || btn.textContent || '').trim().toLowerCase();
-        if (/continue|submit|next|get quote|get started|see results|claim|proceed|tiếp tục|xác nhận|hoàn thành|agree|start/i.test(text)) {
+        if (/continue|submit|next|get quote|get started|see results|claim|proceed|tiếp tục|xác nhận|hoàn thành|agree|start|sign up|register|join|enter|survey/i.test(text)) {
           btn.setAttribute('data-ux-submit-target', 'true');
           return true;
         }
@@ -1440,9 +1533,11 @@ export function matchAgeRange(optionText, age) {
  *
  * @param {object} frame Frame Playwright đang quét.
  * @param {object} [record={}] Bản ghi dữ liệu hiện tại để ưu tiên nếu có cấu hình.
+ * @param {object|null} session Phiên browser nhận trạng thái autofill.
  * @return {Promise<number>} Số câu hỏi đã được chọn/trả lời.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @throws {Error} Lỗi thao tác frame được xử lý tại chỗ và không làm dừng phiên.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
  */
 export async function handleRadioAndSurveyOptions(frame, record = {}, session = null) {
   let answeredCount = 0;
@@ -1471,6 +1566,55 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         '[data-btn-option]',
         'button.btn-option',
         'a.btn-option',
+        // Các thẻ <a> là link câu trả lời khảo sát / trắc nghiệm nhảy trang:
+        'a.choice',
+        'a.choice-btn',
+        'a.option-btn',
+        'a.answer-btn',
+        'a.quiz-btn',
+        'a.creative-survey-answer',
+        'a[data-vector-answer="true"]',
+        'a[data-choice]',
+        'a[data-answer]',
+        'a[data-option]',
+        'a.primary-btn',
+        'a.offer-click-tracking-no-link',
+        // Các thẻ <a> hoặc button nằm trong container câu hỏi khảo sát:
+        '.choices a',
+        '.answers a',
+        '.options a',
+        '.survey-question a',
+        '.question a',
+        '.choice-container a',
+        '.options-container a',
+        '.card-options a',
+        '.options-grid a',
+        '.quiz-step a',
+        '.survey-step a',
+        '.quiz-container a',
+        '.survey-card a',
+        '.options-list a',
+        '.step-container a',
+        // Các nút bấm & lựa chọn của LocoTomato Widget nhúng:
+        '.loco-btn',
+        '.loco-option',
+        '.loco-choice',
+        '[data-loco-option]',
+        '[data-loco-choice]',
+        '[data-loco-value]',
+        'button.loco-btn',
+        'a.loco-btn',
+        '[data-loco-role="option"]',
+        '[data-loco-role="choice"]',
+        '[data-loco-action="next"]',
+        '[data-loco-action="select"]',
+        '.loco-widget button',
+        '.loco-widget a',
+        '.choices button:not([type="submit"])',
+        '.answers button:not([type="submit"])',
+        '.options button:not([type="submit"])',
+        '.survey-question button:not([type="submit"])',
+        '.question button:not([type="submit"])',
         // Các loại quiz cards, survey cards, choice cards, option cards:
         '.choice-card',
         '.option-card',
@@ -1538,14 +1682,23 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         const href = (el.getAttribute ? el.getAttribute('href') : '') || '';
         const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
 
-        const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
-        if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) return true;
+        // 1. Kiểm tra nếu nằm trong container câu hỏi khảo sát / quiz / choices rõ ràng
+        const inSurveyContainer = Boolean(el.closest && el.closest('.question, .survey-question, .choices, .answers, .options, .choice-container, .options-container, .quiz-step, .survey-step, [id*="btn-option"], .btn-option, .survey-card, .quiz-card, .quiz-container, .selection-card, .card-options, .options-grid, .loco-widget, .loco-card, .loco-step, .loco-question, .loco-form, [data-loco-widget], fieldset'));
 
-        const navNoise = /sign in|sign up|\blogin\b|\blog in\b|\bregister\b|my account|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|contact us|about us|\b(help & faq|faqs?)\b/i;
-        if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) return true;
+        // 2. Pháp lý / điều khoản (privacy, terms...)
+        const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
+        if (legalNoise.test(text) || (!inSurveyContainer && (legalNoise.test(href) || legalNoise.test(idAndClass)))) return true;
+
+        // 3. Menu điều hướng: Chỉ kiểm tra trên text hiển thị của nút để tránh lọc nhầm link khảo sát dẫn tới /register hoặc /signup
+        const navTextNoise = /^(sign\s*in|login|log\s*in|my\s*account|home|homepage|main\s*menu|menu|cart|shopping\s*cart|portal|contact\s*us|about\s*us|help\s*&\s*faq|faqs?)$/i;
+        if (navTextNoise.test(text)) return true;
+        if (!inSurveyContainer) {
+          const generalNavNoise = /sign in|sign up|\blogin\b|\blog in\b|\bregister\b|my account|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|contact us|about us|\b(help & faq|faqs?)\b/i;
+          if (generalNavNoise.test(text) || generalNavNoise.test(idAndClass)) return true;
+        }
 
         if (href.startsWith('mailto:') || href.startsWith('tel:')) return true;
-        if (/cancel|back|previous|prev|quay lại|bỏ qua/i.test(text)) return true;
+        if (/^(cancel|back|previous|prev|quay lại|hủy|bỏ qua)$/i.test(text)) return true;
 
         return false;
       };
@@ -1600,7 +1753,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
       });
 
       const actionableGroups = [];
-      for (const [, items] of groups.entries()) {
+      for (const [container, items] of groups.entries()) {
         const hasRecentlyClicked = items.some((it) => it.recentlyClicked);
         const hasSelected = items.some((it) => it.isSelected);
         // QUAN TRỌNG: Chỉ chọn khi nhóm này CHƯA có đáp án nào được chọn (isSelected)
@@ -1647,18 +1800,18 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
               const now = Date.now();
               el.setAttribute('data-ux-btn-clicked-time', String(now));
               el.setAttribute('data-ux-clicked', '1');
-              el.classList.add('active', 'selected');
-              el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.classList.add('selected', 'active');
+              if (el.tagName && el.tagName.toLowerCase() === 'a' && el.href && !el.href.startsWith('javascript:') && !el.href.startsWith('#')) {
+                // Nhảy trang theo đường link câu trả lời khảo sát theo đúng thiết kế của offer
+                try { window.location.href = el.href; } catch {}
+              }
             }).catch(() => {});
 
             answeredCount += 1;
             if (session) {
               session.lastActionTime = Date.now();
               session.autofillFields = (session.autofillFields ?? 0) + 1;
+              session.hasSubmittedCurrentScreen = true;
             }
           }
         } catch {}
@@ -1767,6 +1920,17 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         '[id*="btn-option"]',
         '.btn-option',
         'button.btn-option',
+        'a.btn-option',
+        'a.choice',
+        'a.choice-btn',
+        'a.option-btn',
+        'a.answer-btn',
+        'a.quiz-btn',
+        'a.creative-survey-answer',
+        'a[data-vector-answer="true"]',
+        'a[data-choice]',
+        'a[data-answer]',
+        'a[data-option]',
         'button[data-vector-answer="true"]',
         'button[data-element-type="survey_answer"]',
         'button[name="selected_answer"]',
@@ -1781,6 +1945,19 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         '[role="button"]:not(.btn-submit):not(.offerwall-btn)',
         '.option-btn, .choice-btn, .quiz-btn, .answer-btn, label.btn',
         '.options-container a',
+        '.choice-container a',
+        '.choices a',
+        '.answers a',
+        '.options a',
+        '.survey-question a',
+        '.question a',
+        'button.loco-btn',
+        'a.loco-btn',
+        '.loco-btn',
+        '.loco-option',
+        '.loco-choice',
+        '[data-loco-option]',
+        '[data-loco-value]',
       ].join(', ');
 
       const isVisible = (el) => {
@@ -1811,6 +1988,12 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         '.quiz-container',
         '.survey-card',
         '.questions-container',
+        '.loco-widget',
+        '.loco-card',
+        '.loco-step',
+        '.loco-question',
+        '.loco-form',
+        '[data-loco-widget]',
       ].join(', ');
 
       const containers = Array.from(document.querySelectorAll(containerSelector));
@@ -2030,6 +2213,8 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         try {
           const locator = frame.locator(`[data-ux-choice-id="${picked.uid}"]`).first();
           if (locator && (await locator.count() > 0)) {
+            const answerSignature = buildSurveyAnswerSignature(frame, group.questionTitle, group.items);
+            if (reserveSurveyAnswerClick(frame, answerSignature)) continue;
             if (typeof locator.scrollIntoViewIfNeeded === 'function') {
               await locator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
             }
@@ -2052,7 +2237,6 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
               await locator.click({ timeout: 1500, force: true }).catch(async () => {
                 await locator.evaluate((el) => {
                   el.click();
-                  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
                 }).catch(() => {});
               });
             }
@@ -2069,6 +2253,11 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
             }).catch(() => {});
 
             answeredCount += 1;
+            if (session) {
+              session.lastActionTime = Date.now();
+              session.autofillFields = (session.autofillFields ?? 0) + 1;
+              session.hasSubmittedCurrentScreen = true;
+            }
           }
         } catch {}
       }
@@ -2614,8 +2803,8 @@ export async function humanType(field, text, page = null, options = {}) {
  * @param {object} session Phiên để cập nhật số trường đã điền và đồng bộ record.
  * @param {object} [options={}] Tùy chọn nâng cao như autoSubmit.
  * @return {void} Đăng ký theo dõi các trang hiện tại và trang mở sau.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-20
  */
 export function attachAutofill(context, records, allowedOrigin, session = {}, options = {}) {
   const effectiveRecords = Array.isArray(records) && records.length > 0 ? records : [createFallbackAutofillRecord()];
@@ -2640,9 +2829,12 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
    *
    * @param {object} page Trang Chrome cần xử lý.
    * @return {Promise<void>} Hoàn tất lượt quét form.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-10-20
    */
   async function fillVisibleForms(page) {
     if (page.isClosed()) return;
+    const record = page._assignedRecord || session.currentRecord || effectiveRecords[session.recordIndex];
     if (session.leadCheckStatus === 'failed') return;
     if (session.leadCheckStatus === 'checking') return;
     if (options.enableLeadCheck !== false && (session.screen5LeadCheckTriggered || session.leadCheckTriggered) && !session.screen5LeadVerified) return;
@@ -2654,21 +2846,25 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       }
       const checkScreenTarget = Number(options.leadCheckScreen) || 4;
       if (session.completedScreens >= checkScreenTarget) {
-        session.screen5LeadCheckTriggered = true;
-        session.leadCheckTriggered = true;
-        session.leadCheckStatus = 'checking';
-        session.leadCheckReason = 'screen_target';
-        console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (Mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
-        options.onLog?.({
-          type: 'screen_target_lead_check',
-          detail: `Đã hoàn thành ${session.completedScreens} màn hình điền form. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
-        });
-        if (typeof options.onEmailSubmitted === 'function') {
-          options.onEmailSubmitted(session, page);
-        } else if (typeof options.onScreen5Reached === 'function') {
-          options.onScreen5Reached(session, page);
+        if (!session.emailFilled) {
+          console.log(`[LeadCheck] Đã đạt Màn ${session.completedScreens} nhưng ô Gmail/Email chưa được điền hợp lệ. Bỏ qua kiểm tra lead, tiếp tục quét form.`);
+        } else {
+          session.screen5LeadCheckTriggered = true;
+          session.leadCheckTriggered = true;
+          session.leadCheckStatus = 'checking';
+          session.leadCheckReason = 'screen_target';
+          console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (Mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
+          options.onLog?.({
+            type: 'screen_target_lead_check',
+            detail: `Đã hoàn thành ${session.completedScreens} màn hình điền form. Bắt đầu chờ đợi lead (2 lần x 30s)...`,
+          });
+          if (typeof options.onEmailSubmitted === 'function') {
+            options.onEmailSubmitted(session, page);
+          } else if (typeof options.onScreen5Reached === 'function') {
+            options.onScreen5Reached(session, page);
+          }
+          return;
         }
-        return;
       }
     }
 
@@ -2699,6 +2895,16 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
       session.lastObservedUrl = currentUrl;
     }
 
+
+    // Tự động phát hiện và cuộn tới widget nhúng LocoTomato (.loco-widget) hoặc iframe form nhúng để kích hoạt hiển thị
+    try {
+      if (typeof page.locator === 'function') {
+        const locoWidget = page.locator('.loco-widget, [data-loco-widget], iframe[src*="locotomato.com"]').first();
+        if ((await locoWidget.count().catch(() => 0)) > 0) {
+          await locoWidget.scrollIntoViewIfNeeded({ timeout: 1200 }).catch(() => {});
+        }
+      }
+    } catch {}
 
     const frames = typeof page.frames === 'function' ? page.frames() : [page];
     const unmatchedFieldNames = new Set();
@@ -2808,7 +3014,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               if (el.offsetWidth > 0 || el.offsetHeight > 0 || el.offsetParent !== null) return true;
               const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
               if (label && (label.offsetWidth > 0 || label.offsetHeight > 0 || label.offsetParent !== null)) return true;
-              const parent = el.parentElement;
+              const parent = el.closest('.form-group, .custom-control, .checkbox, .field, .input-container, label, div');
               if (parent && (parent.offsetWidth > 0 || parent.offsetHeight > 0 || parent.offsetParent !== null)) return true;
               return false;
             }).catch(() => false);
@@ -2828,15 +3034,16 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           }
           const isMarkedFilled = (await field.getAttribute('data-ux-filled')) === '1';
           if (isMarkedFilled) {
+            const isUncheckedBox = isCheckbox && !(await field.isChecked().catch(() => true));
             const currentVal = await field.inputValue().catch(() => null);
             const hasError = await field.evaluate((el) => {
               if (el.classList.contains('error') || el.getAttribute('aria-invalid') === 'true') return true;
-              const parent = el.closest('.input-group, .form-group, .field, .loco-group');
-              return parent ? parent.querySelector('.error, .visible, .helper-text.visible') !== null : false;
+              const parent = el.closest('.input-group, .form-group, .field, .loco-group, .checkbox-group, .checkbox, label, div');
+              return parent ? parent.querySelector('.error, .visible, .helper-text.visible, [role="alert"]') !== null : false;
             }).catch(() => false);
 
-            // Nếu đã fill nhưng giá trị hiện tại bị rỗng hoặc đang bị báo lỗi -> xóa mark để điền lại
-            if ((currentVal !== null && currentVal.trim() === '') || hasError) {
+            // Nếu đã fill nhưng giá trị hiện tại bị rỗng hoặc đang bị báo lỗi hoặc là checkbox chưa được tích -> xóa mark để điền lại
+            if ((currentVal !== null && currentVal.trim() === '') || hasError || isUncheckedBox) {
               await field.evaluate((el) => el.removeAttribute('data-ux-filled')).catch(() => {});
             } else {
               continue;
@@ -2932,96 +3139,118 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           });
 
           // Nhận diện trường email ngay khi lấy metadata của trường
-          const isEmailVal = (metadata.type === 'email' || metadata.names?.some(isEmailFieldName)) || (metadata.value && metadata.value.includes('@') && !metadata.names?.some((n) => /address|street|diachi/i.test(n)));
+          const isEmailVal = (metadata.type === 'email' || metadata.names?.some(isEmailFieldName) || (metadata.value && metadata.value.includes('@'))) && !metadata.names?.some((n) => /address|street|diachi/i.test(n));
           if (isEmailVal) {
             frameHasEmail = true;
             session.screenHasEmail = true;
-            session.emailFilled = true;
-            session.emailScreenNumber = (session.completedScreens || 0) + 1;
+            if (metadata.value && metadata.value.includes('@')) {
+              session.emailFilled = true;
+              session.emailScreenNumber = (session.completedScreens || 0) + 1;
+            }
           }
 
-          // Xử lý ô checkbox: nếu là ô đồng ý điều khoản/consent hoặc checkbox bắt buộc thì tự động tích
+          // Xử lý ô checkbox: TỰ ĐỘNG TÍCH TẤT CẢ CÁC Ô CHECKBOX CHƯA ĐƯỢC TÍCH TRÊN FORM
           if (metadata.type === 'checkbox') {
-            if (isConsentCheckbox(metadata)) {
-              visibleFieldCount += 1;
-              const isAlreadyChecked = await field.isChecked().catch(() => metadata.checked);
-              if (!isAlreadyChecked) {
-                try {
-                  await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
-                  const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
-                  const consentPause = isRealBrowser
-                    ? Math.floor(Math.random() * 120) + 140
-                    : Math.floor(Math.random() * 30) + 30;
-                  if (page && typeof page.waitForTimeout === 'function') {
-                    await page.waitForTimeout(consentPause).catch(() => {});
-                  } else {
-                    await new Promise((r) => setTimeout(r, consentPause));
-                  }
+            visibleFieldCount += 1;
+            const isAlreadyChecked = await field.isChecked().catch(() => metadata.checked);
+            if (!isAlreadyChecked) {
+              try {
+                await field.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+                const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
+                const consentPause = isRealBrowser
+                  ? Math.floor(Math.random() * 120) + 140
+                  : Math.floor(Math.random() * 30) + 30;
+                if (page && typeof page.waitForTimeout === 'function') {
+                  await page.waitForTimeout(consentPause).catch(() => {});
+                } else {
+                  await new Promise((r) => setTimeout(r, consentPause));
+                }
 
-                  // 1. Click tự nhiên bằng humanClick trên trình duyệt thật (rê chuột Bézier và click vật lý)
-                  let checkedOk = false;
-                  if (isRealBrowser) {
-                    await humanClick(page, field).catch(() => {});
-                    checkedOk = await field.isChecked().catch(() => false);
-                    if (!checkedOk && metadata.id) {
-                      const labelLocator = frame.locator(`label[for="${metadata.id}"]`).first();
-                      if (await labelLocator.count().catch(() => 0) > 0) {
-                        await humanClick(page, labelLocator).catch(() => {});
-                        checkedOk = await field.isChecked().catch(() => false);
-                      }
+                // 1. Click tự nhiên bằng humanClick trên trình duyệt thật (rê chuột Bézier và click vật lý)
+                let checkedOk = false;
+                if (isRealBrowser) {
+                  await humanClick(page, field).catch(() => {});
+                  checkedOk = await field.isChecked().catch(() => false);
+                  if (!checkedOk && metadata.id) {
+                    const labelLocator = frame.locator(`label[for="${metadata.id}"]`).first();
+                    if (await labelLocator.count().catch(() => 0) > 0) {
+                      await humanClick(page, labelLocator).catch(() => {});
+                      checkedOk = await field.isChecked().catch(() => false);
                     }
                   }
+                }
 
-                  // 2. Dùng Playwright check({ force: true }) - chuẩn nhất nếu chưa checked
-                  if (!checkedOk) {
-                    await field.check({ force: true, timeout: 1500 }).catch(() => {});
-                    checkedOk = await field.isChecked().catch(() => false);
+                // 2. Thử click thẻ label liên kết (nếu có)
+                if (!checkedOk) {
+                  try {
+                    const labelHandle = await field.evaluateHandle((el) => {
+                      return el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+                    });
+                    if (labelHandle && labelHandle.asElement()) {
+                      await labelHandle.asElement().click({ timeout: 1000 }).catch(() => {});
+                      checkedOk = await field.isChecked().catch(() => false);
+                    }
+                  } catch {}
+                }
+
+                // 3. Dùng Playwright check({ force: true }) - chuẩn nhất nếu chưa checked
+                if (!checkedOk) {
+                  await field.check({ force: true, timeout: 1500 }).catch(() => {});
+                  checkedOk = await field.isChecked().catch(() => false);
+                }
+
+                // 4. Click trực tiếp vào field
+                if (!checkedOk) {
+                  await field.click({ force: true, timeout: 1000 }).catch(() => {});
+                  checkedOk = await field.isChecked().catch(() => false);
+                }
+
+                // 5. Nếu vẫn chưa checked (do custom styled label/checkmark overlay), click vào label hoặc checkmark
+                if (!checkedOk) {
+                  await field.evaluate((el) => {
+                    const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+                    if (label) {
+                      const target = label.querySelector('.checkmark, .checkbox-custom, .indicator, [class*="check"], svg') || label;
+                      target.click();
+                    } else {
+                      el.click();
+                    }
+                  }).catch(() => {});
+                  checkedOk = await field.isChecked().catch(() => false);
+                }
+
+                // 6. Luôn cập nhật trạng thái DOM chuẩn React / Vue / Plain HTML qua native setter
+                await field.evaluate((el) => {
+                  if (!el.checked) {
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked')?.set;
+                    if (nativeSetter) {
+                      nativeSetter.call(el, true);
+                    } else {
+                      el.checked = true;
+                    }
                   }
+                  el.setAttribute('aria-checked', 'true');
+                  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                }).catch(() => {});
 
-                  // 3. Nếu vẫn chưa checked (do custom styled label/checkmark overlay), click vào label hoặc checkmark
-                  if (!checkedOk) {
-                    await field.evaluate((el) => {
-                      const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
-                      if (label) {
-                        const target = label.querySelector('.checkmark, .checkbox-custom, .indicator, [class*="check"]') || label;
-                        target.click();
-                      } else {
-                        el.click();
-                      }
-                    }).catch(() => {});
-                    checkedOk = await field.isChecked().catch(() => false);
-                  }
+                checkedOk = await field.isChecked().catch(() => true);
+                await field.evaluate((el) => { el.dataset.uxFilled = '1'; }).catch(() => {});
+                session.autofillFields = (session.autofillFields ?? 0) + 1;
+                session.autofillError = null;
+                filledInThisPass += 1;
 
-                  // 3. Fallback chắc chắn: đặt trực tiếp el.checked = true và dispatch event (KHÔNG dispatch click vì click sẽ đảo ngược lại false)
-                  if (!checkedOk) {
-                    await field.evaluate((el) => {
-                      if (!el.checked) {
-                        el.checked = true;
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                      }
-                    }).catch(() => {});
-                    checkedOk = await field.isChecked().catch(() => false);
-                  }
-
-                  await field.dispatchEvent('input').catch(() => {});
-                  await field.dispatchEvent('change').catch(() => {});
-                  await field.evaluate((el) => { el.dataset.uxFilled = '1'; }).catch(() => {});
-                  session.autofillFields = (session.autofillFields ?? 0) + 1;
-                  session.autofillError = null;
-                  filledInThisPass += 1;
-
-                  const consentName = metadata.names?.[0] || metadata.id || metadata.name || 'checkbox';
-                  options.onLog?.({
-                    type: 'checkbox_checked',
-                    tag: 'INPUT',
-                    id: metadata.id || null,
-                    name: metadata.name || null,
-                    text: consentName.slice(0, 100),
-                    detail: `Đã tự động tích ô điều khoản: ${metadata.id || metadata.name || 'checkbox'}`,
-                  });
-                } catch {}
-              }
+                const consentName = metadata.names?.[0] || metadata.id || metadata.name || 'checkbox';
+                options.onLog?.({
+                  type: 'checkbox_checked',
+                  tag: 'INPUT',
+                  id: metadata.id || null,
+                  name: metadata.name || null,
+                  text: consentName.slice(0, 100),
+                  detail: `Đã tự động tích ô checkbox: ${metadata.id || metadata.name || consentName.slice(0, 50)}`,
+                });
+              } catch {}
             }
             continue;
           }
@@ -3347,49 +3576,43 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         }
       } catch {}
 
-      // Quét thêm một lượt an toàn: Đảm bảo không sót bất kỳ checkbox điều khoản / consent / required nào chưa được tích trên frame
+      // Quét thêm một lượt an toàn: Đảm bảo không sót bất kỳ checkbox nào chưa được tích trên frame
       try {
         const uncheckedBoxes = await frame.locator('input[type="checkbox"]:not(:checked)').all();
         for (const cb of uncheckedBoxes) {
-          const isConsent = await cb.evaluate((el) => {
-            if (el.checked || el.disabled) return false;
-            const meta = `${el.id} ${el.name} ${el.className} ${el.getAttribute('data-tf-element-role') || ''} ${el.getAttribute('data-leadid-type') || ''}`;
-            const isReq = el.required || el.getAttribute('aria-required') === 'true';
-            if (isReq) return true;
-            if (/consent|terms|agree|privacy|policy|disclosure|tcpa|optin|tos|rules|accept|confirm|legal|disclaimer|certify|authorize|sms|resident|age|subscriber/i.test(meta)) return true;
-            const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
-            const text = label ? (label.innerText || label.textContent || '').toLowerCase() : '';
-            if (/agree|consent|terms|privacy|policy|disclosure|tcpa|18\+|by clicking|confirm|accept|certify|understand|authorize/i.test(text)) return true;
-            return false;
-          }).catch(() => false);
+          const isEnabled = await cb.isEnabled().catch(() => true);
+          if (!isEnabled) continue;
 
-          if (isConsent) {
-            await cb.check({ force: true, timeout: 1000 }).catch(() => {});
-            let nowChecked = await cb.isChecked().catch(() => false);
-            if (!nowChecked) {
-              await cb.evaluate((el) => {
-                const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
-                if (label) {
-                  const target = label.querySelector('.checkmark, .checkbox-custom, .indicator, [class*="check"]') || label;
-                  target.click();
-                }
-                if (!el.checked) {
-                  el.checked = true;
-                  el.dispatchEvent(new Event('input', { bubbles: true }));
-                  el.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-              }).catch(() => {});
-              nowChecked = await cb.isChecked().catch(() => false);
-            }
-            if (nowChecked) {
-              await cb.evaluate((el) => { el.dataset.uxFilled = '1'; }).catch(() => {});
-              filledInThisPass += 1;
-              session.autofillFields = (session.autofillFields ?? 0) + 1;
-              options.onLog?.({
-                type: 'checkbox_checked',
-                detail: 'Đã tự động tích ô điều khoản/consent còn sót trước khi submit.',
-              });
-            }
+          await cb.check({ force: true, timeout: 1000 }).catch(() => {});
+          let nowChecked = await cb.isChecked().catch(() => false);
+          if (!nowChecked) {
+            await cb.evaluate((el) => {
+              const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+              if (label) {
+                const target = label.querySelector('.checkmark, .checkbox-custom, .indicator, [class*="check"], svg') || label;
+                try { target.click(); } catch {}
+              }
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked')?.set;
+              if (nativeSetter) {
+                nativeSetter.call(el, true);
+              } else {
+                el.checked = true;
+              }
+              el.setAttribute('aria-checked', 'true');
+              el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }).catch(() => {});
+            nowChecked = await cb.isChecked().catch(() => false);
+          }
+          if (nowChecked) {
+            await cb.evaluate((el) => { el.dataset.uxFilled = '1'; }).catch(() => {});
+            filledInThisPass += 1;
+            session.autofillFields = (session.autofillFields ?? 0) + 1;
+            options.onLog?.({
+              type: 'checkbox_checked',
+              detail: 'Đã tự động tích ô checkbox còn sót trước khi submit.',
+            });
           }
         }
       } catch {}
@@ -3433,21 +3656,29 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           const isExplicitOptional = /apt|suite|unit|address2|street2|secondary|middle|comments|notes|ext\b|optional/i.test(fieldMeta);
           if (isExplicitOptional) continue;
 
-          // Checkbox chỉ bắt buộc khi có required attribute
-          if (input.type === 'checkbox' && !input.required && input.getAttribute('aria-required') !== 'true') {
-            continue;
-          }
-
           const isRequiredAttr = input.required || input.getAttribute('aria-required') === 'true';
           const hasErrorClass = input.classList.contains('error') || input.getAttribute('aria-invalid') === 'true';
 
           // Chỉ coi là lỗi thực sự nếu phần tử thông báo lỗi ĐANG HIỂN THỊ và CÓ CHỮ THỰC TẾ
-          const parentGroup = input.closest('.input-group, .form-group, .field, .loco-group');
-          const hasParentError = parentGroup ? Array.from(parentGroup.querySelectorAll('.error:not(input):not(select), .error-message, .invalid-feedback')).some((errEl) => {
+          const parentGroup = input.closest('.input-group, .form-group, .field, .loco-group, .checkbox-group, .checkbox, label, div');
+          const hasParentError = parentGroup ? Array.from(parentGroup.querySelectorAll('.error:not(input):not(select), .error-message, .invalid-feedback, [role="alert"]')).some((errEl) => {
             if (!isVisible(errEl)) return false;
             const errText = (errEl.innerText || errEl.textContent || '').trim();
             return errText.length > 0;
           }) : false;
+
+          // Checkbox: nếu đã checked thì hợp lệ; nếu chưa checked, chỉ bỏ qua nếu chắc chắn không phải consent/required/error
+          if (input.type === 'checkbox') {
+            if (isChecked) continue;
+            const label = input.closest('label') || (input.id ? document.querySelector(`label[for="${input.id}"]`) : null);
+            const textNear = ((label ? (label.innerText || label.textContent || '') : '') + ' ' + (parentGroup ? (parentGroup.innerText || parentGroup.textContent || '') : '')).toLowerCase();
+            const isConsent = isRequiredAttr || hasParentError || hasErrorClass ||
+              /accept|agree|consent|terms|tcpa|privacy|policy|disclosure|must\s*(?:accept|agree|check|confirm|be)|you\s*must|required|mandatory|i\s*represent|18\+|certify|acknowledge|authorize|understand|by\s*checking|by\s*clicking|continue|proceed/i.test(textNear) ||
+              /consent|terms|agree|privacy|policy|disclosure|tcpa|optin|tos|rules|accept|confirm|legal|disclaimer|certify|authorize|resident|must/i.test(fieldMeta);
+            if (!isConsent) {
+              continue;
+            }
+          }
 
           let labelIsRequired = false;
           if (input.id) {
@@ -3459,11 +3690,34 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             if (lbl && /(^|\s)\*|\*(\s|$)/.test(lbl.innerText || lbl.textContent || '')) labelIsRequired = true;
           }
 
-          if ((isRequiredAttr || labelIsRequired || hasErrorClass || hasParentError) && (!val || !isChecked)) {
+          const isEmailField = (input.type === 'email' || /email/i.test(input.name || '') || /email/i.test(input.id || ''));
+          const isInvalidEmailVal = isEmailField && (!val || !val.includes('@'));
+          const hasValidationIssue = Boolean(hasErrorClass || hasParentError || (input.validity && !input.validity.valid));
+
+          if (isEmailField && isInvalidEmailVal) {
+            return {
+              unfilled: true,
+              id: input.id || input.name || 'email',
+              type: input.type || 'email',
+              reason: 'missing_or_invalid_email',
+            };
+          }
+
+          if ((isRequiredAttr || labelIsRequired) && (!val || !isChecked)) {
             return {
               unfilled: true,
               id: input.id || input.name || 'unknown',
               type: input.type || input.tagName.toLowerCase(),
+              reason: 'missing_required',
+            };
+          }
+
+          if (hasValidationIssue) {
+            return {
+              unfilled: true,
+              id: input.id || input.name || 'unknown',
+              type: input.type || input.tagName.toLowerCase(),
+              reason: 'validation_error',
             };
           }
         }
@@ -3491,7 +3745,20 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         const hasJumpCta = Boolean(document.querySelector('.cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], [aria-label*="Reward" i]'));
         const isJumpPage = inputs.length === 0 && hasJumpCta;
 
-        return { isScreen5, isJumpPage, hasDob, hasGender, hasEmailInput };
+        const visibleInputKeys = inputs
+          .filter((el) => {
+            const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+            return !s || (s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0');
+          })
+          .map((el) => `${el.tagName}:${el.name || el.id || el.type || ''}`)
+          .slice(0, 15)
+          .join(',');
+        const stepIndicator = document.querySelector('[data-step], .step.active, .current-step, [class*="step-indicator"]')
+          ? (document.querySelector('[data-step], .step.active, .current-step, [class*="step-indicator"]').getAttribute('data-step') || document.querySelector('[data-step], .step.active, .current-step, [class*="step-indicator"]').textContent?.trim())
+          : '';
+        const screenSignature = `${window.location.pathname}#${stepIndicator}#${visibleInputKeys}`;
+
+        return { isScreen5, isJumpPage, hasDob, hasGender, hasEmailInput, screenSignature };
       }).catch(() => null);
 
       if (screenInfo?.hasEmailInput) {
@@ -3504,12 +3771,49 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         session.isAtScreen5 = true;
       }
 
+      // Theo dõi chữ ký màn hình thực tế (True Screen Transition):
+      // Chỉ tăng completedScreens khi màn hình/bước form THỰC SỰ thay đổi sau khi đã bấm submit
+      if (screenInfo?.screenSignature) {
+        if (!session.lastActiveScreenSignature) {
+          session.lastActiveScreenSignature = screenInfo.screenSignature;
+        } else if (session.lastActiveScreenSignature !== screenInfo.screenSignature) {
+          if (session.hasSubmittedCurrentScreen) {
+            session.completedScreens = (session.completedScreens || 0) + 1;
+            session.currentScreen = session.completedScreens + 1;
+            session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
+            session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
+            session.lastActiveScreenSignature = screenInfo.screenSignature;
+            session.hasSubmittedCurrentScreen = false;
+            console.log(`[ScreenProgress] Xác nhận chuyển màn thực tế thành công: Màn ${session.completedScreens} -> Màn ${session.currentScreen}`);
+            options.onLog?.({
+              type: 'screen_advanced',
+              detail: `Đã hoàn thành Màn ${session.completedScreens}, chuyển sang Màn ${session.currentScreen}.`,
+            });
+            options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
+
+            // Gỡ bỏ bộ đếm submit trên các nút của màn mới
+            await frame.evaluate(() => {
+              document.querySelectorAll('[data-ux-submit-count], [data-ux-submitted]').forEach((b) => {
+                b.removeAttribute('data-ux-submit-count');
+                b.removeAttribute('data-ux-submitted');
+                delete b.dataset.uxSubmitCount;
+                delete b.dataset.uxSubmitted;
+              });
+            }).catch(() => {});
+          } else {
+            session.lastActiveScreenSignature = screenInfo.screenSignature;
+          }
+        }
+      }
+
       // Nếu đang ở Jump Page (sau Màn 4) và chưa kiểm tra lead:
       // TẠM DỪNG, KHÔNG CLICK NÚT NHẬN THƯỞNG, GỌI KIỂM TRA LEAD TRÙNG IP!
       const checkScreenTarget = Number(options.leadCheckScreen) || 4;
       const isRealJumpPage = Boolean(screenInfo?.isJumpPage && (session.completedScreens >= checkScreenTarget));
       if (isRealJumpPage && options.enableLeadCheck !== false && !session.screen5LeadVerified) {
-        if (!session.screen5LeadCheckTriggered) {
+        if (!session.emailFilled) {
+          console.log(`[LeadCheck] Đang ở Jump Page nhưng ô Gmail/Email chưa được điền hợp lệ. Bỏ qua kiểm tra lead, tiếp tục làm form.`);
+        } else if (!session.screen5LeadCheckTriggered) {
           session.screen5LeadCheckTriggered = true;
           session.leadCheckTriggered = true;
           session.leadCheckStatus = 'checking';
@@ -3517,21 +3821,23 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           console.log(`[LeadCheck] Đang ở Jump Page nhận thưởng (sau Màn ${session.completedScreens || checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
           options.onLog?.({
             type: 'jump_page_lead_check',
-            detail: `Đã tới Jump Page nhận thưởng sau khi điền ${session.completedScreens || checkScreenTarget} màn. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
+            detail: `Đã tới Jump Page nhận thưởng sau khi điền ${session.completedScreens || checkScreenTarget} màn. Bắt đầu chờ đợi lead (2 lần x 30s)...`,
           });
           if (typeof options.onEmailSubmitted === 'function') {
             options.onEmailSubmitted(session, page);
           } else if (typeof options.onScreen5Reached === 'function') {
             options.onScreen5Reached(session, page);
           }
+          return; // Dừng lại ở Jump Page, đợi kết quả kiểm tra lead!
         }
-        return; // Dừng lại ở Jump Page, đợi kết quả kiểm tra lead!
       }
 
       // Nếu đã đạt đến số màn quy định (mục tiêu: Màn 4) và chưa xác nhận lead: tạm dừng chờ lead
       const isTargetReached = (session.completedScreens >= checkScreenTarget);
       if (options.enableLeadCheck !== false && isTargetReached && !session.screen5LeadVerified) {
-        if (!session.screen5LeadCheckTriggered) {
+        if (!session.emailFilled) {
+          console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} nhưng ô Gmail/Email chưa được điền hợp lệ. Bỏ qua kiểm tra lead, tiếp tục làm form.`);
+        } else if (!session.screen5LeadCheckTriggered) {
           session.screen5LeadCheckTriggered = true;
           session.leadCheckTriggered = true;
           session.leadCheckStatus = 'checking';
@@ -3539,18 +3845,19 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
           options.onLog?.({
             type: 'screen_target_lead_check',
-            detail: `Đã hoàn thành ${session.completedScreens} màn hình điền form. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
+            detail: `Đã hoàn thành ${session.completedScreens} màn hình điền form. Bắt đầu chờ đợi lead (2 lần x 30s)...`,
           });
           if (typeof options.onEmailSubmitted === 'function') {
             options.onEmailSubmitted(session, page);
           } else if (typeof options.onScreen5Reached === 'function') {
             options.onScreen5Reached(session, page);
           }
+          return; // Dừng lại ở màn đích, chờ đợi có lead mới làm tiếp!
         }
-        return; // Dừng lại ở màn đích, chờ đợi có lead mới làm tiếp!
       }
 
       // Kiểm tra và chủ động bấm nút submit/tiếp tục nếu có tùy chọn autoSubmit
+      let rescueSucceeded = false;
       if (hasUnfilledRequiredOrErrorField?.unfilled) {
         console.log(`[Autofill] Phát hiện trường bắt buộc chưa điền hoặc bị lỗi: ${hasUnfilledRequiredOrErrorField.id} (${hasUnfilledRequiredOrErrorField.type}). Đang thử điền cứu trợ...`);
         try {
@@ -3560,6 +3867,11 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                        document.querySelector('input[required]:not([type="hidden"]), select[required]');
             if (!el) return false;
             if (el.type === 'checkbox') {
+              const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+              if (label) {
+                const target = label.querySelector('.checkmark, .checkbox-custom, .indicator, [class*="check"]') || label;
+                try { target.click(); } catch {}
+              }
               el.checked = true;
               el.dispatchEvent(new Event('input', { bubbles: true }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -3595,11 +3907,31 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             return false;
           }, hasUnfilledRequiredOrErrorField, record).catch(() => false);
 
-          if (rescueFilled) {
+          if (rescueFilled === true) {
             session.autofillFields = (session.autofillFields ?? 0) + 1;
             filledInThisPass += 1;
+            rescueSucceeded = true;
+            if (/email/i.test(hasUnfilledRequiredOrErrorField.id || hasUnfilledRequiredOrErrorField.type)) {
+              session.emailFilled = true;
+            }
           }
         } catch {}
+      }
+
+      // Kiểm tra xem trường lỗi có phải là trường tùy chọn hay không
+      const isOptionalField = hasUnfilledRequiredOrErrorField?.id &&
+        /apt|suite|unit|address2|street2|secondary|middle|comments|notes|ext\b|optional/i.test(hasUnfilledRequiredOrErrorField.id);
+
+      // Nếu vẫn còn lỗi chặn hoặc ô email chưa điền, chặn submit và kích hoạt AI sửa lỗi:
+      const isUnfilledEmailOrFatalError = hasUnfilledRequiredOrErrorField?.unfilled && !rescueSucceeded && !isOptionalField;
+      if (isUnfilledEmailOrFatalError) {
+        console.log(`[Autofill] Form chưa đủ điều kiện submit (Lỗi trường: ${hasUnfilledRequiredOrErrorField.id}, reason: ${hasUnfilledRequiredOrErrorField.reason || 'unfilled'}). Đang kích hoạt AI chẩn đoán và sửa lỗi...`);
+        options.onLog?.({
+          type: 'form_blocked_calling_ai',
+          detail: `Trường [${hasUnfilledRequiredOrErrorField.id}] chưa điền hoặc bị lỗi. Đang nhờ AI chẩn đoán và tự sửa...`,
+        });
+        void inspectAndFixFormWithAi(page, record, session, options);
+        return; // Không bấm submit mù quáng khi form đang có lỗi!
       }
 
       if (options.autoSubmit !== false) {
@@ -3629,7 +3961,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               let clickCount = Number(btn.dataset.uxSubmitCount || 0);
               const lastFields = Number(btn.dataset.uxLastFields || -1);
 
-              // Nếu số trường autofill tăng lên (vừa điền thêm trường ở bước mới), reset clickCount
+              // Chỉ reset khi có tiến triển ở màn mới; tính trước lần tăng autofillFields do submit bên dưới.
               if (currentFields > lastFields && lastFields !== -1) {
                 clickCount = 0;
               }
@@ -3653,7 +3985,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               btn.dataset.uxLastSubmitTime = String(now);
               btn.dataset.uxSubmitted = '1';
               btn.dataset.uxSubmitCount = String(clickCount + 1);
-              btn.dataset.uxLastFields = String(currentFields);
+              btn.dataset.uxLastFields = String(currentFields + 1);
               return { shouldClick: true, text, tag, id, clickCount: clickCount + 1 };
             }, session.autofillFields ?? 0).catch(() => null);
 
@@ -3717,29 +4049,12 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 try {
                   await submitBtn.click({ force: true, timeout: 2000 });
                 } catch (clickErr) {
-                  console.warn('[Autofill] Playwright click lỗi, dùng fallback evaluate click:', clickErr.message);
+                  console.warn('[Autofill] Playwright click lỗi:', clickErr.message);
                 }
               }
 
               session.lastActionTime = Date.now();
               session.autofillFields = (session.autofillFields ?? 0) + 1;
-
-              // Luôn kích hoạt native click và form.requestSubmit() để đảm bảo ăn chắc 100%
-              await submitBtn.evaluate((btn) => {
-                try { btn.click(); } catch {}
-                const form = btn.closest('form') || btn.form || (btn.getAttribute('form') ? document.getElementById(btn.getAttribute('form')) : null) || document.querySelector('form');
-                if (form && typeof form.requestSubmit === 'function') {
-                  try { form.requestSubmit(btn); } catch {
-                    try { form.requestSubmit(); } catch {
-                      try { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); } catch {}
-                    }
-                  }
-                }
-                // Đối với thẻ <a> chuyển bước Jump Page (/next), nếu click không điều hướng thì chủ động gán href
-                if (btn.tagName === 'A' && btn.href && !btn.href.startsWith('javascript:') && !btn.href.startsWith('#')) {
-                  try { window.location.href = btn.href; } catch {}
-                }
-              }).catch(() => {});
 
               // Xử lý đặc thù màn đầu nếu có tab quảng cáo mở ra ngoài
               if (isFirstSubmitOfSession) {
@@ -3772,13 +4087,53 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 }
               }
 
+              // Sau khi click submit: kiểm tra xem form có bị trang web chặn do lỗi validation không
+              let submitError = null;
+              try {
+                if (!page.isClosed()) {
+                  submitError = await frame.evaluate(() => {
+                    const isVisible = (el) => {
+                      if (!el) return false;
+                      const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                      if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) return false;
+                      return Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+                    };
+                    const errEls = Array.from(document.querySelectorAll([
+                      '.error:not(input):not(select):not(form)', '.error-message', '.invalid-feedback',
+                      '.form-error', '.field-error', '[role="alert"]', '.alert-danger',
+                      '.validation-error', '.text-danger', '.has-error .help-block', 'label.error'
+                    ].join(', '))).filter(isVisible);
+                    const texts = errEls.map((e) => (e.innerText || e.textContent || '').trim()).filter((t) => t.length > 0 && !/^(ok|valid|success)$/i.test(t));
+                    const invalidInputs = Array.from(document.querySelectorAll('input:invalid, select:invalid, [aria-invalid="true"], input.error')).filter(isVisible);
+                    return {
+                      hasError: texts.length > 0 || invalidInputs.length > 0,
+                      firstError: texts[0] || (invalidInputs[0] ? (invalidInputs[0].name || invalidInputs[0].id) : null),
+                    };
+                  }).catch(() => null);
+                }
+              } catch {}
+
+              if (submitError?.hasError) {
+                console.log(`[Autofill] Submit chưa qua được do trang báo lỗi: ${submitError.firstError}. Đang gọi AI chẩn đoán và tự sửa lỗi...`);
+                options.onLog?.({
+                  type: 'submit_rejected_with_error',
+                  detail: `Form chưa gửi được do có lỗi validation: ${submitError.firstError}. Đang kích hoạt AI chẩn đoán và sửa lỗi.`,
+                });
+                session.hasSubmittedCurrentScreen = false;
+                void inspectAndFixFormWithAi(page, record, session, options);
+                return;
+              }
+
+              session.hasSubmittedCurrentScreen = true;
               const isFirstClickOnThisScreen = !btnInfo?.clickCount || btnInfo.clickCount <= 1;
               if (isFirstClickOnThisScreen) {
-                session.completedScreens = (session.completedScreens || 0) + 1;
-                session.currentScreen = session.completedScreens + 1;
-                session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
-                session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
-                options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
+                if (!session.completedScreens || session.completedScreens < 1) {
+                  session.completedScreens = 1;
+                  session.currentScreen = 2;
+                  session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
+                  session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
+                  options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
+                }
               }
 
               // Kiểm tra xem màn vừa submit có phải là màn điền email hay không
@@ -3796,7 +4151,9 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               const isLeadCheckTrigger = (session.completedScreens >= checkScreenTarget);
 
               if (options.enableLeadCheck !== false && isLeadCheckTrigger && !session.screen5LeadVerified) {
-                if (!session.screen5LeadCheckTriggered) {
+                if (!session.emailFilled) {
+                  console.log(`[LeadCheck] Đã submit nhưng ô Gmail/Email chưa được điền hợp lệ. Bỏ qua kiểm tra lead, tiếp tục làm form.`);
+                } else if (!session.screen5LeadCheckTriggered) {
                   session.screen5LeadCheckTriggered = true;
                   session.leadCheckTriggered = true;
                   session.leadCheckStatus = 'checking';
@@ -3804,7 +4161,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (Mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
                   options.onLog?.({
                     type: 'screen_target_lead_check',
-                    detail: `Đã submit form Màn ${session.completedScreens}. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
+                    detail: `Đã submit form Màn ${session.completedScreens}. Bắt đầu chờ đợi lead (2 lần x 30s)...`,
                   });
                   if (typeof options.onEmailSubmitted === 'function') {
                     options.onEmailSubmitted(session, page);
@@ -3817,15 +4174,25 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
               // Kích hoạt quét tiếp theo sau 120ms để màn hình thao tác liên tục không nghỉ
             }
-          } else if (filledInThisPass > 0 || (session.autofillFields ?? 0) > 0) {
+          } else if (filledInThisPass > 0) {
             // FALLBACK NẾU THIẾU NÚT BẤM HOẶC NÚT BẤM KHÔNG ĐƯỢC NHẬN DIỆN:
-            // Chỉ chạy khi đã điền hoặc có dữ liệu form
+            // Chỉ chạy khi TRONG LƯỢT QUÉT NÀY vừa điền thêm được ô mới
             const formSubmitted = await frame.evaluate(() => {
               const forms = Array.from(document.querySelectorAll('form')).filter((f) => {
                 const rect = f.getBoundingClientRect();
                 return rect.width > 0 && rect.height > 0;
               });
-              if (!forms.length) return false;
+              if (!forms.length) {
+                // Thử tìm nút button, div.button, div.btn-option, .btn-option trong div chứa input
+                const btn = document.querySelector('button[type="submit"], [role="button"], div.button, div.btn-option, .btn-option, a.btn, button:not([type="reset"])');
+                if (btn) {
+                  try {
+                    btn.click();
+                    return true;
+                  } catch {}
+                }
+                return false;
+              }
               for (const form of forms) {
                 const lastSubmit = Number(form.dataset.uxLastSubmitTime || 0);
                 const now = Date.now();
@@ -3851,11 +4218,14 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               });
               session.lastActionTime = Date.now();
               session.autofillFields = (session.autofillFields ?? 0) + 1;
-              session.completedScreens = (session.completedScreens || 0) + 1;
-              session.currentScreen = session.completedScreens + 1;
-              session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
-              session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
-              options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
+              session.hasSubmittedCurrentScreen = true;
+              if (!session.completedScreens || session.completedScreens < 1) {
+                session.completedScreens = 1;
+                session.currentScreen = 2;
+                session.pageJumps = Math.max(session.pageJumps || 0, session.completedScreens);
+                session.screenReached = Math.max(session.screenReached || 1, session.currentScreen);
+                options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
+              }
 
               const wasEmailScreenFallback = frameHasEmail || session.screenHasEmail || screenInfo?.hasEmailInput || (session.emailFilled && !session.emailScreenSubmitted);
               if (wasEmailScreenFallback) {
@@ -3864,29 +4234,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 session.emailScreenNumber = session.completedScreens;
               }
 
-              const checkScreenTarget = Number(options.leadCheckScreen) || 4;
-              const isLeadCheckTrigger = (session.completedScreens >= checkScreenTarget);
-              if (options.enableLeadCheck !== false && isLeadCheckTrigger && !session.screen5LeadVerified) {
-                if (!session.screen5LeadCheckTriggered) {
-                  session.screen5LeadCheckTriggered = true;
-                  session.leadCheckTriggered = true;
-                  session.leadCheckStatus = 'checking';
-                  session.leadCheckReason = 'screen_target';
-                  console.log(`[LeadCheck] Đã hoàn thành Màn ${session.completedScreens} (fallback submit, Mục tiêu: Màn ${checkScreenTarget}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
-                  options.onLog?.({
-                    type: 'screen_target_lead_check',
-                    detail: `Đã submit form Màn ${session.completedScreens}. Bắt đầu chờ đợi lead (1 lần x 15s)...`,
-                  });
-                  if (typeof options.onEmailSubmitted === 'function') {
-                    options.onEmailSubmitted(session, page);
-                  } else if (typeof options.onScreen5Reached === 'function') {
-                    options.onScreen5Reached(session, page);
-                  }
-                  return;
-                }
-              }
-
-              setTimeout(() => { session.triggerAutofillScan?.(); }, 120);
+              setTimeout(() => { session.triggerAutofillScan?.(); }, 200);
             }
           }
         } catch (submitErr) {
@@ -3905,7 +4253,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
   }
 
   const isSpamAdUrl = (url = '') => {
-    return /galaxystore\.samsung\.com|play\.google\.com\/store|apps\.apple\.com|ppntrk\.com|adswapper|popads|propellerads|clickadu|trafficjunky|zeroredirect|doubleclick\.net|syndication\.exoclick/i.test(url);
+    return /galaxystore\.samsung\.com|play\.google\.com\/store|apps\.apple\.com|popads|propellerads|clickadu|trafficjunky|zeroredirect|doubleclick\.net|syndication\.exoclick/i.test(url);
   };
 
   /**
@@ -3917,18 +4265,15 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
   function watchPage(page) {
     if (trackedPages.has(page)) return;
 
-    const currentUrl = typeof page.url === 'function' ? page.url() : '';
-    if (isSpamAdUrl(currentUrl)) {
-      console.log(`[Autofill] Phát hiện tab quảng cáo/app store rác (${currentUrl}), tự động đóng.`);
-      page.close?.().catch(() => {});
-      return;
-    }
-
     trackedPages.add(page);
     let filling = false;
     let noProgressRounds = 0;
     const scan = async () => {
-      if (filling || page.isClosed()) return;
+      if (filling || page.isClosed() || page._aiFormFixing || page._aiAssistRunning) return;
+      const u = typeof page.url === 'function' ? page.url() : '';
+      if (!u || u.startsWith('chrome-error:') || u.startsWith('about:') || u.startsWith('chrome:')) {
+        return;
+      }
       filling = true;
       const fieldsBefore = session.autofillFields ?? 0;
       // Một lượt quét bình thường xong trong vài giây; quá 20s là đang kẹt ở một lệnh không trả về, ghi lại chỗ kẹt.
@@ -3987,12 +4332,12 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
               // 3. Kiểm tra có radio group hoặc câu hỏi khảo sát/quiz nào đang hiển thị không
               const surveyOptions = Array.from(document.querySelectorAll(
-                'input[type="radio"], [role="radio"], [id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"], .choice-btn, .option-btn, .quiz-btn, .answer-btn, label.btn, .creative-survey-answer'
+                'input[type="radio"], [role="radio"], [id="btn-option"], [id^="btn-option"], [id*="btn-option"], .btn-option, [data-vector-answer="true"], [data-element-type="survey_answer"], .choice-btn, .option-btn, .quiz-btn, .answer-btn, label.btn, .creative-survey-answer, a.choice, a.btn-option, a.choice-btn, a.option-btn, a.answer-btn, a.quiz-btn, .choices a, .answers a, .options a, .choice-container a, .options-container a, .loco-btn, .loco-option, .loco-choice, [data-loco-option], [data-loco-value]'
               ));
               if (surveyOptions.some((el) => isVisible(el) && !el.disabled)) return true;
 
-              // 4. Có form hoặc iframe đang hiển thị
-              const forms = Array.from(document.querySelectorAll('form, iframe'));
+              // 4. Có form hoặc iframe/widget nhúng (như LocoTomato) đang hiển thị
+              const forms = Array.from(document.querySelectorAll('form, iframe, .loco-widget, [data-loco-widget]'));
               if (forms.some((el) => isVisible(el))) return true;
 
               return false;
@@ -4017,27 +4362,34 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
 
         // Gọi AI Assist khi thực sự kẹt sau nhiều vòng liên tục không có tiến triển
         const stuckThreshold = options.stuckThreshold ?? 3;
-        if (noProgressRounds >= stuckThreshold && !session.aiAssistRunning && !page.isClosed()) {
+        if (noProgressRounds >= stuckThreshold && !page._aiAssistRunning && !page._aiFormFixing && !page.isClosed()) {
           noProgressRounds = 0;
           options.onStuck?.(page);
+          const tabRecord = page._assignedRecord || session.currentRecord || record;
+          void inspectAndFixFormWithAi(page, tabRecord, session, options);
         }
       }
     };
-    session.triggerAutofillScan = () => { void scan(); };
+    if (!session._pageScans) session._pageScans = new Set();
+    session._pageScans.add(scan);
+    session.triggerAutofillScan = () => {
+      for (const s of (session._pageScans || [])) {
+        try { void s(); } catch {}
+      }
+    };
+    page.triggerAutofillScan = () => { void scan(); };
+
     const timer = setInterval(() => { void scan(); }, 250);
     timer.unref?.();
+    if (!session._autofillTimers) session._autofillTimers = new Set();
+    session._autofillTimers.add(timer);
     session._autofillTimer = timer;
     if (typeof page.on === 'function') {
       page.on('domcontentloaded', scan);
       page.on('load', scan);
       page.on('framenavigated', (navFrame) => {
-        const u = typeof page.url === 'function' ? page.url() : '';
-        if (isSpamAdUrl(u)) {
-          console.log(`[Autofill] Điều hướng đến link rác (${u}), tự động đóng.`);
-          page.close?.().catch(() => {});
-          return;
-        }
         try {
+          const u = typeof page.url === 'function' ? page.url() : '';
           const isMain = !navFrame || (typeof page.mainFrame === 'function' && navFrame === page.mainFrame());
           if (isMain && u && !u.startsWith('about:') && !u.startsWith('chrome:')) {
             const cleanU = u.split('#')[0];
@@ -4058,12 +4410,17 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         const pu = typeof popup?.url === 'function' ? popup.url() : '';
         if (isSpamAdUrl(pu)) {
           console.log(`[Autofill] Phát hiện popup rác (${pu}), đóng ngay lập tức.`);
+          options.onLog?.({ type: 'popup_closed', detail: `Đã đóng popup quảng cáo rác: ${pu}` });
           popup.close?.().catch(() => {});
           return;
         }
         watchPage(popup);
       });
-      page.on('close', () => clearInterval(timer));
+      page.on('close', () => {
+        clearInterval(timer);
+        session._autofillTimers?.delete(timer);
+        session._pageScans?.delete(scan);
+      });
     }
 
     // Tự động xử lý dialog (alert, confirm, prompt) để tránh làm treo trình duyệt

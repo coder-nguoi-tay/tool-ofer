@@ -7,7 +7,7 @@ echo "=== Compiling native Swift binary ==="
 TMP_BIN="/tmp/AutoLeadPCMac_bin"
 swiftc -O -parse-as-library AutoLeadPCMacApp.swift -o "$TMP_BIN"
 
-# Tạo một bundle Mac từ source chung, gồm phần tạo profile GoLogin.
+# Tạo bundle Mac từ source chung với luồng Chrome và AdsPower.
 # @param $1 Tên bundle .app.
 # @param $2 Số instance.
 # @param $3 Cổng giao diện.
@@ -95,11 +95,10 @@ EOF
     cp -p autoleadpc-icon.svg "$RESOURCES_DIR/autoleadpc-icon.svg"
   fi
 
-  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs gologin-profile.mjs gologin-profile.test.mjs local-profile-engine.mjs local-profile-engine.test.mjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md GOLOGIN.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
-  if [ -d "Config/Browser" ]; then
-    mkdir -p "$LAUNCHER_DIR/Config"
-    cp -R Config/Browser "$LAUNCHER_DIR/Config/"
-    rm -rf "$LAUNCHER_DIR/Config/Browser/zero_profile/Default/Network"
+  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs adspower-profile.mjs adspower-profile.test.mjs codex-form-agent.mjs codex-form-agent.test.mjs playwright-mcp-human.cjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  if [ -f "Config/Browser/bookmarks.txt" ]; then
+    mkdir -p "$LAUNCHER_DIR/Config/Browser"
+    cp -p Config/Browser/bookmarks.txt "$LAUNCHER_DIR/Config/Browser/"
   fi
   if [ -f "script.mjs" ]; then
     cp -p script.mjs "$LAUNCHER_DIR/"
@@ -118,19 +117,16 @@ EOF
   echo "✓ Hoàn tất $APP_NAME"
 }
 
-# Build bản 1: AutoleadMac.app (Port 3210)
-rm -f "AutoleadMac.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
-build_app_bundle "AutoleadMac.app" "1" 3210 "com.autoleadmac.app" "AutoleadMac"
-
-# Build bản 2: Autolead.app (Port 3211)
-rm -f "Autolead.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
-build_app_bundle "Autolead.app" "2" 3211 "com.autolead.mac2" "Autolead"
+# Build duy nhất bản AdsPower: AutoLeadPC Mac 2 AdsPower.app (Port 3211)
+rm -f "AutoLeadPC Mac 2 AdsPower.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
+build_app_bundle "AutoLeadPC Mac 2 AdsPower.app" "2" 3211 "com.autolead.mac2.adspower" "AutoLeadPC Mac 2 AdsPower"
 
 rm -f "$TMP_BIN"
 
 echo "Triển khai vào ~/Downloads/ ..."
 mkdir -p "$HOME/Downloads/AutoLeadPC-mac"
 
+# Dọn dẹp triệt để toàn bộ bản build cũ và backup thừa
 rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" \
        "$HOME/Downloads/AutoLeadPC Mac 2.app" \
        "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app" \
@@ -139,27 +135,49 @@ rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" \
        "$HOME/Downloads/AutoLeadPC Mac.app" \
        "$HOME/Downloads/AutoLeadPC.app" \
        "$HOME/Downloads/AutoleadMac.app" \
-       "$HOME/Downloads/AutoLeadPC-mac/"*.app
+       "$HOME/Downloads/Autolead.app" \
+       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app.backup-"* \
+       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app.previous-"* \
+       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app.signature-recovery-"* \
+       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app.staged-"* \
+       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.launcher-previous-"* \
+       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.nested-copy-"* \
+       "$HOME/Downloads/AutoLeadPC Mac 2.app.backup-"* \
+       "$HOME/Downloads/AutoLeadPC Mac 2.app.source-backup-"* \
+       "$HOME/Downloads/AutoleadMac.zip" \
+       "$HOME/Downloads/Autolead.zip" \
+       "$HOME/Downloads/AutoLeadPC.zip" \
+       "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.zip" \
+       "$HOME/Downloads/AutoLeadPC_Mac2.zip" \
+       "$HOME/Downloads/AutoLeadPC-mac/"*.app \
+       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app" \
+       "AutoleadMac.app" \
+       "Autolead.app"
 
-cp -R "AutoleadMac.app" "$HOME/Downloads/AutoleadMac.app"
-cp -R "Autolead.app" "$HOME/Downloads/Autolead.app"
-cp -R "AutoleadMac.app" "$HOME/Downloads/AutoLeadPC-mac/AutoleadMac.app"
-cp -R "Autolead.app" "$HOME/Downloads/AutoLeadPC-mac/Autolead.app"
+rm -rf "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app"
+cp -R "AutoLeadPC Mac 2 AdsPower.app" "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app"
+cp -R "AutoLeadPC Mac 2 AdsPower.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 AdsPower.app"
 
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoleadMac.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/Autolead.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoleadMac.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/Autolead.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
 
-rm -f "$HOME/Downloads/AutoleadMac.zip" "$HOME/Downloads/AutoLeadPC.zip" \
-      "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.zip" "$HOME/Downloads/AutoLeadPC_Mac2.zip" \
-      "$HOME/Downloads/Autolead.zip" 2>/dev/null || true
-(cd "$HOME/Downloads" && zip -rq "AutoleadMac.zip" "AutoleadMac.app")
-(cd "$HOME/Downloads" && zip -rq "Autolead.zip" "Autolead.app")
+rm -f "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.zip" 2>/dev/null || true
+(cd "$HOME/Downloads" && zip -rq "AutoLeadPC Mac 2 AdsPower.zip" "AutoLeadPC Mac 2 AdsPower.app")
+
+# Đồng bộ bản build & code sang ~/workspaces/
+if [ -d "$HOME/workspaces" ]; then
+  echo "Đồng bộ bản build & code sang $HOME/workspaces/ ..."
+  rm -rf "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
+  cp -R "AutoLeadPC Mac 2 AdsPower.app" "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
+  cp "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.zip" "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.zip" 2>/dev/null || true
+  xattr -dr com.apple.quarantine "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
+  rsync -av --exclude 'node_modules' --exclude '.git' --exclude '*.app' --exclude '*.zip' ./ "$HOME/workspaces/AutoLeadPC-mac/" 2>/dev/null || true
+fi
 
 echo "=========================================="
-echo "Build thành công 2 bản:"
-echo "  AutoleadMac.app → Cổng 3210"
-echo "  Autolead.app    → Cổng 3211"
-echo "Đã lưu tại: $HOME/Downloads/"
+echo "Build thành công bản duy nhất:"
+echo "  AutoLeadPC Mac 2 AdsPower.app   → Cổng 3211"
+echo "Đã lưu tại:"
+echo "  - $HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app"
+echo "  - $HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
 echo "=========================================="

@@ -1296,12 +1296,12 @@
                 🌐 Google Chrome
               </label>
               <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-weight:bold;color:#0055aa;font-size:12px;">
-                <input type="radio" name="dashBrowserRadio" id="dashRadioGologin" value="Gologin" checked onchange="syncBrowserChoice('Gologin')">
-                🛡️ Chrome GoLogin (profile cục bộ)
+                <input type="radio" name="dashBrowserRadio" id="dashRadioAdsPower" value="AdsPower" checked onchange="syncBrowserChoice('AdsPower')">
+                🛡️ AdsPower SunBrowser
               </label>
             </div>
             <div id="dashBrowserBadge" style="font-size:11px;font-weight:bold;padding:3px 10px;border-radius:3px;background:#28a745;color:#fff;">
-              🛡️ Đang chọn: Chrome GoLogin (profile cục bộ)
+              🛡️ Đang chọn: AdsPower SunBrowser (profile riêng)
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -1369,6 +1369,16 @@
               <span class="options-toolbar-hint">Bấm trực tiếp vào từng ô để bật / tắt nhanh</span>
             </div>
             <div class="options-pills-row">
+              <label class="option-pill active" title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
+                <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
+                <span class="option-pill-text"><span class="option-pill-icon">📺</span> Chạy trong app (Khi bấm mới hiện)</span>
+              </label>
+
+              <label class="option-pill active" id="pillMultiTab" title="Chạy đa luồng dạng đa tab trong cùng trình duyệt (tiết kiệm tài nguyên và không bị giới hạn số profile AdsPower).">
+                <input type="checkbox" id="cbxMultiTab" checked onchange="syncOptionPills()">
+                <span class="option-pill-text"><span class="option-pill-icon">📑</span> Đa luồng dạng đa tab</span>
+              </label>
+
               <label class="option-pill option-pill-dup" title="Khi bật: chặn IP đã từng chạy thành công cho offer này. Khi tắt: cho phép chạy lại IP cũ.">
                 <input type="checkbox" id="cbxCheckDuplicateIP" checked onchange="syncOptionPills()">
                 <span class="option-pill-text"><span class="option-pill-icon">🛡️</span> Check duplicate IP</span>
@@ -1530,6 +1540,8 @@
           <div class="running-header-actions">
             <button type="button" class="win-btn" onclick="fetchRunningState()" title="Cập nhật trạng thái ngay lập tức">🔄 Làm mới</button>
             <button type="button" id="btnToggleScreenView" class="win-btn" onclick="toggleScreenView()" title="Chuyển đổi giữa chế độ Bảng và Xem màn hình trực tiếp">📺 Xem màn hình</button>
+            <button type="button" class="win-btn" onclick="handleShowAllBrowsers()" title="Bung tất cả cửa sổ trình duyệt ra màn hình Desktop">🖥️ Hiện tất cả</button>
+            <button type="button" class="win-btn" onclick="handleHideAllBrowsers()" title="Thu nhỏ toàn bộ trình duyệt về chạy ngầm trong app">🔽 Ẩn tất cả</button>
             <button type="button" class="win-btn win-btn-danger" onclick="handleCloseAll()" title="Đóng toàn bộ cửa sổ trình duyệt đang chạy">✕ Đóng tất cả</button>
           </div>
         </div>
@@ -1551,20 +1563,21 @@
             <thead>
               <tr>
                 <th class="col-header-selector"></th>
-                <th style="width:105px;">Thread</th>
-                <th style="width:130px;">IP Thoát</th>
-                <th style="width:240px;">Hành động hiện tại</th>
+                <th style="width:95px;">Thread</th>
+                <th style="width:135px;text-align:center;">Cửa sổ & Xem</th>
+                <th style="width:125px;">IP Thoát</th>
+                <th style="width:230px;">Hành động hiện tại</th>
                 <th style="width:105px;">Trạng thái</th>
                 <th style="width:145px;">Thiết bị & Chrome</th>
-                <th style="width:170px;">Email gán</th>
-                <th style="width:90px;">Mật khẩu</th>
+                <th style="width:160px;">Email gán</th>
+                <th style="width:85px;">Mật khẩu</th>
                 <th>Email phụ / Ghi chú</th>
               </tr>
             </thead>
             <tbody id="dgvRunningBody">
               <tr>
                 <td class="cell-selector">►</td>
-                <td colspan="8">
+                <td colspan="9">
                   <div class="running-empty-state">
                     <div class="running-empty-icon">💤</div>
                     <div class="running-empty-title">Không có luồng trình duyệt nào đang chạy</div>
@@ -1587,6 +1600,7 @@
           <div style="display:flex;gap:8px;align-items:center;">
             <button type="button" class="win-btn" onclick="_quickScroll(0, -500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang lên trên (hoặc dùng con lăn chuột / trackpad)">⬆ Cuộn lên</button>
             <button type="button" class="win-btn" onclick="_quickScroll(0, 500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang xuống dưới (hoặc dùng con lăn chuột / trackpad)">⬇ Cuộn xuống</button>
+            <button type="button" class="win-btn" id="btnModalPopOutDesktop" onclick="popOutActiveScreenToDesktop()" style="padding:4px 12px;font-size:11.5px;background:#0284c7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;" title="Bung cửa sổ trình duyệt thật ra màn hình Desktop">🖥️ Mở ra Desktop</button>
             <button type="button" onclick="closeScreenModal()" style="background:#e11d48;color:#fff;border:none;padding:4px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;">✕ Đóng</button>
           </div>
         </div>
@@ -1975,9 +1989,11 @@
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonChrome" onchange="syncBrowserChoice('Chrome')"> Chrome</label>
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonFirefox" onchange="syncBrowserChoice('Firefox')"> Chrome Firefox</label>
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonAdspower" onchange="syncBrowserChoice('AdsPower')"> Chrome AdsPower</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="browserRadio" id="RadioButtonGologinCMD2" onchange="syncBrowserChoice('Gologin')"> Chrome Gologin</label>
           </div>
-          <div style="font-size:11px;color:#555;">Tạo profile cục bộ từ zero_profile. Cần Chrome đã cài trên máy; không cần GoLogin API token.</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-top:6px;">AdsPower API key:
+            <input type="password" id="AdsPowerApiKey" autocomplete="off" class="win-input" style="flex:1;" placeholder="AdsPower > Automation > API & MCP">
+          </label>
+          <div style="font-size:11px;color:#555;margin-top:4px;">AdsPower phải đang chạy và tài khoản cần quyền Local API. Mỗi luồng tạo profile SunBrowser riêng, gắn proxy rồi mở bằng Playwright.</div>
         </fieldset>
 
         <fieldset class="win-group">
@@ -1990,6 +2006,7 @@
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="CheckBoxWebRTC" checked> WebRTC</label>
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="CheckBoxGetApiPake" checked> Api Fake IP</label>
           </div>
+          <div style="margin-top:5px;color:#555;font-size:11px;">AdsPower tự quản lý Canvas, ClientRects và WebGLImage theo mặc định của từng profile.</div>
         </fieldset>
 
         <fieldset class="win-group">
@@ -2000,6 +2017,7 @@
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkLinux" checked> Linux</label>
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkAndroid"> Android</label>
           </div>
+          <div style="margin-top:5px;color:#555;font-size:11px;">Các phiên Chrome và AdsPower sẽ xoay vòng qua những thiết bị được chọn.</div>
         </fieldset>
 
         <fieldset class="win-group">
@@ -2320,6 +2338,7 @@
     <!-- WinForms StatusStrip -->
     <div class="win-statusbar">
       <div class="status-panel status-panel-flex" id="lbStatus">Ready</div>
+      <div class="status-panel" id="sbActiveIpsPanel" style="color:#0284c7;font-weight:600;">🌐 IP: <b id="sbActiveIps" style="color:#16a34a;">--</b></div>
       <div class="status-panel" style="cursor:pointer;" onclick="switchTab('ToffersLeads')" title="Số Point toffers.top">💎 Point: <b id="sbToffersPoint">--</b></div>
       <div class="status-panel">Total Run: <b id="lbTotalRun">0</b></div>
       <div class="status-panel">Total RRS: <b id="lbTotalRRS">0</b></div>
@@ -3318,45 +3337,49 @@
     }
 
     // Browser Mode Synchronization (Dashboard <-> Settings Tab)
+    /**
+     * Đồng bộ lựa chọn trình duyệt trên Dashboard và Settings rồi lưu cấu hình.
+     * @param {string} mode Chế độ Chrome, AdsPower hoặc Firefox.
+     * @param {boolean} shouldSave Có ghi lại Settings.ini ngay hay không.
+     * @return {void} Cập nhật radio và nhãn trình duyệt.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-20
+     */
     function syncBrowserChoice(mode, shouldSave = true) {
-      const isGoLogin = (mode === 'Gologin');
       const isChrome = (mode === 'Chrome');
+      const isAdsPower = (mode === 'AdsPower');
 
       // Update Dashboard radios
       const dashChrome = document.getElementById('dashRadioChrome');
-      const dashGologin = document.getElementById('dashRadioGologin');
+      const dashAdsPower = document.getElementById('dashRadioAdsPower');
       if (dashChrome) dashChrome.checked = isChrome;
-      if (dashGologin) dashGologin.checked = isGoLogin;
+      if (dashAdsPower) dashAdsPower.checked = isAdsPower;
 
       // Update Settings radios
       const radChrome = document.getElementById('RadioButtonChrome');
-      const radGologin = document.getElementById('RadioButtonGologinCMD2');
       const radFirefox = document.getElementById('RadioButtonFirefox');
       const radAdspower = document.getElementById('RadioButtonAdspower');
       if (radChrome) radChrome.checked = isChrome;
-      if (radGologin) radGologin.checked = isGoLogin;
       if (radFirefox) radFirefox.checked = (mode === 'Firefox');
-      if (radAdspower) radAdspower.checked = (mode === 'AdsPower');
+      if (radAdspower) radAdspower.checked = isAdsPower;
 
       // Update Dashboard badge
       const badge = document.getElementById('dashBrowserBadge');
       if (badge) {
-        if (isGoLogin) {
-          badge.style.background = '#28a745';
-          badge.style.color = '#fff';
-          badge.textContent = '🛡️ Đang chọn: Chrome GoLogin (profile cục bộ)';
-        } else if (isChrome) {
+        if (isChrome) {
           badge.style.background = '#0078d7';
           badge.style.color = '#fff';
           badge.textContent = '🌐 Đang chọn: Google Chrome';
+        } else if (isAdsPower) {
+          badge.style.background = '#28a745';
+          badge.style.color = '#fff';
+          badge.textContent = '🛡️ Đang chọn: AdsPower SunBrowser (profile riêng)';
         } else {
           badge.style.background = '#6c757d';
           badge.style.color = '#fff';
           badge.textContent = `⚙️ Đang chọn: ${mode}`;
         }
       }
-
-      // Update GoLogin token group in Settings
 
       // Persist to localStorage
       try {
@@ -3369,18 +3392,24 @@
     }
 
     // Settings (Settings.ini)
+    /**
+     * Nạp lựa chọn trình duyệt, API key và fingerprint từ cấu hình đã lưu.
+     * @return {Promise<void>} Hoàn tất cập nhật các trường Settings.
+     * @throws {Error} Khi giao diện không đọc được cấu hình cục bộ.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-20
+     */
     async function loadWindowsSettings() {
       const data = await api('/pc/settings/read');
       const localChoice = (() => {
         try { return localStorage.getItem('autoleadpc_browser_choice'); } catch { return null; }
       })();
 
-      let selectedMode = 'Gologin'; // Default to GoLogin as desired by the user
-      if (localChoice) {
+      let selectedMode = 'AdsPower';
+      if (['Chrome', 'AdsPower', 'Firefox'].includes(localChoice)) {
         selectedMode = localChoice;
       } else if (data) {
-        if (data.ChromeGologin) selectedMode = 'Gologin';
-        else if (data.ChromeFirefox) selectedMode = 'Firefox';
+        if (data.ChromeFirefox) selectedMode = 'Firefox';
         else if (data.ChromeAdsPower) selectedMode = 'AdsPower';
         else if (data.Chrome) selectedMode = 'Chrome';
       }
@@ -3388,6 +3417,7 @@
       syncBrowserChoice(selectedMode, false);
 
       if (data) {
+        if (data.AdsPowerApiKey !== undefined) document.getElementById('AdsPowerApiKey').value = data.AdsPowerApiKey;
         if (data.Canvas !== undefined) document.getElementById('CheckBoxCanvas').checked = data.Canvas;
         if (data.ClientRects !== undefined) document.getElementById('CheckboxClientRects').checked = data.ClientRects;
         if (data.WebGLImage !== undefined) document.getElementById('CheckBoxWebGLImage').checked = data.WebGLImage;
@@ -3401,20 +3431,26 @@
       }
     }
 
+    /**
+     * Lưu chế độ trình duyệt cùng khóa AdsPower và tùy chọn fingerprint của AutoLeadPC.
+     * @return {Promise<void>} Hoàn tất ghi Settings.ini và khóa AdsPower.
+     * @throws {Error} Khi máy chủ cục bộ từ chối lưu cấu hình.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-20
+     */
     async function saveWindowsSettings() {
-      let browserMode = 'Gologin';
-      if (document.getElementById('dashRadioChrome')?.checked || document.getElementById('RadioButtonChrome')?.checked) {
+      let browserMode = 'AdsPower';
+      if (document.getElementById('dashRadioAdsPower')?.checked || document.getElementById('RadioButtonAdspower')?.checked) {
+        browserMode = 'AdsPower';
+      } else if (document.getElementById('dashRadioChrome')?.checked || document.getElementById('RadioButtonChrome')?.checked) {
         browserMode = 'Chrome';
-      } else if (document.getElementById('dashRadioGologin')?.checked || document.getElementById('RadioButtonGologinCMD2')?.checked) {
-        browserMode = 'Gologin';
       } else if (document.getElementById('RadioButtonFirefox')?.checked) {
         browserMode = 'Firefox';
-      } else if (document.getElementById('RadioButtonAdspower')?.checked) {
-        browserMode = 'AdsPower';
       }
 
       const payload = {
         browserMode,
+        AdsPowerApiKey: document.getElementById('AdsPowerApiKey')?.value ?? '',
         Canvas: document.getElementById('CheckBoxCanvas')?.checked ?? false,
         ClientRects: document.getElementById('CheckboxClientRects')?.checked ?? true,
         WebGLImage: document.getElementById('CheckBoxWebGLImage')?.checked ?? true,
@@ -3426,7 +3462,8 @@
         Linux: document.getElementById('chkLinux')?.checked ?? true,
         Android: document.getElementById('chkAndroid')?.checked ?? false,
       };
-      await api('/pc/settings/save', { method: 'POST', body: JSON.stringify(payload) });
+      const result = await api('/pc/settings/save', { method: 'POST', body: JSON.stringify(payload) });
+      if (result?.error) throw new Error(result.error);
       const statusEl = document.getElementById('settingsSaveStatus');
       if (statusEl) {
         statusEl.textContent = 'Saved to Settings.ini successfully!';
@@ -3436,11 +3473,11 @@
 
     // Launch & Stop Engine
     /**
-     * Mở các luồng Chrome hoặc GoLogin theo cấu hình trên giao diện.
+     * Mở các luồng Chrome hoặc AdsPower theo cấu hình trên giao diện.
      * @return {Promise<void>} Hoàn tất khi API khởi chạy trả kết quả.
      * @throws {Error} Khi giao diện không thể gửi yêu cầu mở trình duyệt.
      * @author ductv <ductv@getflycrm.com>
-     * @since 2026-10-19
+     * @since 2026-10-20
      */
     async function handleStart() {
       const btnStart = document.getElementById('btnStart');
@@ -3479,7 +3516,7 @@
       // Tự động lưu các link offer mới điền để không bị mất khi chạy
       void saveOfferConfig(true);
 
-      const concurrency = Math.min(10, Math.max(1, parseInt(document.getElementById('nudThread').value) || 1));
+      const concurrency = Math.min(30, Math.max(1, parseInt(document.getElementById('nudThread').value) || 1));
       const scriptPath = document.getElementById('cbbScript').value;
       const timeLimit = parseInt(document.getElementById('txtTimeLimit').value) || 0;
       const delayStart = parseInt(document.getElementById('nudDelayStart').value) || 0;
@@ -3509,16 +3546,13 @@
       const hideUntilTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
       const hideUntilLead = Boolean(document.getElementById('cbxHideUntilLead')?.checked);
 
-      // Kiểm tra chế độ trình duyệt (Mặc định mở bằng GoLogin trừ khi người dùng chủ động tích chọn Chrome)
-      const isExplicitChrome = Boolean(
-        (document.getElementById('dashRadioChrome')?.checked || document.getElementById('RadioButtonChrome')?.checked) &&
-        !document.getElementById('dashRadioGologin')?.checked &&
-        !document.getElementById('RadioButtonGologinCMD2')?.checked
-      );
-      const isGoLogin = !isExplicitChrome;
+      // Dùng lựa chọn đang hiển thị trên Dashboard để gọi đúng trình duyệt.
+      const isAdsPower = Boolean(document.getElementById('dashRadioAdsPower')?.checked || document.getElementById('RadioButtonAdspower')?.checked);
 
-      if (isGoLogin) {
-        document.getElementById('lbStatus').textContent = 'Đang tạo profile cục bộ và mở Chrome...';
+      if (isAdsPower) {
+        await saveWindowsSettings();
+        const browserName = 'AdsPower SunBrowser';
+        document.getElementById('lbStatus').textContent = `Đang tạo profile riêng và mở ${browserName}...`;
         if (hideUntilTarget || hideUntilLead) {
           switchTab('ScreenView');
         } else {
@@ -3526,7 +3560,7 @@
         }
         fetchRunningState();
 
-        const res = await api('/launch-gologin', {
+        const res = await api('/launch-adspower', {
           method: 'POST',
           body: JSON.stringify({
             websiteUrl,
@@ -3550,24 +3584,30 @@
             antiFpWebrtc,
             antiFpFonts,
             antiFpApiFakeIP,
+            Windows: document.getElementById('chkWindows')?.checked ?? false,
+            Mac: document.getElementById('chkMac')?.checked ?? false,
+            Linux: document.getElementById('chkLinux')?.checked ?? false,
+            Android: document.getElementById('chkAndroid')?.checked ?? false,
             checkDuplicate,
             autoSubmitForm: true,
             enableLeadCheck,
-            leadCheckInterval: 15,
-            leadCheckMaxAttempts: 1,
+            leadCheckInterval: 30,
+            leadCheckMaxAttempts: 2,
             leadCheckScreen: 4,
             hideUntilTarget,
             hideUntilLead,
+            runInApp: document.getElementById('cbxRunInApp')?.checked ?? true,
+            multiTab: document.getElementById('cbxMultiTab') ? document.getElementById('cbxMultiTab').checked : true,
           })
         });
         if (res.error) {
-          showWinAlert('Lỗi GoLogin: ' + res.error);
-          document.getElementById('lbStatus').textContent = 'GoLogin error: ' + res.error;
+          showWinAlert(`Lỗi ${browserName}: ` + res.error);
+          document.getElementById('lbStatus').textContent = `${browserName} error: ` + res.error;
         } else if (res.warnings?.length > 0 && !res.results?.length) {
           showWinAlert('Thông báo: ' + res.warnings.join('\n'));
           document.getElementById('lbStatus').textContent = res.warnings[0];
         } else {
-          document.getElementById('lbStatus').textContent = res.message || `GoLogin: mở ${res.results?.length || 0} profile thành công.`;
+          document.getElementById('lbStatus').textContent = res.message || `${browserName}: mở ${res.results?.length || 0} profile thành công.`;
         }
         fetchRunningState();
         return;
@@ -3611,11 +3651,15 @@
               antiFpWebrtc,
               antiFpFonts,
               antiFpApiFakeIP,
+              Windows: document.getElementById('chkWindows')?.checked ?? false,
+              Mac: document.getElementById('chkMac')?.checked ?? false,
+              Linux: document.getElementById('chkLinux')?.checked ?? false,
+              Android: document.getElementById('chkAndroid')?.checked ?? false,
               checkDuplicate,
               autoSubmitForm: true,
               enableLeadCheck,
-              leadCheckInterval: 15,
-              leadCheckMaxAttempts: 1,
+              leadCheckInterval: 30,
+              leadCheckMaxAttempts: 2,
               leadCheckScreen: 4,
               hideUntilTarget,
               hideBrowser: hideUntilTarget,
@@ -3650,15 +3694,20 @@
             antiFpWebrtc,
             antiFpFonts,
             antiFpApiFakeIP,
+            Windows: document.getElementById('chkWindows')?.checked ?? false,
+            Mac: document.getElementById('chkMac')?.checked ?? false,
+            Linux: document.getElementById('chkLinux')?.checked ?? false,
+            Android: document.getElementById('chkAndroid')?.checked ?? false,
             checkDuplicate,
             autoSubmitForm: true,
             enableLeadCheck,
-            leadCheckInterval: 15,
-            leadCheckMaxAttempts: 1,
+            leadCheckInterval: 30,
+            leadCheckMaxAttempts: 2,
             leadCheckScreen: 4,
             hideUntilTarget,
             hideBrowser: hideUntilTarget,
             hideUntilLead,
+            multiTab: document.getElementById('cbxMultiTab') ? document.getElementById('cbxMultiTab').checked : true,
           })
         });
         if (res.error) {
@@ -3708,6 +3757,85 @@
       document.getElementById('lbStatus').textContent = 'Đã đóng tất cả trình duyệt.';
       fetchRunningState();
     }
+
+    async function toggleBrowserWindow(slot, isCurrentlyVisible) {
+      const endpoint = isCurrentlyVisible ? `/browser/hide/${slot}` : `/browser/show/${slot}`;
+      const actionName = isCurrentlyVisible ? 'Thu nhỏ cửa sổ' : 'Hiện cửa sổ Desktop';
+      document.getElementById('lbStatus').textContent = `Đang ${actionName} Slot ${slot}...`;
+      try {
+        const res = await api(endpoint, { method: 'POST' });
+        if (res.error) {
+          showWinAlert(`Lỗi ${actionName}: ${res.error}`);
+        } else {
+          document.getElementById('lbStatus').textContent = `✓ Đã ${actionName} Slot ${slot} thành công.`;
+          fetchRunningState();
+        }
+      } catch (err) {
+        document.getElementById('lbStatus').textContent = `Lỗi: ${err.message}`;
+      }
+    }
+    window.toggleBrowserWindow = toggleBrowserWindow;
+
+    /**
+     * Đóng một trình duyệt theo slot mà không dừng các slot khác.
+     * @param {number} slot Slot trình duyệt cần đóng.
+     * @return {Promise<void>} Hoàn tất khi trạng thái danh sách được làm mới.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-21
+     */
+    async function closeBrowserSlot(slot) {
+      if (!window.confirm(`Đóng riêng trình duyệt Slot ${slot}?`)) return;
+      try {
+        const result = await api(`/browser/close/${slot}`, { method: 'POST' });
+        if (result.error) throw new Error(result.error);
+        document.getElementById('lbStatus').textContent = `✓ Đã đóng trình duyệt Slot ${slot}.`;
+        await fetchRunningState();
+      } catch (error) {
+        showWinAlert(`Không thể đóng Slot ${slot}: ${error.message}`);
+      }
+    }
+    window.closeBrowserSlot = closeBrowserSlot;
+
+    async function handleShowAllBrowsers() {
+      document.getElementById('lbStatus').textContent = 'Đang bung tất cả cửa sổ trình duyệt ra Desktop...';
+      try {
+        const res = await api('/browser/show-all', { method: 'POST' });
+        document.getElementById('lbStatus').textContent = `✓ Đã hiển thị ${res.count || 0} cửa sổ trình duyệt ra Desktop.`;
+        fetchRunningState();
+      } catch (err) {
+        document.getElementById('lbStatus').textContent = `Lỗi: ${err.message}`;
+      }
+    }
+    window.handleShowAllBrowsers = handleShowAllBrowsers;
+
+    async function handleHideAllBrowsers() {
+      document.getElementById('lbStatus').textContent = 'Đang thu nhỏ tất cả trình duyệt về chạy ngầm trong app...';
+      try {
+        const res = await api('/browser/hide-all', { method: 'POST' });
+        document.getElementById('lbStatus').textContent = `✓ Đã thu nhỏ ${res.count || 0} trình duyệt về chạy ngầm trong app.`;
+        fetchRunningState();
+      } catch (err) {
+        document.getElementById('lbStatus').textContent = `Lỗi: ${err.message}`;
+      }
+    }
+    window.handleHideAllBrowsers = handleHideAllBrowsers;
+
+    async function popOutActiveScreenToDesktop() {
+      if (!_screenActiveSlot) return;
+      await toggleBrowserWindow(_screenActiveSlot, false);
+      const btn = document.getElementById('btnModalPopOutDesktop');
+      if (btn) {
+        btn.textContent = '✓ Đã mở ngoài Desktop';
+        btn.style.background = '#16a34a';
+        setTimeout(() => {
+          if (btn) {
+            btn.textContent = '🖥️ Mở ra Desktop';
+            btn.style.background = '#0284c7';
+          }
+        }, 2500);
+      }
+    }
+    window.popOutActiveScreenToDesktop = popOutActiveScreenToDesktop;
 
     let currentSelectedRunningOfferTab = 'all';
     let currentSelectedOfferLogTab = 'all';
@@ -3761,15 +3889,25 @@
       document.getElementById('lbTotalRun').textContent = state.limitRun?.count || 0;
 
       // Update Tab Running Stat Chips
-      const totalThreads = sessions.length;
+      const totalThreads = sessions.reduce((sum, s) => sum + (s.tabCount || 1), 0);
       const totalLeads = sessions.filter(s => s.leadCheckStatus === 'matched' || s.leadCheckStatus === 'confirmed').length;
-      const totalAi = sessions.filter(s => s.aiRunning).length;
+      const totalAi = sessions.reduce((sum, s) => sum + (s.tabs ? s.tabs.filter(t => t.aiRunning).length : (s.aiRunning ? 1 : 0)), 0);
       const elTh = document.getElementById('runStatThreads');
       if (elTh) elTh.textContent = totalThreads;
       const elLd = document.getElementById('runStatLeads');
       if (elLd) elLd.textContent = totalLeads;
       const elAi = document.getElementById('runStatAi');
       if (elAi) elAi.textContent = totalAi;
+
+      // Update IP display on top title bar and bottom status bar
+      const activeIps = sessions.filter(s => s.exitIp).map(s => `S${s.slot}: ${s.exitIp}`);
+      const sbIpsEl = document.getElementById('sbActiveIps');
+      if (sbIpsEl) sbIpsEl.textContent = activeIps.length > 0 ? activeIps.join(', ') : '--';
+      const appTitleEl = document.querySelector('.win-titlebar-title');
+      if (appTitleEl) {
+        appTitleEl.textContent = activeIps.length > 0 ? `AutoLeadPC - Cleaned • [${activeIps.join(' | ')}]` : 'AutoLeadPC - Cleaned';
+      }
+      document.title = activeIps.length > 0 ? `AutoLeadPC • [${activeIps.join(' | ')}]` : 'AutoLeadPC - Cleaned';
 
       // Đồng bộ thông tin point & lead từ toffers nền
       if (state.toffers && state.toffers.point !== null && state.toffers.point !== undefined) {
@@ -3838,7 +3976,7 @@
         const emptyMsg = currentSelectedRunningOfferTab === 'all'
           ? 'Không có luồng trình duyệt nào đang chạy.'
           : `Không có luồng nào đang chạy cho Offer ${currentSelectedRunningOfferTab}.`;
-        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="8"><div class="running-empty-state"><div class="running-empty-icon">💤</div><div class="running-empty-title">${emptyMsg}</div><div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="9"><div class="running-empty-state"><div class="running-empty-icon">💤</div><div class="running-empty-title">${emptyMsg}</div><div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div></div></td></tr>`;
         return;
       }
 
@@ -3863,13 +4001,31 @@
           ? `<span class="run-email-cell" onclick="copyTextToClipboard('${escHtml(s.assignedEmail)}')" title="Nhấp để copy email">${escHtml(s.assignedEmail)}</span>`
           : '<span style="color:#94a3b8;">--</span>';
         const passCell = s.assignedPass ? `<span class="run-pass-chip" title="Mật khẩu">${escHtml(s.assignedPass)}</span>` : '<span style="color:#94a3b8;">--</span>';
-        const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || '')}">💻 ${escHtml(s.deviceProfile || 'Windows')} · ${escHtml(s.version || 'Chrome')}</span>`;
+        const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || '')}">💻 <strong style="color:#0f172a;">${escHtml(s.deviceProfile || 'Windows 11')}</strong> · <span style="color:#0284c7;font-weight:600;">${escHtml(s.version || 'Chrome')}</span></span>`;
+
+        const isWinVis = Boolean(s.isWindowVisible);
+        const winBtnLabel = isWinVis ? '🔽 Ẩn' : '🖥️ Hiện';
+        const winBtnTitle = isWinVis ? 'Thu nhỏ cửa sổ về chạy ngầm' : 'Bung cửa sổ trình duyệt ra màn hình Desktop';
+        const winBtnStyle = isWinVis
+          ? 'background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;'
+          : 'background:#0284c7;color:#fff;border:1px solid #0369a1;font-weight:600;';
+        const actionButtons = `
+          <div style="display:flex;gap:4px;justify-content:center;align-items:center;">
+            <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;${winBtnStyle}" onclick="event.stopPropagation(); toggleBrowserWindow(${s.slot}, ${isWinVis});" title="${winBtnTitle}">${winBtnLabel}</button>
+            <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;" onclick="event.stopPropagation(); openScreenModal(${s.slot});" title="Xem trực tiếp trong app">📺 Xem</button>
+            <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;background:#fff1f2;color:#b91c1c;border:1px solid #fca5a5;" onclick="event.stopPropagation(); closeBrowserSlot(${s.slot});" title="Đóng riêng trình duyệt này">✕ Đóng</button>
+          </div>
+        `;
+
+        tr.ondblclick = () => toggleBrowserWindow(s.slot, isWinVis);
+        tr.title = 'Nhấp đúp chuột để bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop';
 
         tr.innerHTML = `
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
           <td style="text-align:center;white-space:nowrap;">${threadBadge}</td>
+          <td style="text-align:center;white-space:nowrap;">${actionButtons}</td>
           <td>${exitIpBadge}</td>
-          <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(s.websiteUrl || '')}">${actionText}</td>
+          <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(s.websiteUrl || '')}">${actionText}</td>
           <td>${leadBadge}</td>
           <td>${deviceInfo}</td>
           <td>${emailCell}</td>
@@ -4147,6 +4303,12 @@
       window.__currentLogRows = rows;
     }
 
+    /**
+     * Hiển thị hoạt động AI và kết quả kiểm tra lead kèm IP đã lưu trong log.
+     * @return {void} Cập nhật các dòng hoạt động trên giao diện.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-21
+     */
     function renderAiActivityGrid() {
       const tbody = document.getElementById('dgvAiActivityBody');
       if (!tbody) return;
@@ -4173,12 +4335,16 @@
         else if (entry.type === 'ai_error') actionBadge = '<span class="badge-log badge-ai-error">Lỗi AI</span>';
         else if (entry.type === 'ai_smart_fallback') actionBadge = '<span class="badge-log badge-ai">Fallback Heuristic</span>';
 
+        const activityDetail = entry.type === 'lead_confirmed'
+          ? `${entry.detail || ''} · IP: ${entry.ip || session.ip || 'không rõ'}`
+          : (entry.detail || entry.url || '');
+
         return `<tr>
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
           <td>${fmtTime(entry.time)}</td>
           <td style="font-weight:bold;text-align:center;">Slot ${session.slot}</td>
           <td>${actionBadge}</td>
-          <td>${escHtml(entry.detail || entry.url || '')}</td>
+          <td>${escHtml(activityDetail)}</td>
         </tr>`;
       }).join('');
     }
@@ -4530,8 +4696,15 @@
           const header = document.createElement('div');
           header.className = 'screen-tile-header';
           header.innerHTML = `
-            <span class="screen-tile-slot-badge">Slot ${slot}</span>
-            <span class="screen-tile-live-badge"><span class="screen-tile-live-dot"></span> LIVE</span>
+            <div style="display:flex;align-items:center;gap:5px;">
+              <span class="screen-tile-slot-badge">Slot ${slot}</span>
+              <span style="font-size:10px;color:#cbd5e1;font-weight:600;">${escHtml(entry.deviceProfile || 'Windows 11')} · <span style="color:#38bdf8;">${escHtml(entry.version || 'Chrome')}</span></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button type="button" class="win-btn win-btn-sm" style="font-size:10px;padding:1px 6px;background:#0284c7;color:#fff;border:none;border-radius:2px;cursor:pointer;" onclick="event.stopPropagation(); toggleBrowserWindow(${slot}, ${Boolean(entry.isWindowVisible)});" title="Bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop">${entry.isWindowVisible ? '🔽 Ẩn' : '🖥️ Desktop'}</button>
+              <button type="button" class="win-btn win-btn-sm" style="font-size:10px;padding:1px 6px;background:#fff1f2;color:#b91c1c;border:1px solid #fca5a5;border-radius:2px;cursor:pointer;" onclick="event.stopPropagation(); closeBrowserSlot(${slot});" title="Đóng riêng trình duyệt này">✕ Đóng</button>
+              <span class="screen-tile-live-badge"><span class="screen-tile-live-dot"></span> LIVE</span>
+            </div>
           `;
           tile.appendChild(header);
 
@@ -4577,8 +4750,10 @@
       _screenActiveSlot = slot;
       document.getElementById('screenModal').style.display = 'flex';
       const entry = _screenSlots.find(s => s.slot === slot);
-      const ipLabel = entry && entry.ip ? ` — ${entry.ip}` : '';
-      document.getElementById('screenModalTitle').textContent = `Slot ${slot}${ipLabel} (nhấp vào canvas để tương tác)`;
+      const modalTitle = document.getElementById('screenModalTitle');
+      if (modalTitle) {
+        modalTitle.innerHTML = `Màn hình Slot ${slot} • <span style="color:#22c55e;">🌐 IP: ${escHtml(entry?.ip || 'Direct')}</span> • <span style="color:#cbd5e1;">${escHtml(entry?.deviceProfile || 'Windows 11')}</span> • <span style="color:#38bdf8;">${escHtml(entry?.version || 'Chrome')}</span> <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(nhấp canvas để điều khiển)</span>`;
+      }
 
       const fpsEl = document.getElementById('screenModalFps');
       if (fpsEl) {
@@ -4963,6 +5138,9 @@
         completedScreens: s.completedScreens || 0,
         pageJumps: s.pageJumps || 0,
         currentAction: s.currentAction || s.status || '',
+        version: s.version || 'Chrome',
+        deviceProfile: s.deviceProfile || 'Windows 11',
+        isWindowVisible: Boolean(s.isWindowVisible),
       }));
     }
 

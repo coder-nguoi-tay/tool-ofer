@@ -151,12 +151,12 @@ export async function prepareLocalZeroProfile({ slot = 1, locale = 'en-US', lang
  * Ghép danh sách command line flags khởi động trình duyệt mô phỏng chính xác
  * luồng native của Security.dll (sub_180028180).
  *
- * @param {object} options Tham số (profilePath, proxyUrl, tile, locale).
+ * @param {object} options Tham số profile, proxy, tile, locale và chính sách WebRTC.
  * @return {string[]} Danh sách cờ dòng lệnh cho trình duyệt.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-19
  */
-export function buildLocalBrowserArgs({ profilePath, proxyUrl = null, tile = null, locale = 'en-US', headless = false }) {
+export function buildLocalBrowserArgs({ profilePath, proxyUrl = null, tile = null, locale = 'en-US', headless = false, protectWebRtc = true }) {
   const args = [
     '--remote-debugging-port=0',
     `--user-data-dir=${profilePath}`,
@@ -166,13 +166,16 @@ export function buildLocalBrowserArgs({ profilePath, proxyUrl = null, tile = nul
     '--disable-encryption',
     '--disable-backgrounding-occluded-windows',
     '--donut-pie=undefined',
-    `--webrtc-ip-handling-policy=${proxyUrl ? 'disable_non_proxied_udp' : 'default_public_interface_only'}`,
     '--component-updater=fast-update,initial-delay=0.1',
     '--disable-features=PrintCompositorLPAC',
     '--font-masking-mode=1',
     '--no-first-run',
     '--no-default-browser-check',
   ];
+
+  args.push(`--webrtc-ip-handling-policy=${protectWebRtc
+    ? (proxyUrl ? 'disable_non_proxied_udp' : 'default_public_interface_only')
+    : 'default'}`);
 
   if (headless) {
     args.push('--headless=new');
@@ -220,16 +223,17 @@ export async function waitForDevToolsActivePort(profilePath, timeoutMs = 15000) 
 /**
  * Khởi tạo tiến trình trình duyệt độc lập với profile cục bộ, trả về wsUrl để Playwright kết nối.
  *
- * @param {object} options Cấu hình profile, proxy, tile, locale, executable và headless.
+ * @param {object} options Cấu hình profile, proxy, tile, locale, executable, WebRTC và headless.
  * @return {Promise<{proc: object, wsUrl: string, profilePath: string}>}
+ * @throws {Error} Khi không tìm thấy trình duyệt hoặc trình duyệt không mở được cổng CDP.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-19
  */
-export async function spawnLocalProfileBrowser({ profilePath, proxyUrl = null, tile = null, locale = 'en-US', executablePath = null, headless = false }) {
+export async function spawnLocalProfileBrowser({ profilePath, proxyUrl = null, tile = null, locale = 'en-US', executablePath = null, headless = false, protectWebRtc = true }) {
   const bin = executablePath || resolveBrowserExecutable();
   if (!bin) throw new Error('Không tìm thấy Google Chrome hoặc Chromium trên máy để khởi chạy profile cục bộ.');
 
-  const args = buildLocalBrowserArgs({ profilePath, proxyUrl, tile, locale, headless });
+  const args = buildLocalBrowserArgs({ profilePath, proxyUrl, tile, locale, headless, protectWebRtc });
   const proc = spawn(bin, args, { stdio: 'ignore', detached: false });
 
   proc.on('error', (err) => {
