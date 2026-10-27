@@ -1,133 +1,124 @@
 
-## 15) Yêu cầu xử lý trường hợp câu trả lời khó xác định nút click
+## 16) Bản yêu cầu kỹ thuật cần thêm cho việc xử lý nút click khó xác định
 
-### 15.1. Vấn đề thực tế
+### 16.1. Yêu cầu mục tiêu
 
-Trong nhiều form HTML phức tạp, không phải lúc nào cũng có thể xác định chắc chắn option nào là đáp án đúng chỉ bằng text và selector đơn giản. Một số trường hợp phổ biến:
+Khi gặp câu trả lời không xác định rõ nút nào là option hợp lệ, hệ thống phải tự xử lý theo cơ chế sau:
 
-- option là `div` hoặc `span`, không phải `input[type="radio"]`
-- option nằm trong card UI với icon / SVG / background / custom class
-- label và input tách nhau, không cùng container
-- text câu hỏi nằm ở trên, option ở dưới, không cùng ancestor gần
-- option có role button / option / tab, không có name/id rõ ràng
-- nhiều button cùng kiểu “Yes/No”, “Continue”, “Next”, nhưng chỉ một button là thực sự của câu hỏi hiện tại
-- nút option bị ẩn, bị overlay, bị disabled khi chưa chọn xong
+- xác định đúng câu hỏi hiện tại
+- lọc option trong cùng phạm vi của câu hỏi
+- bỏ noise và button không liên quan
+- chọn best candidate dựa trên điểm số
+- click theo fallback an toàn
+- verify sau click
+- nếu vẫn mơ hồ thì dừng hoặc chuyển AI fallback
 
-### 15.2. Quy tắc xử lý bắt buộc
+Nói ngắn gọn: không được click ngẫu nhiên hoặc click theo `.first()` nếu không chắc chắn.
 
-Khi gặp trường hợp câu trả lời khó xác định hoặc option không rõ ràng, hệ thống không được click ngẫu nhiên. Thay vào đó phải dùng luồng sau:
+### 16.2. Yêu cầu đầu vào
 
-1. Nhận diện đúng câu hỏi hiện tại
-   - tìm container gần nhất có title câu hỏi
-   - không scan toàn page
-   - nếu không tìm được => mark ambiguous
+Hệ thống phải nhận vào:
 
-2. Trích xuất candidate option trong cùng container
-   - chỉ lấy option visible + enabled + không noise
-   - loại bỏ legal/nav/footer/button rác
+- `page` hoặc `frame` hiện hành
+- `questionContext` hoặc `title câu hỏi` nếu có
+- danh sách candidate elements trong vùng tương ứng
+- `record` dữ liệu người dùng để match đáp án
+- `strategy` để xử lý item mơ hồ
 
-3. Tính điểm từng option
-   - text gần title câu hỏi
-   - cùng container
-   - role/label/aria tương ứng
-   - không phải nút back/continue/legal
-   - visible + enabled + not hidden
-   - selected/checked nếu đã có
+### 16.3. Yêu cầu đầu ra
 
-4. Chọn best candidate
-   - nếu score cao và rõ ràng => click
-   - nếu score trung bình hoặc mơ hồ => không click ngay
-
-5. Fallback theo trình tự an toàn
-   - click node trực tiếp
-   - click label / closest label
-   - click parent container
-   - dispatch `input` + `change`
-   - trigger `evaluate(() => el.click())`
-
-6. Xác minh đã chọn đúng
-   - check `aria-selected`, `checked`, `selected`, `active`, `value` changed
-   - nếu không xác minh được => không tiếp tục random; chuyển fallback hoặc dừng
-
-7. Nếu vẫn không xác định rõ
-   - không click random
-   - chuyển sang AI assist / human review / skip session / log as ambiguous
-
-### 15.3. Logic đề xuất cho `scoreOption()`
-
-```js
-function scoreOption(optionEl, questionText, record) {
-  let score = 0;
-
-  if (optionEl && optionEl.getBoundingClientRect().width > 0) score += 30;
-  if (isInSameContainer(optionEl, questionText)) score += 25;
-  if (normalizeText(optionEl.textContent).includes(normalizeText(questionText))) score += 15;
-  if (optionEl.role === 'radio' || optionEl.getAttribute('role') === 'option') score += 15;
-  if (isVisible(optionEl) && !isDisabled(optionEl)) score += 10;
-  if (closestLabelMatches(optionEl, questionText)) score += 10;
-  if (isNoiseButton(optionEl)) score -= 50;
-  if (isFooterNavOrLegal(optionEl)) score -= 60;
-  if (isHiddenOrAriaHidden(optionEl)) score -= 100;
-  if (optionEl.matches('.selected, .active, [aria-selected="true"], input:checked')) score += 10;
-
-  return score;
-}
-```
-
-### 15.4. Rule: không được xử lý theo kiểu “click first matching result”
-
-Các mẫu sai cần tránh:
-
-```js
-frame.locator('.btn-option').first().click();
-frame.locator('input[type="radio"]').first().click();
-frame.locator('label').first().click();
-```
-
-Các mẫu này rất dễ gây click nh���m do:
-
-- nhiều `.btn-option` không phải là đáp án của câu hỏi hiện tại
-- nhiều input radio là choice của các câu khác hoặc hidden
-- label đầu tiên có thể là label của title hoặc footer
-
-### 15.5. Quy tắc fallback an toàn
-
-Khi option có score thấp hoặc không rõ, thay vì click ngẫu nhiên, hệ thống nên làm:
-
-- thử `closest('label')`
-- thử click trên `parentElement`
-- thử `dispatchEvent(new Event('input'))`
-- thử `dispatchEvent(new Event('change'))`
-- thử `evaluate(() => el.click())`
-- nếu kỹ thuật trên đều không xác minh được => `markAmbiguous()` + `fallbackToAi()`
-
-### 15.6. Yêu cầu bắt buộc với feature này
-
-Mỗi khi có trường hợp “khó xác định”, hệ thống phải lưu log ít nhất:
+Khi xử lý xong, phải có output chuẩn như sau:
 
 ```json
 {
-  "questionText": "...",
-  "candidateCount": 8,
-  "bestScore": 62,
-  "ambiguous": true,
-  "fallbackUsed": true,
-  "verificationPassed": false,
-  "reason": "low confidence / custom widget / label mismatch"
+  "questionDetected": true,
+  "questionText": "What is your housing status?",
+  "candidateCount": 6,
+  "bestCandidateScore": 81,
+  "selectedCandidateText": "Own",
+  "selectionVerified": true,
+  "fallbackUsed": false,
+  "ambiguous": false,
+  "reason": "matched same container and role"
 }
 ```
 
-Không được chỉ log “failed to click” mà không mô tả vì sao.
+Nếu không rõ:
 
-### 15.7. Kết luận
+```json
+{
+  "questionDetected": true,
+  "candidateCount": 5,
+  "bestCandidateScore": 38,
+  "selectedCandidateText": null,
+  "selectionVerified": false,
+  "fallbackUsed": true,
+  "ambiguous": true,
+  "reason": "low confidence / custom card widget / same text across multiple blocks"
+}
+```
 
-Với HTML khó, cách xử lý đúng không phải là “nhấn nút nào cũng được” mà là:
+### 16.4. Yêu cầu logic xử lý bắt buộc
 
-- định vị đúng câu hỏi
-- trích xuất option trong cùng ngữ cảnh
-- chấm điểm từng option
-- chọn tốt nhất
-- xác nhận sau click
-- nếu mơ hồ thì fallback hoặc bỏ qua, không random click
+#### 16.4.1. Tìm câu hỏi đúng vùng
+- không quét cả page mà phải tìm trong vùng câu hỏi gần nhất
+- ưu tiên container có title/label/question text
+- nếu không tìm được vùng câu hỏi rõ ràng => đánh dấu ambiguous
 
-Đây là yêu cầu bắt buộc nếu repo muốn hoạt động ổn định với các form/survey phức tạp và có thể tích hợp `playwright-core` mà không làm tăng sai lệch quá nhiều.
+#### 16.4.2. Lọc candidate đúng
+- visible
+- enabled
+- không disabled
+- không hidden / aria-hidden / opacity 0 / zero-size
+- không nằm trong footer / legal / nav / help / account / menu
+- không là nút prev/back/cancel/skip
+
+#### 16.4.3. Gán điểm cho từng candidate
+- cùng container với câu hỏi: +25
+- text gần câu hỏi: +20
+- role/aria-label phù hợp: +15
+- label tương ứng: +10
+- visible + enabled: +10
+- không noise: +10
+- selected/active: +10
+- hidden/disabled: trừ rất mạnh
+
+#### 16.4.4. Chọn answer theo score
+- nếu candidate có điểm cao nhất và vượt ngưỡng rõ ràng => click
+- nếu score thấp hoặc chênh lệch không rõ => không click random
+
+#### 16.4.5. Fallback an toàn
+- click direct element
+- click closest label
+- click parent container
+- dispatch `input` + `change`
+- evaluate click if needed
+
+#### 16.4.6. Xác minh sau click
+- check `aria-selected`
+- check `checked`
+- check `selected`
+- check class `active`/`selected`
+- check `value` hoặc `dataset` changed
+- nếu không thành công, retry khác strategy hoặc bỏ qua
+
+### 16.5. Quy định không được làm
+
+- Không dùng `.first().click()` nếu không chắc chắn
+- Không click button đầu tiên có chữ “Yes/No” khi nhiều block cùng hiện trên page
+- Không click theo class chung như `.btn-option` mà không xác nhận question context
+- Không random click nếu candidate score thấp
+- Không coi `evaluate(() => el.click())` là method chính mà không verify lại
+- Không bỏ qua `ambiguous` state
+
+### 16.6. Kết luận
+
+Nếu repo muốn xử lý tốt các câu hỏi khó và HTML tùy biến, cần có 3 thành phần bắt buộc:
+
+- `questionDetector`
+- `optionScorer`
+- `selectionVerifier`
+
+Mọi logic nếu thiếu các thành phần này sẽ dễ click sai, đánh dấu đúng sai và làm tăng lỗi ở site custom.
+
+Những yêu cầu này cần được tích hợp vào repo như một tiêu chí bắt buộc của mỗi module xử lý form/survey.
