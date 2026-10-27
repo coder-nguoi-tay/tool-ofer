@@ -1,374 +1,384 @@
-# Nghiên cứu tích hợp Playwright Core cho repo `tool-ofer`
 
-## 1) Tóm tắt ngắn
+## 13) Cấu trúc module mới cho repo `tool-ofer`
 
-Repo hiện tại không thiếu khả năng chạy browser; nó đã đang dùng Playwright theo cách rất mạnh mẽ: `locator()`, `click()`, `fill()`, `evaluate()`, `page.goto()`, `frameLocator`, `context`, `browser`, `mouse`, `keyboard`, custom fallback, và các heuristic từ form autofill / survey solver.
+### 13.1. Mục tiêu kiến trúc
 
-Vấn đề không nằm ở việc `playwright` hay `playwright-core` khác nhau về API. Vấn đề nằm ở chỗ:
+Repo cần chuyển từ mô hình “logic rải rác trong file lớn” sang mô hình “module theo chức năng”, rõ ràng như sau:
 
-- mã đang dựa nhiều vào selector/heuristic từng loại HTML phổ biến,
-- web target có cấu trúc HTML rất đa dạng, custom component, nested labels, SVG, role=button, hidden inputs, listbox, matrix, checkbox card, iframe, popup, lazy rendering,
-- các site khảo sát/offerwall thường không tuân thủ chuẩn web rõ ràng, nên logic cần hiểu ngữ nghĩa của câu hỏi/đáp án, không chỉ biết cách click theo CSS.
+- Browser runtime layer: quản lý page/frame/browser
+- DOM intelligence layer: hiểu câu hỏi và option
+- Form automation layer: autofill và select
+- Survey execution layer: giải quyết câu hỏi/quiz/survey
+- Verification and fallback layer: kiêm tra đã click đúng chưa, retry, AI assist
+- State and logging layer: theo dõi session + sự kiện + debug
 
-Do đó, nếu người ta chỉ chuyển từ `playwright` sang `playwright-core` mà không thay đổi logic “nhận dạng câu hỏi + lựa chọn đáp án”, hệ thống sẽ vẫn thất bại ở các form khó.
+Cấu trúc này giúp repo tách được 3 rắc rối chính:
 
-Kết luận: `playwright-core` là khả thi và tương thích về API, nhưng không giải quyết được vấn đề thực sự nếu phần `DOM intelligence` chưa đủ mạnh.
+1. `playwright-core` / `playwright` runtime
+2. DOM hiểu nghĩa / filter noise
+3. Click + verify + retry
 
----
+Nếu không tách, chương trình sẽ luôn bị “nhầm answer / click wrong button / submit sai / không biết fail ở đâu”.
 
-## 2) Nguyên nhân thực sự của vấn đề
+### 13.2. Kiến trúc module đề xuất
 
-### 2.1. Không phải lỗi của Playwright core
-
-`playwright-core` có API gần như giống hệt `playwright` về thao tác browser. Điều khác biệt là:
-
-- `playwright`: thêm browser binaries, dễ chạy ngay,
-- `playwright-core`: chỉ engine, bắt buộc có Chrome/Chromium trên máy target,
-- cả hai đều hỗ trợ `locator`, `click`, `fill`, `page.evaluate`, Timers, keyboard, mouse, frame, popup.
-
-Vì vậy, khi repo lỗi ở nhiều site, nguyên nhân không phải là `playwright-core` không nhận diện được DOM. Nguyên nhân là logic auto-fill/survey xử lý hiện tại đang dựa vào heuristic quá mạnh và không đủ mềm.
-
-### 2.2. HTML form/quiz/survey không đồng nhất
-
-Trong các form khảo sát/offerwall, cấu trúc phổ biến rất khác nhau:
-
-- `label + input` cách xa nhau,
-- phần tử chọn nằm trong `div/span/svg/button/a` khác nhau,
-- `role="radio"`, `role="button"`, `role="option"` thay vì `input[type="radio"]`,
-- input ẩn nhưng custom div hiển thị,
-- container có `aria-hidden`, inert, hidden, opacity:0,
-- nhiều option không có `id` / `name`, chỉ có `data-*`, class, text,
-- matrix/table với nhiều hàng x nhiều cột,
-- checkbox dạng card, pill, image, circle, icon,
-- mỗi câu hỏi có title khác nhau, text option không sát với selector của câu hỏi,
-- popup, iframe, SDK third-party, widget ams/locotomato, custom survey engine.
-
-### 2.3. Logic hiện tại đang vượt quá CSS selector đơn giản
-
-Repo đã có nhiều code rất tốt như:
-
-- `resolveSmartLocator()`
-- `executeSmartClick()`
-- `handleGenderSelect()`
-- `handleTrySelectOption()`
-- `handleRadioAndSurveyOptions()`
-- `survey-solver.mjs`
-- `solveSurveyStep()`
-
-Nhưng hầu hết các hàm này vẫn đang chạy theo kiểu:
-
-- "nếu thấy selector này thì nhắm vào";
-- "nếu không thấy -> thử selector khác";
-- "nếu text chứa keyword này thì chọn";
-- "nếu bằng random thì click".
-
-Điều này làm việc với 60–80% site phổ biến, nhưng sẽ yếu ở các site custom hoặc đa lớp.
-
-### 2.4. Bot-detection và performance khiến click phải “rất tự nhiên”
-
-Repo đã cố tình mô phỏng hành vi thật:
-
-- human mouse movement,
-- adaptive typing,
-- random pauses,
-- click sau khi hover,
-- submit cooldown,
-- focus/blur events,
-- manual fallback evaluate.
-
-Tuy nhiên, ở các site khó, với HTML custom, robot-like heuristic just by clicking random choices sẽ khiến hiệu quả thấp hoặc sai địa lý đáp án.
-
----
-
-## 3) Vì sao không nên tập trung vào `playwright-core` như giải pháp chính
-
-### 3.1. `playwright-core` không sửa được sự không đồng nhất của DOM
-
-Nó không có khả năng hiểu “câu hỏi này là gì” và “đáp án nào phù hợp nhất” nếu không có logic riêng.
-
-### 3.2. Repo đang cần intelligence chứ không chỉ browser runtime
-
-Cần một lớp mới để:
-
-- phân tích ngữ cảnh câu hỏi,
-- tách phần tử câu hỏi và các option,
-- so sánh text, role, container, parent-child,
-- chọn option tốt nhất theo heuristic hoặc câu hỏi mục tiêu,
-- xác minh câu trả lời đã được chọn thành công.
-
-### 3.3. Nếu chỉ đổi import, repo sẽ chạy tốt ở site chuẩn nhưng yếu ở site custom
-
-Câu hỏi đúng cần trả lời là: "đúng site nào đang test, html trông như thế nào". Với HTML khó, chỉ cần `playwright-core` là không đủ.
-
----
-
-## 4) Nguồn gốc thực tế trong repo hiện tại
-
-### 4.1. Các file cho thấy repo đã hiểu được bài toán
-
-Các file quan trọng:
-
-- `script.mjs`: có `resolveSmartLocator`, `executeSmartClick`, huge command interpreter
-- `survey-solver.mjs`: có `solveRatingQuestions`, `solveMatrixQuestions`, `solveSurveyCheckboxes`, `clickSurveyNextButton`
-- `autofill.mjs`: có `matchFieldValue`, semantic categories, form matching
-- `ai-assist.mjs`: AI fallback để sửa form nếu quá khó
-
-Tức là repo không thiếu browser automation; nó thiếu một lớp `semantic DOM resolver` vững chắc hơn để hoạt động trên dạng HTML khó.
-
-### 4.2. Những điểm đang yếu
-
-Repo có các kỹ thuật tốt nhưng vẫn còn 3 điểm yếu chính:
-
-1. `selector` phụ thuộc nhiều vào class/id,/keyword từ các site phổ biến.
-2. `click` thường hoạt động “thử rồi xem” chứ không có cơ chế xác nhận thật sự thành công.
-3. `question choice matching` thiếu scoring rõ ràng dựa trên ngữ nghĩa và cấu trúc HTML.
-
----
-
-## 5) Yêu cầu thật sự cần có để tích hợp Playwright Core an toàn
-
-### 5.1. Yêu cầu kỹ thuật
-
-- Cài `playwright-core` và duy trì `playwright` hoặc chỉ dùng `playwright-core` khi browser system có sẵn.
-- Dùng `executablePath` rõ ràng nếu không dùng bundled browser.
-- Kiểm tra `chromium.launch({ headless: false, executablePath: ... })` thành công.
-- Giữ nguyên API của repo `<page>.locator()` / `<frame>.locator()` / `evaluate()` / `click()`.
-- Nếu cần, thêm fallback cho browser path macOS/Linux/Windows.
-
-### 5.2. Yêu cầu logic
-
-- Phải có `semantic question detector`.
-- Phải có `option extraction` và `option scoring`.
-- Phải có `selection verification` sau khi click.
-- Phải có `safe fallback` nếu option bị ẩn / bị overlay / custom.
-- Phải có `submit guard` để không click nhầm form/continue.
-- Phải có `logic bỏ noise` cho privacy / terms / login / nav links.
-
-### 5.3. Yêu cầu đo lường hiệu quả
-
-Mỗi lần xử lý câu hỏi phải có:
-
-- `question_detected = true/false`
-- `options_found = n`
-- `best_option_score`
-- `selection_verified = true/false`
-- `fallback_used = true/false`
-- `submit_guard_passed = true/false`
-
-Nếu không có các metric này, bạn sẽ khó biết vì sao site nào fail.
-
----
-
-## 6) Cách tích hợp đúng chuẩn
-
-### 6.1. Tách các lớp logic
-
-Khuyến nghị thêm các module như:
-
-```js
-// pseudo-design
-export async function detectQuestionContext(frame) {...}
-export function extractQuestionOptions(frame, questionContext) {...}
-export function scoreOption(option, questionContext, record) {...}
-export async function chooseBestOption(frame, questionContext, record) {...}
-export async function verifySelection(frame, chosenOption) {...}
+```
+repo/
+├─ browser/
+│  ├─ browser-runtime.js
+│  ├─ browser-context.js
+│  ├─ browser-launch.js
+│  └─ browser-helpers.js
+├─ dom/
+│  ├─ question-detector.js
+│  ├─ option-extractor.js
+│  ├─ noise-filter.js
+│  ├─ selector-resolver.js
+│  └─ form-analyzer.js
+├─ survey/
+│  ├─ question-classifier.js
+│  ├─ answer-selector.js
+│  ├─ answer-verifier.js
+│  └─ survey-runner.js
+├─ autofill/
+│  ├─ record-normalizer.js
+│  ├─ field-matcher.js
+│  ├─ checkbox-handler.js
+│  ├─ select-handler.js
+│  └─ input-handler.js
+├─ execution/
+│  ├─ click-executor.js
+│  ├─ keyboard-executor.js
+│  ├─ submit-executor.js
+│  └─ retry-policy.js
+├─ state/
+│  ├─ session-state.js
+│  ├─ metrics.js
+│  └─ log-collector.js
+├─ fallback/
+│  ├─ ai-assist-adapter.js
+│  ├─ dom-fallback.js
+│  └─ retry-fallback.js
+├─ utils/
+│  ├─ dom-utils.js
+│  ├─ text-utils.js
+│  ├─ selectors.js
+│  └─ timing.js
+├─ app.mjs
+├─ script.mjs
+├─ autofill.mjs
+├─ survey-solver.mjs
+└─ ai-assist.mjs
 ```
 
-### 6.2. Cách chọn đáp án không nên chỉ dựa vào random
+### 13.3. Chi tiết từng module
 
-Không nên:
+#### 13.3.1. `browser/`
 
-- chọn random một option trong tất cả các option có sẵn,
-- click vào option gần nhất mà không xem context,
-- click vào phần đầu tiên matching với class `.btn-option`.
+##### `browser-runtime.js`
+- mở browser và page
+- expose API chuẩn:
+  - `launchBrowser()`
+  - `createPage()`
+  - `openNewTab()`
+  - `closePage()`
+  - `ensureReady()`
+- ẩn hoàn toàn `playwright` hoặc `playwright-core` khỏi phần còn lại của repo
 
-Nên:
+##### `browser-launch.js`
+- quyết định dùng `playwright` hay `playwright-core`
+- hỗ trợ `executablePath` theo OS
+- kiểm tra `chromium.launch()` có thành công không
+- fallback để xác định browser path trên macOS/Linux/Windows
 
-- tìm container của câu hỏi,
-- quét các option trong cùng container,
-- tính điểm cho từng option theo:
-  - text gần title câu hỏi,
-  - là radio/button/select option,
-  - visible,
-  - không nằm trong footer/legal,
-  - không là nút back/prev/cancel,
-  - không phải hidden/disabled/aria-secret,
-  - có role=radio/image/button. 
+##### `browser-context.js`
+- quản lý context / session / profile
+- quản lý popup, iframe, frame navigation
+- đảm bảo mọi page đều đi qua cùng một lifecycle
 
-### 6.3. Sử dụng verification sau click
+##### `browser-helpers.js`
+- wrapper cho `scrollIntoViewIfNeeded`, `hover`, `mouse.move`, `keyboard`, `waitForTimeout`
+- giúp cùng repo dùng một cách tương tự nhau, không lặp logic qua lại
 
-Sau khi click, kiểm tra:
+#### 13.3.2. `dom/`
 
-- `selected`/`checked`/`aria-checked=true`/`classList.contains('selected')`
-- nếu không thành công thì fallback `evaluate(() => el.click())`
-- nếu vẫn không thành công thì thử click label hoặc parent node
+##### `question-detector.js`
+- phát hiện câu hỏi đang hiện trên màn hình
+- xác định mọi loại câu hỏi:
+  - yes/no
+  - radio
+  - checkbox group
+  - select
+  - rating
+  - table/matrix
+  - card option
+  - consent checkbox
+- trả về cấu trúc:
+  - `questionTitle`
+  - `questionType`
+  - `container`
+  - candidate list
 
-Điều này cực kỳ quan trọng với custom component.
+##### `option-extractor.js`
+- trích xuất options trong cùng container với câu hỏi
+- lọc theo visibility/aria-hidden/disabled/hidden
+- trả về metadata cho từng option:
+  - `text`
+  - `role`
+  - `tag`
+  - `id`
+  - `checked`
+  - `selected`
+  - `visible`
+  - `parent`
 
----
+##### `noise-filter.js`
+- loại bỏ nút không phải câu hỏi:
+  - legal/privacy/terms
+  - back/cancel/skip
+  - nav, menu, footer links
+  - login/account links
+  - popup / donate / support buttons
+- đây là phần cực quan trọng vì hiện repo dễ click nhầm button ngoài câu hỏi
 
-## 7) Không nên làm gì
+##### `selector-resolver.js`
+- giải quyết custom DOM khi không có ID / name chuẩn
+- ưu tiên theo:
+  - role
+  - aria-label
+  - nearest label
+  - parent question container
+  - associated input
 
-### 7.1. Không nên đổi `playwright` sang `playwright-core` mà bỏ qua browser setup
+##### `form-analyzer.js`
+- nhận diện loại page:
+  - form thông thường
+  - survey
+  - offerwall
+  - jump page
+  - validation form
+- quyết định có nên submit hay không, có nên AI assist hay không
 
-Nếu thiếu `executablePath`, browser sẽ không chạy.
+#### 13.3.3. `survey/`
 
-### 7.2. Không nên tin selector cứng
+##### `question-classifier.js`
+- phân loại câu hỏi theo loại thực tế, ví dụ:
+  - `age_range`
+  - `gender`
+  - `income`
+  - `yes_no`
+  - `consent`
+  - `rating`
+  - `matrix`
+  - `select`
+- không tự do dùng keyword đơn thuần; phải dựa theo context + container + option text + data attribute
 
-Ví dụ không nên logic như:
+##### `answer-selector.js`
+- chọn đáp án phù hợp nhất dựa trên record + question type + candidate score
+- ưu tiên logic đúng hơn là random
+- nếu không match -> chọn best-score candidate
 
-```js
-frame.locator('.btn-option').first().click();
+##### `answer-verifier.js`
+- kiểm tra click đã có hiệu quả chưa
+- dùng các trạng thái sau:
+  - `aria-selected="true"`
+  - `selected` / `active` class
+  - `checked=true`
+  - value changed
+- nếu chưa xác nhận thì retry với label/parent/input
+
+##### `survey-runner.js`
+- điều phối toàn bộ vòng survey:
+  - detect question
+  - classify
+  - choose answer
+  - verify
+  - move next
+  - log result
+
+#### 13.3.4. `autofill/`
+
+##### `record-normalizer.js`
+- chuẩn hóa record từ CSV/JSON/pipe data
+- đồng bộ tên trường và giá trị
+- chuẩn hóa phone, email, dob, zip, state
+
+##### `field-matcher.js`
+- map `field metadata` -> `record value`
+- phần này hiện đang là điểm mạnh của repo, nên nên tách rõ ràng ra file riêng để dễ test
+
+##### `checkbox-handler.js`
+- click consent / required checkbox
+- dùng label click / parent click / dispatch change nếu cần
+
+##### `select-handler.js`
+- xử lý dropdown, custom select, options list
+- không chỉ `field.selectOption()` đơn giản, mà cần DOM fallback và `input/change` propagation
+
+##### `input-handler.js`
+- gõ text kiểu người thật
+- fill field với delay + keyboard + blur + change events
+
+#### 13.3.5. `execution/`
+
+##### `click-executor.js`
+- thực hiện click an toàn
+- ưu tiên logic: visible -> enabled -> correct container -> label fallback -> evaluate fallback
+- không click random
+
+##### `keyboard-executor.js`
+- gõ text / simulate input
+- bao gồm typing delay, fallback setter
+
+##### `submit-executor.js`
+- tìm nút submit thật sự
+- kiểm tra required field và validation trước khi click
+- không click submit khi form lỗi / field bị thiếu
+
+##### `retry-policy.js`
+- các strategy retry rõ ràng:
+  - retry click
+  - retry label
+  - retry parent element
+  - retry evaluate
+  - retry form.requestSubmit()
+
+#### 13.3.6. `state/`
+
+##### `session-state.js`
+- lưu trạng thái session:
+  - `currentScreen`
+  - `completedScreens`
+  - `emailFilled`
+  - `leadCheckStatus`
+  - `autofillFields`
+  - `lastActionTime`
+
+##### `metrics.js`
+- lưu metrics cho mỗi question / mỗi field / mỗi submit
+- dùng cho debug và đánh giá hiệu năng
+
+##### `log-collector.js`
+- standardize logs theo event type
+- log rõ `questionType`, `optionsFound`, `bestScore`, `selected`, `verified`, `fallbackUsed`
+
+#### 13.3.7. `fallback/`
+
+##### `ai-assist-adapter.js`
+- gắn `inspectAndFixFormWithAi` vào flow, nhưng chỉ khi fallback DOM không thành công
+- không gọi AI mỗi vòng lặp
+
+##### `dom-fallback.js`
+- nếu selector không match, dùng nearest parent / nearest label / nearest role / nearest container
+
+##### `retry-fallback.js`
+- retry theo policy
+- dùng nhiều kỹ thuật khác nhau thay vì lặp lại 1 cách
+
+### 13.4. Luồng xử lý mới theo từng màn hình
+
+#### Bước 1: Browser runtime check
+- `browser-launch.js` phát hiện Chrome/Chromium path
+- `browser-runtime.js` khởi tạo page
+- `browser-context.js` gắn page listener
+
+#### Bước 2: Analyze page type
+- `form-analyzer.js` phát hiện page đang là form hay survey hay offerwall
+
+#### Bước 3: Noise filtering
+- `noise-filter.js` loại bỏ privacy/footer/nav/login/back buttons
+
+#### Bước 4: Detect question
+- `question-detector.js` tìm container câu hỏi và câu hỏi title
+
+#### Bước 5: Extract options
+- `option-extractor.js` scan toàn bộ option visible trong container
+
+#### Bước 6: Classify question
+- `question-classifier.js` xác định loại câu hỏi
+
+#### Bước 7: Choose answer
+- `answer-selector.js` chọn option tốt nhất theo record và scoring
+
+#### Bước 8: Click + verify
+- `click-executor.js` click
+- `answer-verifier.js` kiểm tra selected state
+
+#### Bước 9: Retry / fallback
+- nếu thất bại, `retry-policy.js` chạy các fallback strategy khác nhau
+
+#### Bước 10: Submit guard
+- `submit-executor.js` tìm submit đúng, không click nếu form invalid
+
+#### Bước 11: Log & metrics
+- `log-collector.js` lưu state và debug logs
+
+### 13.5. Mô hình scoring option cần thêm
+
+Phần này cực cần có để thay vì random click.
+
+```
+score =
+  +30 if visible
+  +25 if same container as question
+  +20 if text semantically close to question title
+  +15 if role is radio/button/option
+  +10 if associated label matches question context
+  +10 if it is not nav/legal/footer
+  -50 if in header/footer/legal/nav
+  -100 if hidden/inert/aria-hidden/disabled
+  -40 if already selected
+  -20 if duplicate option
 ```
 
-vì trên nhiều site `.btn-option` có thể là nút rác, button wrapper, hoặc không ổn định.
+Các mức điểm:
+- `>= 70`: click ngay
+- `40-69`: thử fallback hoặc click với label
+- `< 40`: bỏ qua / không xử lý
 
-### 7.3. Không nên click ngay khi phát hiện “nút nào có chữ Yes/No” mà không xác nhận container
+Đây là bộ lọc quan trọng để chống nhầm click.
 
-Có rất nhiều nút Yes/No trên site nhưng không phải câu hỏi hiện tại.
+### 13.6. Không nên làm gì trong cấu trúc mới
 
-### 7.4. Không nên bỏ qua noise patterns
+- Không gọi `locators` quá nhiều trực tiếp trong `autofill.mjs`/`script.mjs`
+- Không để click logic phân tán khắp repo
+- Không click random option trong `btn-option` mà không xác định container
+- Không coi `evaluate()` là API chính để làm mọi thứ
+- Không bỏ qua validation guard trước submit
+- Không log quá ít; mỗi question cần có kết quả rõ ràng
 
-Privacy / legal / footer / login / nav / help / home / cart / account đều là lỗi phổ biến.
+### 13.7. Yêu cầu triển khai tối thiểu
 
-### 7.5. Không nên coi `evaluate()` là fallback lõi duy nhất
+Để repo được coi là ổn định, yêu cầu tối thiểu phải có:
 
-`evaluate()` rất mạnh nhưng không phải lúc nào cũng đúng. Nếu click không được, `evaluate` có thể đổi DOM, nhưng nếu không điền đúng state thì vẫn fail.
+- browser adapter
+- question detector
+- option extractor
+- scoring logic
+- answer verifier
+- fallback retry
+- validation guard before submit
+- logging for each question
 
-### 7.6. Không nên randomize quá mức
+Nếu thiếu 1 trong số này, repo sẽ vẫn fail ở các form khó.
 
-Nếu random quá mức, các câu hỏi có dấu hiệu logic (age, income, yes/no, state, gender) sẽ sai nhiều hơn và phá trạng thái flow.
+### 13.8. Kết luận phần cấu trúc mới
 
-### 7.7. Không nên bấm submit ngay khi có một field rỗng mà không check required + validation
+Cấu trúc mới này giải quyết đúng nguyên nhân gốc rễ của repo:
 
-Repo đã có logic này tốt, nhưng cần giữ nguyên vì nếu bấm submit quá sớm sẽ làm form bị block.
+- không phải vì thiếu `playwright-core`
+- mà vì logic đang ở dạng “điền + click + guess” chồng chéo
+- cần tách thành các lớp rõ ràng để hiểu câu hỏi và lựa chọn đáp án thực sự
 
----
-
-## 8) Yêu cầu nghiệp vụ / UX cho repo
-
-### 8.1. Tính tin cậy
-
-- Với site chuẩn: phải điền ocr/form đúng hơn 90%.
-- Với site custom survey: phải có thể chọn từ nhiều loại question cơ bản.
-- Với site custom widget: phải có thể fallback cho label, role, parent click, input dispatch.
-
-### 8.2. Tính bền vững
-
-- Khi layout thay đổi đôi chút, logic không nên fail hoàn toàn.
-- Có fallback branch rõ ràng.
-- Có metrics log từng bước.
-
-### 8.3. Tính an toàn
-
-- Không click nhầm footer, legal, contact, nav, login.
-- Không click duplicate nhiều lần trên cùng option.
-- Không submit khi form đang có validation lỗi.
-
-### 8.4. Tính dễ debug
-
-Mỗi câu hỏi cần log:
-
-- question text xuất hiện ở đâu,
-- option count found,
-- chosen option score,
-- clicked node type,
-- verified state,
-- fallback reason.
+Đây là bước bắt buộc nếu muốn repo có thể xử lý các form/survey khó một cách bền vững.
 
 ---
 
-## 9) Kế hoạch tích hợp đề xuất cho repo `tool-ofer`
+## 14) Tóm tắt cuối cùng
 
-### Bước 1: Duy trì Playwright hiện tại hoặc chuyển sang Playwright Core khi browser sẵn có
+- `playwright-core` có thể tích hợp, nhưng không phải là giải pháp chính.
+- Vấn đề thực sự nằm ở thiếu `DOM semantic intelligence` và `verification loop`.
+- Cấu trúc module mới này là hướng triển khai hợp lý cho repo `tool-ofer`.
+- Nên thực hiện refactor theo tầng, không tiếp tục giữ logic chồng lặp trong file lớn.
 
-- ưu tiên hiển thị rõ browser path cho system Chrome/Chromium,
-- kiểm tra `chromium.launch()` kết nối thành công,
-- nếu không chạy, fallback thông báo `executablePath` chưa tồn tại.
-
-### Bước 2: Tạo lớp `semantic DOM resolver`
-
-Thêm một module mới hoặc mở rộng `survey-solver.mjs` / `autofill.mjs`:
-
-- `detectQuestionContext(frame)`
-- `extractVisibleQuestionNodes(frame)`
-- `findCandidateOptions(questionNode)`
-- `scoreOption(option, question, record)`
-
-### Bước 3: Chỉ thực thi click khi option đã được xác minh
-
-- không chỉ `.click()`
-- phải có `verifySelection()`
-- nếu không verified -> thử `label.click()` / `closest('label')` / `dispatchEvent('input')` / `dispatchEvent('change')`
-
-### Bước 4: Tích hợp với các survey solver hiện tại
-
-- `solveRatingQuestions()` => giữ nguyên, nhưng thêm range detection cho card rating custom
-- `solveMatrixQuestions()` => giữ nguyên, cần xác định row + column theo accessiblity
-- `solveSurveyCheckboxes()` => cần tránh select toàn bộ đầu tiên nếu không phải consent
-- `handleRadioAndSurveyOptions()` => cần dùng score-based matching thay vì random broad matching
-
-### Bước 5: Log chuẩn cho debugging
-
-- log từng câu hỏi,
-- log `questionTitle`, `options`, `pickedOption`, `score`, `fallback`, `verified`, `submitGuard`.
-
----
-
-## 10) Mức độ nên hoàn thành trước khi coi là tích hợp ổn định
-
-Một repo như `tool-ofer` nên chỉ gọi là “tích hợp xong” khi thỏa mãn các tiêu chí sau:
-
-- Có ít nhất 3–5 loại survey pattern được cover: radio, checkbox, yes/no, rating, matrix, select.
-- Có fallback cho custom card/option/listbox.
-- Có score-based scoring cho option matching.
-- Có verification sau click.
-- Có noise filtering cho legal/nav/footer.
-- Có browser path config và launch test cho `playwright-core`.
-- Có logging và metrics cho each question.
-- Có acceptance tests trên nhiều HTML mẫu khó.
-
----
-
-## 11) Kết luận cuối cùng
-
-Nếu chỉ nhìn vào vấn đề `playwright` vs `playwright-core`, thì câu trả lời là: `playwright-core` có thể tích hợp và tương thích về API, nhưng không phải là cứu cánh cho repo này.
-
-Vấn đề thực sự là:
-
-- HTML của survey/offerwall rất đa dạng,
-- custom UI không theo chuẩn,
-- selector logic hiện tại chưa đủ mạnh,
-- repo cần semantic DOM detection và verification loop.
-
-Do đó, phương án đúng là:
-
-1. Giữ/integrate `playwright-core` nếu system browser có sẵn.
-2. Đồng thời thêm lớp `semantic question detection + option scoring + verification`.
-3. Không chạy random click / selector cứng / không check noise.
-4. Không coi browser runtime là “giải pháp chính” cho form automation khó.
-
----
-
-## 12) Tài liệu / checklist gợi ý cho dev tiếp theo
-
-Checklist tối thiểu trước khi deploy:
-
-- [ ] browser path đúng
-- [ ] `chromium.launch()` thành công
-- [ ] locator works on page/frame
-- [ ] question detector works on 3+ patterns
-- [ ] option extraction finds all visible candidates
-- [ ] scoring logic chooses correct option
-- [ ] verification checks selected state
-- [ ] no duplicate click / no legal/nav click
-- [ ] submit guard blocks invalid form
-- [ ] debug logs capture each question
-
----
-
-Bản ghi này nên được dùng như tài liệu chính để định hướng tiếp theo: không tập trung vào `playwright-core` như đích cuối, mà tập trung vào `DOM semantic intelligence + feature verification + browser runtime compatibility`.
-
-Nguồn gốc của bài toán nằm ở việc repo đang làm “automation trình duyệt” qua nhiều loại form phức tạp, không phải ở bản thân Playwright.
-
-
+Bản nghiên cứu này nên được xem như “bản thiết kế kỹ thuật để triển khai tiếp theo”, không chỉ là lý thuyết.
