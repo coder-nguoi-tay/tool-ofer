@@ -276,7 +276,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: nodePath)
-        process.arguments = ["app.mjs"]
+        // Mặc định mở cho máy này + máy CÙNG MẠNG LAN/tailnet (0.0.0.0). Đặt
+        // AUTOLEADPC_ALLOW_LAN=0 nếu chỉ muốn 127.0.0.1. Tailnet đi qua `tailscale serve`
+        // nên vẫn hoạt động ở cả hai chế độ.
+        let allowLan = (ProcessInfo.processInfo.environment["AUTOLEADPC_ALLOW_LAN"] ?? "1") != "0"
+        process.arguments = allowLan ? ["app.mjs", "--public"] : ["app.mjs"]
         process.currentDirectoryURL = launcherDirectory
         process.environment = ProcessInfo.processInfo.environment.merging([
             "AUTOLEADPC_NO_OPEN": "1",
