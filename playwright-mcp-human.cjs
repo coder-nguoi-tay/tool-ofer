@@ -19,8 +19,46 @@ const { program } = require('playwright-core/lib/utilsBundle');
 const { tools, libCli } = require('playwright-core/lib/coreBundle');
 const packageJSON = require('@playwright/mcp/package.json');
 
-// Patch browser_type tool before registering CLI commands
+// Patch browser tools before registering CLI commands:
+// 1. Parameter Normalization: Maps `selector`, `element`, or `css` -> `target`
+//    and `value` -> `text` across all browser tools before Zod schema validation.
+// 2. Human Keystroke Simulation: Intercepts `browser_type` to enforce `slowly=true`,
+//    human typing jitter (35-60ms/char), and inter-field settle pause (120-200ms).
 if (tools && Array.isArray(tools.browserTools)) {
+  for (const tool of tools.browserTools) {
+    if (tool?.schema?.inputSchema) {
+      const origParse = tool.schema.inputSchema.parse?.bind(tool.schema.inputSchema);
+      if (typeof origParse === 'function') {
+        tool.schema.inputSchema.parse = function normalizeAndParse(rawArgs, ...rest) {
+          if (rawArgs && typeof rawArgs === 'object') {
+            if (!rawArgs.target && (rawArgs.selector || rawArgs.element || rawArgs.css)) {
+              rawArgs.target = rawArgs.selector || rawArgs.element || rawArgs.css;
+            }
+            if (rawArgs.text === undefined && rawArgs.value !== undefined) {
+              rawArgs.text = String(rawArgs.value);
+            }
+          }
+          return origParse(rawArgs, ...rest);
+        };
+      }
+
+      const origSafeParse = tool.schema.inputSchema.safeParse?.bind(tool.schema.inputSchema);
+      if (typeof origSafeParse === 'function') {
+        tool.schema.inputSchema.safeParse = function normalizeAndSafeParse(rawArgs, ...rest) {
+          if (rawArgs && typeof rawArgs === 'object') {
+            if (!rawArgs.target && (rawArgs.selector || rawArgs.element || rawArgs.css)) {
+              rawArgs.target = rawArgs.selector || rawArgs.element || rawArgs.css;
+            }
+            if (rawArgs.text === undefined && rawArgs.value !== undefined) {
+              rawArgs.text = String(rawArgs.value);
+            }
+          }
+          return origSafeParse(rawArgs, ...rest);
+        };
+      }
+    }
+  }
+
   const typeTool = tools.browserTools.find((t) => t.schema?.name === 'browser_type');
   if (typeTool && typeof typeTool.handle === 'function') {
     const originalHandle = typeTool.handle;

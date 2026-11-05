@@ -537,6 +537,7 @@ export async function runScript(page, steps, record, {
           break;
 
         case 'Close':
+          page._uxClosedByApp = 'script đóng tab';
           await page.close().catch(() => {});
           break;
 

@@ -1,0 +1,19 @@
+{
+  "snapshotCount": 789,
+  "forms": 964,
+  "snapshotsWithForm": 622,
+  "snapshotsWithoutForm": 167,
+  "radioInputs": 182,
+  "checkboxInputs": 64,
+  "questionAnswersContainers": 26,
+  "answerButtons": 77,
+  "questionAnswerButtonClasses": 77,
+  "phoneWidgets": 49,
+  "phoneInputs": 108,
+  "hiddenRequiredFields": 97,
+  "phoneSaveButtons": 7,
+  "ratingGroups": 6,
+  "matrixGroups": 0,
+  "choiceCards": 0,
+  "aiQuestionSections": 25
+}

@@ -1,8 +1,8 @@
 # Security.dll: bản dịch hành vi và khả năng port sang macOS
 
-Ngày phân tích: 2026-10-20 00:16 +07
-Artifact: `/Users/codernguoitay/Downloads/AutoLeadPC/Security.dll`
-SHA-256: `80f5175e78f78d60bc387110672cfa950a333ef17639ce6d0919f3302fd8dce2`
+Ngày phân tích: 2026-10-20 00:16 +07  
+Artifact: `/Users/codernguoitay/Downloads/AutoLeadPC/Security.dll`  
+SHA-256: `80f5175e78f78d60bc387110672cfa950a333ef17639ce6d0919f3302fd8dce2`  
 Kiến trúc: PE x64 (Windows). Pseudocode từ Hopper/REA là kết quả decompile, không phải mã nguồn gốc và không biên dịch được.
 
 ## Bản dịch các export được app PC gọi

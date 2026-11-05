@@ -71,8 +71,8 @@ export function selectAdsPowerKernelVersions(installedVersions, occupiedVersions
  */
 export function buildAdsPowerProfileRequest({ slot, proxy = null, exitIp = '', websiteUrl = '', antiFingerprint = {}, deviceProfile = 'windows', userAgent = '', browserVersion, resolution = '1920x1080' }) {
   if (!browserVersion) throw new Error('Thiếu phiên bản SunBrowser đã cài cho profile AdsPower.');
-  const osLabel = ({ windows: 'Windows 11', macos: 'Mac OS X 14', linux: 'Linux', android: 'Android 13' })[deviceProfile] || 'Windows 11';
-  const osShort = ({ windows: 'Win 11', macos: 'macOS', linux: 'Linux', android: 'Android' })[deviceProfile] || 'Win 11';
+  const osLabel = ({ windows: 'Windows 11', macos: 'Mac OS X 14', linux: 'Linux', android: 'Android 13', ios: 'iOS 17', ipad: 'iOS 17' })[deviceProfile] || 'Windows 11';
+  const osShort = ({ windows: 'Win 11', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Win 11';
 
   const fingerprint = {
     browser_kernel_config: { type: 'chrome', version: String(browserVersion) },
@@ -240,6 +240,7 @@ export async function updateAdsPowerProfile(apiKey, profileId, options = {}, req
     ...(options.name ? { name: options.name } : {}),
     ...(options.user_proxy_config ? { user_proxy_config: options.user_proxy_config } : {}),
     ...(options.tabs ? { tabs: options.tabs } : {}),
+    ...(options.fingerprint_config ? { fingerprint_config: options.fingerprint_config } : {}),
   };
   return requestAdsPower(apiKey, '/api/v1/user/update', payload, request);
 }
@@ -268,13 +269,19 @@ export async function getOrCreateAdsPowerProfile(apiKey, profileRequest, activeP
     if (idleProfile) {
       console.log(`[AdsPower] ♻️ Tái sử dụng profile có sẵn ${idleProfile.user_id} (${idleProfile.name || 'Slot ' + slot}) cho Slot ${slot} (tiết kiệm quota API).`);
       try {
+        // BẮT BUỘC cập nhật cả fingerprint_config theo profileRequest hiện tại:
+        // nếu không, slot nào cũng nhận fingerprint của lần tạo cũ → thiết bị/OS/phiên bản
+        // không thay đổi giữa các slot dù deviceProfile đã xoay vòng ở tầng app.
+        // AdsPower User Update API không cho đè fingerprint trần khi profile đang chạy,
+        // nên chỉ merge fingerprint chưa có/khác — với profile nhàn rỗi thì hợp lệ.
         await updateAdsPowerProfile(apiKey, idleProfile.user_id, {
           name: profileRequest.name,
           user_proxy_config: profileRequest.user_proxy_config,
           tabs: profileRequest.tabs,
+          fingerprint_config: profileRequest.fingerprint_config,
         }, request);
       } catch (updateErr) {
-        console.warn(`[AdsPower] Cập nhật proxy profile ${idleProfile.user_id}: ${updateErr.message}`);
+        console.warn(`[AdsPower] Cập nhật proxy/fingerprint profile ${idleProfile.user_id}: ${updateErr.message}`);
       }
       return idleProfile.user_id;
     }
@@ -352,6 +359,8 @@ export async function startAdsPowerProfile(apiKey, profileId, options = {}, requ
   if (launchArgs.length > 0) {
     payload.launch_args = launchArgs;
   }
+  // Chạy trong app: SunBrowser headless, không có cửa sổ nên không hiện icon trên Dock.
+  if (options.headless) payload.headless = '1';
   const started = await requestAdsPower(apiKey, '/api/v2/browser-profile/start', payload, request);
   if (!started.ws?.puppeteer) throw new Error('AdsPower mở profile nhưng không trả CDP URL.');
   return started.ws.puppeteer;

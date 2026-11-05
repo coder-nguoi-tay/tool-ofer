@@ -149,8 +149,12 @@
         </div>
         <div style="margin-top: 10px; margin-bottom: 12px; border: 1px solid #d8dfeb; border-radius: 8px; padding: 10px 12px; background: #ffffff;">
           <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;">
-            <input type="checkbox" id="enable-lead-check" name="enableLeadCheck" checked style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+            <input type="checkbox" id="enable-lead-check" name="enableLeadCheck" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
             <span>Kiểm tra lead khi đến màn số 5 (gọi API toffers.top, trùng IP mới làm tiếp, không thì tắt Chrome đổi sock)</span>
+          </label>
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; margin-top: 6px;">
+            <input type="checkbox" id="auto-close-no-lead" name="autoCloseNoLead" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+            <span>Tự tắt Chrome nếu đợi 30s × 2 lần không có lead về (bỏ tick để giữ trình duyệt mở khi hết lượt check)</span>
           </label>
           <p class="hint" style="margin-top: 5px; margin-bottom: 6px;">
             Điền tự động các màn 1-4 bình thường. Khi làm đến màn 5 (DOB/Gender), hệ thống tạm dừng và gọi API toffers.top kiểm tra lead trùng với IP sock. Nếu lead về mới làm tiếp các bước sau; nếu không có lead sau thời gian chờ thì tắt Chrome và mở sock tiếp theo.
@@ -232,6 +236,7 @@
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-clientrects" name="antiFpClientRects"> Rung ClientRects (chống đo layout fingerprint)</label>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-webgl" name="antiFpWebgl"> Giả mạo WebGL vendor/renderer</label>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="anti-fp-webrtc" name="antiFpWebrtc"> Chặn rò IP qua WebRTC</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px;font-weight:600;color:#003399;"><input type="checkbox" id="use-cloak-browser" name="useCloakBrowser"> 🥷 Kích hoạt CloakBrowser (Stealth Chromium chống bot & Humanize)</label>
             </div>
 
             <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eef1f6;">
@@ -440,6 +445,7 @@
             <input type="checkbox" id="log-auto-refresh" checked style="width:14px;height:14px;"> Tự làm mới
           </label>
           <button class="secondary" id="log-open-folder-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;" title="Mở thư mục lưu file HTML trong Finder">📁 Mở thư mục HTML</button>
+          <button class="secondary" id="log-download-all-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;" title="Tải log, HTML và ảnh giao diện đã lưu">⬇️ Tải tất cả giao diện</button>
           <button class="secondary" id="log-clear-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xoá bộ lọc</button>
           <button class="secondary" id="log-clear-all-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;color:#dc2626;border-color:#fca5a5;" title="Xoá toàn bộ log thao tác và các file HTML đã lưu">🗑️ Xoá toàn bộ log & HTML</button>
         </div>
@@ -526,7 +532,7 @@
     let isRefreshingAutoRefillState = false;
     const savedFieldNames = [
       'proxyList', 'requestedCount', 'proxyType', 'websiteUrl', 'websiteUrl2', 'autofillData', 'emailList', 'autoSubmitForm',
-      'enableLeadCheck', 'leadCheckScreen', 'leadCheckApiUrl', 'leadCheckCookie', 'leadCheckDatas', 'leadCheckInterval', 'leadCheckMaxAttempts',
+      'enableLeadCheck', 'leadCheckScreen', 'leadCheckApiUrl', 'leadCheckCookie', 'leadCheckDatas', 'leadCheckInterval', 'leadCheckMaxAttempts', 'autoCloseNoLead',
       'scriptPath', 'captchaApiKey', 'completeText', 'timeLimit', 'delayStart', 'delayStop', 'limitRun',
       'antiFpCanvas', 'antiFpClientRects', 'antiFpWebgl', 'antiFpWebrtc',
     ];
@@ -587,7 +593,10 @@
     window.restoreSavedPreferencesFromBase64 = (encodedSettings) => {
       const bytes = Uint8Array.from(atob(encodedSettings), (character) => character.charCodeAt(0));
       const preferences = JSON.parse(new TextDecoder().decode(bytes));
+      // Hai ô lead check luôn khởi động ở trạng thái KHÔNG tích (bỏ qua giá trị lưu cũ).
+      const notRestoredFieldNames = ['enableLeadCheck', 'autoCloseNoLead'];
       for (const fieldName of savedFieldNames) {
+        if (notRestoredFieldNames.includes(fieldName)) continue;
         const field = form.elements.namedItem(fieldName);
         if (field && preferences[fieldName] !== undefined) {
           if (field.type === 'checkbox') {
@@ -666,9 +675,7 @@
             if (session.leadCheckStatus === 'waiting') {
               leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#92400e;">⏳ Đang chờ lead (30s)...</span>';
             } else if (session.leadCheckStatus === 'confirmed') {
-              leadTag = `<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;">✅ Có lead · IP ${session.exitIp || 'không rõ'}</span>`;
-            } else if (session.leadCheckStatus === 'manual_unlocked') {
-              leadTag = `<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#92400e;" title="${session.leadCheckMessage || ''}">⚠️ Đã mở khóa · IP ${session.exitIp || 'không rõ'} · chưa xác nhận lead</span>`;
+              leadTag = '<span style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;">✅ Có lead về</span>';
             } else if (session.leadCheckStatus === 'api_error') {
               leadTag = `<span style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fee2e2;color:#991b1b;" title="${session.leadCheckMessage || 'Lỗi API lead'}">⚠️ Lỗi API lead <button type="button" class="resume-lead-btn" data-slot="${session.slot}" style="background:#dc2626;color:#fff;border:none;border-radius:3px;padding:1px 5px;font-size:9px;cursor:pointer;">Tiếp tục fill</button></span>`;
             } else if (session.leadCheckStatus === 'failed') {
@@ -710,7 +717,6 @@
                     <span class="chrome-card-slot">Cửa sổ ${session.slot}</span>
                     <span class="chrome-card-version">v${session.version}</span>
                     <span style="font-size:11px;margin-left:4px;" title="${session.deviceSummary || deviceLabel}">${deviceIcon}</span>
-                    <button type="button" onclick="event.stopPropagation(); closeBrowserSlot(${session.slot});" title="Đóng riêng trình duyệt này" style="margin-left:5px;border:1px solid #fca5a5;background:#fff1f2;color:#b91c1c;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;">✕ Đóng</button>
                     ${session.streamLabel ? `<span style="background:${session.streamRole === 2 ? '#8b5cf6' : '#2563eb'};color:#fff;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-left:auto;">${session.streamLabel}</span>` : ''}
                   </div>
                   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -749,25 +755,6 @@
         isRefreshingAutoRefillState = false;
       }
     }
-
-    /**
-     * Đóng một trình duyệt theo slot mà không dừng các slot khác.
-     * @param {number} slot Slot trình duyệt cần đóng.
-     * @return {Promise<void>} Hoàn tất khi trạng thái danh sách được làm mới.
-     * @author ductv <ductv@getflycrm.com>
-     * @since 2026-10-21
-     */
-    window.closeBrowserSlot = async function closeBrowserSlot(slot) {
-      if (!window.confirm(`Đóng riêng trình duyệt Slot ${slot}?`)) return;
-      try {
-        const response = await fetch(`/browser/close/${slot}`, { method: 'POST' });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Không thể đóng trình duyệt.');
-        await refreshAutoRefillState();
-      } catch (error) {
-        window.alert(error.message);
-      }
-    };
 
     /**
      * Bật hoặc tắt việc tự mở profile thay thế.
@@ -814,6 +801,7 @@
           leadCheckDatas: full.leadCheckDatas,
           leadCheckInterval: full.leadCheckInterval,
           leadCheckMaxAttempts: full.leadCheckMaxAttempts,
+          autoCloseNoLead: full.autoCloseNoLead,
         };
         const res = await fetch('/auto-refill/sequential', {
           method: 'POST',
@@ -932,15 +920,26 @@
       if (document.querySelector('#ai-cli-select')) document.querySelector('#ai-cli-select').value = cfg.cliBinary || 'codex_mcp';
       if (document.querySelector('#ai-codex-mcp')) document.querySelector('#ai-codex-mcp').checked = cfg.useCodexMcp !== false;
       if (document.querySelector('#ai-mode-select')) document.querySelector('#ai-mode-select').value = cfg.mode || 'auto_on_stuck';
+      const savedCloak = localStorage.getItem('autolead_use_cloak') === '1';
+      const cloakEl = document.querySelector('#use-cloak-browser');
+      if (cloakEl) {
+        cloakEl.checked = savedCloak;
+        cloakEl.addEventListener('change', (e) => {
+          localStorage.setItem('autolead_use_cloak', e.target.checked ? '1' : '0');
+        });
+      }
     }).catch(() => {});
 
     function buildRequestBody(overrides = {}) {
       const autoSubmitEl = form.elements.namedItem('autoSubmitForm');
       const enableLeadCheckEl = form.elements.namedItem('enableLeadCheck');
+      const cloakEl = document.querySelector('#use-cloak-browser');
       return {
         ...Object.fromEntries(new FormData(form)),
         autoSubmitForm: autoSubmitEl ? autoSubmitEl.checked : true,
-        enableLeadCheck: enableLeadCheckEl ? enableLeadCheckEl.checked : true,
+        enableLeadCheck: enableLeadCheckEl ? enableLeadCheckEl.checked : false,
+        autoCloseNoLead: Boolean((form.elements.namedItem('autoCloseNoLead') || {}).checked),
+        useCloakBrowser: cloakEl ? cloakEl.checked : false,
         ...overrides,
       };
     }
@@ -1233,6 +1232,10 @@
     document.querySelector('#log-open-folder-btn').addEventListener('click', async () => {
       const res = await fetch('/browser-logs/open-folder', { method: 'POST' }).then((r) => r.json());
       status.textContent = res.message || 'Đã mở thư mục trong Finder.';
+    });
+
+    document.querySelector('#log-download-all-btn').addEventListener('click', () => {
+      window.location.href = '/browser-logs/download-all';
     });
 
     document.querySelector('#log-clear-all-btn').addEventListener('click', () => {

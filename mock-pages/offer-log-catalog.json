@@ -1,0 +1,194 @@
+{
+  "scannedSnapshotCount": 789,
+  "offerMarkerSnapshotCount": 49,
+  "offerRootOccurrenceCount": 21,
+  "excludedFormRootCount": 0,
+  "excludedEmptyRootCount": 0,
+  "duplicateOfferOccurrenceCount": 13,
+  "offerwallMarkerOccurrenceCount": 28,
+  "uniqueOfferCount": 8,
+  "uniqueActionableOfferCount": 7,
+  "uniqueInformationalOfferCount": 1,
+  "uniqueFormExcludedOfferCount": 5,
+  "excludedFormOffers": [
+    {
+      "offerId": "offerwall_card_0_1792758649913",
+      "sourceType": "offerwall_form_marker",
+      "exclusionReason": "The saved marker belongs to a form element, and only the information-entry page may contain a form.",
+      "sourceSnapshotCount": 5,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-30-53-031_slot3_tab1_sweepstakesalerts.com_316e2183f448.html",
+        "offer1_2026-10-23T12-32-09-372_slot3_tab1_sweepstakesalerts.com_427097d60244.html",
+        "offer1_2026-10-23T12-32-26-389_slot3_tab1_sweepstakesalerts.com_0a2fa5f146ad.html",
+        "offer1_2026-10-23T12-32-41-891_slot3_tab1_sweepstakesalerts.com_b6e956d12e13.html",
+        "offer1_2026-10-23T12-33-02-286_slot3_tab1_sweepstakesalerts.com_01dac43d7282.html"
+      ]
+    },
+    {
+      "offerId": "offerwall_card_0_1792758657433",
+      "sourceType": "offerwall_form_marker",
+      "exclusionReason": "The saved marker belongs to a form element, and only the information-entry page may contain a form.",
+      "sourceSnapshotCount": 7,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-31-00-623_slot10_tab1_sweepstakesalerts.com_82ad851fef3f.html",
+        "offer1_2026-10-23T12-32-16-418_slot10_tab1_sweepstakesalerts.com_d7da9cb9008b.html",
+        "offer1_2026-10-23T12-32-32-937_slot10_tab1_sweepstakesalerts.com_1572429612d6.html",
+        "offer1_2026-10-23T12-32-36-910_slot10_tab1_sweepstakesalerts.com_79de41e976ad.html",
+        "offer1_2026-10-23T12-33-29-735_slot10_tab1_sweepstakesalerts.com_f9d27ab05e9a.html",
+        "offer1_2026-10-23T12-33-45-111_slot10_tab1_sweepstakesalerts.com_9af29205a641.html",
+        "offer1_2026-10-23T12-34-05-487_slot10_tab1_sweepstakesalerts.com_df41ad181ce6.html"
+      ]
+    },
+    {
+      "offerId": "offerwall_card_0_1792758669713",
+      "sourceType": "offerwall_form_marker",
+      "exclusionReason": "The saved marker belongs to a form element, and only the information-entry page may contain a form.",
+      "sourceSnapshotCount": 9,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-31-12-272_slot9_tab1_sweepstakesalerts.com_987f8dac8ee0.html",
+        "offer1_2026-10-23T12-31-13-296_slot9_tab1_sweepstakesalerts.com_238d3b02bb0d.html",
+        "offer1_2026-10-23T12-31-14-708_slot9_tab1_sweepstakesalerts.com_2f4fa64d64c1.html",
+        "offer1_2026-10-23T12-31-17-051_slot9_tab1_sweepstakesalerts.com_c3355e373e1e.html",
+        "offer1_2026-10-23T12-31-32-992_slot9_tab1_sweepstakesalerts.com_c1e058b923a7.html",
+        "offer1_2026-10-23T12-31-48-357_slot9_tab1_sweepstakesalerts.com_d44e28c829c8.html",
+        "offer1_2026-10-23T12-33-05-709_slot9_tab1_sweepstakesalerts.com_391ea1b55725.html",
+        "offer1_2026-10-23T12-33-22-111_slot9_tab1_sweepstakesalerts.com_508c9c44fc80.html",
+        "offer1_2026-10-23T12-33-55-796_slot9_tab1_sweepstakesalerts.com_dc84e1b8d06f.html"
+      ]
+    },
+    {
+      "offerId": "offerwall_card_0_1792760033618",
+      "sourceType": "offerwall_form_marker",
+      "exclusionReason": "The saved marker belongs to a form element, and only the information-entry page may contain a form.",
+      "sourceSnapshotCount": 6,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-53-54-318_slot3_tab1_sweepstakesalerts.com_19783afbca6b.html",
+        "offer1_2026-10-23T12-53-56-249_slot3_tab1_sweepstakesalerts.com_a721d62048ee.html",
+        "offer1_2026-10-23T12-55-12-091_slot3_tab1_sweepstakesalerts.com_0e655ef1d627.html",
+        "offer1_2026-10-23T12-55-28-424_slot3_tab1_sweepstakesalerts.com_1094335e31f9.html",
+        "offer1_2026-10-23T12-55-43-770_slot3_tab1_sweepstakesalerts.com_9e13203ca8b5.html",
+        "offer1_2026-10-23T12-56-04-167_slot3_tab1_sweepstakesalerts.com_c15bea7de8b1.html"
+      ]
+    },
+    {
+      "offerId": "offerwall_card_0_1792760124546",
+      "sourceType": "offerwall_form_marker",
+      "exclusionReason": "The saved marker belongs to a form element, and only the information-entry page may contain a form.",
+      "sourceSnapshotCount": 1,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-55-25-090_slot2_tab1_sweepstakesalerts.com_239b72e03bca.html"
+      ]
+    }
+  ],
+  "offers": [
+    {
+      "offerId": "captured-dc790f63169c",
+      "sourceType": "offer_container",
+      "actionType": "informational",
+      "primaryActionId": null,
+      "declineActionId": null,
+      "sourceActionCount": 0,
+      "sourceSnapshotCount": 7,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-37-22-178_slot2_tab2_benefitssaccesscenters.com_5465aba1976e.html",
+        "offer1_2026-10-23T12-40-04-824_slot5_tab8_benefitssaccesscenters.com_d5695baaa1c1.html",
+        "offer1_2026-10-23T12-40-04-850_slot5_tab8_benefitssaccesscenters.com_b9882a3b6cb3.html",
+        "offer1_2026-10-23T12-40-08-930_slot5_tab8_benefitssaccesscenters.com_73e7780a7b85.html",
+        "offer1_2026-10-23T12-40-28-054_slot5_tab8_benefitssaccesscenters.com_6edcec8b6535.html",
+        "offer1_2026-10-23T12-40-28-114_slot5_tab8_benefitssaccesscenters.com_71a2cde42d8c.html",
+        "offer1_2026-10-23T12-40-30-413_slot5_tab8_benefitssaccesscenters.com_8a505f61de44.html"
+      ]
+    },
+    {
+      "offerId": "offers_list-3102",
+      "sourceType": "offers_list",
+      "actionType": "primary_cta",
+      "primaryActionId": "ct-creative-submit-yes",
+      "declineActionId": "ct-creative-submit-no",
+      "sourceActionCount": 2,
+      "sourceSnapshotCount": 5,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-37-40-023_slot10_tab1_sweepstakesalerts.com_d98d17177fa0.html",
+        "offer1_2026-10-23T12-37-55-087_slot10_tab1_sweepstakesalerts.com_bb259137efc0.html",
+        "offer1_2026-10-23T12-38-27-288_slot9_tab1_sweepstakesalerts.com_f7a71a9e2d0a.html",
+        "offer1_2026-10-23T12-38-47-422_slot9_tab1_sweepstakesalerts.com_91c5f4d0a853.html",
+        "offer1_2026-10-23T12-45-59-674_slot10_tab1_sweepstakesalerts.com_9ef31248d213.html"
+      ]
+    },
+    {
+      "offerId": "offer-431",
+      "sourceType": "offer_object",
+      "actionType": "question_answer",
+      "primaryActionId": "answer-0",
+      "declineActionId": null,
+      "sourceActionCount": 7,
+      "sourceSnapshotCount": 1,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-38-39-298_slot5_tab1_sweepstakesalerts.com_ebdbfa23e774.html"
+      ]
+    },
+    {
+      "offerId": "offers_list-4261",
+      "sourceType": "offers_list",
+      "actionType": "primary_cta",
+      "primaryActionId": "ct-creative-submit-01",
+      "declineActionId": "ct-creative-submit-05",
+      "sourceActionCount": 2,
+      "sourceSnapshotCount": 1,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-40-52-364_slot3_tab1_sweepstakesalerts.com_65c88e3fbe8a.html"
+      ]
+    },
+    {
+      "offerId": "offers_list-4149",
+      "sourceType": "offers_list",
+      "actionType": "primary_cta",
+      "primaryActionId": "ct-creative-submit-yes",
+      "declineActionId": "ct-creative-submit-no",
+      "sourceActionCount": 2,
+      "sourceSnapshotCount": 1,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-43-25-398_slot9_tab1_sweepstakesalerts.com_0e38ccbcbf75.html"
+      ]
+    },
+    {
+      "offerId": "offer-3749",
+      "sourceType": "multi_offer",
+      "actionType": "primary_cta",
+      "primaryActionId": "ct-creative-submit-01",
+      "declineActionId": "ct-creative-submit-02",
+      "sourceActionCount": 2,
+      "sourceSnapshotCount": 1,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-44-17-783_slot9_tab1_sweepstakesalerts.com_07929436ec28.html"
+      ]
+    },
+    {
+      "offerId": "offer-4159",
+      "sourceType": "multi_offer",
+      "actionType": "primary_cta",
+      "primaryActionId": "ct-creative-submit-01",
+      "declineActionId": "ct-creative-submit-02",
+      "sourceActionCount": 2,
+      "sourceSnapshotCount": 1,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-45-17-581_slot9_tab1_sweepstakesalerts.com_5c2ea78e286c.html"
+      ]
+    },
+    {
+      "offerId": "offer-4000",
+      "sourceType": "multi_offer",
+      "actionType": "primary_cta",
+      "primaryActionId": "ct-creative-submit-01",
+      "declineActionId": "ct-creative-submit-02",
+      "sourceActionCount": 2,
+      "sourceSnapshotCount": 4,
+      "sourceSnapshotNames": [
+        "offer1_2026-10-23T12-47-08-952_slot10_tab1_sweepstakesalerts.com_a37c692e4601.html",
+        "offer1_2026-10-23T12-47-18-809_slot10_tab1_sweepstakesalerts.com_364af13b601c.html",
+        "offer1_2026-10-23T12-47-45-399_slot10_tab1_sweepstakesalerts.com_c4b5f8d7b52f.html",
+        "offer1_2026-10-23T12-47-48-901_slot10_tab1_sweepstakesalerts.com_862a329c8204.html"
+      ]
+    }
+  ]
+}

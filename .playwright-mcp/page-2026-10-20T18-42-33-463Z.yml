@@ -1,0 +1,17 @@
+- generic [ref=e2]:
+  - heading "Special Offer Form" [level=2] [ref=e3]
+  - generic [ref=e4]:
+    - text: "Full Name:"
+    - textbox "Full Name:" [ref=e5]:
+      - /placeholder: Enter your full name
+      - text: James Smith
+  - generic [ref=e6]:
+    - text: "Email:"
+    - textbox "Email:" [active] [ref=e7]:
+      - /placeholder: Enter email
+      - text: james.smith1234@gmail.com
+  - generic [ref=e8]: "Option 1: Receive Benefits"
+  - generic [ref=e11]:
+    - checkbox "You must accept to continue" [ref=e12]
+    - text: You must accept to continue
+  - button "Continue & Submit" [ref=e14]

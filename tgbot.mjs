@@ -73,11 +73,16 @@ async function appGet(path) {
 }
 
 async function readAutoRefillSettings() {
-  try {
-    const p = join(homedir(), 'Library', 'Application Support', dataDirName, 'autorefill-settings.json');
-    const raw = JSON.parse(await readFile(p, 'utf8'));
-    return raw?.settings ? raw : null;
-  } catch { return null; }
+  const dir = join(homedir(), 'Library', 'Application Support', dataDirName);
+  // autorefill-settings.json bị xoá khi Stop; last-launch-settings.json giữ cấu hình lần Start gần nhất
+  // nên /run vẫn chạy được sau Stop mà không cần mở app bấm Start lại.
+  for (const name of ['autorefill-settings.json', 'last-launch-settings.json']) {
+    try {
+      const raw = JSON.parse(await readFile(join(dir, name), 'utf8'));
+      if (raw?.settings) return raw;
+    } catch { /* thử file tiếp theo */ }
+  }
+  return null;
 }
 
 async function appPost(path, body = {}) {

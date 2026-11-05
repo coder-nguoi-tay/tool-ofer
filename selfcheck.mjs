@@ -13,6 +13,8 @@ import {
   handleOfferwallCards,
   attachAutofill,
   humanType,
+  fillAlphaIntentFullName,
+  createFallbackAutofillRecord,
   DEFAULT_PHONE_AREA_CODES,
   getPhoneAreaCode,
   getNormalizedPhone,
@@ -49,6 +51,7 @@ import {
   loadEmailQueue,
   saveEmailQueue,
   parseEmailLine,
+  isPlausibleGmail,
   importEmailLines,
   dequeueNextEmail,
   DEVICE_PROFILES,
@@ -68,6 +71,12 @@ import {
   isProxyUsedByAllOffers,
   buildProxyUsageHistoryCsv,
 } from './app.mjs';
+
+// app.mjs đăng ký process.on('uncaughtException') để giữ app sống khi một nhánh hậu kỳ
+// hỏng. Handler đó sẽ nuốt lỗi assert, khiến selfcheck luôn báo "thành công" dù kiểm tra
+// đã fail. Ở đây ta bỏ handler để lỗi nổi lên và tiến trình dừng với exit code khác 0.
+process.removeAllListeners('uncaughtException');
+process.removeAllListeners('unhandledRejection');
 
 const parse = (line, type = 'socks5') => parseProxyLine(line, 1, type);
 const fails = (line, type = 'socks5') => assert.throws(() => parse(line, type));
@@ -440,7 +449,8 @@ assert.equal(matchFieldValue(['day'], userSample), '18');
 assert.equal(matchFieldValue(['year'], userSample), '1967');
 assert.equal(matchFieldValue(['middle_name', 'initial'], leadRecord), 'Pablo');
 assert.equal(matchFieldValue(['email', 'email_address'], leadRecord), 'juan@example.com');
-assert.equal(matchFieldValue(['email'], { fullname: 'John Doe', phonenumber: '1234567890' }), 'john.doe7890@gmail.com');
+// Record không có email: không tự sinh email (chỉ dùng email trong danh sách app cung cấp).
+assert.equal(matchFieldValue(['email'], { fullname: 'John Doe', phonenumber: '1234567890' }), null);
 
 // Kiểm tra dữ liệu mẫu người dùng cung cấp kèm dấu phẩy kết thúc:
 const jeremySampleJson = `{
@@ -490,7 +500,7 @@ assert.equal(matchFieldValue(['v3-state'], jeremy), 'OK');
 assert.equal(matchFieldValue(['v3-dob_month'], jeremy), '08');
 assert.equal(matchFieldValue(['v3-dob_day'], jeremy), '04');
 assert.equal(matchFieldValue(['v3-dob_year'], jeremy), '1984');
-assert.equal(matchFieldValue(['v3-gender'], jeremy), 'Male');
+assert.equal(matchFieldValue(['v3-gender'], jeremy), null, 'jeremy không có trường sex/gender -> không bịa giá trị');
 
 // Kiểm tra đối sánh form Vector landing page (data-vector-field="address1", "city", "state", .input-group, nextElementSibling label):
 assert.equal(matchFieldValue(['address1', 'Street Address *', 'input-field'], jeremy), '723 e 6th st');
@@ -585,31 +595,42 @@ assert.equal(
 );
 assert.equal(
   matchFieldValue(['address1', 'street-address', 'Street Address*'], {}),
-  '100 Main St',
-  'Khi record thiếu địa chỉ, phải có fallback địa chỉ mặc định hợp lệ để không bị chặn form'
+  null,
+  'Record thiếu địa chỉ -> không bịa giá trị ngoài dữ liệu, trả null'
 );
 
 // Test Phone mặc định đầu số 814 hoặc 817
 assert.deepEqual(DEFAULT_PHONE_AREA_CODES, ['814', '817']);
+const savedFormTestPhone = '8145550100';
+assert.equal(getNormalizedPhone({ phone: savedFormTestPhone }), savedFormTestPhone, 'Số chuẩn trong form test phải giữ đủ 10 chữ số và đầu 814');
+assert.equal(matchFieldValue(['phone', 'tel'], { phone: savedFormTestPhone }), savedFormTestPhone, 'Autofill chính phải điền nguyên số hợp lệ từ form test');
+assert.equal(getPhoneAreaCode({ phone: '+1 (814) 555-0100' }), '814', 'Tiền tố quốc gia +1 không làm mất mã vùng 814');
+assert.equal(getPhoneAreaCode({ phone: '+1 (817) 555-0100' }), '817', 'Tiền tố quốc gia +1 không làm mất mã vùng 817');
 assert.ok(['814', '817'].includes(getPhoneAreaCode({})), 'Khi record rỗng, getPhoneAreaCode phải trả về 814 hoặc 817');
 assert.equal(getPhoneAreaCode({ phone: '8141234567' }), '814', 'Số có sẵn đầu 814 phải giữ nguyên');
 assert.equal(getPhoneAreaCode({ phone: '8179998888' }), '817', 'Số có sẵn đầu 817 phải giữ nguyên');
-assert.ok(['814', '817'].includes(getPhoneAreaCode({ phone: '4059335582' })), 'Số đầu khác phải được chuyển về 814 hoặc 817');
+assert.ok(['814', '817'].includes(getPhoneAreaCode({ phone: '4059335582' })), 'Số có sẵn đầu khác -> chuẩn hóa về 814 hoặc 817');
 assert.equal(getPhoneAreaCode({ areacode: '814' }), '814', 'Trường areacode = 814 phải được tôn trọng');
 assert.equal(getPhoneAreaCode({ areacode: '817' }), '817', 'Trường areacode = 817 phải được tôn trọng');
 
-// Test getNormalizedPhone sinh đúng 10 số có đầu 814 hoặc 817
 const emptyPhone = getNormalizedPhone({});
-assert.equal(emptyPhone.length, 10, 'Fallback phone phải đủ 10 số');
-assert.ok(/^(814|817)/.test(emptyPhone), 'Fallback phone phải bắt đầu bằng 814 hoặc 817');
+assert.ok(/^(814|817)\d{7}$/.test(emptyPhone), 'Record thiếu số điện thoại -> đầu 814/817 + 7 số đuôi bất kỳ');
+assert.equal(getNormalizedPhone({}).length, 10, 'Số sinh ra phải đủ 10 chữ số');
+const stablePhoneRecord = {};
+assert.equal(getNormalizedPhone(stablePhoneRecord), getNormalizedPhone(stablePhoneRecord), 'Cùng bản ghi phải ra cùng một số');
+assert.ok(['814', '817'].includes(getPhoneAreaCode({})), 'Khi record rỗng, getPhoneAreaCode phải trả về 814 hoặc 817');
+assert.equal(getPhoneAreaCode({ phone: '8141234567' }), '814', 'Số có sẵn đầu 814 phải giữ nguyên');
+assert.equal(getPhoneAreaCode({ phone: '8179998888' }), '817', 'Số có sẵn đầu 817 phải giữ nguyên');
+assert.ok(['814', '817'].includes(getPhoneAreaCode({ phone: '4059335582' })), 'Số có sẵn đầu khác -> chuẩn hóa về 814 hoặc 817');
+assert.equal(getPhoneAreaCode({ areacode: '814' }), '814', 'Trường areacode = 814 phải được tôn trọng');
+assert.equal(getPhoneAreaCode({ areacode: '817' }), '817', 'Trường areacode = 817 phải được tôn trọng');
+const fallbackAutofillRecord = createFallbackAutofillRecord();
+const fallbackPhoneDigits = fallbackAutofillRecord.phone.replace(/\D/g, '');
+assert.match(fallbackPhoneDigits, /^(?:814|817)\d{7}$/, 'Record fallback chính thức phải có đầu 814/817 và đủ 10 chữ số');
+assert.equal(fallbackAutofillRecord.areacode, fallbackPhoneDigits.slice(0, 3), 'Mã vùng fallback phải khớp số điện thoại đầy đủ');
+assert.equal(matchFieldValue(['phone', 'tel'], fallbackAutofillRecord), fallbackAutofillRecord.phone, 'Trường điện thoại đầy đủ dùng đúng số của record fallback');
 
-const formattedPhone = getNormalizedPhone({ phone: '(405) 933-5582' });
-assert.ok(/^\((814|817)\) 933-5582$/.test(formattedPhone), 'Phải giữ nguyên định dạng ngoặc đơn với đầu 814 hoặc 817');
-
-const dashPhone = getNormalizedPhone({ phone: '405-933-5582' });
-assert.ok(/^(814|817)-933-5582$/.test(dashPhone), 'Phải giữ nguyên định dạng gạch nối với đầu 814 hoặc 817');
-
-// Test matchFieldValue với record rỗng vẫn tự động sinh phone hợp lệ đầu 814/817
+// Test matchFieldValue với record rỗng phải trả null (không bịa phone từ bên ngoài)
 const matchedEmptyPhone = matchFieldValue(['phone', 'tel'], {});
 assert.ok(/^(814|817)\d{7}$/.test(matchedEmptyPhone), 'matchFieldValue cho record rỗng phải trả về 10 số đầu 814/817');
 assert.ok(['814', '817'].includes(matchFieldValue(['areacode', 'phone1'], {})), 'matchFieldValue areacode cho record rỗng phải là 814 hoặc 817');
@@ -865,13 +886,15 @@ assert.deepEqual(chromeExecutableNames('145.0.7632.117'), ['Google Chrome', 'Goo
 assert.deepEqual(chromeExecutableNames('beta'), ['Google Chrome Beta']);
 assert.deepEqual(chromeExecutableNames('canary'), ['Google Chrome Canary']);
 
-// Đảm bảo không chứa bất kỳ bản Chrome for Testing nào trong danh sách Chrome khả dụng
+// Vòng xoay Chrome: chấp nhận cả Chrome for Testing (kho chrome-builds) nhưng
+// CHỈ các major ≥ 150 để profile mẫu RoboForm chép được sang mọi profile mới.
 const activeChromeBuilds = await listInstalledChromeChannels();
 assert.ok(activeChromeBuilds.length > 0, 'Phải tìm thấy ít nhất 1 bản Chrome thường');
 for (const b of activeChromeBuilds) {
-  assert.ok(!b.executablePath.includes('Chrome for Testing'), `Bản ${b.version} không được là Chrome for Testing`);
-  assert.ok(!b.executablePath.includes('chrome-builds'), `Bản ${b.version} không được nằm trong kho chrome-builds`);
   assert.ok(b.major >= 150, `Bản ${b.version} phải từ major 150 trở lên`);
+  if (b.executablePath.includes('Chrome for Testing') || b.executablePath.includes('chrome-builds')) {
+    assert.ok(b.major >= 150, `Bản CfT ${b.version} phải từ major 150 trở lên`);
+  }
 }
 
 // Test isConsentCheckbox nhận diện chính xác ô digitalConsent / consent-box của form
@@ -1052,17 +1075,46 @@ assert.equal(await detectSmartFallbackAction(null), null);
 assert.equal(await detectSmartFallbackAction({ isClosed: () => true }), null);
 
 // 2. Test executeAction
+// Mock phải phản ánh hành vi thật: executeAction điền xong sẽ ĐỌC LẠI giá trị trong DOM
+// để xác minh, chỉ khi khớp mới tăng session.autofillFields. Mock cũ trả về undefined
+// nên bước xác minh luôn fail và counter không bao giờ tăng.
 let executedActionLog = [];
+const mockFieldStates = new Map();
 const mockAiPage = {
   locator: (sel) => ({
-    first: () => ({
-      isVisible: async () => true,
-      click: async () => { executedActionLog.push(`click:${sel}`); },
-      fill: async (val) => { executedActionLog.push(`fill:${sel}:${val}`); },
-      selectOption: async (val) => { executedActionLog.push(`select:${sel}:${val}`); },
-      check: async () => { executedActionLog.push(`check:${sel}`); },
-      evaluate: async (fn) => fn({ dispatchEvent: () => {}, setAttribute: () => {} }),
-    }),
+    first: () => {
+      if (!mockFieldStates.has(sel)) {
+        mockFieldStates.set(sel, { value: '', checked: false });
+      }
+      const state = mockFieldStates.get(sel);
+      return {
+        isVisible: async () => true,
+        click: async () => { executedActionLog.push(`click:${sel}`); },
+        fill: async (val) => {
+          state.value = String(val ?? '');
+          executedActionLog.push(`fill:${sel}:${val}`);
+        },
+        selectOption: async (val) => {
+          state.selectedOptions = [{ value: String(val ?? ''), label: String(val ?? '') }];
+          executedActionLog.push(`select:${sel}:${val}`);
+        },
+        check: async () => {
+          state.checked = true;
+          executedActionLog.push(`check:${sel}`);
+        },
+        evaluate: async (fn) => fn({
+          ...state,
+          tagName: 'INPUT',
+          type: 'text',
+          matches: () => true,
+          querySelector: () => null,
+          getAttribute: () => null,
+          classList: { contains: () => false, add: () => {} },
+          dispatchEvent: () => {},
+          setAttribute: () => {},
+        }),
+      };
+    },
   }),
 };
 
@@ -1080,7 +1132,9 @@ assert.equal(mockSession.autofillFields, 3);
 assert.ok(executedActionLog.some((e) => e === 'check:#agree'));
 
 await executeAction(mockAiPage, { action: 'click', selector: '#submit' }, mockSession);
-assert.equal(mockSession.autofillFields, 4);
+// executeAction chỉ tăng autofillFields cho thao tác ĐIỀN ĐÃ XÁC MINH (fill/select/check).
+// Click không điền field nên không tính vào bộ đếm này — chỉ cập nhật lastActionTime.
+assert.equal(mockSession.autofillFields, 3);
 assert.ok(executedActionLog.some((e) => e === 'click:#submit'));
 
 // 3. Test pageHasWork
@@ -1115,6 +1169,9 @@ const mockStuckContext = {
 const mockSessionStuck = { autofillFields: 0, leadCheckStatus: null };
 attachAutofill(mockStuckContext, [{ firstname: 'Jeremy' }], 'https://example.com', mockSessionStuck, {
   onStuck: () => { stuckTriggered = true; },
+  // Production chờ 5s cho lượt autofill thư viện chạy trước khi gọi AI. Test rút ngắn
+  // cửa sổ này để không phải chờ 5 giây thật.
+  libraryFirstPassDelayMs: 0,
 });
 assert.equal(stuckTriggered, false);
 // Kích hoạt 3 lần scan không có trường nào điền thêm
@@ -1146,6 +1203,7 @@ const mockBlankContext = {
 const mockSessionBlank = { autofillFields: 5, leadCheckStatus: null };
 attachAutofill(mockBlankContext, [{ firstname: 'Jeremy' }], 'https://example.com', mockSessionBlank, {
   onStuck: () => { stuckTriggeredBlank = true; },
+  libraryFirstPassDelayMs: 0,
 });
 for (let i = 0; i < 5; i++) {
   mockSessionBlank.triggerAutofillScan?.();
@@ -1208,7 +1266,7 @@ const mockFrameWithIframeAndButton = {
 const foundValidBtn = await findSubmitButton(mockFrameWithIframeAndButton);
 assert.equal(foundValidBtn, mockValidButton, 'findSubmitButton phải loại trừ thẻ IFRAME và chọn nút BUTTON hợp lệ');
 
-// Test findSubmitButton: Gỡ disabled trên nút submit nếu nút bị disabled tạm thời
+// Test findSubmitButton: Không ép nút disabled hoặc đang "Submitting..." chạy lại
 let disabledRemoved = false;
 const mockDisabledSubmitBtn = {
   isVisible: async () => true,
@@ -1231,8 +1289,51 @@ const mockFrameWithDisabledBtn = {
   }),
 };
 const foundDisabledBtn = await findSubmitButton(mockFrameWithDisabledBtn);
-assert.equal(foundDisabledBtn, mockDisabledSubmitBtn, 'findSubmitButton phải nhận diện và gỡ disabled trên nút submit');
-assert.equal(disabledRemoved, true, 'Thuộc tính disabled phải được gỡ bỏ khỏi nút submit');
+assert.equal(foundDisabledBtn, null, 'findSubmitButton phải bỏ qua nút đang disabled');
+assert.equal(disabledRemoved, false, 'Không được gỡ thuộc tính disabled do website đặt');
+
+const mockLoadingNewsletterButton = {
+  isVisible: async () => true,
+  isEnabled: async () => true,
+  evaluate: async (fn) => fn({
+    tagName: 'BUTTON',
+    id: 'newsletter-submit',
+    disabled: false,
+    textContent: 'Submitting...',
+    getAttribute: () => null,
+  }),
+};
+const foundLoadingNewsletterButton = await findSubmitButton({
+  locator: (selector) => ({
+    all: async () => selector === 'button[type="submit"]' ? [mockLoadingNewsletterButton] : [],
+  }),
+});
+assert.equal(foundLoadingNewsletterButton, null, 'Không bấm nút newsletter khi đang hiển thị Submitting...');
+
+// Alpha Intent: chỉ điền ô Full Name hiển thị; không ghi nhận thành công nếu React xóa giá trị.
+let alphaNameValue = '';
+let alphaNameMarked = null;
+const alphaNameField = {
+  count: async () => 1,
+  isVisible: async () => true,
+  inputValue: async () => alphaNameValue,
+  getAttribute: async () => alphaNameMarked,
+  fill: async (value) => { alphaNameValue = value; },
+  press: async () => {},
+  evaluate: async (fn) => fn({ dataset: { set uxFilled(value) { alphaNameMarked = value; } } }),
+};
+const alphaFrame = { locator: (selector) => {
+  assert.ok(selector.includes('#alpha-intent-content input[data-testid="fullname-input"]') && selector.includes('#ai-funnel input[data-testid="fullname-input"]'), 'Selector phải bao gồm cả alpha-intent và ai-funnel');
+  return alphaNameField;
+} };
+assert.equal(await fillAlphaIntentFullName(alphaFrame, { firstname: 'Ada', lastname: 'Lovelace' }), true);
+assert.equal(alphaNameValue, 'Ada Lovelace');
+assert.equal(await fillAlphaIntentFullName(alphaFrame, { firstname: 'Ada', lastname: 'Lovelace' }), false, 'Không tăng bộ đếm sau khi đã điền');
+assert.equal(await fillAlphaIntentFullName(alphaFrame, {}), false, 'Không bịa họ tên khi record rỗng');
+alphaNameValue = '';
+alphaNameMarked = null;
+alphaNameField.fill = async () => { alphaNameValue = ''; };
+assert.equal(await fillAlphaIntentFullName(alphaFrame, { firstname: 'Ada', lastname: 'Lovelace' }), false, 'React xóa tên thì không ghi nhận đã điền');
 
 // 7. Test tự động chuẩn hóa email thiếu @ và sinh email hợp lệ khi khuyết
 const rawKendra = {
@@ -1253,7 +1354,7 @@ const rawNoEmailRecord = {
   state: 'AK',
 };
 const generatedEmail = matchFieldValue(['email'], rawNoEmailRecord, { type: 'email' });
-assert.equal(generatedEmail, 'kendra.wardlaw0430@gmail.com', 'Record thiếu email phải tự động sinh email hợp lệ');
+assert.equal(generatedEmail, null, 'Record thiếu email: không tự sinh email, chỉ dùng email trong danh sách app');
 
 // 8. Test nhận diện Zip Code từ cột ziporpostcode và fallback mã zip theo state
 const matchedKendraZip = matchFieldValue(['zipcode', 'zip'], rawKendra);
@@ -1263,7 +1364,7 @@ const rawMissingZip = {
   state: 'AK',
 };
 const fallbackZip = matchFieldValue(['zipcode'], rawMissingZip);
-assert.equal(fallbackZip, '99654', 'Record thiếu zip code phải tự động lấy mã zip hợp lệ của bang AK');
+assert.equal(fallbackZip, null, 'Record thiếu zip code -> không tra bảng zip theo bang, trả null');
 
 // 9. Test Hàng đợi Email mẫu và ưu tiên email mẫu khi tự điền form
 // 9.1 isEmailFieldName
@@ -1287,6 +1388,14 @@ assert.equal(parseEmailLine('User.123+promo@Sub.Domain.COM:pass123'), 'user.123+
 assert.equal(parseEmailLine('# ghi chu'), null);
 assert.equal(parseEmailLine(''), null);
 assert.equal(parseEmailLine('khong_co_email_o_day'), null);
+// Gmail rác trong file nguồn: tên quá ngắn, ký tự lạ, dính mã UUID, quá 30 ký tự
+for (const bad of ['l@gmail.com', 'work@gmail.com', 'khmai,g@gmail.com', 'a&e@gmail.com', 'name@gmail.com',
+  'mollybernardingadca7ab2-e211-4f17-93e7-dc6fdd712fc@gmail.com', 'cassidycorrespondenceangela.cassidy@gmail.com', 'ab..cdef@gmail.com']) {
+  assert.equal(parseEmailLine(bad), null, bad);
+}
+assert.equal(isPlausibleGmail('patnaegle@gmail.com'), true);
+assert.equal(isPlausibleGmail('contact.molly.inc+x@gmail.com'), true);
+assert.equal(isPlausibleGmail('me@outlook.com'), true); // domain khác Gmail không kiểm tra thêm
 
 // 9.3 importEmailLines & dequeueNextEmail
 emailQueue.available = [];
@@ -1424,7 +1533,7 @@ assert.equal(
   'Khi thiếu ssn, ssn_last4 phải fallback lấy 4 số cuối của số điện thoại'
 );
 const fallbackSsn4 = matchFieldValue(['ssn_last4'], {});
-assert.ok(/^\d{4}$/.test(fallbackSsn4), 'Khi record rỗng, ssn_last4 phải tự động sinh chuỗi 4 chữ số');
+assert.equal(fallbackSsn4, null, 'Khi record rỗng và không có số điện thoại, ssn_last4 không bịa giá trị');
 
 // 11.2 Kiểm tra extractCleanPageStructure (làm sạch HTML trước khi gửi AI Assist)
 const dirtyHtml = `
@@ -1489,11 +1598,16 @@ assert.ok(foundBtn !== null, 'findSubmitButton phải tìm thấy nút button#bt
 const clickedOptions = [];
 const mockFrameForBtnOption = {
   evaluate: async () => [
-    [
-      { uid: 'btn_opt_1', id: 'btn-option', className: 'btn-choice', text: 'Yes', isActive: false },
-      { uid: 'btn_opt_2', id: 'btn-option', className: 'btn-choice', text: 'No', isActive: false },
-      { uid: 'btn_opt_3', id: 'btn-option', className: 'btn-choice', text: 'Maybe', isActive: false },
-    ],
+    // Contract mới: mỗi nhóm trả về từ evaluate là { source, heading, items }
+    {
+      source: 'btn_option',
+      heading: '',
+      items: [
+        { uid: 'btn_opt_1', id: 'btn-option', className: 'btn-choice', text: 'Yes', isSelected: false, recentlyClicked: false },
+        { uid: 'btn_opt_2', id: 'btn-option', className: 'btn-choice', text: 'No', isSelected: false, recentlyClicked: false },
+        { uid: 'btn_opt_3', id: 'btn-option', className: 'btn-choice', text: 'Maybe', isSelected: false, recentlyClicked: false },
+      ],
+    },
   ],
   locator: (sel) => ({
     first: () => ({
@@ -1634,10 +1748,15 @@ const mockSessionForSurvey = {
 const mockSurveyClicked = [];
 const mockFrameForSurveyOption = {
   evaluate: async () => [
-    [
-      { uid: 'btn_opt_choice_1', id: 'btn-option', className: 'btn-option', text: 'Option A' },
-      { uid: 'btn_opt_choice_2', id: 'btn-option', className: 'btn-option', text: 'Option B' },
-    ],
+    // Contract mới: mỗi nhóm trả về từ evaluate là { source, heading, items }
+    {
+      source: 'btn_option',
+      heading: '',
+      items: [
+        { uid: 'btn_opt_choice_1', id: 'btn-option', className: 'btn-option', text: 'Option A', isSelected: false, recentlyClicked: false },
+        { uid: 'btn_opt_choice_2', id: 'btn-option', className: 'btn-option', text: 'Option B', isSelected: false, recentlyClicked: false },
+      ],
+    },
   ],
   locator: (sel) => ({
     first: () => ({
@@ -1662,7 +1781,8 @@ const mockFrameForSurveyOption = {
 const surveyResult = await handleRadioAndSurveyOptions(mockFrameForSurveyOption, {}, mockSessionForSurvey);
 assert.equal(surveyResult, 1, 'handleRadioAndSurveyOptions phải chọn được 1 option');
 assert.ok(mockSessionForSurvey.lastActionTime > 0, 'session.lastActionTime phải được cập nhật');
-assert.equal(mockSessionForSurvey.autofillFields, 1, 'session.autofillFields phải được tăng lên');
+assert.equal(mockSessionForSurvey.autofillFields, 0, 'session.autofillFields phải không tăng khi chỉ click đáp án khảo sát');
+assert.equal((mockSessionForSurvey.autofillActions ?? 0), 1, 'session.autofillActions phải được tăng khi click đáp án khảo sát');
 
 // 11.9 Test attachAutofill tự động đóng tab/popup quảng cáo rác (galaxystore.samsung.com)
 let spamPopupClosed = false;
@@ -1842,23 +1962,23 @@ assert.equal(isProxyUsedByAllOffers(run3, 3), true, 'Hoàn tất cả 3 offer, �
 releaseProxyLock(run3);
 
 // 13. Kiểm tra Smart Contextual Fallback cho các trường tài chính / khảo sát
-assert.equal(matchFieldValue(['income'], {}), '65000', 'Income mặc định phải là 65000');
-assert.equal(matchFieldValue(['debt'], {}), '15000', 'Debt mặc định phải là 15000');
-assert.equal(matchFieldValue(['credit_score'], {}), '720', 'Credit score mặc định phải là 720');
-assert.equal(matchFieldValue(['homeowner'], {}), 'Own', 'Homeowner mặc định phải là Own');
-assert.equal(matchFieldValue(['employment_status'], {}), 'Employed Full-Time', 'Employment status mặc định');
-assert.equal(matchFieldValue(['education'], {}), "Bachelor's Degree", 'Education mặc định');
-assert.equal(matchFieldValue(['military'], {}), 'No', 'Military mặc định là No');
-assert.equal(matchFieldValue(['weight'], {}), '165', 'Weight mặc định là 165');
-assert.equal(matchFieldValue(['height_feet'], {}), '5', 'Height feet mặc định là 5');
-assert.equal(matchFieldValue(['height_inches'], {}), '9', 'Height inches mặc định là 9');
+assert.equal(matchFieldValue(['income'], {}), null, 'Income không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['debt'], {}), null, 'Debt không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['credit_score'], {}), null, 'Credit score không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['homeowner'], {}), null, 'Homeowner không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['employment_status'], {}), null, 'Employment status không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['education'], {}), null, 'Education không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['military'], {}), null, 'Military không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['weight'], {}), null, 'Weight không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['height_feet'], {}), null, 'Height feet không có trong dữ liệu -> trả null');
+assert.equal(matchFieldValue(['height_inches'], {}), null, 'Height inches không có trong dữ liệu -> trả null');
 
 // 14. Kiểm tra Universal Smart Fallback cho các ô BẮT BUỘC (required): không để trống
 assert.equal(matchFieldValue(['custom_unknown_number'], {}, { required: true, type: 'number' }), '1000', 'Ô number bắt buộc phải có giá trị an toàn');
-assert.equal(matchFieldValue(['custom_unknown_text'], {}, { required: true, type: 'text' }), 'Yes', 'Ô text bắt buộc phải có giá trị an toàn');
+assert.equal(matchFieldValue(['custom_unknown_text'], {}, { required: true, type: 'text' }), null, 'Ô text bắt buộc không có trong dữ liệu -> để trống, không bịa giá trị');
 assert.equal(matchFieldValue(['custom_comments'], {}, { required: true, kind: 'textarea' }), 'Interested in learning more information.', 'Textarea bắt buộc phải có giá trị an toàn');
 assert.ok(matchFieldValue(['required_tel_field'], {}, { required: true, type: 'tel' }).replace(/\D/g, '').length >= 10, 'Ô tel bắt buộc phải có số điện thoại');
-assert.ok(matchFieldValue(['required_email_field'], {}, { required: true, type: 'email' }).includes('@'), 'Ô email bắt buộc phải có email hợp lệ');
+assert.equal(matchFieldValue(['required_email_field'], {}, { required: true, type: 'email' }), null, 'Ô email bắt buộc nhưng không có email trong danh sách: để trống, không tự sinh');
 
 // 15. Kiểm tra findSubmitButton nhận diện các biến thể nút submit mới (Check Eligibility, Complete)
 const mockCheckBtn = {
@@ -1973,9 +2093,10 @@ const mockEmailInput = {
 };
 
 let mockEmailPageClosed = false;
+let mockEmailPageUrl = 'https://example.com/step-email';
 const mockEmailPage = {
   isClosed: () => mockEmailPageClosed,
-  url: () => 'https://example.com/step-email',
+  url: () => mockEmailPageUrl,
   on: () => {},
   off: () => {},
   frames: () => [{
@@ -2023,7 +2144,13 @@ await new Promise((r) => setTimeout(r, 600));
 assert.ok(mockEmailSession.emailFilled, 'Session phải đánh dấu emailFilled khi điền ô email');
 assert.ok(emailSubmitBtnClicked, 'Autofill phải click submit màn chứa email');
 assert.ok(mockEmailSession.emailScreenSubmitted, 'Session phải đánh dấu emailScreenSubmitted');
-assert.ok(mockEmailSession.leadCheckTriggered, 'Session phải kích hoạt leadCheckTriggered sau khi nộp email đạt màn đích');
+// Bấm submit nhưng trang vẫn đứng ở màn email (cùng URL, ô email còn hiện): CHƯA được check lead.
+assert.ok(!mockEmailSession.leadCheckTriggered, 'Chưa qua được màn email thì không được check lead');
+// Trang nhảy sang màn tiếp theo → lượt quét sau mới check lead.
+mockEmailPageUrl = 'https://example.com/step-2';
+mockEmailSession.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 600));
+assert.ok(mockEmailSession.leadCheckTriggered, 'Session phải kích hoạt leadCheckTriggered sau khi đã nhảy qua màn email');
 assert.equal(mockEmailSession.leadCheckStatus, 'checking', 'Trạng thái lead check phải là checking');
 assert.ok(emailSubmitTriggered, 'Callback onEmailSubmitted/onScreen5Reached phải được gọi');
 
@@ -2042,12 +2169,13 @@ mockEmailPageClosed = true;
 
 // 17.2 KIỂM TRA MẶC ĐỊNH KHÔNG DỪNG Ở MÀN 1 NẾU MỤC TIÊU LÀ MÀN 4-5
 mockEmailPageClosed = false;
+mockEmailPageUrl = 'https://example.com/step-email';
 const mockEmailSession5 = { autofillFields: 0 };
 let email5LeadTriggered = false;
 let email5SubmitClicked = false;
 mockEmailSubmitBtn.click = async () => {
   email5SubmitClicked = true;
-  mockEmailPageClosed = true; // Mô phỏng form submit chuyển trang
+  mockEmailPageUrl = 'https://example.com/step-2'; // Mô phỏng form submit chuyển sang màn tiếp theo
 };
 
 attachAutofill(mockEmailContext, [{ email: 'test@gmail.com' }], 'https://example.com', mockEmailSession5, {
@@ -2060,11 +2188,16 @@ attachAutofill(mockEmailContext, [{ email: 'test@gmail.com' }], 'https://example
 
 mockEmailSession5.triggerAutofillScan?.();
 await new Promise((r) => setTimeout(r, 400));
+// Lượt quét sau khi trang đã sang màn mới mới check lead (check sau khi đã NHẢY QUA màn email).
+mockEmailSession5.triggerAutofillScan?.();
+await new Promise((r) => setTimeout(r, 400));
 
 assert.ok(email5SubmitClicked, 'Phải click submit màn 1');
 assert.strictEqual(mockEmailSession5.completedScreens, 1, 'Đã hoàn thành màn 1');
-assert.strictEqual(mockEmailSession5.leadCheckTriggered, undefined, 'Màn 1 không được kích hoạt leadCheckTriggered khi mục tiêu là màn 5');
-assert.strictEqual(email5LeadTriggered, false, 'Không được gọi callback chờ lead ở màn 1 khi mục tiêu là màn 5');
+// SPEC MỚI (2026-10-26): chỉ cần bước qua màn nhập email là kích hoạt check lead ngay (2 lần x 30s),
+// không chờ đủ số màn mục tiêu.
+assert.ok(mockEmailSession5.leadCheckTriggered, 'Sau màn email đã kích hoạt leadCheckTriggered (spec mới: check ngay sau màn email)');
+assert.ok(email5LeadTriggered, 'Callback chờ lead được gọi ngay sau màn email (spec mới)');
 mockEmailPageClosed = true;
 
 // ─── 18. KIỂM TRA TƯƠNG TÁC TRÌNH DUYỆT TỰ NHIÊN (HUMAN INTERACTION PHYSICS) ───
@@ -2320,23 +2453,51 @@ const mockFormErrorPage = {
     first: () => ({
       count: async () => 1,
       isVisible: async () => true,
-      evaluate: async (fn) => fn({
+      evaluate: async (fn, arg) => fn({
         tagName: 'INPUT',
         type: 'email',
         id: 'txtEmail',
+        name: 'email',
+        // Giá trị thật trong DOM: executeAction đọc lại để xác minh, nên phải cập nhật theo fill.
+        value: healedEmailValue,
+        matches: () => true,
+        querySelector: () => null,
+        getAttribute: () => null,
+        classList: { contains: () => false, add: () => {} },
         dispatchEvent: () => {},
         setAttribute: () => {},
-      }),
-      fill: async (v) => { healedEmailValue = v; },
+        click: () => {},
+      }, arg),
+      fill: async (v) => { healedEmailValue = String(v ?? ''); },
+      click: async () => { healedEmailValue = healedEmailValue || 'clicked'; },
     }),
   }),
-  evaluate: async () => ({
-    errors: ['Valid email is required'],
-    emailInput: { id: 'txtEmail', name: 'email', type: 'email', val: '', isEmpty: true, isInvalid: true, required: true, selector: '#txtEmail' },
-    emailMissing: true,
-    problemInputs: [{ tag: 'input', type: 'email', id: 'txtEmail', name: 'email', isEmpty: true, isInvalid: true, required: true, selector: '#txtEmail' }],
-    hasBlocker: true,
-  }),
+  // page.evaluate được dùng cho 2 mục đích khác nhau: đọc trạng thái form
+  // (inspectFormRepairState) và lấy chữ ký tiến trình (getFormProgressSignature).
+  evaluate: async (fn) => {
+    const source = typeof fn === 'function' ? fn.toString() : '';
+    if (source.includes('controlState')) {
+      // Chữ ký tiến trình: đổi khi ô email đã có giá trị.
+      return JSON.stringify({ url: 'https://sweepstake.example.com/step-error', value: healedEmailValue });
+    }
+    if (healedEmailValue) {
+      // Form đã được sửa: không còn lỗi, email đã hợp lệ.
+      return {
+        errors: [],
+        emailInput: { id: 'txtEmail', name: 'email', type: 'email', val: healedEmailValue, isEmpty: false, isInvalid: false, required: true, selector: '#txtEmail' },
+        emailMissing: false,
+        problemInputs: [],
+        hasBlocker: false,
+      };
+    }
+    return {
+      errors: ['Valid email is required'],
+      emailInput: { id: 'txtEmail', name: 'email', type: 'email', val: '', isEmpty: true, isInvalid: true, required: true, selector: '#txtEmail' },
+      emailMissing: true,
+      problemInputs: [{ tag: 'input', type: 'email', id: 'txtEmail', name: 'email', isEmpty: true, isInvalid: true, required: true, selector: '#txtEmail' }],
+      hasBlocker: true,
+    };
+  },
 };
 const mockHealSession = {
   assignedEmail: 'healed.user@gmail.com',
@@ -2447,14 +2608,19 @@ const mockSurveyLinkEl = {
 const mockSurveyFrame = {
   evaluate: async (fn, ...args) => {
     if (typeof fn === 'function') {
-      return [[{
-        uid: 'btn_option_gender_0',
-        id: 'btn-option-gender-female',
-        className: 'choice-btn option-btn',
-        text: 'Female',
-        isSelected: false,
-        recentlyClicked: false,
-      }]];
+      // Contract mới: mỗi nhóm trả về từ evaluate là { source, heading, items }
+      return [{
+        source: 'btn_option',
+        heading: '',
+        items: [{
+          uid: 'btn_option_gender_0',
+          id: 'btn-option-gender-female',
+          className: 'choice-btn option-btn',
+          text: 'Female',
+          isSelected: false,
+          recentlyClicked: false,
+        }],
+      }];
     }
     return [];
   },
@@ -2475,8 +2641,10 @@ const mockSurveySession = {
 
 const surveyAnsCount = await handleRadioAndSurveyOptions(mockSurveyFrame, {}, mockSurveySession);
 assert.equal(surveyAnsCount, 1, 'handleRadioAndSurveyOptions phải chọn được thẻ <a> câu trả lời');
-assert.ok(mockSurveySession.autofillFields >= 1, 'autofillFields phải được tăng khi click câu trả lời thẻ <a>');
-assert.strictEqual(mockSurveySession.hasSubmittedCurrentScreen, true, 'hasSubmittedCurrentScreen phải chuyển thành true để nhảy sang bước tiếp theo');
+assert.equal(mockSurveySession.autofillFields, 0, 'click đáp án KHÔNG được tính vào autofillFields');
+assert.equal((mockSurveySession.autofillActions ?? 0), 1, 'click đáp án phải được tính vào autofillActions');
+assert.strictEqual(mockSurveySession.hasSubmittedCurrentScreen, false, 'click đáp án KHÔNG được tính là submit (không đánh dấu màn nhảy)');
+assert.strictEqual(mockSurveySession.answerClickPending, true, 'click đáp án phải ghi answerClickPending — bộ đếm màn chỉ tăng khi trang thật sự chuyển màn');
 assert.ok(surveyLinkClickCount > 0, 'Thẻ <a> câu trả lời phải được click');
 
 // 25. KIỂM TRA NHẬN DIỆN VÀ TƯƠNG TÁC LOCOTOMATO WIDGET VÀ IFRAME
@@ -2500,8 +2668,6 @@ assert.ok(locoSubmitFound, 'findSubmitButton phải tìm được nút submit Ge
 
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 process.exit(0);
-
-
 
 
 

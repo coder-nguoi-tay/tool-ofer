@@ -109,6 +109,26 @@ export const NONE_OF_THE_ABOVE_PATTERNS = [
 ];
 
 /**
+ * Regex lọc link/nút rác về pháp lý (Privacy, Terms, Cookie...) dùng chung toàn dự án.
+ * Nguồn duy nhất của sự thật — tránh drift giữa survey-solver và autofill.
+ *
+ * @type {RegExp}
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-21
+ */
+export const SURVEY_LEGAL_NOISE_RE = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
+
+/**
+ * Regex lọc noise điều hướng/menu (Sign in, Cart, Portal...) dùng chung toàn dự án.
+ * Nguồn duy nhất của sự thật — tránh drift giữa survey-solver và autofill.
+ *
+ * @type {RegExp}
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-21
+ */
+export const SURVEY_NAV_NOISE_RE = /sign in|sign up|\blogin\b|\blog in\b|\bregister\b|my account|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|contact us|about us|\b(help & faq|faqs?)\b/i;
+
+/**
  * Các từ khóa nhận diện link/nút rác (Legal, Footer, Disclaimer, Nav, Login) cần loại trừ
  */
 export const NOISE_PATTERNS = [
@@ -344,13 +364,21 @@ export async function solveMatrixQuestions(frame, options = {}) {
  * @param {object} frame Frame hoặc Page Playwright.
  * @param {object} [options={}] Tùy chọn (maxPick: số mục chọn tối đa).
  * @return {Promise<number>} Số câu hỏi checkbox đã hoàn thành.
+ * @throws {never} Lỗi frame được xử lý và trả về 0.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-24
  */
 export async function solveSurveyCheckboxes(frame, options = {}) {
   let answered = 0;
-  const maxPick = options.maxPick || 2;
+  const maxPick = Number.isInteger(Number(options.maxPick)) && Number(options.maxPick) > 0
+    ? Number(options.maxPick) : 2;
+  const multiChoicePatternSources = [];
+  for (const pattern of MULTI_CHOICE_INDICATORS) {
+    multiChoicePatternSources.push(pattern.source);
+  }
 
   try {
-    const checkboxGroups = await frame.evaluate(() => {
+    const checkboxGroups = await frame.evaluate((patternSources) => {
       const isVisible = (el) => {
         if (!el || el.disabled) return false;
         const rect = el.getBoundingClientRect();
@@ -406,11 +434,27 @@ export async function solveSurveyCheckboxes(frame, options = {}) {
       for (const [container, items] of groups.entries()) {
         const hasChecked = items.some((it) => it.isChecked);
         const headingText = (container.querySelector('h1, h2, h3, h4, legend, .question-title, p')?.innerText || '').toLowerCase();
-        const text = (headingText + ' ' + items.map((it) => it.text).join(' ')).toLowerCase();
-        const isConsent = /terms|privacy|consent|agree|accept|must|required/i.test(text);
 
-        // Nếu là consent/terms hoặc chỉ có 1 checkbox trong container: bắt buộc phải tích
-        if ((isConsent || items.length === 1) && !hasChecked) {
+        // Heading kiểu "Select all that apply / must pick 2 / chọn tất cả..." là câu hỏi
+        // nhiều lựa chọn — không được nhầm thành consent rồi tick toàn bộ options.
+        let matchesMultiChoicePattern = false;
+        for (const patternSource of patternSources) {
+          if (new RegExp(patternSource, 'i').test(headingText)) {
+            matchesMultiChoicePattern = true;
+            break;
+          }
+        }
+        const multiChoiceHeading = matchesMultiChoicePattern || /\b(pick|select|choose|chọn)\b/i.test(headingText);
+
+        // Consent phải do heading nói về điều khoản/đồng ý, hoặc từng item tự thân là
+        // statement consent ("I agree to the Terms..."). Không dùng từ "required/must"
+        // chung chung vì dễ bắt nhầm câu hỏi thường (ví dụ "Women must pick 2").
+        const consentByHeading = /terms|privacy|consent|agree|accept|waiver|opt[- ]?in/i.test(headingText) && !multiChoiceHeading;
+        const consentByItems = items.length <= 2 &&
+          items.every((it) => /terms|privacy|consent|agree|accept|waiver|opt[- ]?in/i.test(it.text)) &&
+          !multiChoiceHeading;
+
+        if ((consentByHeading || consentByItems || items.length === 1) && !hasChecked) {
           actionable.push({ type: 'consent', items });
         } else if (!hasChecked && items.length >= 2) {
           actionable.push({ type: 'multi_choice', items });
@@ -418,7 +462,7 @@ export async function solveSurveyCheckboxes(frame, options = {}) {
       }
 
       return actionable;
-    }).catch(() => []);
+    }, multiChoicePatternSources).catch(() => []);
 
     for (const group of checkboxGroups) {
       if (!group.items.length) continue;
@@ -433,6 +477,9 @@ export async function solveSurveyCheckboxes(frame, options = {}) {
         }
         answered++;
       } else {
+        // Chọn ngẫu nhiên có chừng mực (1-3 lựa chọn). Khi pickRandom === false,
+        // không tự điền câu hỏi nhiều đáp án (chỉ điền khi có dữ liệu thực tế).
+        if (options.pickRandom !== true) continue;
         // Multi-choice survey: lọc bỏ các mục "None of the above" nếu muốn chọn các mục cụ thể
         const validOptions = group.items.filter((it) =>
           !NONE_OF_THE_ABOVE_PATTERNS.some((p) => p.test(it.text))
@@ -470,7 +517,7 @@ export async function clickSurveyNextButton(frame, options = {}) {
   const startTime = Date.now();
 
   try {
-    const buttonUid = await frame.evaluate(() => {
+    const buttonUid = await frame.evaluate((forwardPatterns) => {
       const isVisible = (el) => {
         if (!el) return false;
         const rect = el.getBoundingClientRect();
@@ -483,13 +530,13 @@ export async function clickSurveyNextButton(frame, options = {}) {
         const href = (el.getAttribute('href') || '').toLowerCase();
         const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
 
-        // 1. Kiểm tra từ khóa pháp lý / chân trang / link điều khoản
-        const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
-        if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) return true;
+        // 1. Kiểm tra từ khóa pháp lý / chân trang / link điều khoản (regex dùng chung)
+        if (SURVEY_LEGAL_NOISE_RE.test(text) || SURVEY_LEGAL_NOISE_RE.test(href) || SURVEY_LEGAL_NOISE_RE.test(idAndClass)) return true;
 
-        // 2. Kiểm tra từ khóa menu / đăng nhập / tài khoản
-        const navNoise = /sign in|sign up|login|log in|register|my account|home|menu|cart|portal|contact us|about us|help|faq/i;
-        if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) return true;
+        // 2. Kiểm tra từ khóa menu / đăng nhập / tài khoản (regex dùng chung)
+        const navTextNoise = /^(sign\s*in|login|log\s*in|my\s*account|home|homepage|main\s*menu|menu|cart|shopping\s*cart|portal|contact\s*us|about\s*us|help\s*&\s*faq|faqs?)$/i;
+        if (navTextNoise.test(text)) return true;
+        if (SURVEY_NAV_NOISE_RE.test(text) || SURVEY_NAV_NOISE_RE.test(href) || SURVEY_NAV_NOISE_RE.test(idAndClass)) return true;
 
         // 3. Link liên lạc
         if (href.startsWith('mailto:') || href.startsWith('tel:')) return true;
@@ -513,18 +560,8 @@ export async function clickSurveyNextButton(frame, options = {}) {
         'button, input[type="submit"], input[type="button"], a.btn, [role="button"], .next-btn, .continue-btn, .btn-next, .btn-option, div.button, div.btn, div.btn-option, [id*="btn-option"]'
       )).filter((el) => isVisible(el) && !isNoiseElement(el));
 
-      const patterns = [
-        /^next\b/i,
-        /^continue\b/i,
-        /^proceed\b/i,
-        /^tiếp tục($|\s)/i,
-        /^tiếp theo($|\s)/i,
-        /^submit\b/i,
-        /^submit survey\b/i,
-        /^finish\b/i,
-        /^next step\b/i,
-        /^next question\b/i,
-      ];
+      // Nguồn pattern duy nhất: NEXT_BUTTON_PATTERNS (đã truyền vào evaluate)
+      const patterns = forwardPatterns;
 
       // Ưu tiên 1: Nút nằm bên trong container của câu hỏi/bước khảo sát đang active
       const activeStepContainer = document.querySelector(
@@ -642,7 +679,12 @@ export async function solveSurveyStep(frame, record = {}, options = {}) {
       const textInputs = Array.from(document.querySelectorAll(
         'input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input:not([type]), select'
       )).filter(isVisible);
-      return textInputs.some((inp) => !inp.value || inp.value.trim() === '');
+      // CHỈ các trường BẮT BUỘC mới chặn việc bấm Next:
+      // nếu tính cả field tùy chọn, trang khảo sát có 1 input không required sẽ bị kẹt vĩnh viễn không bấm Next.
+      return textInputs.some((inp) =>
+        (!inp.value || inp.value.trim() === '') &&
+        (inp.hasAttribute('required') || inp.getAttribute('aria-required') === 'true')
+      );
     }).catch(() => false);
 
     if (!hasUnfilledTextInputs) {
@@ -664,12 +706,16 @@ export async function solveSurveyStep(frame, record = {}, options = {}) {
  * @param {object} page Page Playwright.
  * @param {object} [record={}] Bản ghi hồ sơ người dùng.
  * @param {object} [options={}] Tùy chọn: maxSteps (mặc định 25), stepDelayMs, onStepDone.
- * @return {Promise<{completedSteps: number, finished: boolean}>}
+ * @return {Promise<{completedSteps: number, finished: boolean}>} `finished` chỉ true khi khảo sát kết thúc tự nhiên (không còn câu hỏi).
  */
 export async function runMultiStepSurveyLoop(page, record = {}, options = {}) {
   const maxSteps = options.maxSteps || 25;
   const stepDelayMs = options.stepDelayMs || 500;
   let completedSteps = 0;
+  // True chỉ khi vòng lặp dừng do màn hình không còn câu hỏi khảo sát nào
+  // (tức là khảo sát đã đi tới cuối). Dừng vì hết maxSteps hoặc tab đóng
+  // phải báo finished=false để caller không kết luận nhầm là đã hoàn tất.
+  let stoppedBecauseNoMoreQuestions = false;
 
   for (let step = 1; step <= maxSteps; step++) {
     if (page.isClosed()) break;
@@ -677,6 +723,7 @@ export async function runMultiStepSurveyLoop(page, record = {}, options = {}) {
     const res = await solveSurveyStep(page, record, options);
     if (res.answeredCount === 0 && !res.nextClicked) {
       // Không còn câu hỏi khảo sát nào trên màn hình hiện tại
+      stoppedBecauseNoMoreQuestions = true;
       break;
     }
 
@@ -690,6 +737,6 @@ export async function runMultiStepSurveyLoop(page, record = {}, options = {}) {
 
   return {
     completedSteps,
-    finished: completedSteps > 0,
+    finished: stoppedBecauseNoMoreQuestions,
   };
 }

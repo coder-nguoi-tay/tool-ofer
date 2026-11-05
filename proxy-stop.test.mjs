@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { autoRefill, closeActiveBrowsers, closeChromeWhenLastTabCloses, queueAutomaticRefill, getDeadOrBlockedReason, watchTrafficBlockedPage, proxyQueue, clearAllProxyQueue } from './app.mjs';
 
-test('đóng tab cuối AdsPower vẫn giữ cửa sổ mở bằng tab trống', async () => {
+test('đóng tab cuối AdsPower không mở lại tab trống', async () => {
   let onPageClose;
   let browserCloseCount = 0;
   let replacementPageCount = 0;
@@ -18,17 +18,18 @@ test('đóng tab cuối AdsPower vẫn giữ cửa sổ mở bằng tab trống'
       newPage: async () => { replacementPageCount += 1; return { isClosed: () => false, on: () => {} }; },
     },
   };
+  autoRefill.enabled = false;
   autoRefill.sequential = false;
   autoRefill.targetCount = 2;
   closeChromeWhenLastTabCloses(session);
   await onPageClose();
   assert.equal(autoRefill.targetCount, 2);
-  assert.equal(session.suppressAutoRefill, false);
-  assert.equal(browserCloseCount, 0);
-  assert.equal(replacementPageCount, 1);
+  assert.equal(session.suppressAutoRefill, true);
+  assert.equal(browserCloseCount, 1);
+  assert.equal(replacementPageCount, 0);
 });
 
-test('đóng tab cuối Chrome thường không tự đóng phiên khi autoRefill đang bật', async () => {
+test('đóng tab cuối Chrome thường giảm mục tiêu tự bù khi autoRefill đang bật', async () => {
   let onPageClose;
   let browserCloseCount = 0;
   let replacementPageCount = 0;
@@ -46,14 +47,15 @@ test('đóng tab cuối Chrome thường không tự đóng phiên khi autoRefil
   };
   autoRefill.enabled = true;
   autoRefill.stopRequested = false;
+  autoRefill.settings = null;
   autoRefill.sequential = false;
   autoRefill.targetCount = 2;
   closeChromeWhenLastTabCloses(session);
   await onPageClose();
-  assert.equal(autoRefill.targetCount, 2);
-  assert.equal(session.suppressAutoRefill, false);
-  assert.equal(browserCloseCount, 0);
-  assert.equal(replacementPageCount, 1);
+  assert.equal(autoRefill.targetCount, 1);
+  assert.equal(session.suppressAutoRefill, true);
+  assert.equal(browserCloseCount, 1);
+  assert.equal(replacementPageCount, 0);
 });
 
 test('closeActiveBrowsers sets stopRequested and disables autoRefill completely', async () => {

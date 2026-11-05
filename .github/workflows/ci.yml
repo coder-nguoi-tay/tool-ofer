@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node ${{ matrix.node-version }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      # npm ci cài đúng theo package-lock.json để CI không lệch bản local.
+      # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: test đều chạy với mock, không mở trình duyệt thật.
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+      # Bắt lỗi cú pháp sớm với thông báo rõ ràng hơn để chúng lọt vào selfcheck.
+      - name: Check sources parse
+        run: |
+          node --check app.mjs
+          node --check ai-assist.mjs
+          node --check autofill.mjs
+          node --check option-scorer.mjs
+          node --check cloakbrowser-engine.mjs
+          node --check run-tests.mjs
+
+      # run-tests.mjs tự kiểm tra mọi file test tồn tại trước khi chạy, nên file test
+      # bị mất khỏi repo sẽ làm CI fail thay vì bị bỏ qua trong im lặng.
+      - name: Run tests
+        run: npm test

@@ -1,24 +1,104 @@
 import { createServer, get as requestHttp } from 'node:http';
 import { createConnection as netCreateConnection } from 'node:net';
 import { get as requestHttps } from 'node:https';
-import { access, chmod, cp, mkdir, readFile, readdir, readlink, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { access, appendFile, chmod, cp, mkdir, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { homedir, hostname as getHostname, cpus } from 'node:os';
+import { homedir, hostname as getHostname, cpus, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { startManualOpsRecorder } from './observer.mjs';
 import { chromium } from 'playwright';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
+import { appendFileSync } from 'node:fs';
+
+const OFFER_HTML_FULL_DIR = '/Users/codernguoitay/offer-html-full';
+mkdirSync(OFFER_HTML_FULL_DIR, { recursive: true });
+const OFFER_HTML_FULL_LOG = join(OFFER_HTML_FULL_DIR, `full-capture-${Date.now()}.jsonl`);
+
+// Ghi log HTML nối tiếp, không chặn event loop: appendFileSync ~400KB mỗi 2,5s cho mọi tab làm server giao diện
+// đứng hình (bảng giật, Screen View khựng) khi chạy nhiều luồng.
+let fullHtmlWriteChain = Promise.resolve();
+
+function logFullPageHtml(page, reason = 'event') {
+  try {
+    if (!page || typeof page.isClosed === 'function' && page.isClosed()) return;
+    page.content().then((html) => {
+      // Lượt poll định kỳ chỉ ghi khi HTML đổi so với lần ghi trước của tab đó.
+      const hash = createHash('sha1').update(html).digest('hex');
+      if (reason === 'poll' && page._uxLastHtmlHash === hash) return;
+      page._uxLastHtmlHash = hash;
+      const entry = {
+        ts: new Date().toISOString(),
+        reason,
+        url: typeof page.url === 'function' ? page.url() : '',
+        title: '',
+        html,
+      };
+      fullHtmlWriteChain = fullHtmlWriteChain
+        .then(() => appendFile(OFFER_HTML_FULL_LOG, JSON.stringify(entry) + '\n'))
+        .catch(() => {});
+    }).catch(() => {});
+  } catch {}
+}
+
+function attachFullHtmlLoggerToPage(page) {
+  try {
+    if (!page || page._fullHtmlLogged) return;
+    page._fullHtmlLogged = true;
+    page.on('load', () => logFullPageHtml(page, 'load'));
+    page.on('domcontentloaded', () => logFullPageHtml(page, 'domcontentloaded'));
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) logFullPageHtml(page, 'navigated');
+    });
+    // Poll thưa (10s) và chỉ ghi khi HTML đổi: page.content() trên mọi tab mỗi 2,5s làm Chrome nặng.
+    const iv = setInterval(() => {
+      if (page.isClosed()) { clearInterval(iv); return; }
+      logFullPageHtml(page, 'poll');
+    }, 10000);
+    logFullPageHtml(page, 'attached');
+  } catch {}
+}
+
+function attachFullHtmlLoggerToBrowser(browser) {
+  try {
+    browser.on('page', attachFullHtmlLoggerToPage);
+    try {
+      for (const p of browser.pages()) {
+        attachFullHtmlLoggerToPage(p);
+      }
+    } catch {}
+    console.log(`[HTML-FULL] Logger attached to browser. Saving to ${OFFER_HTML_FULL_LOG}`);
+  } catch {}
+}
+
+function attachFullHtmlLoggerToContext(context) {
+  try {
+    context.on('page', attachFullHtmlLoggerToPage);
+    try {
+      for (const p of context.pages()) {
+        attachFullHtmlLoggerToPage(p);
+      }
+    } catch {}
+  } catch {}
+}
 import {
   installChromeVersions,
+  listInstalledChromeVersions,
 } from './chrome-versions.mjs';
 import { startAuthenticatedHttpRelay, startAuthenticatedSocksRelay } from './relay.mjs';
 import { buildAdsPowerProfileRequest, createAdsPowerProfile, getOrCreateAdsPowerProfile, updateAdsPowerProfile, startAdsPowerProfile, stopAdsPowerProfile, deleteAdsPowerProfile, cleanupOrphanedAdsPowerProfiles, listInstalledAdsPowerKernelVersions, selectAdsPowerKernelVersions } from './adspower-profile.mjs';
 import {
   applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, stealthInitScript,
 } from './stealth.mjs';
+import {
+  isCloakBrowserInstalled,
+  getCloakBrowserStatus,
+  applyCloakHumanize,
+  launchCloakBrowserPersistentContext,
+} from './cloakbrowser-engine.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig } from './ai-assist.mjs';
 import { startTelegramBot, tgNotify } from './tgbot.mjs';
@@ -70,8 +150,30 @@ import {
   clearLeadIpStats,
 } from './lead-check.mjs';
 
+/**
+ * Tạo bản sao độc lập (deep copy) của một record để tránh nhiều slot/tab
+ * cùng tham chiếu một object trong pool dùng chung rồi ghi đè lẫn nhau.
+ *
+ * @param {object|null} record Record cần sao chép.
+ * @return {object|null} Bản sao độc lập, hoặc null nếu đầu vào không hợp lệ.
+ * @author coder-nguoi-tay
+ * @since 2026-10-26
+ */
+function safeCloneRecord(record) {
+  if (!record || typeof record !== 'object') return record ?? null;
+  try {
+    return JSON.parse(JSON.stringify(record));
+  } catch {
+    return record;
+  }
+}
+
+// Handler giữ app sống sót khi một nhánh hậu kỳ hỏng. Tuy nhiên lỗi assert luôn là
+// lỗi lập trình chứ không phải lỗi runtime — nuốt nó khiến selfcheck báo "thành công"
+// dù kiểm tra đã fail. Vì vậy lỗi assert luôn được ném lại để tiến trình dừng.
 process.on('uncaughtException', (err) => {
   console.error('[Process] Uncaught exception:', err);
+  if (err?.code === 'ERR_ASSERTION') throw err;
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[Process] Unhandled rejection:', reason);
@@ -190,6 +292,158 @@ export const autoRefill = {
   stopRequested: false, // Cờ yêu cầu dừng hẳn toàn bộ luồng, không mở hay bù thêm slot nào
 };
 
+/**
+ * Đẩy cửa sổ ra ngoài màn hình rồi thu nhỏ để chạy ngầm trong app.
+ * Chrome mới từ chối gộp windowState 'minimized' với left/top trong một lệnh
+ * ("cannot be combined with 'left', 'top'...") nên cửa sổ cứ hiện ra Desktop; phải tách hai lệnh.
+ *
+ * @param {object} cdpSession Phiên CDP của tab trong cửa sổ.
+ * @param {number} windowId ID cửa sổ từ Browser.getWindowForTarget.
+ * @return {Promise<void>}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-27
+ */
+export async function hideWindowOffscreen(cdpSession, windowId) {
+  await cdpSession.send('Browser.setWindowBounds', { windowId, bounds: { left: -20000, top: -20000 } }).catch(() => {});
+  await cdpSession.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+}
+
+/**
+ * Khi chạy ngầm trong app, chặn page.bringToFront(): macOS 14+ không cho app nền giành focus nên mỗi lần gọi
+ * làm icon Chrome nảy trên Dock và máy giật. Nhập liệu qua CDP vẫn chạy khi tab không được focus.
+ * Cửa sổ được "Hiện" (session.isWindowVisible = true) thì bringToFront chạy như cũ.
+ *
+ * @param {object} context BrowserContext của phiên.
+ * @param {object} session Phiên đang chạy (runHidden, isWindowVisible).
+ * @return {void}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-27
+ */
+export function suppressBringToFrontWhileHidden(context, session) {
+  const guard = (page) => {
+    if (!page || page._uxFrontGuard) return;
+    page._uxFrontGuard = true;
+    const original = page.bringToFront.bind(page);
+    page.bringToFront = () => (session.runHidden && session.isWindowVisible !== true ? Promise.resolve() : original());
+  };
+  context.pages().forEach(guard);
+  context.on('page', guard);
+}
+
+/** Số tab offer tối đa mỗi trình duyệt (mặc định làm 3 offer); tab mở thêm vượt mức tự đóng. */
+export const MAX_OFFER_TABS = 3;
+
+/**
+ * Giới hạn số tab của một phiên ở MAX_OFFER_TABS: tab mới mở khi đã đủ tab thì đóng ngay.
+ * Tab không phải offer đã bị watchTrafficBlockedPage đóng riêng, nên các tab còn lại là tab offer đang làm.
+ *
+ * @param {object} context BrowserContext của phiên.
+ * @param {object} session Phiên đang chạy.
+ * @param {number} [maxTabs=MAX_OFFER_TABS] Số tab tối đa.
+ * @return {void}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-27
+ */
+export function limitOfferTabs(context, session, maxTabs = MAX_OFFER_TABS) {
+  context.on('page', (newPage) => {
+    // Tab gốc do app tự mở (đa tab lúc khởi chạy) không bao giờ bị đóng vì giới hạn.
+    if (session._uxOpeningOriginTabs > 0 || newPage._uxOriginTab) return;
+    const openTabs = context.pages().filter((p) => !p.isClosed());
+    if (openTabs.length <= maxTabs) return;
+    console.log(`[TabLimit] Slot ${session.slot ?? '?'}: đã đủ ${maxTabs} tab offer, đóng tab mới mở thêm.`);
+    session.addBrowserLog?.({ type: 'offer_tab_limit', detail: `Đã đủ ${maxTabs} tab offer; tự đóng tab mở thêm.` });
+    newPage._uxClosedByApp = `vượt giới hạn ${maxTabs} tab offer`;
+    void newPage.close().catch(() => {});
+  });
+}
+
+/**
+ * Tìm ô <select> dạng dropdown tại toạ độ click của Screen View. Popup native của select không có
+ * trong ảnh screencast (nhất là khi chạy headless), nên Screen View tự hiện danh sách lựa chọn.
+ * Select tìm thấy được gắn `data-ux-screen-select` để bước chọn sau tìm lại.
+ *
+ * @param {object} page Tab Playwright đang xem.
+ * @param {number} x Toạ độ X (CSS px trong viewport).
+ * @param {number} y Toạ độ Y (CSS px trong viewport).
+ * @return {Promise<{frame: object, selectedIndex: number, options: {label: string, disabled: boolean}[]}|null>} Select tại điểm click, hoặc null.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-30
+ */
+export async function findSelectAtPoint(page, x, y) {
+  let frame = page.mainFrame();
+  let px = x;
+  let py = y;
+  // Đi xuống tối đa 3 tầng iframe: elementFromPoint ở frame cha chỉ trả về thẻ IFRAME.
+  for (let depth = 0; depth < 3; depth++) {
+    const el = (await frame.evaluateHandle(([cx, cy]) => document.elementFromPoint(cx, cy), [px, py])).asElement();
+    if (!el) return null;
+    const uid = String(Date.now());
+    const info = await el.evaluate((node, selUid) => {
+      if (node.tagName === 'IFRAME' || node.tagName === 'FRAME') {
+        const r = node.getBoundingClientRect();
+        return { iframe: true, left: r.left + node.clientLeft, top: r.top + node.clientTop };
+      }
+      const sel = node.closest('select');
+      // Select dạng list (size > 1 / multiple) hiện ngay trong trang nên click thường vẫn chạy.
+      if (!sel || sel.disabled || sel.multiple || sel.size > 1) return null;
+      sel.setAttribute('data-ux-screen-select', selUid);
+      sel.focus();
+      return {
+        selectedIndex: sel.selectedIndex,
+        options: [...sel.options].map((o) => ({ label: (o.label || o.text || o.value).trim(), disabled: o.disabled })),
+      };
+    }, uid);
+    if (!info?.iframe) return info ? { ...info, uid, frame } : null;
+    frame = await el.contentFrame();
+    if (!frame) return null;
+    px -= info.left;
+    py -= info.top;
+  }
+  return null;
+}
+
+/**
+ * Tìm các tab trùng link (bỏ phần #hash) với một tab khác đang mở: giữ tab gốc / tab mở trước,
+ * trả về tab trùng cần đóng. Tab gốc (tab chính + tab app tự mở) không bao giờ nằm trong kết quả,
+ * vì chế độ đa tab cố ý mở cùng một link ở nhiều tab gốc.
+ *
+ * @param {object[]} pages Các tab của phiên, theo thứ tự mở.
+ * @param {(page: object) => boolean} isOrigin Tab có phải tab gốc không.
+ * @return {object[]} Các tab trùng link cần đóng.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-28
+ */
+export function findDuplicateTabs(pages, isOrigin) {
+  const linkOf = (page) => {
+    const url = String(page.url?.() || '');
+    return /^https?:/i.test(url) ? url.split('#')[0] : '';
+  };
+  const open = pages.filter((p) => !p.isClosed?.() && linkOf(p));
+  const seen = new Set(open.filter(isOrigin).map(linkOf));
+  const duplicates = [];
+  for (const page of open) {
+    if (isOrigin(page)) continue;
+    const link = linkOf(page);
+    if (seen.has(link)) duplicates.push(page);
+    else seen.add(link);
+  }
+  return duplicates;
+}
+
+/**
+ * Chỉ cho phép tên file cấu hình đơn giản (không thư mục, không ".."): các endpoint /pc/config và
+ * /pc/browser-config ghép thẳng body.file vào đường dẫn nên trước đây đọc/ghi được file bất kỳ trên máy.
+ *
+ * @param {string} name Tên file do giao diện gửi lên.
+ * @return {string} Tên file an toàn.
+ * @throws {Error} Khi tên file không hợp lệ.
+ */
+export function safeConfigFileName(name) {
+  const fileName = String(name ?? '');
+  if (!/^[\w .-]+$/.test(fileName) || fileName.includes('..')) throw new Error('Tên file cấu hình không hợp lệ');
+  return fileName;
+}
+
 /** Lấy profile thiết bị tiếp theo theo vòng tròn xoay vòng toàn cục. */
 export function getNextDeviceProfile() {
   const profiles = autoRefill.deviceProfiles?.length > 0 ? autoRefill.deviceProfiles : ['windows'];
@@ -207,7 +461,7 @@ export function getNextDeviceProfile() {
  * @since 2026-10-20
  */
 function syncDeviceProfilesFromSettings(settings) {
-  const settingKeys = ['Windows', 'Mac', 'Linux', 'Android'];
+  const settingKeys = ['Windows', 'Mac', 'Linux', 'Android', 'iPhone', 'iPad'];
   if (!settingKeys.some((key) => Object.hasOwn(settings, key))) return null;
 
   const selectedProfiles = [
@@ -215,6 +469,8 @@ function syncDeviceProfilesFromSettings(settings) {
     settings.Mac && 'macos',
     settings.Linux && 'linux',
     settings.Android && 'android',
+    settings.iPhone && 'ios',
+    settings.iPad && 'ipad',
   ].filter(Boolean);
   autoRefill.deviceProfiles = selectedProfiles.length > 0 ? selectedProfiles : ['macos'];
   void saveSavedDeviceProfiles();
@@ -311,6 +567,50 @@ export const multiOfferState = {
   offerCursors: new Map(), // offerNumber -> current index
   offerDirections: new Map(), // offerNumber -> 1 (forward) | -1 (reverse)
 };
+
+/**
+ * Bản đồ chiến lược giải offer theo từng offerNumber.
+ * Mỗi offer link có thể cấu hình cách bấm/trả lời khác nhau:
+ * - 'auto_full': tự động điền toàn bộ form và tích checkbox (mặc định).
+ * - 'consent_only': chỉ tích ô consent/điều khoản, không điền các trường khác.
+ * - 'manual': không tự động giải, chờ người thao tác thủ công.
+ * - 'skip': bỏ qua offer này, không mở.
+ * @type {Map<number, { mode: string; autoSubmit: boolean; maxPick?: number; pickRandom?: boolean; notes?: string }>}
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-22
+ */
+export const offerStrategyState = new Map();
+
+/**
+ * Nạp chiến lược đã lưu trước khi khôi phục phiên tự bù sau khi mở ứng dụng.
+ *
+ * @return {Promise<void>} Hoàn tất cập nhật bản đồ chiến lược.
+ * @throws {never} File thiếu hoặc sai định dạng được bỏ qua an toàn.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-23
+ */
+export async function loadOfferStrategies() {
+  try {
+    const path = join(getAutoLeadPCDir(), 'Config', 'Offer', 'offer-methods.json');
+    const methods = JSON.parse(await readFile(path, 'utf8'));
+    if (!Array.isArray(methods)) return;
+    offerStrategyState.clear();
+    for (const item of methods) {
+      const number = Number(item?.offerNumber);
+      if (!Number.isInteger(number) || number < 1 || number > 30) continue;
+      offerStrategyState.set(number, {
+        mode: ['auto_full', 'consent_only', 'manual', 'skip'].includes(item.mode) ? item.mode : 'auto_full',
+        autoSubmit: item.autoSubmit !== false,
+        maxPick: Number.isInteger(Number(item.maxPick)) && Number(item.maxPick) > 0 ? Number(item.maxPick) : null,
+        pickRandom: item.pickRandom === true,
+        notes: String(item.notes || ''),
+        link: String(item.link || '').trim(),
+      });
+    }
+  } catch {
+    // Cấu hình offer chưa được lưu lần đầu.
+  }
+}
 
 /**
  * Quản lý trạng thái chia 2 luồng song song (giữ tương thích ngược với API cũ).
@@ -678,12 +978,16 @@ export async function loadPersistedBrowserLogs() {
   }
 }
 
+/**
+ * Lưu toàn bộ log trình duyệt đã ghi nhận xuống đĩa mà không cắt bỏ lịch sử cũ.
+ *
+ * @return {Promise<void>} Hoàn tất sau khi ghi dữ liệu log.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
+ */
 export async function savePersistedBrowserLogs() {
   try {
     await mkdir(interactionLogDirectory, { recursive: true });
-    if (persistedBrowserLogs.length > 100) {
-      persistedBrowserLogs = persistedBrowserLogs.slice(0, 100);
-    }
     await writeFile(interactionLogFilePath, JSON.stringify(persistedBrowserLogs, null, 2), 'utf8');
   } catch (err) {
     console.error('Lỗi khi lưu browser-logs.json:', err.message);
@@ -730,6 +1034,29 @@ export async function openLogsHtmlDirectoryInFinder(offerNumber = null) {
   await executeFile('open', [targetDir]);
 }
 
+/**
+ * Đóng gói toàn bộ log, mã HTML và ảnh chụp giao diện để người dùng tải xuống.
+ *
+ * @return {Promise<Buffer>} Nội dung ZIP chứa lịch sử giao diện đã lưu.
+ * @throws {Error} Khi không thể tạo hoặc đọc tệp ZIP.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
+ */
+export async function createBrowserLogsArchive() {
+  await mkdir(interactionHtmlDirectory, { recursive: true });
+  await savePersistedBrowserLogs();
+  const archivePath = join(tmpdir(), `autoleadpc-interfaces-${randomUUID()}.zip`);
+  try {
+    await executeFile('zip', ['-q', '-r', archivePath, 'browser-logs.json', 'html'], {
+      cwd: interactionLogDirectory,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return await readFile(archivePath);
+  } finally {
+    await rm(archivePath, { force: true }).catch(() => {});
+  }
+}
+
 export async function clearAllLogsAndHtml(offerNumber = null) {
   try {
     if (offerNumber && offerNumber !== 'all') {
@@ -759,7 +1086,32 @@ export async function clearAllLogsAndHtml(offerNumber = null) {
     return { success: false, error: error.message };
   }
 }
+/** Chu kỳ tự xoá log (ms). */
+export const LOG_PURGE_INTERVAL_MS = 10 * 60 * 1000;
+
+/**
+ * Xoá log định kỳ: log trình duyệt + file HTML đã lưu (như nút "Xóa log"), và file chụp HTML trong
+ * offer-html-full (xoá file cũ, làm rỗng file đang ghi) để ổ đĩa không phình (đã từng lên 9,7 GB).
+ *
+ * @return {Promise<void>}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-28
+ */
+async function purgeLogsPeriodically() {
+  await clearAllLogsAndHtml().catch(() => {});
+  const files = await readdir(OFFER_HTML_FULL_DIR).catch(() => []);
+  for (const name of files) {
+    const filePath = join(OFFER_HTML_FULL_DIR, name);
+    if (name.endsWith('.jsonl') && filePath !== OFFER_HTML_FULL_LOG) await rm(filePath, { force: true }).catch(() => {});
+  }
+  // Làm rỗng file đang ghi qua cùng hàng đợi ghi để không cắt ngang một dòng đang ghi dở.
+  fullHtmlWriteChain = fullHtmlWriteChain.then(() => writeFile(OFFER_HTML_FULL_LOG, '')).catch(() => {});
+  console.log(`[LogCleanup] Đã xoá log trình duyệt, file HTML và file chụp HTML (chu kỳ ${LOG_PURGE_INTERVAL_MS / 60000} phút).`);
+}
+
 const autoRefillSettingsPath = join(appDataDirectory, 'autorefill-settings.json');
+/** Cấu hình lần bấm Start gần nhất; không bị xoá khi Stop (dùng cho /run trên Telegram). */
+const lastLaunchSettingsPath = join(appDataDirectory, 'last-launch-settings.json');
 
 async function saveAutoRefillSettings() {
   if (!autoRefill.settings) return;
@@ -1124,7 +1476,7 @@ async function fetch711Token(username, passwd) {
   throw new Error('Đăng nhập thất bại. Kiểm tra lại tài khoản 711proxy.');
 }
 /** Hàng đợi email mẫu: available = chưa dùng, used = đã dùng. */
-export const emailQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
+export const emailQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]), rejected: /** @type {string[]} */ ([]) };
 const emailAutoRefillConfigPath = join(appDataDirectory, 'email-autorefill.json');
 /** Cấu hình tự động nạp email từ file nguồn khi hàng đợi cạn. */
 export const emailAutoRefill = { enabled: false, sourcePath: '', batchSize: 1000, byteOffset: 0 };
@@ -1522,14 +1874,32 @@ async function readUserAgents() {
  * @since 2026-10-19
  */
 async function readConfiguredUserAgents(deviceProfile) {
-  const fileName = ({ windows: 'useragent.txt', macos: 'useragent Mac.txt', linux: 'useragent Linux.txt', android: 'useragent Android.txt' })[deviceProfile];
+  // Cùng tên file với tab Useragent trong Settings (index-pc.html → /pc/browser-config/save).
+  const fileName = ({ windows: 'useragents.txt', macos: 'useragentMac.txt', linux: 'useragentLinux.txt', android: 'useragentAndroid.txt', ios: 'useragentIphone.txt', ipad: 'useragentIpad.txt' })[deviceProfile];
+  // Chỉ nhận UA đúng hệ điều hành của profile, tránh UA Windows chạy với Client Hints macOS.
+  const osToken = ({ windows: /Windows NT/, macos: /Macintosh/, linux: /X11; Linux/, android: /Android/, ios: /iPhone/, ipad: /iPad/ })[deviceProfile];
   if (!fileName) return [];
   try {
     const content = await readFile(join(getAutoLeadPCDir(), 'Config', 'Browser', fileName), 'utf8');
-    const configuredAgents = content.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('Mozilla/'));
-    if (configuredAgents.length || deviceProfile !== 'macos') return configuredAgents;
+    return content.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('Mozilla/') && osToken.test(line));
   } catch {}
-  return deviceProfile === 'macos' ? readUserAgents() : [];
+  return [];
+}
+
+/**
+ * Lấy ngẫu nhiên một UA trong file cấu hình và thay số phiên bản Chrome bằng bản engine thật,
+ * để UA, Client Hints và engine luôn khớp nhau.
+ *
+ * @param {string[]} agents UA đã lọc theo hệ điều hành.
+ * @param {number} seed Seed của phiên.
+ * @return {((version: string) => string)|null} Hàm dựng UA theo phiên bản, null nếu không có UA cấu hình.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-27
+ */
+export function pickConfiguredUserAgent(agents, seed) {
+  if (!agents?.length) return null;
+  const picked = agents[Math.abs(seed) % agents.length];
+  return (v) => picked.replace(/(Chrome|CriOS)\/[\d.]+/g, `$1/${v}`);
 }
 
 /**
@@ -1543,11 +1913,26 @@ async function readConfiguredUserAgents(deviceProfile) {
  * @since 2026-10-08
  */
 function respondWithJson(response, statusCode, responseBody) {
+  let payload;
+  try {
+    payload = JSON.stringify(responseBody);
+  } catch (stringifyErr) {
+    // JSON.stringify nổ (object vòng / BigInt...) → trả thông tin chẩn đoán thay vì im lặng
+    // treo request mãi mãi (lỗi trước đây: GET /state không bao giờ trả về khi có log chứa object Playwright).
+    try {
+      payload = JSON.stringify({
+        error: `Không thể serialize response (${stringifyErr.message})`,
+        keys: Object.keys(responseBody || {}),
+      });
+    } catch {
+      payload = '{"error":"Không thể serialize response"}';
+    }
+  }
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
   });
-  response.end(JSON.stringify(responseBody));
+  response.end(payload);
 }
 
 /**
@@ -1601,6 +1986,7 @@ async function openBrowserThroughProxy({
       : [],
   });
   activeBrowsers.add(browser);
+  attachFullHtmlLoggerToBrowser(browser);
   browser.on('disconnected', () => activeBrowsers.delete(browser));
 
   // viewport: null để cửa sổ thật quyết định khung nhìn, nếu không Playwright ép 1280x720.
@@ -1894,6 +2280,101 @@ async function markAutofillRecordUsed(record) {
   await writeFile(autofillUsedPath, JSON.stringify({ keys: [...autofillUsedKeys] })).catch(() => {});
 }
 
+const autofillRejectedPath = join(appDataDirectory, 'autofill-rejected.json');
+let autofillRejectedKeys = new Set();
+
+/** Định danh record bỏ qua các trường email (email do hàng đợi email gán thêm vào record). */
+function autofillRecordIdentity(record = {}) {
+  const rest = Object.fromEntries(Object.entries(record).filter(([k]) => !/^(email|emailaddress|mail|assignedemail)$/i.test(k)));
+  return autofillRecordKey(rest);
+}
+
+/** Nạp danh sách record bị form từ chối. */
+async function loadAutofillRejected() {
+  try {
+    const data = JSON.parse(await readFile(autofillRejectedPath, 'utf8'));
+    autofillRejectedKeys = new Set(Array.isArray(data.keys) ? data.keys : []);
+  } catch { /* file chưa tồn tại */ }
+}
+
+/**
+ * Đánh dấu record bị form từ chối: bỏ khỏi hàng đợi (cả available lẫn used) để không bao giờ dùng lại.
+ *
+ * @param {object} record Bản ghi không qua được form.
+ * @return {Promise<void>}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-28
+ */
+async function rejectAutofillRecord(record) {
+  const id = autofillRecordIdentity(record);
+  autofillRejectedKeys.add(id);
+  // Sửa tại chỗ (không gán mảng mới): các phiên đang chạy giữ tham chiếu tới autofillQueue.available.
+  for (const list of [autofillQueue.available, autofillQueue.used]) {
+    for (let i = list.length - 1; i >= 0; i -= 1) if (autofillRecordIdentity(list[i]) === id) list.splice(i, 1);
+  }
+  await saveAutofillQueue();
+  await writeFile(autofillRejectedPath, JSON.stringify({ keys: [...autofillRejectedKeys] })).catch(() => {});
+}
+
+let recordRotationCounter = 0;
+
+/**
+ * Lấy record riêng cho một tab: rút khỏi hàng đợi "Dữ liệu tự điền" (chuyển sang đã dùng) để mỗi tab/trình duyệt
+ * nhận một record khác nhau. Trước đây tab chính luôn lấy recordPool[0] nên mọi trình duyệt điền cùng một người.
+ * Khi pool không phải hàng đợi (dữ liệu dán trực tiếp / tái dùng record đã dùng) thì xoay vòng lần lượt.
+ *
+ * @param {object[]} pool Pool record của phiên.
+ * @param {object[]} [fallback=[]] Danh sách dự phòng khi pool rỗng.
+ * @return {object} Bản sao record cho tab (rỗng nếu không còn record).
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-28
+ */
+function takeNextRecord(pool, fallback = []) {
+  if (pool === autofillQueue.available) {
+    const index = pool.findIndex((r) => !autofillRejectedKeys.has(autofillRecordIdentity(r)));
+    if (index !== -1) {
+      const [record] = pool.splice(index, 1);
+      autofillQueue.used.push(record);
+      void saveAutofillQueue();
+      void markAutofillRecordUsed(record);
+      return safeCloneRecord(record);
+    }
+  }
+  const list = (pool && pool.length > 0) ? pool : fallback;
+  if (!list || list.length === 0) return {};
+  const record = list[recordRotationCounter % list.length];
+  recordRotationCounter += 1;
+  return safeCloneRecord(record);
+}
+
+/**
+ * Xử lý khi form từ chối email hoặc thông tin khác: cho vào danh sách bị từ chối và cấp dữ liệu mới.
+ *
+ * @param {object} session Phiên đang chạy.
+ * @param {{kind: 'email'|'record', record: object}} info Loại dữ liệu bị từ chối và record hiện tại.
+ * @return {Promise<object|null>} `{ email }` hoặc record mới; null nếu hết dữ liệu.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-28
+ */
+async function handleFormRejected(session, { kind, record = {} }) {
+  if (kind === 'email') {
+    rejectEmail(session.assignedEmail || record.email);
+    const next = dequeueNextEmail();
+    if (!next) return null;
+    session.assignedEmail = next;
+    return { email: next };
+  }
+  await rejectAutofillRecord(record);
+  const nextIndex = autofillQueue.available.findIndex((r) => !autofillUsedKeys.has(autofillRecordKey(r)) && !autofillRejectedKeys.has(autofillRecordIdentity(r)));
+  if (nextIndex === -1) return null;
+  const [next] = autofillQueue.available.splice(nextIndex, 1);
+  autofillQueue.used.push(next);
+  void saveAutofillQueue();
+  void markAutofillRecordUsed(next);
+  session.currentRecord = next;
+  return { ...next };
+}
+
 /** Nạp hàng đợi autofill từ file. */
 async function loadAutofillQueue() {
   await seedFileIfMissing(autofillQueuePath, 'autofill-queue.json');
@@ -2029,7 +2510,7 @@ function dispatchOneTaskToAgent(agent, settings) {
     autoSubmitForm: settings.autoSubmitForm ?? true,
     deviceProfile: chosenProfile,
     leadConfig: {
-      enabled: settings.enableLeadCheck !== false,
+      enabled: settings.enableLeadCheck === true,
       checkScreen: Number(settings.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 4,
       apiUrl: settings.leadCheckApiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
       cookie: settings.leadCheckCookie || DEFAULT_LEAD_CONFIG.cookie,
@@ -2067,6 +2548,7 @@ export async function loadEmailQueue() {
     const data = JSON.parse(await readFile(emailQueuePath, 'utf8'));
     emailQueue.available = Array.isArray(data.available) ? data.available : [];
     emailQueue.used = Array.isArray(data.used) ? data.used : [];
+    emailQueue.rejected = Array.isArray(data.rejected) ? data.rejected : [];
   } catch { /* file chưa tồn tại */ }
 }
 
@@ -2148,7 +2630,7 @@ export function parseEmailLine(line) {
   const trimmed = String(line || '').trim();
   if (!trimmed || trimmed.startsWith('#')) return null;
   const match = trimmed.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-  return match ? match[0].toLowerCase() : null;
+  return match && isPlausibleGmail(match[0]) ? match[0].toLowerCase() : null;
 }
 
 /**
@@ -2175,6 +2657,53 @@ export function importEmailLines(rawLines) {
  * Nếu hết available nhưng còn used, tự động quay vòng danh sách đã dùng để phiên không bị gián đoạn.
  * @return {string|null} Email được gán cho phiên hoặc null nếu rỗng.
  */
+/**
+ * Đánh dấu email bị form từ chối: bỏ khỏi hàng đợi và danh sách đã dùng, ghi vào danh sách bị từ chối.
+ *
+ * @param {string} email Email không qua được form.
+ * @return {void}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-28
+ */
+/**
+ * Chuẩn hoá một dòng trong danh sách email: lấy phần email hợp lệ ở đầu dòng (cho phép "email|pass", "email:pass"),
+ * trả null nếu email dính ký tự lạ phía sau (vd "_old", dãy số).
+ *
+ * @param {string} line Dòng email trong hàng đợi.
+ * @return {string|null} Email hợp lệ hoặc null.
+ */
+export function normalizeQueueEmail(line) {
+  const match = /^\s*([^@\s|:;,]+@[^@\s|:;,]+\.[a-z]{2,})\s*(?:[|:;,\s].*)?$/i.exec(String(line ?? ''));
+  return match && isPlausibleGmail(match[1]) ? match[1] : null;
+}
+
+/**
+ * Gmail chỉ cho tên 6–30 ký tự gồm chữ, số, dấu chấm (không tính phần +tag). File nguồn có nhiều dòng rác
+ * như "l@gmail.com", "work@gmail.com", "khmai,g@gmail.com", tên dính mã UUID — form báo email không hợp lệ.
+ * Domain khác Gmail thì không kiểm tra thêm.
+ *
+ * @param {string} email Email cần kiểm tra.
+ * @return {boolean} False khi là địa chỉ Gmail không thể tồn tại.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-30
+ */
+export function isPlausibleGmail(email) {
+  const [local = '', domain = ''] = String(email).toLowerCase().split('@');
+  if (domain !== 'gmail.com' && domain !== 'googlemail.com') return true;
+  const name = local.split('+')[0];
+  const letters = name.replace(/\./g, '');
+  return /^[a-z0-9](?:[a-z0-9.]*[a-z0-9])?$/.test(name) && !name.includes('..') && letters.length >= 6 && letters.length <= 30;
+}
+
+export function rejectEmail(email) {
+  if (!email) return;
+  const key = String(email).toLowerCase();
+  emailQueue.available = emailQueue.available.filter((e) => String(e).toLowerCase() !== key);
+  emailQueue.used = emailQueue.used.filter((e) => String(e).toLowerCase() !== key);
+  if (!emailQueue.rejected.some((e) => String(e).toLowerCase() === key)) emailQueue.rejected.push(email);
+  void saveEmailQueue();
+}
+
 export function dequeueNextEmail() {
   if (emailQueue.available.length === 0 && emailQueue.used.length > 0 && !emailAutoRefill.enabled) {
     console.log('[EmailQueue] Hàng đợi email mẫu đã hết, tự động quay vòng danh sách đã dùng.');
@@ -2185,7 +2714,31 @@ export function dequeueNextEmail() {
     void autoRefillEmailIfNeeded();
     return null;
   }
-  const email = emailQueue.available.shift();
+  // Email form đã từ chối (emailQueue.rejected) không bao giờ được cấp lại, kể cả khi quay vòng danh sách đã dùng.
+  const rejected = new Set(emailQueue.rejected.map((e) => String(e).toLowerCase()));
+  emailQueue.available = emailQueue.available.filter((e) => !rejected.has(String(e).toLowerCase()));
+  if (emailQueue.available.length === 0) {
+    void autoRefillEmailIfNeeded();
+    return null;
+  }
+  // Bỏ qua (và đưa vào danh sách bị từ chối) dòng email hỏng trong danh sách, ví dụ "x@gmail.com_old",
+  // "x@gmail.com17650076"; dòng "email|mật khẩu" thì chỉ lấy phần email.
+  let email = null;
+  while (emailQueue.available.length > 0 && !email) {
+    const raw = emailQueue.available.shift();
+    const cleaned = normalizeQueueEmail(raw);
+    if (cleaned) {
+      email = cleaned;
+    } else {
+      console.log(`[EmailQueue] Bỏ email không hợp lệ trong danh sách: ${raw}`);
+      if (!emailQueue.rejected.includes(raw)) emailQueue.rejected.push(raw);
+    }
+  }
+  if (!email) {
+    void saveEmailQueue();
+    void autoRefillEmailIfNeeded();
+    return null;
+  }
   emailQueue.used.push(email);
   void saveEmailQueue();
   if (emailQueue.available.length === 0) void autoRefillEmailIfNeeded();
@@ -2303,6 +2856,10 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
   };
   const hideUntilTarget = Boolean(body.hideUntilTarget ?? body.hideBrowser);
   const hideUntilLead = Boolean(body.hideUntilLead);
+  const useCloakBrowser = Boolean(body.useCloakBrowser ?? body.cloakBrowser);
+  // "Chạy trong app" (checkbox cbxRunInApp): true = chạy ngầm thu nhỏ (ScreenView),
+  // false = mở cửa sổ Chrome bình thường ra Desktop. Mặc định true giữ hành vi cũ.
+  const screenPreviewOnly = Boolean(body.screenPreviewOnly ?? body.runInApp ?? true);
 
   let scriptSteps = null;
   if (scriptPath) {
@@ -2520,7 +3077,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
       autofillData: body.autofillData,
       emailList: body.emailList,
       autoSubmitForm: body.autoSubmitForm !== false,
-      enableLeadCheck: body.enableLeadCheck !== false,
+      enableLeadCheck: body.enableLeadCheck === true,
       leadCheckApiUrl: body.leadCheckApiUrl,
       leadCheckCookie: body.leadCheckCookie,
       leadCheckDatas: body.leadCheckDatas,
@@ -2529,6 +3086,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
       scriptPath, captchaApiKey, completeText, timeLimit, delayStart, delayStop, limitRun: newLimitRun,
       antiFpCanvas: antiFingerprint.canvas, antiFpClientRects: antiFingerprint.clientRects,
       antiFpWebgl: antiFingerprint.webgl, antiFpWebrtc: antiFingerprint.webrtc,
+      useCloakBrowser,
     };
     if (autoRefill.targetCount < 1) autoRefill.targetCount = targetSuccessCount;
   }
@@ -2554,6 +3112,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
     const offerNumber = assignedStreamRoles?.[workerIndex]
       ?? ((workerIndex % offerCount) + 1);
     const targetUrl = offerUrls[offerNumber - 1] || websiteUrl;
+    if (offerStrategyState.get(offerNumber)?.mode === 'skip') return;
     const streamRole = offerNumber;
     const streamLabel = offerCount > 1 ? `Offer ${offerNumber}` : '';
 
@@ -2613,13 +3172,14 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           await persistProxyUsageHistory(usageHistory);
         };
         const leadConfig = {
-          enabled: body.enableLeadCheck !== false,
+          enabled: body.enableLeadCheck === true,
           apiUrl: body.leadCheckApiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
           cookie: body.leadCheckCookie || DEFAULT_LEAD_CONFIG.cookie,
           datas: body.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
           intervalSeconds: Number(body.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
           maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
           checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 4,
+          autoCloseNoLead: body.autoCloseNoLead !== false,
         };
         const chosenDeviceProfile = getNextDeviceProfile();
         if (delayStart > 0) {
@@ -2649,6 +3209,8 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           checkDuplicate: body.checkDuplicate !== false,
           hideUntilTarget,
           hideUntilLead,
+          screenPreviewOnly,
+          useCloakBrowser,
         });
         activeSession = openedBrowser.session;
         successfulBrowsers += 1;
@@ -2829,7 +3391,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
   hideUntilTarget = false, hideUntilLead = false, totalCount = 10, screenPreviewOnly = false,
   deviceProfile = 'windows', browserVersion = '155', antiFingerprint = {}, deleteProfile = null, startProfile, stopProfile,
-  offerUrls = [], threadCount = 1, multiTab = true }) {
+  offerUrls = [], threadCount = 1, multiTab = true, useCloakBrowser = false }) {
 
   const assignedSlot = slot ?? (tileIndex + 1);
   const screen = await readScreenSize();
@@ -2838,8 +3400,20 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   const proxyUrl = proxy?.server ?? null;
   const initialExitIp = verifiedExitIp || 'Direct';
 
+  // "Chạy trong app" (checkbox cbxRunInApp): true/Ẩn-tới-target = cửa sổ chạy ngầm ngoài màn hình;
+  // false = SunBrowser mở cửa sổ bình thường ra Desktop ngay khi khởi chạy.
+  const hideInitialWindow = screenPreviewOnly || hideUntilTarget || hideUntilLead;
+  // "Chạy trong app" → headless thật: không có cửa sổ, không có icon trên Dock (ưu tiên hơn ẩn-tới-target/lead).
+  // Đổi lại nút "Hiện cửa sổ" và việc tự bung cửa sổ khi có lead không còn tác dụng; xem và thao tác qua Screen View.
+  const trueHeadless = Boolean(screenPreviewOnly);
+
   // AdsPower cấp CDP URL cho profile SunBrowser vừa mở (chạy ẩn ban đầu ngoài màn hình, bấm mới hiện ra Desktop).
-  const browserWebSocketUrl = await startProfile({ launchArgs: ['--window-position=-20000,-20000', '--start-minimized'] });
+  const browserWebSocketUrl = await startProfile({
+    headless: trueHeadless,
+    launchArgs: hideInitialWindow
+      ? ['--window-position=-20000,-20000', '--start-minimized']
+      : ['--window-position=40,60', `--window-size=${tile.width},${tile.height + 100}`],
+  });
   if (!browserWebSocketUrl) throw new Error('AdsPower không trả CDP URL.');
 
   // Kết nối Playwright vào SunBrowser đang chạy qua CDP (timeout 15s).
@@ -2855,6 +3429,18 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     throw new Error('SunBrowser không có profile mặc định để kết nối.');
   }
 
+  let cloakHumanizeApplied = false;
+  if (useCloakBrowser) {
+    try {
+      cloakHumanizeApplied = await applyCloakHumanize(context);
+      console.log(cloakHumanizeApplied
+        ? `[AdsPower] Đã gắn lớp Humanize của CloakBrowser cho profile ${profileId}`
+        : `[AdsPower] Không gắn được lớp Humanize của CloakBrowser cho profile ${profileId}`);
+    } catch (err) {
+      console.warn(`[AdsPower] Lỗi gắn CloakBrowser Humanize: ${err.message}`);
+    }
+  }
+
   // Thu nhỏ và ẩn ngay lập tức qua CDP và AppleScript để đảm bảo không hiện trên màn hình lúc khởi chạy
   let cdpSession = null;
   let cdpWindowId = null;
@@ -2864,10 +3450,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
       cdpSession = await context.newCDPSession(activePage);
       const win = await cdpSession.send('Browser.getWindowForTarget');
       cdpWindowId = win.windowId;
-      await cdpSession.send('Browser.setWindowBounds', {
-        windowId: cdpWindowId,
-        bounds: { left: -20000, top: -20000, windowState: 'minimized' },
-      });
+      await hideWindowOffscreen(cdpSession, cdpWindowId);
       execFile('osascript', ['-e', 'tell application "System Events" to set visible of every process whose name is "SunBrowser" to false'], () => {});
     }
   } catch {}
@@ -2906,8 +3489,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     await ipCheckPage?.close().catch(() => {});
   }
 
-  const osDisplay = ({ windows: 'Windows 11', macos: 'macOS 14', linux: 'Linux', android: 'Android 13' })[deviceProfile] || 'Windows 11';
-  const osShort = ({ windows: 'Win 11', macos: 'macOS', linux: 'Linux', android: 'Android' })[deviceProfile] || 'Win 11';
+  const osDisplay = ({ windows: 'Windows 11', macos: 'macOS 14', linux: 'Linux', android: 'Android 13', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Windows 11';
+  const osShort = ({ windows: 'Win 11', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Win 11';
   const chromeVer = browserVersion ? `Chrome ${browserVersion}` : `Chrome ${cdpBrowser.version().replace(/^Chrome\//i, '')}`;
 
   const session = {
@@ -2917,7 +3500,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     slot: assignedSlot,
     chromeVersion: chromeVer,
     deviceProfile: osDisplay,
-    deviceSummary: `${osDisplay} · ${chromeVer} · Anti-Detect Active`,
+    deviceSummary: useCloakBrowser ? `${osDisplay} · ${chromeVer} · CloakBrowser Humanize` : `${osDisplay} · ${chromeVer} · Anti-Detect Active`,
+    useCloakBrowser: Boolean(useCloakBrowser),
     suppressAutoRefill: false,
     proxy: proxy ?? null,
     proxyKey: proxyUrl ?? profileId,
@@ -2942,9 +3526,10 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     leadCheckStatus: null,
     leadCheckMessage: null,
     updateBadge: (text) => { session.badgeText = text; },
-    closeAuxiliaryBrowsers: () => closeAuxiliaryBrowserSessions(session),
   };
   activeBrowsers.add(session);
+  try { if (session.browser) attachFullHtmlLoggerToContext(session.browser); } catch {}
+  try { if (session._cdpBrowser) attachFullHtmlLoggerToBrowser(session._cdpBrowser); } catch {}
 
   const displayIp = detectedIp || initialExitIp;
   const titlePrefix = `[${displayIp}] [S${assignedSlot}|${osShort}|${chromeVer}]`;
@@ -3028,8 +3613,9 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     console.warn('[AdsPower] Lỗi gắn stealth script:', err.message);
   }
 
-  // Luôn thu nhỏ cửa sổ về chạy ngầm trong app (ScreenView) ngay khi khởi chạy.
-  // Cửa sổ Desktop chỉ hiện ra khi người dùng chủ động bấm nút hoặc khi có lead (nếu chọn hideUntilLead).
+  // Thu nhỏ cửa sổ về chạy ngầm trong app (ScreenView) khi khởi chạy Nếu bật
+  // "Chạy trong app" hoặc ẩn tới khi có target/lead. Khi "Chạy trong app" tắt →
+  // cửa sổ SunBrowser mở bình thường ra Desktop.
   try {
     const initPage = context.pages()[0] ?? await context.newPage();
     if (!cdpSession && initPage) {
@@ -3040,19 +3626,27 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
         const win = await cdpSession.send('Browser.getWindowForTarget');
         cdpWindowId = win.windowId;
       }
-      await cdpSession.send('Browser.setWindowBounds', {
-        windowId: cdpWindowId,
-        bounds: { left: -20000, top: -20000, windowState: 'minimized' },
-      });
-      session.isWindowVisible = false;
-      console.log(`[AdsPower] Slot ${assignedSlot}: Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện).`);
-      session.addBrowserLog?.({ type: 'navigate', detail: 'Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện)...' });
+      if (screenPreviewOnly || hideUntilTarget || hideUntilLead) {
+        await hideWindowOffscreen(cdpSession, cdpWindowId);
+        session.isWindowVisible = false;
+        console.log(`[AdsPower] Slot ${assignedSlot}: Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện).`);
+        session.addBrowserLog?.({ type: 'navigate', detail: 'Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện)...' });
+      } else {
+        session.isWindowVisible = true;
+        session.hasShownWindow = true;
+        console.log(`[AdsPower] Slot ${assignedSlot}: Mở cửa sổ SunBrowser bình thường ("Chạy trong app" đang tắt).`);
+        session.addBrowserLog?.({ type: 'navigate', detail: 'Mở cửa sổ SunBrowser bình thường ("Chạy trong app" tắt)...' });
+      }
     }
   } catch (err) {
     console.warn('[AdsPower] Lỗi thu nhỏ cửa sổ ban đầu:', err.message);
   }
 
   session.showWindow = async (force = false) => {
+    if (session.trueHeadless) {
+      session.addBrowserLog?.({ type: 'navigate', detail: 'Đang chạy headless (Chạy trong app) nên không có cửa sổ để hiện; xem qua Screen View.' });
+      return;
+    }
     try {
       const activePage = session.mainPage || (context.pages().filter(p => !p.isClosed())[0]);
       if (!cdpSession && activePage) {
@@ -3073,9 +3667,10 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
             windowState: 'normal',
           },
         });
-        if (activePage) await activePage.bringToFront().catch(() => {});
+        // Đặt cờ hiện trước khi bringToFront, nếu không suppressBringToFrontWhileHidden chặn mất lệnh đưa lên trước.
         session.hasShownWindow = true;
         session.isWindowVisible = true;
+        if (activePage) await activePage.bringToFront().catch(() => {});
         console.log(`[AdsPower] Slot ${assignedSlot}: Đã hiển thị cửa sổ trình duyệt ra Desktop.`);
         session.addBrowserLog?.({ type: 'navigate', detail: 'Đã hiển thị cửa sổ trình duyệt ra Desktop.' });
         execFile('osascript', ['-e', 'tell application "System Events" to set visible of every process whose name is "SunBrowser" to true\ntell application "System Events" to set frontmost of every process whose name is "SunBrowser" to true'], () => {});
@@ -3096,14 +3691,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
           const win = await cdpSession.send('Browser.getWindowForTarget');
           cdpWindowId = win.windowId;
         }
-        await cdpSession.send('Browser.setWindowBounds', {
-          windowId: cdpWindowId,
-          bounds: {
-            left: -20000,
-            top: -20000,
-            windowState: 'minimized',
-          },
-        });
+        await hideWindowOffscreen(cdpSession, cdpWindowId);
         session.isWindowVisible = false;
         console.log(`[AdsPower] Slot ${assignedSlot}: Đã thu nhỏ cửa sổ về chạy ngầm.`);
         session.addBrowserLog?.({ type: 'navigate', detail: 'Đã thu nhỏ cửa sổ về chạy ngầm.' });
@@ -3117,7 +3705,21 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   const assignedEmail = dequeueNextEmail();
   if (assignedEmail) session.assignedEmail = assignedEmail;
 
+  session.runHidden = Boolean(screenPreviewOnly || hideUntilTarget || hideUntilLead);
+  session.trueHeadless = trueHeadless;
+  suppressBringToFrontWhileHidden(context, session);
+  limitOfferTabs(context, session);
   attachBrowserLogger(context, session);
+  if (useCloakBrowser) {
+    // AdsPower chạy SunBrowser (Chromium thường) — chỉ có lớp Humanize (JS) được gắn,
+    // KHÔNG phải nhân Chromium vá C++ của CloakBrowser. Không được ghi "C++ Patched".
+    session.addLog({
+      type: 'cloakbrowser_active',
+      detail: cloakHumanizeApplied
+        ? 'Kích hoạt lớp Humanize (mô phỏng chuột/phím) trên SunBrowser của AdsPower.'
+        : 'Yêu cầu bật Humanize trên AdsPower nhưng lớp Humanize không gắn được (xem log cảnh báo).',
+    });
+  }
 
   const handleSessionClosed = () => {
     if (session._hasCleanedUp) return;
@@ -3160,9 +3762,14 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   const pages = context.pages().filter(p => !p.isClosed());
   const page = pages.length > 0 ? pages[0] : await context.newPage();
   session.mainPage = page;
+  page._uxOriginTab = true;
   page._tabIndex = 0;
   page._offerNumber = offer;
-  page._assignedRecord = (recordPool && recordPool.length > 0) ? recordPool[0] : (autofillRecords[0] ?? {});
+  // Khai báo trước khi gán record cho tab (trước đây khai báo phía dưới nên dòng này lỗi TDZ).
+  const recordPool = autofillQueue.available.length > 0
+    ? autofillQueue.available
+    : (autofillRecords.length > 0 ? autofillRecords : autofillQueue.used);
+  page._assignedRecord = session.currentRecord ? safeCloneRecord(session.currentRecord) : takeNextRecord(recordPool, autofillRecords);
 
   const tabUrlsToOpen = [];
   if (Array.isArray(offerUrls) && offerUrls.length > 0) {
@@ -3177,6 +3784,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     }
   }
 
+  // Không mở quá MAX_OFFER_TABS tab offer, nếu không limitOfferTabs sẽ đóng ngay các tab vượt mức.
+  if (tabUrlsToOpen.length > MAX_OFFER_TABS) tabUrlsToOpen.length = MAX_OFFER_TABS;
   const primaryUrl = tabUrlsToOpen[0] || websiteUrl;
   if (primaryUrl) {
     await Promise.race([
@@ -3193,10 +3802,15 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     for (let t = 1; t < tabUrlsToOpen.length; t++) {
       const tabUrl = tabUrlsToOpen[t];
       try {
-        const extraPage = await context.newPage();
+        // Tab gốc app tự mở: đánh dấu trước khi mở để limitOfferTabs không đóng nhầm.
+        session._uxOpeningOriginTabs = (session._uxOpeningOriginTabs || 0) + 1;
+        const extraPage = await context.newPage().finally(() => { session._uxOpeningOriginTabs -= 1; });
+        extraPage._uxOriginTab = true;
         extraPage._tabIndex = t;
+        extraPage._uxPlanned = true;
         extraPage._offerNumber = (t % (offerUrls.length || 1)) + 1;
-        extraPage._assignedRecord = (recordPool && recordPool.length > 0) ? (recordPool[t % recordPool.length] || recordPool[0]) : (autofillRecords[t % autofillRecords.length] || autofillRecords[0] || {});
+        extraPage._assignedRecord = takeNextRecord(recordPool, autofillRecords); // mỗi tab một record riêng
+        extraPage._uxOriginTab = true;
         if (tabUrl) {
           void extraPage.goto(tabUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {});
         }
@@ -3246,20 +3860,40 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     })();
   }
 
-  // Autofill logic giống hệt Chrome thường
-  const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
+  // Lấy từ queue available; nếu cạn thì tái dùng record đã dùng (used) thay vì chạy rỗng
+  if (autofillQueue.available.length === 0 && recordPool.length > 0) {
+    void session.addLog?.({
+      type: 'record_pool_reuse',
+      detail: `Hàng đợi record đã cạn (available=0) — tự động tái dùng lại ${recordPool.length} record đã dùng. Bấm "Đặt lại" trong tab Proxy nếu muốn làm mới.`,
+    });
+  }
   if (websiteUrl) {
+    // Lưu flag để /state hiển thị đúng trạng thái check lead của phiên
+    session.enableLeadCheck = leadConfig.enabled === true;
     attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
+      manualOpsRecorder: startManualOpsRecorder(context, session, appDataDirectory, {}),
+      offerStrategy: offerStrategyState.get(session.offerNumber ?? session.streamRole ?? 1) ?? null,
       autoSubmit,
-      enableLeadCheck: leadConfig.enabled !== false,
+      enableLeadCheck: leadConfig.enabled === true,
       leadCheckScreen: leadConfig.checkScreen || 4,
-      onLog: (entry) => {
+      /**
+       * Ghi log autofill cùng tab nguồn để lưu đúng giao diện của luồng hiện tại.
+       * @param {object} entry Sự kiện autofill cần ghi.
+       * @param {object|null} page Tab Playwright phát sinh sự kiện.
+       * @return {void} Ghi sự kiện vào lịch sử phiên.
+       * @author ductv <ductv@getflycrm.com>
+       * @since 2026-10-21
+       */
+      onLog: (entry, page) => {
         if (session.hideUntilLead && entry && entry.type === 'lead_confirmed') {
           void session.showWindow?.(true);
         }
-        session.addBrowserLog?.(entry);
+        session.addBrowserLog?.(entry, page);
       },
+      onFormRejected: (sess, info) => handleFormRejected(sess, info),
       onRecordPicked: (record) => {
+        // Tab chính đã nhận record riêng (takeNextRecord) trước khi gắn autofill: dùng luôn, không rút thêm record.
+        if (session.mainPage?._assignedRecord) { session.currentRecord = session.mainPage._assignedRecord; return; }
         // Giữ nguyên trạng thái chạy ngầm trong app, không tự ý bung cửa sổ Desktop
         if (session.assignedEmail && record) {
           record.email = session.assignedEmail;
@@ -3268,7 +3902,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
           record.assignedEmail = session.assignedEmail;
         }
         session.currentRecord = record;
-        const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordKey(r) === autofillRecordKey(record));
+        const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordIdentity(r) === autofillRecordIdentity(record));
         if (idx !== -1) {
           autofillQueue.available.splice(idx, 1);
           autofillQueue.used.push(record);
@@ -3356,12 +3990,13 @@ async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, as
   const websiteUrl = body.websiteUrl || '';
   const offerUrls = body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 || body.websiteUrl2 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : [websiteUrl].filter(Boolean));
   const multiTab = body.multiTab !== false; // Mặc định chạy đa luồng là đa tab trong 1 trình duyệt
+  const useCloakBrowser = Boolean(body.useCloakBrowser ?? body.cloakBrowser);
 
-  const screenPreviewOnly = Boolean(body.screenPreviewOnly);
+  const screenPreviewOnly = Boolean(body.screenPreviewOnly ?? body.runInApp ?? true); // "Chạy trong app": false = mở cửa sổ thường
 
   // Lưu mục tiêu của lượt Start; lần bù chỉ mở số slot còn thiếu.
   if (!isAutomaticRefill) {
-    autoRefill.settings = { ...body, browserMode: 'AdsPower', screenPreviewOnly };
+    autoRefill.settings = { ...body, browserMode: 'AdsPower', screenPreviewOnly, useCloakBrowser };
     autoRefill.targetCount = concurrency;
     void saveAutoRefillSettings();
   }
@@ -3390,6 +4025,8 @@ async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, as
     body.Mac && 'macos',
     body.Linux && 'linux',
     body.Android && 'android',
+    body.iPhone && 'ios',
+    body.iPad && 'ipad',
   ].filter(Boolean);
   if (enabledDeviceProfiles.length === 0) enabledDeviceProfiles.push('macos');
   let scriptSteps = null;
@@ -3400,13 +4037,14 @@ async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, as
     if (added > 0) await saveAutofillQueue();
   }
   const leadConfig = {
-    enabled: body.enableLeadCheck !== false,
+    enabled: body.enableLeadCheck === true,
     apiUrl: body.leadCheckApiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
     cookie: body.leadCheckCookie || DEFAULT_LEAD_CONFIG.cookie,
     datas: body.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
     intervalSeconds: Number(body.leadCheckInterval) || DEFAULT_LEAD_CONFIG.intervalSeconds,
     maxAttempts: Number(body.leadCheckMaxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts,
     checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 4,
+    autoCloseNoLead: body.autoCloseNoLead !== false,
   };
   const hideUntilTarget = Boolean(body.hideUntilTarget ?? body.hideBrowser);
   const hideUntilLead = Boolean(body.hideUntilLead);
@@ -3467,6 +4105,10 @@ async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, as
   for (let i = 0; i < count; i++) {
     const offerNum = assignedStreamRoles?.[i] ?? ((i % Math.max(1, offerUrls.length)) + 1);
     const slotOfferUrl = offerUrls[offerNum - 1] || websiteUrl;
+    if (offerStrategyState.get(offerNum)?.mode === 'skip') {
+      warnings.push(`Offer ${offerNum} được cấu hình bỏ qua; không cấp proxy hoặc mở trình duyệt.`);
+      continue;
+    }
     const normOfferUrl = slotOfferUrl ? safeNormalizeUrl(slotOfferUrl) : '';
 
     let slot = 1;
@@ -3626,6 +4268,7 @@ async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, as
         stopProfile: () => stopAdsPowerProfile(apiToken, profileId),
         totalCount: concurrency,
         screenPreviewOnly,
+        useCloakBrowser,
       });
 
       results.push({
@@ -3693,6 +4336,9 @@ async function launchUserRequestedBrowsers(requestBody) {
   autoRefill.stopRequested = false;
   autoRefill.enabled = true;
   const body = JSON.parse(requestBody);
+  // Lưu cấu hình lần chạy gần nhất riêng (Stop không xoá file này) để /run trên Telegram chạy được ngay,
+  // không phải mở app bấm Start lại sau mỗi lần Stop.
+  void writeFile(lastLaunchSettingsPath, JSON.stringify({ settings: body, savedAt: new Date().toISOString() }), 'utf8').catch(() => {});
   if (body.browserMode === 'AdsPower' || body.useAdsPower) {
     return launchAdsPowerBrowsers(requestBody);
   }
@@ -3717,7 +4363,7 @@ async function launchUserRequestedBrowsers(requestBody) {
       checkDuplicate: body.checkDuplicate !== false,
       autofillData: body.autofillData,
       autoSubmitForm: body.autoSubmitForm !== false,
-      enableLeadCheck: body.enableLeadCheck !== false,
+      enableLeadCheck: body.enableLeadCheck === true,
       leadCheckApiUrl: body.leadCheckApiUrl,
       leadCheckCookie: body.leadCheckCookie,
       leadCheckDatas: body.leadCheckDatas,
@@ -3737,6 +4383,9 @@ async function launchUserRequestedBrowsers(requestBody) {
       hideUntilTarget: Boolean(body.hideUntilTarget ?? body.hideBrowser),
       hideBrowser: Boolean(body.hideUntilTarget ?? body.hideBrowser),
       hideUntilLead: Boolean(body.hideUntilLead),
+      runInApp: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
+      screenPreviewOnly: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
+      useCloakBrowser: Boolean(body.useCloakBrowser ?? body.cloakBrowser),
     };
     autoRefill.targetCount = Math.min(
       maxAliveBrowsers,
@@ -3944,6 +4593,7 @@ function getAutoRefillStatus() {
           assignedRecover: session.assignedRecover ?? (session.currentRecord?.recover || session.currentRecord?.recoveryEmail || '--'),
           autofillRecord: session.autofillRecord ?? null,
           autofillFields: session.autofillFields ?? 0,
+          autofillActions: session.autofillActions ?? 0,
           autofillError: session.autofillError ?? null,
           completedScreens: session.completedScreens ?? 0,
           currentScreen: session.currentScreen ?? ((session.completedScreens ?? 0) + 1),
@@ -3951,6 +4601,9 @@ function getAutoRefillStatus() {
           screenReached: session.screenReached ?? session.currentScreen ?? 1,
           leadCheckStatus: session.leadCheckStatus ?? null,
           leadCheckMessage: session.leadCheckMessage ?? null,
+          emailFilled: Boolean(session.emailFilled),
+          emailScreenSubmitted: Boolean(session.emailScreenSubmitted),
+          leadCheckEnabled: session.enableLeadCheck !== false,
           extensions: session.extensions ?? null,
           streamRole: session.streamRole ?? 1,
           streamLabel: session.streamLabel ?? '',
@@ -3965,7 +4618,15 @@ function getAutoRefillStatus() {
           action: anyTabAiRunning
             ? (tabCount > 1 ? `🤖 AI đang chạy trên ${aiRunningCount || 1}/${tabCount} tabs` : '🤖 AI đang phân tích & điền form')
             : (session.lastActionText || (session.autofillFields ? `Đã điền ${session.autofillFields} ô` : (session.websiteUrl ? 'Đang duyệt' : 'Running'))),
-          lastLog: (session.logs && session.logs.length > 0) ? session.logs[session.logs.length - 1] : null,
+          lastLog: (session.logs && session.logs.length > 0)
+            // Ép chỉ giữ các trường chuỗi/số — tránh object Playwright (frame/page) lọt vào gây
+            // JSON.stringify nổ → GET /state chết âm thầm.
+            ? {
+                time: String(session.logs[session.logs.length - 1]?.time || ''),
+                type: String(session.logs[session.logs.length - 1]?.type || ''),
+                detail: String(session.logs[session.logs.length - 1]?.detail || ''),
+              }
+            : null,
         };
       })
       .sort((firstSession, secondSession) => firstSession.slot - secondSession.slot),
@@ -4207,62 +4868,6 @@ export async function closeActiveBrowsers() {
 }
 
 /**
- * Đóng riêng trình duyệt của một slot mà không tắt tự bù cho các slot còn lại.
- *
- * @param {number} slot Số slot cần đóng.
- * @param {Iterable<object>} [browserSessions=activeBrowsers] Danh sách phiên đang mở.
- * @return {Promise<{success: boolean, slot: number}>} Trạng thái đóng phiên.
- * @throws {Error} Khi slot không tồn tại hoặc không thể đóng trình duyệt.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-21
- */
-export async function closeBrowserBySlot(slot, browserSessions = activeBrowsers) {
-  const session = [...browserSessions].find((item) => !item.isClosed && (item.slot ?? (item.tileIndex ?? -1) + 1) === slot);
-  if (!session) throw new Error(`Không tìm thấy trình duyệt ở Slot ${slot}.`);
-
-  const browser = session.browser ?? session.context;
-  if (!browser || typeof browser.close !== 'function') {
-    throw new Error(`Không thể đóng trình duyệt ở Slot ${slot}.`);
-  }
-  session.suppressAutoRefill = true;
-  try {
-    await browser.close();
-  } catch (error) {
-    session.suppressAutoRefill = false;
-    throw error;
-  }
-  for (const timerName of ['_monitorInterval', '_autofillTimer']) {
-    if (session[timerName]) {
-      clearInterval(session[timerName]);
-      session[timerName] = null;
-    }
-  }
-  session.isClosed = true;
-  if (session.isManagedProfile && session.profileId) {
-    await requestManagedProfileStop(session);
-  }
-  return { success: true, slot };
-}
-
-/**
- * Đóng mọi trình duyệt phụ đang chạy, giữ nguyên trình duyệt đang ở bước Take the Deal.
- * @param {object} activeSession Phiên trình duyệt cần tiếp tục giữ mở.
- * @return {Promise<{closed: number, failed: number}>} Số trình duyệt đã đóng và số lần đóng lỗi.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-21
- */
-async function closeAuxiliaryBrowserSessions(activeSession) {
-  const auxiliarySessions = [...activeBrowsers].filter((session) => session !== activeSession && !session.isClosed);
-  const results = await Promise.allSettled(auxiliarySessions.map((session) =>
-    closeBrowserBySlot(session.slot ?? ((session.tileIndex ?? -1) + 1))
-  ));
-  return {
-    closed: results.filter((result) => result.status === 'fulfilled').length,
-    failed: results.filter((result) => result.status === 'rejected').length,
-  };
-}
-
-/**
  * Trả danh sách IP exit đã dùng để giao diện hiện bảng.
  *
  * @return {Promise<{ips: object[], results: string[], warnings: string[]}>} Danh sách IP và dòng tóm tắt.
@@ -4380,9 +4985,9 @@ async function readInstalledChromeChannel(appPath, channel) {
   if (!executablePath) {
     throw new Error(`Không tìm thấy binary Chrome trong ${appPath}.`);
   }
-  if (appPath.includes('Chrome for Testing') || executablePath.includes('Chrome for Testing')) {
-    throw new Error(`Bỏ qua Chrome for Testing tại ${appPath}.`);
-  }
+  // Chrome for Testing được phép dùng trong vòng xoay (xem listInstalledChromeChannels):
+  // là binary Chrome chính thức của Google, engine/UA/Sec-CH-UA cùng phiên bản, chỉ
+  // khác tên bundle. Chỉ nhận major ≥ 150 để profile mẫu RoboForm chép được sang.
   const infoPath = join(appPath, 'Contents', 'Info.plist');
   const { stdout } = await executeFile('/usr/libexec/PlistBuddy', [
     '-c', 'Print :CFBundleShortVersionString', infoPath,
@@ -4421,6 +5026,16 @@ export async function listInstalledChromeChannels() {
     ['beta', join(chromeChannelDirectory, 'Google Chrome Beta.app')],
     ['dev', join(chromeChannelDirectory, 'Google Chrome Dev.app')],
     ['canary', join(chromeChannelDirectory, 'Google Chrome Canary.app')],
+    // Kho Chrome for Testing xếp cuối: bổ sung các major còn thiếu cho vòng xoay
+    // (máy chỉ giữ được số ít bản stable dạng archive). Chỉ nhận major ≥ 150 vì
+    // profile mẫu RoboForm tạo bằng Chrome 150 — build cũ hơn sẽ không được chép RoboForm.
+    ...(await listInstalledChromeVersions())
+      .filter((build) => build.major >= 150)
+      .map((build) => [
+        build.version,
+        join(build.executablePath, '..', '..', '..'),
+        150,
+      ]),
   ];
   const builds = [];
   const seenMajors = new Set();
@@ -4468,11 +5083,10 @@ function compareChromeVersions(left, right) {
  *
  * @param {string} userDataDirectory Thư mục profile Chrome đích.
  * @param {{version: string}} build Bản Chrome sẽ mở profile đích.
- * @param {string} [templateProfileDirectory=chromeTemplateProfileDirectory] Thư mục profile mẫu.
+ * @param {string} [templateProfileDirectory] Thư mục profile mẫu; mặc định dùng profile mẫu của app.
  * @return {Promise<string|null>} Null nếu đã chép, hoặc lý do không chép để hiện trên giao diện.
- * @throws {Error} Khi không thể chép dữ liệu profile mẫu vào profile mới.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-21
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-14
  */
 export async function seedChromeProfileFromTemplate(
   userDataDirectory,
@@ -4493,7 +5107,9 @@ export async function seedChromeProfileFromTemplate(
   } catch {
     return 'chưa có profile mẫu; bấm "Cài RoboForm cho profile mới"';
   }
-  if (!existsSync(join(templateProfileDirectory, 'Default', 'Extensions', roboFormExtensionId))) {
+  try {
+    await access(join(templateProfileDirectory, 'Default', 'Extensions', roboFormExtensionId));
+  } catch {
     return 'profile mẫu chưa cài RoboForm';
   }
   if (compareChromeVersions(templateVersion, build.version) > 0) {
@@ -4708,7 +5324,7 @@ async function openTemplateProfile() {
     results: [
       `Đã mở profile mẫu bằng Chrome ${build.version} (không qua proxy).`,
       'Bấm "Thêm vào Chrome" để cài RoboForm, đăng nhập RoboForm, rồi đóng cửa sổ này.',
-      'Từ đó, profile mới trên mọi phiên bản Chrome local tương thích mà app tạo sẽ có sẵn RoboForm. Profile đã tạo trước đây không thay đổi.',
+      'Profile mới trên mọi phiên bản Chrome do app quản lý (Chrome 150 trở lên) sẽ được chép kèm RoboForm. Profile đã tạo trước đây không thay đổi.',
     ],
     warnings,
   };
@@ -4718,17 +5334,17 @@ async function openTemplateProfile() {
  * Bắt đầu quy trình kiểm tra lead khi đến/hoàn thành màn đích (mặc định màn 5: DOB/Gender).
  * Gọi API toffers.top kiểm tra IP sock theo chu kỳ cấu hình (mặc định mỗi 30s, tối đa 2 lần).
  * Nếu IP xuất hiện: cho phép autofill tiếp tục các bước sau (Jump Page, Reward, Offerwall).
- * Nếu không xuất hiện sau maxAttempts: đóng Chrome và chuyển sang proxy/sock tiếp theo.
- * Nếu API gặp lỗi (hết hạn Cookie): giữ nguyên Chrome để bảo vệ sock và cảnh báo người dùng.
+ * Chỉ đóng Chrome khi API trả dữ liệu hợp lệ nhưng không có lead; giữ Chrome khi dữ liệu có lead chưa khớp IP hoặc API lỗi.
  *
  * @param {object} session Phiên Chrome đang chạy.
  * @param {object} leadConfig Cấu hình API và thời gian chờ.
  * @return {Promise<void>} Hoàn tất quy trình kiểm tra lead.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-20
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-21
  */
 async function startLeadVerification(session, leadConfig) {
-  if (session.leadCheckRunning || leadConfig.enabled === false) return;
+  // Chỉ check lead khi người dùng tick ô "Check Lead" (leadConfig.enabled === true).
+  if (session.leadCheckRunning || leadConfig.enabled !== true) return;
   // BẢO VỆ CHẶN CHECK LEAD ẢO: Tuyệt đối không chuyển sang checking khi chưa điền Gmail
   if (!session.emailFilled) {
     const slotNum = session.tileIndex !== undefined ? (session.tileIndex + 1) : (session.slot || 1);
@@ -4759,46 +5375,81 @@ async function startLeadVerification(session, leadConfig) {
   session.leadCheckMessage = `Đã nộp ${targetDesc}; bắt đầu chờ kiểm tra lead (${attemptText})...`;
   updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead (${attemptText})...</span>`);
 
+  // Đóng Chrome để phiên tự bù mở slot mới với proxy khác (closingDueToNoLead: không tính là người dùng tự đóng).
+  const closeForNewSlot = async (logType, reasonText) => {
+    session.closingDueToNoLead = true;
+    session.leadCheckMessage = `❌ ${reasonText}. Tự động tắt trình duyệt để đổi sock mới...`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ ${reasonText}. Tự tắt Chrome...</span>`);
+    console.log(`[LeadCheck] ${label}: ❌ ${reasonText}. Tắt trình duyệt và xoay sock.`);
+    const logs = browserSessionLogs.get(session);
+    if (logs) {
+      logs.push({
+        time: new Date().toISOString(),
+        offer: session.offerNumber ?? session.streamRole ?? 1,
+        type: logType,
+        ip: exitIp,
+        detail: `${reasonText}. Tự động đóng trình duyệt để chuyển proxy tiếp theo.`,
+      });
+      queueSaveBrowserLogs();
+    }
+    try {
+      if (session.browser && !session.browser.isClosed?.()) {
+        session.suppressAutoRefill = false;
+        await session.browser.close().catch(() => {});
+      }
+    } catch (closeErr) {
+      console.warn(`[LeadCheck] ${label}: Lỗi khi đóng trình duyệt:`, closeErr.message);
+    }
+  };
+
   let leadFound = false;
   let attempt = 0;
-  let hasApiError = false;
+  let latestAttemptHadApiError = false;
   let lastApiErrorMessage = '';
+  let latestLeadData = null;
 
-  while (attempt < maxAttempts) {
+  // Tổng thời gian chờ giữ nguyên (intervalSeconds × maxAttempts) nhưng gọi API mỗi LEAD_POLL_SECONDS:
+  // lead về giữa chừng là làm tiếp ngay (trả lời câu hỏi / điền form), không phải đợi hết lượt 30s.
+  const totalWaitSeconds = intervalSeconds * maxAttempts;
+  const pollEverySeconds = Math.min(intervalSeconds, LEAD_POLL_SECONDS);
+  const totalPolls = Math.ceil(totalWaitSeconds / pollEverySeconds);
+  let waitedSeconds = 0;
+  while (waitedSeconds < totalWaitSeconds) {
     attempt += 1;
-    // Chờ trọn vẹn intervalSeconds cho mỗi lần kiểm tra, đếm ngược trực tiếp trên badge và message
-    for (let sec = intervalSeconds; sec > 0; sec--) {
+    const step = Math.min(pollEverySeconds, totalWaitSeconds - waitedSeconds);
+    for (let sec = step; sec > 0; sec--) {
       if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
         return; // Phiên đã bị đóng bởi người dùng
       }
-      const attemptLabel = maxAttempts > 1 ? `lần ${attempt}/${maxAttempts}: ` : '';
-      session.leadCheckMessage = `Đang chờ có lead ${attemptLabel}còn ${sec}s...`;
-      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead ${attemptLabel}còn ${sec}s...</span>`);
+      const remaining = totalWaitSeconds - waitedSeconds - (step - sec);
+      session.leadCheckMessage = `Đang chờ có lead (kiểm tra ${attempt}/${totalPolls}), còn ${remaining}s...`;
+      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead còn ${remaining}s...</span>`);
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
+    waitedSeconds += step;
 
     if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
       return; // Phiên đã bị đóng bởi người dùng
     }
 
     try {
-      console.log(`[LeadCheck] ${label}: Gọi API kiểm tra lead lần ${attempt}/${maxAttempts}...`);
-      session.leadCheckMessage = `Đang gọi API kiểm tra lead lần ${attempt}/${maxAttempts} (IP: ${exitIp})...`;
+      console.log(`[LeadCheck] ${label}: Gọi API kiểm tra lead lần ${attempt}/${totalPolls}...`);
+      session.leadCheckMessage = `Đang gọi API kiểm tra lead lần ${attempt}/${totalPolls} (IP: ${exitIp})...`;
 
       const leadData = await fetchLeadDatas(leadConfig);
+      latestLeadData = leadData;
+      latestAttemptHadApiError = false;
       const isPresent = isLeadPresent(leadData, targetIps);
 
       if (isPresent) {
         leadFound = true;
-        hasApiError = false;
         console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead cho IP ${exitIp} ở lần ${attempt}! Tiếp tục làm tiếp.`);
         break;
       } else {
-        hasApiError = false;
-        console.log(`[LeadCheck] ${label}: ⚠️ Chưa thấy IP ${exitIp} trong dữ liệu lead (lần ${attempt}/${maxAttempts}).`);
+        console.log(`[LeadCheck] ${label}: ⚠️ Chưa thấy IP ${exitIp} trong dữ liệu lead (lần ${attempt}/${totalPolls}).`);
       }
     } catch (err) {
-      hasApiError = true;
+      latestAttemptHadApiError = true;
       lastApiErrorMessage = err.message.split('\n')[0];
       console.error(`[LeadCheck] ${label}: ⚠️ Lỗi khi gọi API kiểm tra lead: ${lastApiErrorMessage}`);
       session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}`;
@@ -4850,42 +5501,67 @@ async function startLeadVerification(session, leadConfig) {
     try {
       session.triggerAutofillScan?.();
     } catch {}
+  } else if (latestAttemptHadApiError) {
+    session.leadCheckStatus = 'api_error';
+    session.screen5LeadVerified = false;
+    session.leadCheckMessage = `⚠️ Không xác minh được lead do API lỗi: ${lastApiErrorMessage}. Giữ trình duyệt mở.`;
+    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#dc2626;">⚠️ API lỗi; giữ trình duyệt mở</span>`);
+    session.addBrowserLog?.({
+      type: 'lead_check_error',
+      ip: exitIp,
+      detail: `Không xác minh được lead sau ${maxAttempts} lần; API lỗi: ${lastApiErrorMessage}. Giữ trình duyệt mở.`,
+    });
+    console.warn(`[LeadCheck] ${label}: ${session.leadCheckMessage}`);
+  } else if (latestLeadData?.results?.length > 0) {
+    const returnedLeadIps = latestLeadData.results
+      .slice(0, 5)
+      .map((lead) => `ID ${lead.id || '?'} / IP ${normalizeIpAddress(lead.ip) || '?'}`)
+      .join('; ');
+    session.leadCheckStatus = 'unmatched';
+    session.screen5LeadVerified = false;
+    const mismatchText = `Có ${latestLeadData.results.length} lead trong API nhưng chưa khớp IP ${exitIp}`;
+    session.addBrowserLog?.({
+      type: 'lead_ip_mismatch',
+      ip: exitIp,
+      detail: `${mismatchText}. API check=${latestLeadData.check || '?'}; mẫu kết quả: ${returnedLeadIps || 'không có IP hợp lệ'}.`,
+    });
+    console.warn(`[LeadCheck] ${label}: ${mismatchText}. API check=${latestLeadData.check || '?'}.`);
+    // Lead chưa khớp IP: tắt trình duyệt và bù slot mới (theo yêu cầu, không giữ mở để kiểm tra tay).
+    await closeForNewSlot('lead_ip_mismatch_closed', `Lead chưa khớp IP ${exitIp}`);
   } else {
-    // KHÔNG CÓ LEAD VỀ HOẶC API LỖI: TỰ ĐỘNG TẮT TRÌNH DUYỆT ĐỂ ĐỔI SOCK MỚI
+    // Chỉ xoay proxy khi API phản hồi hợp lệ và không trả lead cho dữ liệu đang kiểm tra.
     session.leadCheckStatus = 'failed';
     session.screen5LeadVerified = false;
-    session.closingDueToNoLead = true;
-    const reasonText = hasApiError
-      ? `Lỗi gọi API toffers.top (${lastApiErrorMessage})`
-      : `Không có lead về cho IP ${exitIp} sau ${intervalSeconds * maxAttempts}s chờ (${maxAttempts} lần kiểm tra)`;
-    session.leadCheckMessage = `❌ ${reasonText}. Tự động tắt trình duyệt để đổi sock mới...`;
-    updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ Không có lead. Tự tắt Chrome...</span>`);
-
-    console.log(`[LeadCheck] ${label}: ❌ ${reasonText}. Tắt trình duyệt và xoay sock.`);
-
-    const logs = browserSessionLogs.get(session);
-    if (logs) {
-      logs.push({
-        time: new Date().toISOString(),
-        offer: session.offerNumber ?? session.streamRole ?? 1,
-        type: 'lead_failed',
-        ip: exitIp,
-        detail: `${reasonText}. Tự động đóng trình duyệt để chuyển proxy tiếp theo.`,
-      });
-      queueSaveBrowserLogs();
-    }
-
-    try {
-      if (session.browser && !session.browser.isClosed?.()) {
-        session.suppressAutoRefill = false;
-        await session.browser.close().catch(() => {});
+    const reasonText = `Không có lead về cho IP ${exitIp} sau ${intervalSeconds * maxAttempts}s chờ (${maxAttempts} lần kiểm tra)`;
+    if (leadConfig.autoCloseNoLead === false) {
+      // Checkbox "tự đóng khi hết lead" bị TẮT: giữ trình duyệt mở, không xoay sock tự động.
+      session.leadCheckMessage = `⚠️ ${reasonText}. Giữ trình duyệt mở theo cài đặt (không auto-đóng).`;
+      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⚠️ Không có lead. Giữ Chrome mở...</span>`);
+      console.log(`[LeadCheck] ${label}: ⚠️ ${reasonText}. autoCloseNoLead=false → giữ trình duyệt mở.`);
+      const logsKeep = browserSessionLogs.get(session);
+      if (logsKeep) {
+        logsKeep.push({
+          time: new Date().toISOString(),
+          offer: session.offerNumber ?? session.streamRole ?? 1,
+          type: 'lead_failed_keep_open',
+          ip: exitIp,
+          detail: `${reasonText}. Đã hết 2 lần × 30s check nhưng để trình duyệt mở theo cài đặt checkbox.`,
+        });
+        queueSaveBrowserLogs();
       }
-    } catch (closeErr) {
-      console.warn(`[LeadCheck] ${label}: Lỗi khi đóng trình duyệt:`, closeErr.message);
+      return;
     }
+    await closeForNewSlot('lead_failed', reasonText);
   }
   } catch (fatalLeadErr) {
     console.error(`[LeadCheck] ${label}: Lỗi nghiêm trọng khi kiểm tra lead:`, fatalLeadErr.message);
+    session.leadCheckStatus = 'api_error';
+    session.screen5LeadVerified = false;
+    session.leadCheckMessage = `⚠️ Lỗi xử lý check lead: ${fatalLeadErr.message}. Giữ trình duyệt mở.`;
+    session.updateBadge?.(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#dc2626;">⚠️ Lỗi check lead; giữ trình duyệt mở</span>`);
+    session.addBrowserLog?.({ type: 'lead_check_error', ip: exitIp, detail: session.leadCheckMessage });
+  } finally {
+    session.leadCheckRunning = false;
   }
 }
 
@@ -4902,14 +5578,37 @@ async function startLeadVerification(session, leadConfig) {
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
  * @since 2026-10-15
  */
+/**
+ * Tách profile CloakBrowser khỏi profile Chrome thường theo phiên bản engine thực tế.
+ *
+ * @param {{channel: string, version: string}} build Bản Chrome được phân bổ cho slot.
+ * @param {string} proxyKey Khóa profile gắn với proxy và offer.
+ * @param {string|null} cloakVersion Phiên bản engine CloakBrowser, hoặc null khi dùng Chrome thường.
+ * @return {string} Đường dẫn profile độc lập với engine còn lại.
+ * @throws {never} Hàm chỉ nối các thành phần đường dẫn hợp lệ.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-23
+ */
+export function browserProfilePath(build, proxyKey, cloakVersion = null) {
+  return join(chromeProfileDirectory, cloakVersion !== null ? 'cloakbrowser' : build.channel, cloakVersion ?? build.version, proxyKey);
+}
+
 async function openBrowserWithInstalledChrome({
   build, proxy, proxyKey, websiteUrl, usedExitIps, onExitIp, tile, tileIndex, autofillRecords, autoSubmit = true, leadConfig = {}, deviceProfile = 'windows', streamRole = 1, streamLabel = '', offerNumber = 1,
   scriptSteps = null, captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
   antiFingerprint = {}, checkDuplicate = true, hideUntilTarget = false, hideUntilLead = false,
-  offerUrls = [], threadCount = 1, multiTab = true,
+  offerUrls = [], threadCount = 1, multiTab = true, useCloakBrowser = false, screenPreviewOnly = true,
 }) {
-  const userDataDirectory = join(chromeProfileDirectory, build.channel, build.version, proxyKey);
-  const templateSkipReason = await seedChromeProfileFromTemplate(userDataDirectory, build);
+  // Chromium không mở an toàn profile đã được Chrome phiên bản mới hơn khởi tạo.
+  // CloakBrowser có engine riêng; không dùng chung profile Chrome hay seed từ template Chrome.
+  const cloakVersion = useCloakBrowser ? getCloakBrowserStatus().version : null;
+  if (useCloakBrowser && !cloakVersion) {
+    throw new Error('Không xác định được phiên bản CloakBrowser để tạo profile riêng.');
+  }
+  const userDataDirectory = browserProfilePath(build, proxyKey, useCloakBrowser ? cloakVersion : null);
+  const templateSkipReason = useCloakBrowser
+    ? 'CloakBrowser dùng profile riêng, không sao chép profile Chrome khác phiên bản'
+    : await seedChromeProfileFromTemplate(userDataDirectory, build);
   const extensionNames = await listProfileExtensionNames(userDataDirectory);
   await mkdir(userDataDirectory, { recursive: true, mode: 0o700 });
 
@@ -4935,8 +5634,27 @@ async function openBrowserWithInstalledChrome({
   // Mỗi phiên một seed: từ đó bốc ra một máy cụ thể (chip/GPU, nhân CPU, màn hình, bản OS) và nhiễu canvas/audio riêng.
   const sessionSeed = Math.floor(Math.random() * 0x7fffffff) || 1;
   const tileViewport = { width: tile.width, height: Math.max(600, tile.height - 85) };
-  const profileKey = DEVICE_PROFILES[deviceProfile] ? deviceProfile : 'windows';
+  // CloakBrowser tự đặt --fingerprint-platform theo OS của máy đang chạy (darwin -> macos).
+  // Profile thiết bị phải đi theo, nếu không UA/Client Hints nói Windows còn engine lại giả macOS
+  // thì navigator.platform, userAgentData.platform và UA tự mâu thuẫn nhau.
+  const cloakPlatform = process.platform === 'darwin' ? 'macos' : 'windows';
+  const profileKey = useCloakBrowser
+    ? cloakPlatform
+    : (DEVICE_PROFILES[deviceProfile] ? deviceProfile : 'windows');
   const dp = createDeviceVariant(profileKey, DEVICE_PROFILES[profileKey], sessionSeed, { width: tileViewport.width, height: tileViewport.height + 90 });
+  // UA trong tab Useragent (nếu có) thay mẫu cố định. CloakBrowser tự quản UA nên bỏ qua.
+  const configuredUa = useCloakBrowser ? null : pickConfiguredUserAgent(await readConfiguredUserAgents(profileKey), sessionSeed);
+  if (configuredUa) {
+    dp.ua = configuredUa;
+    // Android: Client Hints phải cùng model/bản Android với UA, nếu không trang thấy hai thiết bị khác nhau.
+    const android = /Android (\d+)[^;)]*; ([^;)]+)\)/.exec(configuredUa(''));
+    if (android && dp.uaData) dp.uaData = { ...dp.uaData, platformVersion: `${android[1]}.0.0`, model: android[2].trim() };
+  }
+  // Engine CloakBrowser có version riêng (vd 145.x), khác Chrome đã cài (154/155).
+  // UA và Client Hints phải theo đúng version engine, nếu không site thấy UA 154 nhưng engine là 145.
+  const effectiveBuild = useCloakBrowser
+    ? { ...build, version: cloakVersion, channel: 'cloakbrowser' }
+    : build;
   // Ngôn ngữ khớp quốc gia của IP, cùng nguồn với múi giờ.
   const { locale, languages } = localeForCountry(ipCountry);
   const geolocation = antiFingerprint.apiFakeIP && (ipLat || ipLng)
@@ -4944,48 +5662,116 @@ async function openBrowserWithInstalledChrome({
     : null;
   let context;
   let verifiedExitIp = null;
-  // Chạy ẩn hoàn toàn — người dùng xem qua Screen View trong giao diện AutoLead
+  // Chạy có cửa sổ hay không: "Chạy trong app" BẬT (hoặc ẩn-tới-target/lead) = headless ẩn hoàn toàn,
+  // người dùng xem qua Screen View. TẮT = có cửa sổ Chrome thật hiện ra Desktop.
+  const runHeadless = screenPreviewOnly || hideUntilTarget || hideUntilLead;
+  // "Chạy trong app" → headless thật: không có cửa sổ, không có icon trên Dock (ưu tiên hơn ẩn-tới-target/lead).
+  // Đổi lại nút "Hiện cửa sổ" và việc tự bung cửa sổ khi có lead không còn tác dụng; xem và thao tác qua Screen View.
+  const trueHeadless = Boolean(screenPreviewOnly);
   const headlessViewport = dp.viewport ?? tileViewport;
   try {
-    context = await chromium.launchPersistentContext(userDataDirectory, {
-      executablePath: build.executablePath,
-      ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking', '--disable-component-update'],
-      headless: true,
-      viewport: headlessViewport,
-      ...(dp.screen && { screen: { width: dp.screen.width, height: dp.screen.height } }),
-      ignoreHTTPSErrors: true,
-      userAgent: dp.ua(build.version),
-      locale,
-      isMobile: dp.isMobile,
-      hasTouch: dp.hasTouch,
-      deviceScaleFactor: dp.deviceScaleFactor ?? 1,
-      proxy: relay?.proxy ?? toPlaywrightProxy(proxy),
-      ...(timezoneId && { timezoneId }),
-      // Toạ độ theo IP proxy qua API của Playwright: quyền geolocation và vị trí trả về khớp nhau.
-      ...(geolocation && { geolocation, permissions: ['geolocation'] }),
-      args: [
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-blink-features=AutomationControlled',
-        // WebRTC chỉ đi qua proxy: không để STUN/UDP làm lộ IP thật của máy.
-        '--webrtc-ip-handling-policy=disable_non_proxied_udp',
-        '--disable-gpu',
-        // Chrome mới không tự dùng SwiftShader cho WebGL nữa; thiếu cờ này trang thấy "không có WebGL".
-        '--enable-unsafe-swiftshader',
-        '--disable-dev-shm-usage',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-ipc-flooding-protection',
-        '--disable-breakpad',
-        '--disable-component-update',
-        '--disable-domain-reliability',
-        '--js-flags=--max-old-space-size=512',
-        '--disk-cache-size=1',
-        '--media-cache-size=1',
-        '--renderer-process-limit=3',
-      ],
-    });
+    if (useCloakBrowser) {
+      const cloakVersion = effectiveBuild.version;
+      console.log(`[CloakBrowser] Khởi chạy Stealth Chromium ${cloakVersion} (${cloakPlatform}) với profile ${profileKey}, slot ${(tileIndex ?? 0) + 1}`);
+      // LƯU Ý: KHÔNG dùng headless thật nữa — headless không tồn tại cửa sổ OS,
+      // nút "Hiện cửa sổ" sẽ không bao giờ bung được ra Desktop (bug gốc).
+      // Dùng cửa sổ thật + CDP thu nhỏ ngầm ngay khi mở (giống flow AdsPower).
+      context = await launchCloakBrowserPersistentContext({
+        userDataDir: userDataDirectory,
+        headless: trueHeadless,
+        viewport: runHeadless ? headlessViewport : null,
+        humanize: true,
+        userAgent: dp.ua(cloakVersion),
+        locale,
+        timezoneId,
+        timezone: timezoneId,
+        proxy: relay?.proxy ?? toPlaywrightProxy(proxy),
+        args: [
+          // KHÔNG dùng --disable-gpu: CloakBrowser gỡ "--enable-unsafe-swiftshader" khỏi default args
+          // (IGNORE_DEFAULT_ARGS) nên nếu còn --disable-gpu thì trang mất hoàn toàn WebGL.
+          // Đã đo thực tế: có --disable-gpu -> webgl=false; bỏ đi -> webgl=true.
+          // Không truyền "--enable-unsafe-swiftshader": Playwright tự bỏ cờ này khi nằm trong
+          // ignoreDefaultArgs, và renderer SwiftShader lại là dấu hiệu fingerprint. Không có --disable-gpu
+          // thì WebGL chạy trên GPU thật (ANGLE Metal) — khớp profile macOS và khó phát hiện hơn.
+          // Nền tảng do engine quyết định; nêu rõ để không lệch với profile thiết bị đã chọn.
+          `--fingerprint-platform=${cloakPlatform}`,
+          '--disable-dev-shm-usage',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-ipc-flooding-protection',
+          '--disable-breakpad',
+          '--disable-component-update',
+          '--disable-domain-reliability',
+          '--js-flags=--max-old-space-size=512',
+          '--disk-cache-size=1',
+          '--media-cache-size=1',
+          '--renderer-process-limit=3',
+          // Chromium tự bật cờ "do automation" khi điều khiển từ xa — tắt đi cho khớp Chrome thật.
+          '--disable-blink-features=AutomationControlled',
+          // WebRTC chỉ đi qua proxy: không để STUN/UDP làm lộ IP thật của máy.
+          '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+          // CloakBrowser tự tra IP exit qua proxy rồi thay vào cờ này (--fingerprint-webrtc-ip=<ip>).
+          '--fingerprint-webrtc-ip=auto',
+        ],
+        contextOptions: {
+          ignoreHTTPSErrors: true,
+          ...(geolocation && { geolocation, permissions: ['geolocation'] }),
+          ...(dp.screen && { screen: { width: dp.screen.width, height: dp.screen.height } }),
+          ...(runHeadless && { deviceScaleFactor: dp.deviceScaleFactor ?? 1 }),
+          isMobile: dp.isMobile,
+          hasTouch: dp.hasTouch,
+        },
+        launchOptions: {
+          // CloakBrowser tự đặt ignoreDefaultArgs; Playwright mặc định vẫn thêm --disable-extensions
+          // nên extension trong profile mẫu (RoboForm) không bao giờ nạp. Ghi đè danh sách này,
+          // giữ lại đúng hai cờ chống lộ automation của CloakBrowser.
+          ignoreDefaultArgs: ['--enable-automation', '--enable-unsafe-swiftshader', '--disable-extensions'],
+        },
+      });
+    } else {
+      // LƯU Ý: KHÔNG dùng headless thật nữa — headless không có cửa sổ OS để "Hiện cửa sổ" bung ra.
+      // Cài giảm runHeadless vẫn mở cửa sổ thật nhưng bị thu nhỏ ngầm ngay khi mở.
+      context = await chromium.launchPersistentContext(userDataDirectory, {
+        executablePath: build.executablePath,
+        ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking', '--disable-component-update'],
+        headless: trueHeadless,
+        viewport: runHeadless ? headlessViewport : null,
+        ...(dp.screen && { screen: { width: dp.screen.width, height: dp.screen.height } }),
+        ignoreHTTPSErrors: true,
+        userAgent: dp.ua(build.version),
+        locale,
+        isMobile: dp.isMobile,
+        hasTouch: dp.hasTouch,
+        ...(runHeadless && { deviceScaleFactor: dp.deviceScaleFactor ?? 1 }),
+        proxy: relay?.proxy ?? toPlaywrightProxy(proxy),
+        ...(timezoneId && { timezoneId }),
+        // Toạ độ theo IP proxy qua API của Playwright: quyền geolocation và vị trí trả về khớp nhau.
+        ...(geolocation && { geolocation, permissions: ['geolocation'] }),
+        args: [
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-blink-features=AutomationControlled',
+          // WebRTC chỉ đi qua proxy: không để STUN/UDP làm lộ IP thật của máy.
+          '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+          '--disable-gpu',
+          // Chrome mới không tự dùng SwiftShader cho WebGL nữa; thiếu cờ này trang thấy "không có WebGL".
+          '--enable-unsafe-swiftshader',
+          '--disable-dev-shm-usage',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-ipc-flooding-protection',
+          '--disable-breakpad',
+          '--disable-component-update',
+          '--disable-domain-reliability',
+          '--js-flags=--max-old-space-size=512',
+          '--disk-cache-size=1',
+          '--media-cache-size=1',
+          '--renderer-process-limit=3',
+        ],
+      });
+    }
   } catch (error) {
     await relay?.close();
     throw error;
@@ -4995,9 +5781,12 @@ async function openBrowserWithInstalledChrome({
     browser: context,
     tileIndex,
     slot: (tileIndex ?? 0) + 1,
-    chromeVersion: build.version,
-    deviceProfile,
-    deviceSummary: dp.summary,
+    chromeVersion: useCloakBrowser ? `CloakBrowser ${effectiveBuild.version}` : build.version,
+    // Nhánh CloakBrowser phải lưu profile đã chuẩn hoá (macos/windows) cho khớp engine;
+    // nhánh Chrome thường giữ nguyên giá trị thô như trước đây để không đổi hành vi.
+    deviceProfile: useCloakBrowser ? profileKey : deviceProfile,
+    deviceSummary: useCloakBrowser ? `${dp.summary} · CloakBrowser Stealth` : dp.summary,
+    useCloakBrowser: Boolean(useCloakBrowser),
     suppressAutoRefill: false,
     proxyKey,
     proxyServer: proxy.server,
@@ -5015,7 +5804,6 @@ async function openBrowserWithInstalledChrome({
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
     // Trạng thái hiển thị trong giao diện AutoLead (leadCheckMessage), không ghi vào trang đích.
     updateBadge: (text) => { session.badgeText = text; },
-    closeAuxiliaryBrowsers: () => closeAuxiliaryBrowserSessions(session),
     addLog: (entry) => {
       if (typeof session.addBrowserLog === 'function') {
         session.addBrowserLog(entry);
@@ -5029,14 +5817,24 @@ async function openBrowserWithInstalledChrome({
   if (assignedEmail) {
     session.assignedEmail = assignedEmail;
   }
+  session.runHidden = runHeadless;
+  session.trueHeadless = trueHeadless;
+  suppressBringToFrontWhileHidden(context, session);
+  limitOfferTabs(context, session);
   attachBrowserLogger(context, session);
+  if (useCloakBrowser) {
+    session.addLog({
+      type: 'cloakbrowser_active',
+      detail: `Kích hoạt CloakBrowser Stealth ${effectiveBuild.version} (nhân Chromium vá C++ & Humanize Automation)`,
+    });
+  }
 
   // Giả lập thiết bị + chống fingerprint: một script duy nhất chạy trong mọi frame, hàm vá trông như native.
   const stealthConfig = buildStealthConfig(dp, antiFingerprint, sessionSeed);
   await context.addInitScript(stealthInitScript, stealthConfig);
   // UA, Client Hints, navigator.platform, số nhân CPU, ngôn ngữ: đổi tận gốc qua CDP cho từng tab và iframe khác site.
   const nativeOverrides = {
-    userAgentOverride: buildUserAgentOverride(dp, build, languages),
+    userAgentOverride: buildUserAgentOverride(dp, effectiveBuild, languages),
     hardwareConcurrency: dp.spoof.hardwareConcurrency,
   };
   const overrideTasks = new WeakMap();
@@ -5050,19 +5848,42 @@ async function openBrowserWithInstalledChrome({
   context.on('page', (newPage) => { void applyDeviceOverrides(newPage); });
   await Promise.all(context.pages().map(applyDeviceOverrides));
 
-  // Lấy từ queue available (đã kiểm tra ở launchRequestedBrowsers)
-  const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords;
+  // Lấy từ queue available; nếu cạn thì tái dùng record đã dùng (used) thay vì chạy rỗng
+  const recordPool = autofillQueue.available.length > 0
+    ? autofillQueue.available
+    : (autofillRecords.length > 0 ? autofillRecords : autofillQueue.used);
+  if (autofillQueue.available.length === 0 && recordPool.length > 0) {
+    void session.addLog?.({
+      type: 'record_pool_reuse',
+      detail: `Hàng đợi record đã cạn (available=0) — tự động tái dùng lại ${recordPool.length} record đã dùng. Bấm "Đặt lại" trong tab Proxy nếu muốn làm mới.`,
+    });
+  }
+  // Lưu flag để /state hiển thị đúng trạng thái check lead của phiên
+  session.enableLeadCheck = leadConfig.enabled === true;
   attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
+      offerStrategy: offerStrategyState.get(session.offerNumber ?? session.streamRole ?? 1) ?? null,
+    manualOpsRecorder: startManualOpsRecorder(context, session, appDataDirectory, {}),
     autoSubmit,
-    enableLeadCheck: leadConfig.enabled !== false,
+    enableLeadCheck: leadConfig.enabled === true,
     leadCheckScreen: leadConfig.checkScreen || 4,
-    onLog: (entry) => {
+    /**
+     * Ghi log autofill cùng tab nguồn để lưu đúng giao diện của luồng hiện tại.
+     * @param {object} entry Sự kiện autofill cần ghi.
+     * @param {object|null} page Tab Playwright phát sinh sự kiện.
+     * @return {void} Ghi sự kiện vào lịch sử phiên.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-21
+     */
+    onLog: (entry, page) => {
       if (session.hideUntilLead && entry && entry.type === 'lead_confirmed') {
         void session.showWindow?.(true);
       }
-      session.addBrowserLog?.(entry);
+      session.addBrowserLog?.(entry, page);
     },
+    onFormRejected: (sess, info) => handleFormRejected(sess, info),
     onRecordPicked: (record) => {
+      // Tab chính đã nhận record riêng (takeNextRecord) trước khi gắn autofill: dùng luôn, không rút thêm record.
+      if (session.mainPage?._assignedRecord) { session.currentRecord = session.mainPage._assignedRecord; return; }
       // Không tự ý bung cửa sổ khi điền form
       if (session.assignedEmail && record) {
         record.email = session.assignedEmail;
@@ -5072,7 +5893,7 @@ async function openBrowserWithInstalledChrome({
       }
       session.currentRecord = record; // lưu để AI assist dùng khi cần
       // Dequeue ngay khi chọn
-      const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordKey(r) === autofillRecordKey(record));
+      const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordIdentity(r) === autofillRecordIdentity(record));
       if (idx !== -1) {
         autofillQueue.available.splice(idx, 1);
         autofillQueue.used.push(record);
@@ -5154,12 +5975,13 @@ async function openBrowserWithInstalledChrome({
           return hasThankYouText || hasThankYouUrl;
         }).catch(() => false);
 
-        if (!stillHasWork && isThankYouPage && (session.autofillFields ?? 0) > 0) {
-          console.log(`[AI-Assist] Slot ${tileIndex + 1}: đã đạt trang cảm ơn (${session.autofillFields} trường), đóng trình duyệt và mở phiên mới.`);
+        const completedAutofillWork = (session.autofillFields ?? 0) + (session.autofillActions ?? 0);
+        if (!stillHasWork && isThankYouPage && completedAutofillWork > 0) {
+          console.log(`[AI-Assist] Slot ${tileIndex + 1}: đã đạt trang cảm ơn (${session.autofillFields} trường, ${session.autofillActions ?? 0} thao tác), đóng trình duyệt và mở phiên mới.`);
           session.addLog?.({
             time: new Date().toISOString(),
             type: 'ai_completed',
-            detail: `AI Assist đã hoàn tất đến trang cảm ơn (${session.autofillFields} trường). Đóng trình duyệt và mở phiên mới.`,
+            detail: `AI Assist đã hoàn tất đến trang cảm ơn (${session.autofillFields} trường, ${session.autofillActions ?? 0} thao tác). Đóng trình duyệt và mở phiên mới.`,
           });
           session.suppressAutoRefill = false;
           await session.browser?.close?.().catch(() => {});
@@ -5170,6 +5992,8 @@ async function openBrowserWithInstalledChrome({
     },
   });
   activeBrowsers.add(session);
+  try { if (session.browser) attachFullHtmlLoggerToContext(session.browser); } catch {}
+  try { if (session._cdpBrowser) attachFullHtmlLoggerToBrowser(session._cdpBrowser); } catch {}
 
   // Nếu stop được bấm trong lúc browser đang khởi động → đóng ngay
   if (autoRefill.stopRequested) {
@@ -5225,18 +6049,28 @@ async function openBrowserWithInstalledChrome({
       cdpSession = await context.newCDPSession(page);
       const win = await cdpSession.send('Browser.getWindowForTarget');
       cdpWindowId = win.windowId;
-      await cdpSession.send('Browser.setWindowBounds', {
-        windowId: cdpWindowId,
-        bounds: { windowState: 'minimized' },
-      });
-      session.isWindowVisible = false;
-      console.log(`[HideBrowser] Slot ${tileIndex + 1}: Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện).`);
-      session.addBrowserLog?.({ type: 'navigate', detail: 'Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện)...' });
+      // Chỉ thu nhỏ (chạy ngầm trong app) khi bật "Chạy trong app" hoặc ẩn tới khi có target/lead.
+      // Khi tắt "Chạy trong app" → cửa sổ Chrome mở bình thường ra Desktop.
+      if (screenPreviewOnly || hideUntilTarget || hideUntilLead) {
+        await hideWindowOffscreen(cdpSession, cdpWindowId);
+        session.isWindowVisible = false;
+        console.log(`[HideBrowser] Slot ${tileIndex + 1}: Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện).`);
+        session.addBrowserLog?.({ type: 'navigate', detail: 'Chạy ngầm trong app (thu nhỏ cửa sổ Desktop, bấm mới hiện)...' });
+      } else {
+        session.isWindowVisible = true;
+        session.hasShownWindow = true;
+        console.log(`[ShowBrowser] Slot ${tileIndex + 1}: Mở cửa sổ Chrome bình thường ("Chạy trong app" đang tắt).`);
+        session.addBrowserLog?.({ type: 'navigate', detail: 'Mở cửa sổ Chrome bình thường ("Chạy trong app" tắt)...' });
+      }
     } catch (err) {
       console.warn('[HideBrowser] Lỗi ẩn cửa sổ ban đầu:', err.message);
     }
 
     session.showWindow = async (force = false) => {
+      if (session.trueHeadless) {
+        session.addBrowserLog?.({ type: 'navigate', detail: 'Đang chạy headless (Chạy trong app) nên không có cửa sổ để hiện; xem qua Screen View.' });
+        return;
+      }
       session.hasShownWindow = true;
       try {
         const activePage = session.mainPage || page;
@@ -5281,10 +6115,7 @@ async function openBrowserWithInstalledChrome({
             const win = await cdpSession.send('Browser.getWindowForTarget');
             cdpWindowId = win.windowId;
           }
-          await cdpSession.send('Browser.setWindowBounds', {
-            windowId: cdpWindowId,
-            bounds: { windowState: 'minimized' },
-          });
+          await hideWindowOffscreen(cdpSession, cdpWindowId);
           session.isWindowVisible = false;
           console.log(`[HideBrowser] Slot ${tileIndex + 1}: Đã thu nhỏ cửa sổ về chạy ngầm.`);
           session.addBrowserLog?.({ type: 'navigate', detail: 'Đã thu nhỏ cửa sổ về chạy ngầm.' });
@@ -5314,6 +6145,8 @@ async function openBrowserWithInstalledChrome({
       }
     }
 
+    // Không mở quá MAX_OFFER_TABS tab offer, nếu không limitOfferTabs sẽ đóng ngay các tab vượt mức.
+    if (tabUrlsToOpen.length > MAX_OFFER_TABS) tabUrlsToOpen.length = MAX_OFFER_TABS;
     const primaryUrl = tabUrlsToOpen[0] || websiteUrl;
     const response = await page.goto(primaryUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
     const finalUrl = page.url();
@@ -5325,9 +6158,10 @@ async function openBrowserWithInstalledChrome({
       throw new Error(`trang đích hiển thị ${deadReason}`);
     }
     session.mainPage = page;
+    page._uxOriginTab = true;
     page._tabIndex = 0;
     page._offerNumber = offerNumber;
-    page._assignedRecord = (recordPool && recordPool.length > 0) ? recordPool[0] : (autofillRecords[0] ?? {});
+    page._assignedRecord = session.currentRecord ? safeCloneRecord(session.currentRecord) : takeNextRecord(recordPool, autofillRecords);
 
     if (session.isWindowVisible) {
       await page.bringToFront().catch(() => {});
@@ -5338,10 +6172,15 @@ async function openBrowserWithInstalledChrome({
       for (let t = 1; t < tabUrlsToOpen.length; t++) {
         const tabUrl = tabUrlsToOpen[t];
         try {
-          const extraPage = await context.newPage();
+          // Tab gốc app tự mở: đánh dấu trước khi mở để limitOfferTabs không đóng nhầm.
+          session._uxOpeningOriginTabs = (session._uxOpeningOriginTabs || 0) + 1;
+          const extraPage = await context.newPage().finally(() => { session._uxOpeningOriginTabs -= 1; });
+          extraPage._uxOriginTab = true;
           extraPage._tabIndex = t;
+          extraPage._uxPlanned = true;
           extraPage._offerNumber = (t % (offerUrls.length || 1)) + 1;
-          extraPage._assignedRecord = (recordPool && recordPool.length > 0) ? (recordPool[t % recordPool.length] || recordPool[0]) : (autofillRecords[t % autofillRecords.length] || autofillRecords[0] || {});
+          extraPage._assignedRecord = takeNextRecord(recordPool, autofillRecords); // mỗi tab một record riêng
+          extraPage._uxOriginTab = true;
           if (tabUrl) {
             void extraPage.goto(tabUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {});
           }
@@ -5354,24 +6193,36 @@ async function openBrowserWithInstalledChrome({
 
     // IP, thiết bị và luồng hiển thị trong giao diện AutoLead; không chèn badge hay sửa tiêu đề trang đích vì script chống bot đọc được.
     context.on('page', (newPage) => {
-      // Guard cho tab popup rác: chỉ đóng nếu là spam ad hoặc lỗi mạng rõ ràng
-      const slowLoadTimer = setTimeout(async () => {
-        if (newPage.isClosed() || newPage === session.mainPage || newPage._tabIndex !== undefined) return;
+      // Guard tab popup KHÔNG thuộc luồng (không phải tab đa luồng được biên định):
+      // khảo sát/trang quảng cáo hay "nhảy trang" mở tab mới — đóng tab đó
+      // và quay về tab đầu tiên để tiếp tục bấm Continue.
+      setTimeout(async () => {
+        if (newPage.isClosed() || newPage === session.mainPage || newPage._uxOriginTab) return;
         try {
+          if (newPage._tabIndex !== undefined || newPage._uxPlanned) return;
           const u = newPage.url();
-          if (isSpamAdUrl(u)) {
-            console.log(`[SlowLoad] Tab quảng cáo rác (${u}), đóng tab.`);
-            session.addBrowserLog?.({ type: 'navigate', url: u, title: '[Đóng tab rác]', html: '' });
+          if (!u || u.startsWith('about:')) return;
+          // Chỉ đóng ngay tab quảng cáo rác. Tab mới khác có thể là chính trang offer (offer mở sang tab mới):
+          // trước đây "|| true" đóng mọi tab mới sau 3s nên trang đầu của offer bị tắt. Tab không phải offer
+          // do watchTrafficBlockedPage đóng sau khi kiểm tra; số tab tối đa do limitOfferTabs giới hạn.
+          // (Trước đây gọi isSpamAdUrl chưa khai báo trong file này → lỗi bị nuốt, guard không chạy.)
+          if (/galaxystore\.samsung\.com|play\.google\.com\/store|apps\.apple\.com|popads|propellerads|clickadu|trafficjunky|zeroredirect|doubleclick\.net|syndication\.exoclick/i.test(u)) {
+            newPage._uxClosedByApp = 'tab quảng cáo rác';
+            console.log(`[PopupTab] Tab quảng cáo ngoài luồng (${u}), đóng và quay về tab đầu.`);
+            session.addBrowserLog?.({ type: 'popup_closed', url: u, title: '[Đóng tab nhảy trang]', html: '' });
             await newPage.close().catch(() => {});
           }
+          const remaining = context.pages().filter((p) => !p.isClosed());
+          const first = remaining[0];
+          if (first) await first.bringToFront().catch(() => {});
         } catch {}
-      }, 30000);
-      newPage.once('load', () => clearTimeout(slowLoadTimer));
-      newPage.once('close', () => clearTimeout(slowLoadTimer));
+      }, 3000);
+      newPage.once('load', () => {});
+      newPage.once('close', () => {});
 
       // Guard tab phụ bị lỗi mạng → đóng tab đó thôi, không đóng cả browser
       newPage.on('load', async () => {
-        if (newPage.isClosed() || newPage === session.mainPage) return;
+        if (newPage.isClosed() || newPage === session.mainPage || newPage._uxOriginTab) return;
         try {
           const deadReason = await getDeadOrBlockedReason(newPage);
           if (!deadReason) return;
@@ -5403,6 +6254,7 @@ async function openBrowserWithInstalledChrome({
       }, 2000);
       context.on('close', () => clearInterval(completeTimer));
     }
+
     // timeLimit: ghi nhận mốc thời gian; không đóng phiên khi tác vụ vẫn đang hoạt động.
     if (timeLimit > 0) {
       const timeLimitTimer = setTimeout(() => {
@@ -5445,10 +6297,11 @@ async function openBrowserWithInstalledChrome({
 }
 
 /**
- * Giữ phiên Chrome hoạt động khi tab cuối đóng ngoài ý muốn, rồi theo dõi mọi tab mới.
+ * Theo dõi tab cuối để tôn trọng thao tác đóng trình duyệt bằng nút X.
  *
  * @param {object} session Phiên Chrome cần theo dõi các tab.
- * @return {void} Đăng ký sự kiện theo dõi và khôi phục tab cho phiên.
+ * @return {void} Đăng ký theo dõi thao tác đóng tab cuối.
+ * @throws {never} Đăng ký callback đóng tab không thực thi thao tác trình duyệt.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-21
  */
@@ -5456,24 +6309,48 @@ export function closeChromeWhenLastTabCloses(session) {
   const watchedPages = new WeakSet();
 
   /**
-   * Giữ phiên trình duyệt mở bằng tab trống nếu tab cuối cùng tự đóng.
+   * Đóng phiên khi tab cuối đã đóng. Chỉ coi là người dùng tự đóng (không bù slot, giảm mục tiêu tự bù)
+   * khi cửa sổ đang hiện và tab không do app đóng; còn lại (chạy ngầm/headless không có nút X, trang tự
+   * window.close(), app đóng tab không phải offer…) thì tắt trình duyệt và bù slot mới.
    *
-   * @return {Promise<void>} Mở tab trống khi phiên vẫn còn kết nối.
+   * @param {object} [closedPage] Tab vừa đóng.
+   * @return {Promise<void>} Kết thúc sau khi đóng phiên hoặc bỏ qua nếu còn tab.
+   * @throws {never} Lỗi khi đóng phiên được xử lý tại callback.
    * @author ductv <ductv@getflycrm.com>
    * @since 2026-10-21
    */
-  async function closeEmptyChromeSession() {
-    if (session.suppressAutoRefill || session.closingDueToTrafficBlocked || session.closingDueToNoLead || session.leadCheckStatus === 'failed') return;
+  async function closeEmptyChromeSession(closedPage) {
+    if (session.suppressAutoRefill || session.isClosed || session.closingDueToTrafficBlocked || session.closingDueToNoLead || session.leadCheckStatus === 'failed') return;
     try {
       for (const page of session.browser.pages()) {
         if (!page.isClosed()) return;
       }
-      const replacementPage = await session.browser.newPage().catch(() => null);
-      if (!replacementPage || session.suppressAutoRefill) return;
-      session.mainPage = replacementPage;
-      session.addBrowserLog?.({ type: 'tab_recovered', detail: 'Tab cuối đã đóng; giữ trình duyệt mở bằng tab trống.' });
+      // Cửa sổ đang ẩn/headless thì người dùng không bấm X được; tab do app đóng cũng không tính là người dùng đóng.
+      const closedByUser = session.isWindowVisible !== false && !session.trueHeadless && !closedPage?._uxClosedByApp;
+      if (!closedByUser) {
+        const reason = closedPage?._uxClosedByApp || (session.isWindowVisible !== false ? 'trang tự đóng (window.close)' : 'trang tự đóng khi đang chạy ngầm');
+        console.log(`[LastTab] Slot ${session.slot ?? '?'}: tab cuối bị đóng tự động (${reason}); tắt trình duyệt và bù slot mới.`);
+        session.addBrowserLog?.({ type: 'last_tab_closed_auto', detail: `Tab cuối bị đóng tự động (${reason}); tắt trình duyệt và bù slot mới.` });
+        session.suppressAutoRefill = false;
+        await session.browser.close().catch(() => {});
+        return;
+      }
+      session.suppressAutoRefill = true;
+      session.addBrowserLog?.({ type: 'manual_browser_closed', detail: 'Tab cuối đã đóng; không tự mở lại trình duyệt.' });
+      if (autoRefill.enabled && !autoRefill.stopRequested && autoRefill.targetCount > 0) {
+        autoRefill.targetCount -= 1;
+        if (autoRefill.targetCount === 0) {
+          autoRefill.enabled = false;
+          autoRefill.settings = null;
+          autoRefill.queued = false;
+          void writeFile(autoRefillSettingsPath, '{}', 'utf8').catch(() => {});
+        } else {
+          void saveAutoRefillSettings();
+        }
+      }
+      await session.browser.close().catch(() => {});
     } catch {
-      // Khi trình duyệt mất kết nối, browser close/disconnect handlers xử lý phiên.
+      // Khi trình duyệt đã mất kết nối, browser close/disconnect handlers xử lý phiên.
     }
   }
 
@@ -5482,13 +6359,14 @@ export function closeChromeWhenLastTabCloses(session) {
    *
    * @param {object} page Tab Chrome vừa được mở.
    * @return {void} Gắn sự kiện đóng cho tab chưa theo dõi.
+   * @throws {never} Chỉ đăng ký sự kiện trên tab còn hoạt động.
    * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
    * @since 2026-10-20
    */
   function watchTab(page) {
     if (watchedPages.has(page)) return;
     watchedPages.add(page);
-    page.on('close', closeEmptyChromeSession);
+    page.on('close', () => closeEmptyChromeSession(page));
   }
 
   session.browser.on('page', watchTab);
@@ -5496,11 +6374,14 @@ export function closeChromeWhenLastTabCloses(session) {
 }
 
 /**
- * Gắn logger hành động vào context Chrome: ghi nhận mọi điều hướng và click.
- * Tự động chụp và lưu trọn vẹn mã nguồn HTML của các trang ra file trên đĩa bền bỉ.
+ * Ghi lại thao tác và lưu mã HTML cùng ảnh chụp cho các giao diện AutoLead quan sát.
+ * Log, HTML và ảnh được giữ đầy đủ cho đến khi người dùng chủ động xóa.
  *
  * @param {object} context Playwright BrowserContext.
  * @param {object} session Phiên Chrome hiện tại.
+ * @return {void} Cài bộ ghi nhận sự kiện cho phiên.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
  */
 function attachBrowserLogger(context, session) {
   const sessionId = randomUUID();
@@ -5516,13 +6397,121 @@ function attachBrowserLogger(context, session) {
   };
 
   persistedBrowserLogs.unshift(sessionItem);
-  if (persistedBrowserLogs.length > 150) {
-    persistedBrowserLogs.pop();
-  }
 
   browserSessionLogs.set(session, sessionItem.logs);
+  const snapshotTimers = new Map();
+  const lastSnapshotHashes = new WeakMap();
+  const snapshotLogTypes = new Set([
+    'field_filled',
+    'checkbox_checked',
+    'survey_answered',
+    'survey_solver_answered',
+    'submit_clicked',
+    'screen_advanced',
+    'ai_action',
+    'ai_smart_fallback',
+    'lead_confirmed',
+  ]);
 
-  function addLog(entry) {
+  /**
+   * Lưu mã HTML và ảnh màn hình hiện tại nếu giao diện đã thay đổi kể từ lần chụp trước.
+   *
+   * @param {object} page Tab Playwright cần lưu giao diện.
+   * @param {string} captureReason Sự kiện khiến giao diện được lưu.
+   * @return {Promise<object|null>} Đường dẫn tệp đã lưu hoặc null nếu tab không hợp lệ.
+   * @throws {Error} Khi Playwright không thể chụp ảnh hoặc ghi tệp.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-10-21
+   */
+  async function capturePageInterfaceSnapshot(page, captureReason) {
+    if (!page || page.isClosed()) return null;
+    const url = page.url();
+    if (!/^https?:\/\//i.test(url)) return null;
+
+    let html = '';
+    let title = '';
+    let screenshot = null;
+    try {
+      [html, title, screenshot] = await Promise.all([
+        page.content(),
+        page.title().catch(() => ''),
+        page.screenshot({ type: 'jpeg', quality: 75, timeout: 7000 }),
+      ]);
+    } catch {
+      return null;
+    }
+    if (!html || !screenshot) return null;
+
+    const signature = createHash('sha256')
+      .update(url)
+      .update('\0')
+      .update(html)
+      .update(screenshot)
+      .digest('hex');
+    if (lastSnapshotHashes.get(page) === signature) return null;
+
+    const offerNumber = page._offerNumber ?? session.offerNumber ?? session.streamRole ?? 1;
+    const offerSubDir = join(interactionHtmlDirectory, `offer-${offerNumber}`);
+    await mkdir(offerSubDir, { recursive: true });
+    const safeHost = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, '_') || 'page';
+    const capturedAt = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
+    const pageTabNumber = Number.isInteger(page._tabIndex)
+      ? page._tabIndex + 1
+      : Math.max(1, context.pages().indexOf(page) + 1);
+    const filePrefix = `offer${offerNumber}_${capturedAt}_slot${session.tileIndex + 1}_tab${pageTabNumber}_${safeHost}_${signature.slice(0, 12)}`;
+    const htmlFilename = `${filePrefix}.html`;
+    const screenshotFilename = `${filePrefix}.jpg`;
+    const htmlPath = join(offerSubDir, htmlFilename);
+    const screenshotPath = join(offerSubDir, screenshotFilename);
+
+    await Promise.all([
+      writeFile(htmlPath, html, 'utf8'),
+      writeFile(screenshotPath, screenshot),
+    ]);
+    lastSnapshotHashes.set(page, signature);
+    return {
+      url,
+      title,
+      reason: captureReason,
+      htmlPath,
+      htmlFilename,
+      screenshotPath,
+      screenshotFilename,
+    };
+  }
+
+  /**
+   * Gộp các thay đổi giao diện sát nhau thành một lần chụp sau khi trang ổn định.
+   *
+   * @param {object} page Tab Playwright cần chụp sau thời gian chờ ngắn.
+   * @param {string} captureReason Sự kiện gần nhất làm thay đổi giao diện.
+   * @return {void} Đặt lịch lưu ảnh và HTML của tab.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-10-21
+   */
+  function schedulePageInterfaceSnapshot(page, captureReason) {
+    if (!page || page.isClosed()) return;
+    const previousTimer = snapshotTimers.get(page);
+    if (previousTimer) clearTimeout(previousTimer);
+    const timer = setTimeout(() => {
+      snapshotTimers.delete(page);
+      void capturePageInterfaceSnapshot(page, captureReason).catch((error) => {
+        console.warn('[BrowserLogs] Không lưu được giao diện:', error.message);
+      });
+    }, 650);
+    snapshotTimers.set(page, timer);
+  }
+
+  /**
+   * Ghi một sự kiện thao tác và lên lịch lưu giao diện liên quan khi cần.
+   *
+   * @param {object} entry Nội dung sự kiện trình duyệt.
+   * @param {object|null} eventPage Tab phát sinh sự kiện, nếu sự kiện thuộc autofill.
+   * @return {void} Lưu log trong bộ nhớ và xếp lịch ghi đĩa.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-10-21
+   */
+  function addLog(entry, eventPage = null) {
     sessionItem.ip = session.exitIp ?? sessionItem.ip;
     if (session.offerNumber) sessionItem.offer = session.offerNumber;
     if (session.websiteUrl) sessionItem.offerUrl = session.websiteUrl;
@@ -5532,7 +6521,16 @@ function attachBrowserLogger(context, session) {
       ...entry,
     };
     sessionItem.logs.push(logItem);
-    if (sessionItem.logs.length > 200) sessionItem.logs.shift();
+    if (snapshotLogTypes.has(logItem.type)) {
+      try {
+        const snapshotPage = eventPage && !eventPage.isClosed()
+          ? eventPage
+          : (session.mainPage && !session.mainPage.isClosed()
+            ? session.mainPage
+            : context.pages().find((page) => !page.isClosed()));
+        if (snapshotPage) schedulePageInterfaceSnapshot(snapshotPage, logItem.type);
+      } catch {}
+    }
     queueSaveBrowserLogs();
   }
   session.addBrowserLog = addLog;
@@ -5541,58 +6539,40 @@ function attachBrowserLogger(context, session) {
 
   // Click tay được ghi ở bộ điều khiển Screen View; không tiêm listener hay hàm toàn cục vào trang.
 
-  // Ghi nhận điều hướng + lưu đầy đủ 100% HTML ra file đĩa riêng biệt
+  /**
+   * Theo dõi tab mới, điều hướng và trạng thái tải để lưu mọi giao diện đã quan sát.
+   *
+   * @param {object} page Tab Playwright cần theo dõi.
+   * @return {void} Đăng ký các sự kiện vòng đời của tab.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-10-21
+   */
   function hookPage(page) {
     page.on('framenavigated', async (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
       if (!url || url === 'about:blank' || url.startsWith('chrome:')) return;
-      let html = '';
-      let title = '';
-      let htmlFilename = '';
-      let htmlPath = '';
-
-      try {
-        html = await page.content();
-      } catch {}
-      try {
-        title = await page.title();
-      } catch {}
-
-      if (html) {
-        try {
-          const offerNum = session.offerNumber ?? session.streamRole ?? 1;
-          const offerSubDir = join(interactionHtmlDirectory, `offer-${offerNum}`);
-          await mkdir(offerSubDir, { recursive: true });
-          // Xóa file cũ nhất nếu vượt 300 file trong thư mục offer này
-          try {
-            const existing = (await readdir(offerSubDir)).filter((f) => f.endsWith('.html'));
-            if (existing.length >= 300) {
-              existing.sort();
-              for (const old of existing.slice(0, existing.length - 299)) {
-                await unlink(join(offerSubDir, old)).catch(() => {});
-              }
-            }
-          } catch {}
-          const safeHost = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, '_') || 'page';
-          const nowStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          const randSuffix = Math.random().toString(36).slice(2, 6);
-          htmlFilename = `offer${offerNum}_${nowStr}_slot${session.tileIndex + 1}_${safeHost}_${randSuffix}.html`;
-          htmlPath = join(offerSubDir, htmlFilename);
-          await writeFile(htmlPath, html, 'utf8');
-        } catch (err) {
-          console.error('Lỗi khi ghi file HTML:', err.message);
-        }
-      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const snapshot = await capturePageInterfaceSnapshot(page, 'navigate').catch(() => null);
 
       addLog({
         type: 'navigate',
         url,
-        title,
-        // Không nhúng HTML vào JSON để tránh phình file — dùng htmlPath để load khi cần
-        htmlPath: htmlPath || null,
-        htmlFilename: htmlFilename || null,
+        title: snapshot?.title || '',
+        snapshotReason: snapshot?.reason || 'navigate',
+        htmlPath: snapshot?.htmlPath || null,
+        htmlFilename: snapshot?.htmlFilename || null,
+        screenshotPath: snapshot?.screenshotPath || null,
+        screenshotFilename: snapshot?.screenshotFilename || null,
       });
+    });
+
+    page.on('domcontentloaded', () => schedulePageInterfaceSnapshot(page, 'domcontentloaded'));
+    page.on('load', () => schedulePageInterfaceSnapshot(page, 'load'));
+    page.on('close', () => {
+      const timer = snapshotTimers.get(page);
+      if (timer) clearTimeout(timer);
+      snapshotTimers.delete(page);
     });
   }
 
@@ -5746,6 +6726,100 @@ export async function hasTrafficBlocked(page) {
 }
 
 /**
+ * Thời gian chờ (ms) trước khi coi tab chính là "không phải trang offer".
+ * Trang trắng/lỗi HTTP chờ ngắn; trang không có form chờ lâu hơn vì form có thể tải chậm.
+ */
+/** Khoảng gọi API kiểm tra lead trong lúc chờ (giây); tổng thời gian chờ vẫn theo cấu hình. */
+export const LEAD_POLL_SECONDS = 10;
+
+export const NON_OFFER_WAIT_MS = { blank: 20000, httpError: 10000, noForm: 30000 };
+
+/**
+ * Phiên đã nhận offer và đang làm (điền ô, trả lời câu hỏi, qua màn, check lead): không được tự đóng trình duyệt.
+ *
+ * @param {object} session Phiên đang chạy.
+ * @return {boolean} True nếu phiên đã có tiến triển.
+ */
+export function isSessionWorkingOnOffer(session) {
+  return Boolean(session.emailFilled || session.completedScreens > 0 || session.leadCheckStatus
+    || session.autofillActions > 0 || session.autofillFields > 0);
+}
+
+/**
+ * Nhận diện tab không phải trang offer: offer hết hạn (404offer/unavailable), trang trắng,
+ * lỗi HTTP 404/410/5xx, hoặc trang không có form/nút nào để làm. Tab đã được autofill thao tác
+ * (có dấu data-ux-*) luôn được coi là trang offer đang làm.
+ * Việc đóng tab hay đóng cả trình duyệt do watchTrafficBlockedPage quyết định theo tiến triển của phiên.
+ *
+ * @param {object} page Tab cần xét.
+ * @param {{url?: string, since?: number}} tracker Trạng thái theo dõi của tab (URL đang đứng và mốc bắt đầu).
+ * @return {Promise<string|null>} Lý do đóng, hoặc null nếu vẫn là trang offer / chưa đủ thời gian.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-27
+ */
+export async function getNonOfferReason(page, tracker) {
+  if (!page || page.isClosed?.()) return null;
+  const url = page.url?.() || '';
+  if (url !== tracker.url) {
+    tracker.url = url;
+    tracker.since = Date.now();
+  }
+  const waited = Date.now() - tracker.since;
+  if (/404offer\.com|\/\/unavailable\./i.test(url)) return 'Offer hết hạn (trang unavailable)';
+  // Trang trung gian của luồng click/kiểm tra IP: không phải offer nhưng tự chuyển tiếp.
+  if (/api\.ipify\.org|toffers\.top|adtrapper|adswapper/i.test(url)) return null;
+  if (!url || url === 'about:blank') return waited >= NON_OFFER_WAIT_MS.blank ? 'Trang trắng (about:blank) không tải offer' : null;
+  const status = page._uxMainStatus;
+  if ([404, 410, 500, 502, 504].includes(status) && waited >= NON_OFFER_WAIT_MS.httpError) return `Trang lỗi HTTP ${status}`;
+  if (waited < NON_OFFER_WAIT_MS.noForm) return null;
+  // Xét cả iframe: form offer hay nằm trong iframe. Chỉ cần một frame có form/đáp án là giữ tab.
+  const frames = typeof page.frames === 'function' ? page.frames() : [page];
+  const results = await Promise.all(frames.map((f) => f.evaluate(detectOfferContentInPage).catch(() => null)));
+  const found = results.filter(Boolean);
+  if (found.length === 0) return null; // không đọc được trang: không đóng nhầm
+  if (found.some((r) => r.challenge || r.worked || r.hasForm || r.hasChoices)) return null;
+  return 'Trang không có form nhập / đáp án để chọn';
+}
+
+/**
+ * Chạy trong trang (`frame.evaluate`): trang có ô nhập thật hoặc nhóm đáp án để chọn không.
+ * Nút menu/cookie/chia sẻ, ô tìm kiếm, ô ở header/nav/footer (đăng ký bản tin) không tính —
+ * trước đây chỉ cần có một nút hay iframe bất kỳ là tab quảng cáo/tin tức không bao giờ bị đóng.
+ *
+ * @return {{challenge: boolean, worked: boolean, hasForm: boolean, hasChoices: boolean}} Kết quả nhận diện.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-31
+ */
+export function detectOfferContentInPage() {
+  const shown = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const chrome = (el) => Boolean(el.closest('header, nav, footer, [role="navigation"], [role="banner"], [role="contentinfo"], #footer, .footer, .site-footer'));
+  const noise = /close|skip ad|learn more|ad ?choices|privacy|cookie|accept|reject|agree|menu|share|tweet|facebook|sign in|log ?in|sign up|subscribe|search|next article|read more/i;
+  const fieldSel = 'input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="date"], '
+    + 'input[type="radio"], input[type="checkbox"], select, textarea';
+  const hasForm = [...document.querySelectorAll(fieldSel)].some((el) => {
+    if (!shown(el) || el.disabled || chrome(el)) return false;
+    const hint = `${el.name || ''} ${el.id || ''} ${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`;
+    return !/search|^\s*q\s*$|newsletter/i.test(hint);
+  });
+  // Đáp án survey dạng nút/thẻ: >= 2 lựa chọn chữ ngắn cùng một khối cha.
+  const choiceSel = '[role="radio"], [role="option"], [role="checkbox"], button, label, a[class*="btn"], a[class*="answer"], a[class*="option"], '
+    + '[class*="answer"], [class*="option"], [class*="choice"]';
+  const groups = new Map();
+  for (const el of document.querySelectorAll(choiceSel)) {
+    const text = String(el.innerText || '').trim();
+    if (!text || text.length > 60 || noise.test(text) || !shown(el) || chrome(el)) continue;
+    const parent = el.parentElement;
+    groups.set(parent, (groups.get(parent) || 0) + 1);
+  }
+  return {
+    challenge: /just a moment|checking your browser/i.test(document.title),
+    worked: Boolean(document.querySelector('[data-ux-filled], [data-ux-clicked], [data-ux-qclicked], [data-ux-semantic-clicked], [data-ux-submitted]')),
+    hasForm,
+    hasChoices: [...groups.values()].some((n) => n >= 2),
+  };
+}
+
+/**
  * Đóng cửa sổ và tự động mở proxy khác thay thế khi trang hiển thị thông báo "Traffic Blocked!".
  *
  * @param {object} session Phiên Chrome đã mở thành công.
@@ -5759,6 +6833,7 @@ export function watchTrafficBlockedPage(session) {
   let checking = false;
   let blocked = false;
   const redirectTracker = new WeakMap();
+  const nonOfferTracker = new WeakMap();
 
   const timer = setInterval(() => {
     if (checking || blocked) return;
@@ -5774,14 +6849,49 @@ export function watchTrafficBlockedPage(session) {
           ? await session.browser.pages()
           : [];
 
+        // Hai tab cùng link: đóng tab trùng do trang tự bật ra, giữ tab gốc / tab mở trước.
+        for (const dup of findDuplicateTabs(pages, (p) => p === session.mainPage || p._uxOriginTab === true)) {
+          console.log(`[DupTab] Đóng tab trùng link ${dup.url()}.`);
+          session.addBrowserLog?.({ type: 'duplicate_tab_closed', detail: `Đóng tab trùng link: ${dup.url()}` });
+          dup._uxClosedByApp = 'tab trùng link';
+          await dup.close().catch(() => {});
+        }
+
         for (const page of pages) {
           if (typeof page?.isClosed === 'function' && page.isClosed()) continue;
 
-          // 1. Kiểm tra trang có bị lỗi mạng hoặc thông báo blocked không
-          const deadReason = await getDeadOrBlockedReason(page);
+          // 1. Kiểm tra trang có bị lỗi mạng hoặc thông báo blocked không; tab chính còn xét "không phải trang offer".
+          if (!nonOfferTracker.has(page)) {
+            nonOfferTracker.set(page, { url: '', since: Date.now() });
+            page.on?.('response', (res) => {
+              if (res.request().isNavigationRequest() && res.frame() === page.mainFrame()) page._uxMainStatus = res.status();
+            });
+          }
+          let deadReason = await getDeadOrBlockedReason(page);
+          if (!deadReason) {
+            const isOrigin = page === session.mainPage || page._uxOriginTab === true;
+            // Link gốc (tab chính + tab offer app tự mở) không bao giờ bị đóng vì quy tắc "không phải offer",
+            // kể cả offer hết hạn / lỗi HTTP; quy tắc này chỉ áp cho tab do trang tự bật ra.
+            const nonOfferReason = isOrigin ? null : await getNonOfferReason(page, nonOfferTracker.get(page));
+            if (nonOfferReason) {
+              // Lấy lại danh sách tab ngay lúc này: tab khác có thể vừa tự đóng trong vòng quét.
+              const otherTabs = (session.browser?.pages?.() ?? []).filter((p) => p !== page && !p.isClosed?.());
+              // Tab gốc (tab chính + các tab offer app tự mở lúc đầu) không bao giờ bị đóng riêng.
+              if (otherTabs.length > 0 && !isOrigin) {
+                // Chỉ đóng tab không phải offer do trang tự bật ra, giữ các tab còn lại.
+                console.log(`[NonOffer] Đóng tab ${page.url()}: ${nonOfferReason}.`);
+                session.addBrowserLog?.({ type: 'non_offer_tab_closed', detail: `Đóng tab không phải offer (${nonOfferReason}): ${page.url()}` });
+                page._uxClosedByApp = `tab không phải offer: ${nonOfferReason}`;
+                await page.close().catch(() => {});
+                continue;
+              }
+              // Tab duy nhất còn lại: chỉ đóng cả trình duyệt + bù slot khi phiên chưa nhận offer/chưa làm gì.
+              if (otherTabs.length === 0 && !isSessionWorkingOnOffer(session)) deadReason = nonOfferReason;
+            }
+          }
           if (deadReason) {
             // Tab phụ bị lỗi → chỉ đóng tab đó, quay về tab chính (không đóng browser)
-            if (page !== session.mainPage) {
+            if (page !== session.mainPage && !page._uxOriginTab) {
               console.log(`[DeadTab] Tab phụ bị ${deadReason} (${page.url()}), đóng tab và quay về tab chính.`);
               session.addBrowserLog?.({ type: 'traffic_blocked', detail: `Tab phụ bị ${deadReason}. Đóng tab, giữ trình duyệt.` });
               await page.close().catch(() => {});
@@ -5860,6 +6970,58 @@ export function watchTrafficBlockedPage(session) {
           const isAdtrapper = /adtrapper|adswapper/i.test(currentUrl);
 
           if (isAdtrapper) {
+            // Landing "disabled" của adswapper/adtrapper = offer đã tắt / IP-geo bị từ chối.
+            // Đóng NGAY, không tốn 24 giây reload (2 × 8s) vì trang này không bao giờ nhảy tab.
+            const isDisabledLanding = /\/disabled(\.html)?(\?|\/|$)/i.test(currentUrl);
+            if (isDisabledLanding) {
+              const label = session.chromeVersion
+                ? `Chrome ${session.chromeVersion}`
+                : (session.profileId ? `Profile ${session.profileId}` : `Slot ${(session.tileIndex ?? 0) + 1}`);
+              const disabledReason = 'Landing báo DISABLED (offer từ chối traffic/IP-geo)';
+              clearInterval(timer);
+              session.closingDueToTrafficBlocked = true;
+              try {
+                if (session.proxyKey) {
+                  const history = await readProxyUsageHistory();
+                  if (history?.proxies?.[session.proxyKey]) {
+                    history.proxies[session.proxyKey] = {
+                      ...history.proxies[session.proxyKey],
+                      status: 'failed',
+                      reason: disabledReason,
+                      completedAt: new Date().toISOString(),
+                    };
+                    await persistProxyUsageHistory(history);
+                  }
+                }
+              } catch {}
+
+              autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) vào landing DISABLED của adswapper; `
+                + 'đã đóng cửa sổ và đang tự động mở sock khác thay thế…';
+
+              console.log(`[Adtrapper] ${label}: ${disabledReason}. Đóng ngay (không reload).`);
+              const logs = browserSessionLogs.get(session);
+              if (logs) {
+                logs.push({
+                  time: new Date().toISOString(),
+                  offer: session.offerNumber ?? session.streamRole ?? 1,
+                  type: 'adtrapper_disabled_close',
+                  detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) vào landing disabled.html — offer từ chối traffic/IP. Đóng ngay và đổi sock khác.`,
+                });
+                queueSaveBrowserLogs();
+              }
+
+              chromeBuildRotationCounter += 1;
+              await page.close().catch(() => {});
+              await session.browser?.close?.().catch(() => {});
+              if (session.proxyKey) {
+                await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
+              }
+              if (!autoRefill.stopRequested && autoRefill.enabled) {
+                queueAutomaticRefill();
+              }
+              return;
+            }
+
             // Kiểm tra xem đã có tab khác nhảy sang trang offer đích chưa
             const hasOtherOfferTab = pages.some((p) => {
               if (p === page || (typeof p.isClosed === 'function' && p.isClosed())) return false;
@@ -5994,12 +7156,32 @@ export function watchTrafficBlockedPage(session) {
 }
 
 /**
+ * Quyết định trình duyệt có chạy ẩn hoàn toàn (headless) hay không.
+ *
+ * "Chạy trong app" BẬT → chạy headless, người dùng xem qua tab Xem màn hình.
+ * TẮT → cửa sổ Chrome/SunBrowser thật mở ra Desktop.
+ * "Ẩn đến trang đích" và "Ẩn tới khi có lead" cũng bắt buộc phải chạy ẩn.
+ *
+ * @param {{screenPreviewOnly?: boolean, hideUntilTarget?: boolean, hideUntilLead?: boolean}} options Các cờ điều khiển chế độ hiển thị.
+ * @return {boolean} True khi phải chạy ẩn hoàn toàn.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-22
+ */
+export function shouldRunHeadless({ screenPreviewOnly = true, hideUntilTarget = false, hideUntilLead = false } = {}) {
+  return Boolean(screenPreviewOnly) || Boolean(hideUntilTarget) || Boolean(hideUntilLead);
+}
+
+/**
  * Tự thoát khi tiến trình cha chết.
  *
  * AutoLeadPCMacApp.swift chạy node bằng Process không gắn pipe stdin, và terminate()
  * trong applicationWillTerminate không chạy khi app bị quit qua AppleScript, nên node
  * con sống sót và giữ cổng — lần mở app sau gặp EADDRINUSE. macOS re-parent con sang
  * launchd (pid 1) khi cha chết nên chỉ cần so ppid.
+ *
+ * LƯU Ý: ppid đổi (kể cả về 1) nghĩa là cha đã chết. Trước đây điều kiện `ppid <= 1`
+ * bị hiểu ngược thành "vẫn ổn" nên node mồ côi sống mãi và giữ cổng 3211 — app mới
+ * không bao giờ lên được cổng, giao diện lại nối vào bản code cũ.
  *
  * @return {void} Không trả về giá trị.
  * @author ductv <ductv@getflycrm.com>
@@ -6011,12 +7193,107 @@ function exitWhenParentExits() {
   if (parentPid <= 1) return;
 
   const watchdog = setInterval(() => {
-    if (process.ppid === parentPid || process.ppid <= 1) return;
+    if (process.ppid === parentPid) return;
     console.error('Tiến trình cha đã thoát, đóng máy chủ giao diện.');
     process.exit(0);
   }, 2000);
   // Không để watchdog là thứ giữ process sống; máy chủ HTTP làm việc đó.
   watchdog.unref();
+}
+
+// Đường dẫn lsof trên macOS: app chạy từ Finder có PATH tối giản nên phải thử từng đường dẫn.
+const LSOF_PATHS = ['/usr/sbin/lsof', '/usr/bin/lsof', '/bin/lsof'];
+
+/**
+ * Tìm PID của tiến trình đang giữ cổng TCP.
+ *
+ * @param {number} port Cổng cần kiểm tra.
+ * @return {Promise<number|null>} PID của tiến trình giữ cổng, null nếu cổng trống.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-22
+ */
+async function findPortHolderPid(port) {
+  for (const lsofPath of LSOF_PATHS) {
+    if (!existsSync(lsofPath)) continue;
+    try {
+      const { stdout } = await executeFile(lsofPath, ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { timeout: 5000 });
+      const pid = Number.parseInt(String(stdout).trim().split('\n')[0] ?? '', 10);
+      if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) return pid;
+    } catch {
+      // lsof trả về code khác 0 khi không còn tiến trình nào giữ cổng.
+    }
+  }
+  return null;
+}
+
+/**
+ * Đọc lệnh chạy và thư mục làm việc của một tiến trình để xác định nó có phải máy chủ AutoLeadPC hay không.
+ *
+ * @param {number} pid PID cần kiểm tra.
+ * @return {Promise<{command: string, workingDirectory: string}>} Lệnh chạy và thư mục làm việc.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-22
+ */
+async function describeProcess(pid) {
+  let command = '';
+  let workingDirectory = '';
+  try {
+    const { stdout } = await executeFile('/bin/ps', ['-o', 'command=', '-p', String(pid)], { timeout: 5000 });
+    command = String(stdout).trim();
+  } catch {
+    // Tiến trình có thể đã chết trước khi đọc được thông tin.
+  }
+  for (const lsofPath of LSOF_PATHS) {
+    if (!existsSync(lsofPath)) continue;
+    try {
+      const { stdout } = await executeFile(lsofPath, ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { timeout: 5000 });
+      const cwdLine = String(stdout).split('\n').find((line) => line.startsWith('n'));
+      if (cwdLine) workingDirectory = cwdLine.slice(1);
+    } catch {
+      // Không đọc được cwd thì vẫn dựa vào lệnh chạy để quyết định.
+    }
+    break;
+  }
+  return { command, workingDirectory };
+}
+
+/**
+ * Dừng tiến trình máy chủ AutoLeadPC cũ đang giữ cổng để bản mới phục vụ được.
+ *
+ * Chỉ dừng đúng tiến trình `node app.mjs` nằm trong thư mục launcher của AutoLeadPC;
+ * tiến trình khác giữ cổng (app khác, công cụ khác) thì để nguyên và báo lỗi.
+ *
+ * @param {number} port Cổng đang bị chiếm.
+ * @return {Promise<{released: boolean, reason: string}>} Kết quả giải phóng cổng.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-22
+ */
+async function releaseStalePortHolder(port) {
+  const holderPid = await findPortHolderPid(port);
+  if (!holderPid) return { released: true, reason: 'free' };
+
+  const { command, workingDirectory } = await describeProcess(holderPid);
+  const isAutoLeadServer = /node\s.*app\.mjs/.test(command) && /AutoLeadPC/i.test(workingDirectory);
+  if (!isAutoLeadServer) return { released: false, reason: 'foreign-process' };
+
+  console.warn(`[Server] Cổng ${port} đang bị máy chủ AutoLeadPC cũ giữ (PID ${holderPid}) — dừng tiến trình cũ để nạp code mới.`);
+  try {
+    process.kill(holderPid, 'SIGTERM');
+  } catch {
+    // Tiến trình đã chết: bỏ qua.
+  }
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (!(await findPortHolderPid(port))) return { released: true, reason: 'terminated' };
+  }
+  try {
+    process.kill(holderPid, 'SIGKILL');
+  } catch {
+    // Tiến trình đã chết: bỏ qua.
+  }
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const stillHeld = await findPortHolderPid(port);
+  return { released: !stillHeld, reason: 'killed' };
 }
 
 /**
@@ -6032,6 +7309,7 @@ async function startLocalInterface() {
   // Dọn profile mồ côi định kỳ mỗi 5 phút (bắt Chrome crash không trigger close event)
   setInterval(() => void cleanupStaleProfiles(), 5 * 60 * 1000);
   await loadAutofillUsed();
+  await loadAutofillRejected();
   await loadAutofillQueue();
   await loadProxyQueue();
   await loadDualStreamState();
@@ -6039,6 +7317,7 @@ async function startLocalInterface() {
   await loadEmailAutoRefillConfig();
   await loadProxy711Config();
   await loadProxy711AutoRefillConfig();
+  await loadOfferStrategies();
   await loadAutoRefillSettings();
   if (autoRefill.settings) {
     console.log('[AutoRefill] Khôi phục settings sau restart, bắt đầu bù slot...');
@@ -6131,7 +7410,7 @@ async function startLocalInterface() {
       try {
         const body = JSON.parse(await readRequestBody(request));
         const baseDir = getAutoLeadPCDir();
-        const filePath = join(baseDir, 'Config', 'Proxy', body.file);
+        const filePath = join(baseDir, 'Config', 'Proxy', safeConfigFileName(body.file));
         let text = '';
         if (existsSync(filePath)) {
           text = readFileSync(filePath, 'utf8');
@@ -6147,7 +7426,7 @@ async function startLocalInterface() {
       try {
         const body = JSON.parse(await readRequestBody(request));
         const baseDir = getAutoLeadPCDir();
-        const filePath = join(baseDir, 'Config', 'Proxy', body.file);
+        const filePath = join(baseDir, 'Config', 'Proxy', safeConfigFileName(body.file));
         const dir = dirname(filePath);
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
@@ -6199,7 +7478,16 @@ async function startLocalInterface() {
             if (!Array.isArray(savedList)) savedList = [];
           } catch {}
         }
-        respondWithJson(response, 200, { ...data, savedList });
+        // Nạp methodConfigs từ file riêng
+        let methodConfigs = [];
+        const methodPath = join(offerDir, 'offer-methods.json');
+        if (existsSync(methodPath)) {
+          try {
+            methodConfigs = JSON.parse(readFileSync(methodPath, 'utf8'));
+            if (!Array.isArray(methodConfigs)) methodConfigs = [];
+          } catch {}
+        }
+        respondWithJson(response, 200, { ...data, savedList, methodConfigs });
       } catch (err) {
         respondWithJson(response, 200, { savedList: [] });
       }
@@ -6243,6 +7531,7 @@ async function startLocalInterface() {
           TimeLimit: body.TimeLimit || '30',
           delayStart: body.delayStart || '1',
           delayStop: body.delayStop || '1',
+          methodConfigs: Array.isArray(body.methodConfigs) ? body.methodConfigs : [],
           updatedAt: new Date().toISOString(),
         };
         const existingIdx = savedList.findIndex((item) => (item.id && item.id === offerItem.id) || item.NameOffer === offerName);
@@ -6253,6 +7542,13 @@ async function startLocalInterface() {
         }
         if (savedList.length > 50) savedList.length = 50;
         writeFileSync(listPath, JSON.stringify(savedList, null, 2), 'utf8');
+
+        // Lưu 4 cách giải (Cách 1 → Offer 1, Cách 2 → Offer 2, ...)
+        if (Array.isArray(body.methodConfigs)) {
+          const methodPath = join(offerDir, 'offer-methods.json');
+          writeFileSync(methodPath, JSON.stringify(body.methodConfigs, null, 2), 'utf8');
+          await loadOfferStrategies();
+        }
 
         respondWithJson(response, 200, { success: true, savedItem: offerItem, savedList });
       } catch (err) {
@@ -6282,6 +7578,47 @@ async function startLocalInterface() {
       return;
     }
 
+    if (request.method === 'GET' && request.url === '/pc/offer-strategy/read') {
+      try {
+        const strategies = {};
+        for (const [num, strat] of offerStrategyState) {
+          strategies[num] = strat;
+        }
+        respondWithJson(response, 200, { strategies });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/pc/offer-strategy/save') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const offerNum = Number(body.offerNumber);
+        if (!Number.isInteger(offerNum) || offerNum < 1 || offerNum > 30) {
+          respondWithJson(response, 400, { error: 'offerNumber is required' });
+          return;
+        }
+        offerStrategyState.set(offerNum, {
+          mode: ['auto_full', 'consent_only', 'manual', 'skip'].includes(body.mode) ? body.mode : 'auto_full',
+          autoSubmit: body.autoSubmit !== false,
+          maxPick: Number.isInteger(Number(body.maxPick)) && Number(body.maxPick) > 0 ? Number(body.maxPick) : null,
+          pickRandom: body.pickRandom === true,
+          notes: String(body.notes || ''),
+          link: String(body.link || offerStrategyState.get(offerNum)?.link || '').trim(),
+        });
+        const offerDir = join(getAutoLeadPCDir(), 'Config', 'Offer');
+        await mkdir(offerDir, { recursive: true });
+        await writeFile(join(offerDir, 'offer-methods.json'), JSON.stringify(
+          [...offerStrategyState].map(([offerNumber, strategy]) => ({ offerNumber, ...strategy })), null, 2,
+        ), 'utf8');
+        respondWithJson(response, 200, { success: true });
+      } catch (err) {
+        respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
     if (request.method === 'GET' && request.url === '/pc/settings/read') {
       try {
         const baseDir = getAutoLeadPCDir();
@@ -6302,6 +7639,7 @@ async function startLocalInterface() {
           Chrome: getBool('Chrome'),
           ChromeFirefox: getBool('ChromeFirefox'),
           ChromeAdsPower: getBool('ChromeAdsPower'),
+          CloakBrowser: getBool('CloakBrowser'),
           Canvas: getBool('Canvas'),
           ClientRects: getBool('ClientRects'),
           WebGLImage: getBool('WebGLImage'),
@@ -6312,6 +7650,8 @@ async function startLocalInterface() {
           Mac: getBool('Mac'),
           Linux: getBool('Linux'),
           Android: getBool('Android'),
+          iPhone: getBool('iPhone'),
+          iPad: getBool('iPad'),
           AdsPowerApiKey: await readAdsPowerApiKey(),
         });
       } catch (err) {
@@ -6328,7 +7668,7 @@ async function startLocalInterface() {
         const filePath = join(baseDir, 'Config', 'Settings', 'Settings.ini');
         const b = (val) => val ? 'True' : 'False';
         const bm = body.browserMode || 'Chrome';
-        const content = `[Browser]\nChrome=${b(bm === 'Chrome')}\nChromeAdsPower=${b(bm === 'AdsPower')}\nChromeFirefox=${b(bm === 'Firefox')}\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\n`;
+        const content = `[Browser]\nChrome=${b(bm === 'Chrome')}\nChromeAdsPower=${b(bm === 'AdsPower')}\nChromeFirefox=${b(bm === 'Firefox')}\n[Setting]\nCloakBrowser=${b(body.CloakBrowser)}\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\niPhone=${b(body.iPhone)}\niPad=${b(body.iPad)}\n`;
         const dir = dirname(filePath);
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
@@ -6345,6 +7685,16 @@ async function startLocalInterface() {
         respondWithJson(response, 200, { success: true });
       } catch (err) {
         respondWithJson(response, 400, { error: err.message });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/cloakbrowser/status') {
+      try {
+        const status = getCloakBrowserStatus();
+        respondWithJson(response, 200, status);
+      } catch (err) {
+        respondWithJson(response, 500, { error: err.message });
       }
       return;
     }
@@ -6407,12 +7757,12 @@ async function startLocalInterface() {
       try {
         const body = JSON.parse(await readRequestBody(request));
         const baseDir = getAutoLeadPCDir();
-        const filePath = join(baseDir, 'Config', 'Browser', body.file);
+        const filePath = join(baseDir, 'Config', 'Browser', safeConfigFileName(body.file));
         let text = '';
         if (existsSync(filePath)) {
           text = readFileSync(filePath, 'utf8');
         } else {
-          const fallback = join(baseDir, 'Config', body.file);
+          const fallback = join(baseDir, 'Config', safeConfigFileName(body.file));
           if (existsSync(fallback)) {
             text = readFileSync(fallback, 'utf8');
           }
@@ -6428,7 +7778,7 @@ async function startLocalInterface() {
       try {
         const body = JSON.parse(await readRequestBody(request));
         const baseDir = getAutoLeadPCDir();
-        const filePath = join(baseDir, 'Config', 'Browser', body.file);
+        const filePath = join(baseDir, 'Config', 'Browser', safeConfigFileName(body.file));
         const dir = dirname(filePath);
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
@@ -6442,15 +7792,26 @@ async function startLocalInterface() {
     }
 
     if (request.method === 'GET' && request.url === '/state') {
-      respondWithJson(response, 200, {
-        ...getAutoRefillStatus(),
-        limitRun: { count: limitRunCount, max: limitRunMax },
-        toffers: {
-          point: latestToffersOverview.point,
-          leadCount: latestToffersOverview.results?.length || 0,
-          updatedAt: latestToffersOverview.updatedAt,
-        },
-      });
+      try {
+        const stateBody = {
+          ...getAutoRefillStatus(),
+          limitRun: { count: limitRunCount, max: limitRunMax },
+          toffers: {
+            point: latestToffersOverview.point,
+            leadCount: latestToffersOverview.results?.length || 0,
+            updatedAt: latestToffersOverview.updatedAt,
+          },
+        };
+        respondWithJson(response, 200, stateBody);
+      } catch (stateErr) {
+        // /state từng treo vĩnh viễn khi có exception đồng bộ (object vòng/undefined).
+        // Trả 500 kèm message + 3 khung đầu của stack để chẩn đoán nhanh.
+        console.error('[State] Lỗi dựng state:', stateErr?.stack?.split('\n').slice(0, 4).join(' | ') || stateErr?.message);
+        respondWithJson(response, 500, {
+          error: String(stateErr?.message || stateErr),
+          stackTop: String(stateErr?.stack || '').split('\n').slice(0, 4),
+        });
+      }
       return;
     }
 
@@ -6943,13 +8304,10 @@ async function startLocalInterface() {
         respondWithJson(response, 404, { error: `Không tìm thấy trình duyệt ở slot ${targetSlot}` });
         return;
       }
-      foundSession.leadCheckStatus = 'manual_unlocked';
-      foundSession.leadCheckMessage = 'Đã mở khóa thủ công sau lỗi API; chưa xác nhận có lead.';
-      foundSession.addBrowserLog?.({
-        type: 'lead_manual_resume',
-        ip: foundSession.exitIp,
-        detail: 'Đã mở khóa thủ công sau lỗi API; trạng thái lead chưa được xác nhận.',
-      });
+      foundSession.leadCheckStatus = 'confirmed';
+      // Autofill chỉ chạy tiếp khi screen5LeadVerified = true (xem guard đầu vòng quét trong autofill.mjs).
+      foundSession.screen5LeadVerified = true;
+      foundSession.leadCheckMessage = 'Đã mở khóa thủ công. Tiếp tục tự điền form.';
       try { foundSession.triggerAutofillScan?.(); } catch {}
       respondWithJson(response, 200, { message: `Slot ${targetSlot} đã được mở khóa để tiếp tục điền form.` });
       return;
@@ -7019,6 +8377,22 @@ async function startLocalInterface() {
         htmlCount,
         sessions: persistedBrowserLogs,
       });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/browser-logs/download-all') {
+      try {
+        const archive = await createBrowserLogsArchive();
+        response.writeHead(200, {
+          'content-type': 'application/zip',
+          'content-disposition': `attachment; filename="autoleadpc-interfaces-${new Date().toISOString().slice(0, 10)}.zip"`,
+          'content-length': archive.length,
+          'cache-control': 'no-store',
+        });
+        response.end(archive);
+      } catch (err) {
+        respondWithJson(response, 500, { success: false, error: err.message });
+      }
       return;
     }
 
@@ -7305,15 +8679,18 @@ async function startLocalInterface() {
         if (!page) { response.writeHead(404); response.end(); return; }
         // Ảnh thu nhỏ được hỏi mỗi 1,5s: chỉ chụp một lần mỗi lúc, chụp có giới hạn thời gian và trả ảnh gần nhất
         // trong lúc chờ, để các lệnh chụp không dồn lại làm Chrome đơ.
-        if (!session.snapshotInFlight) {
+        // Ảnh vừa chụp < 3s thì dùng lại, không chụp mới (giảm tải Chrome khi nhiều slot cùng hiện thumbnail).
+        const snapshotFresh = session.lastSnapshot && Date.now() - (session.lastSnapshotAt || 0) < 3000;
+        if (!session.snapshotInFlight && !snapshotFresh) {
           const captureStartedAt = Date.now();
-          session.snapshotInFlight = page.screenshot({ type: 'jpeg', quality: 65, timeout: 5000 })
+          session.snapshotInFlight = page.screenshot({ type: 'jpeg', quality: 45, scale: 'css', timeout: 5000 })
             .then((buf) => {
               const captureDurationMs = Date.now() - captureStartedAt;
               diagnostics.captures += 1;
               diagnostics.captureDurationTotalMs += captureDurationMs;
               diagnostics.captureDurationMaxMs = Math.max(diagnostics.captureDurationMaxMs, captureDurationMs);
               session.lastSnapshot = buf;
+              session.lastSnapshotAt = Date.now();
               return buf;
             })
             .catch((error) => {
@@ -7511,6 +8888,21 @@ async function startLocalInterface() {
       return;
     }
 
+    // Quay lại trang trước của tab đang xem trong Screen View (nút ◀ Quay lại)
+    if (request.method === 'POST' && request.url.startsWith('/screen/back/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const sc = screencastSessions.get(slot);
+      if (!sc?.page || sc.page.isClosed()) { respondWithJson(response, 404, { error: 'not found' }); return; }
+      const res = await sc.page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch((err) => ({ error: err.message }));
+      // goBack trả null khi tab không còn trang trước để quay lại.
+      if (res === null) { respondWithJson(response, 200, { ok: false, reason: 'no_history' }); return; }
+      if (res?.error) { respondWithJson(response, 500, { error: res.error }); return; }
+      const backSession = [...activeBrowsers].find((s) => (s.slot ?? s.tileIndex + 1) === slot);
+      backSession?.addBrowserLog?.({ type: 'navigate', detail: `Quay lại trang trước qua Screen View: ${sc.page.url()}` });
+      respondWithJson(response, 200, { ok: true, url: sc.page.url() });
+      return;
+    }
+
     // Mở thêm tab mới
     if (request.method === 'POST' && request.url.startsWith('/screen/tabs/new/')) {
       const slot = parseInt(request.url.split('/').pop(), 10);
@@ -7578,8 +8970,21 @@ async function startLocalInterface() {
           }
 
           if (body.type === 'mousedown') {
+            // Click vào ô select: không gửi click (popup native không hiện trong screencast) mà trả danh sách
+            // lựa chọn để Screen View tự vẽ. mouseup chờ bước này xong để giữ đúng thứ tự nhấn/nhả.
+            sc.selectPick = null;
+            sc.pointerCheck = (body.button || 'left') === 'left' && sc.page && !sc.page.isClosed()
+              ? findSelectAtPoint(sc.page, targetX, targetY).catch(() => null)
+              : Promise.resolve(null);
+            const picked = await sc.pointerCheck;
+            if (picked) {
+              sc.selectPick = picked;
+              respondWithJson(response, 200, { ok: true, select: { options: picked.options, selectedIndex: picked.selectedIndex } });
+              return;
+            }
             await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
           } else if (body.type === 'mouseup') {
+            if (await sc.pointerCheck) { respondWithJson(response, 200, { ok: true }); return; }
             await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
             const clickedSession = [...activeBrowsers].find((item) => (item.slot ?? (item.tileIndex ?? -1) + 1) === slot);
             clickedSession?.addBrowserLog?.({ type: 'click', detail: `Click tay qua Screen View tại (${targetX}, ${targetY})` });
@@ -7605,6 +9010,67 @@ async function startLocalInterface() {
               }
             }
           }
+        } else if (body.type === 'select') {
+          // Người dùng chọn một dòng trong danh sách select Screen View vừa hiện.
+          const pick = sc.selectPick;
+          if (!pick) { respondWithJson(response, 409, { error: 'select không còn' }); return; }
+          await pick.frame.locator(`select[data-ux-screen-select="${pick.uid}"]`).selectOption({ index: Number(body.index) }, { timeout: 3000 });
+          const clickedSession = [...activeBrowsers].find((item) => (item.slot ?? (item.tileIndex ?? -1) + 1) === slot);
+          clickedSession?.addBrowserLog?.({ type: 'click', detail: `Chọn tay qua Screen View: ${pick.options[body.index]?.label ?? body.index}` });
+        } else if (body.type === 'shortcut') {
+          // Phím tắt hệ thống: Cmd/Ctrl + A/X/C/V → thực hiện copy/cut/paste/select-all tự nhiên
+          // qua CDP Input.dispatchKeyEvent với commands (Chrome DevTools Protocol).
+          if (cdpClient) {
+            const commandMap = {
+              copy: 'copy',
+              cut: 'cut',
+              paste: 'paste',
+              selectAll: 'selectAll',
+            };
+            const command = commandMap[body.command];
+            if (command) {
+              if (command === 'paste') {
+                // Văn bản dán được chèn đúng một lần qua page.keyboard.insertText bên dưới; không gửi CDP ở đây.
+              } else {
+                await cdpClient.send('Input.dispatchKeyEvent', {
+                  type: 'keyDown',
+                  key: body.key || (command === 'selectAll' ? 'a' : 'c'),
+                  code: body.code || '',
+                  modifiers: body.modifiers || 0,
+                  commands: [command],
+                }).catch(() => {});
+                await cdpClient.send('Input.dispatchKeyEvent', {
+                  type: 'keyUp',
+                  key: body.key || (command === 'selectAll' ? 'a' : 'c'),
+                  code: body.code || '',
+                  modifiers: body.modifiers || 0,
+                }).catch(() => {});
+              }
+            }
+          }
+          // Clipboard đi qua macOS (pbcopy/pbpaste) thay vì clipboard của trình duyệt: Chrome headless không nối với
+          // clipboard hệ thống, còn WKWebView của app không phát sự kiện paste trên canvas → Cmd+C/V không chạy.
+          if (sc.page && !sc.page.isClosed() && (body.command === 'copy' || body.command === 'cut')) {
+            const selected = await sc.page.evaluate(() => {
+              const el = document.activeElement;
+              if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && typeof el.selectionStart === 'number') {
+                return el.value.slice(el.selectionStart, el.selectionEnd);
+              }
+              return String(window.getSelection() || '');
+            }).catch(() => '');
+            if (selected) {
+              await new Promise((resolve) => {
+                const child = execFile('pbcopy', resolve);
+                child.stdin.end(selected);
+              });
+            }
+          }
+          if (sc.page && !sc.page.isClosed() && body.command === 'paste') {
+            const text = body.text || (await executeFile('pbpaste').catch(() => ({ stdout: '' }))).stdout;
+            if (text) await sc.page.keyboard.insertText(text).catch(() => {});
+          }
+          respondWithJson(response, 200, { ok: true });
+          return;
         } else if (body.type === 'key' || body.type === 'keydown' || body.type === 'char') {
           // Xử lý sự kiện bàn phím thông minh qua Playwright page.keyboard (trực tiếp và không nghẽn CDP)
           if (sc.page && !sc.page.isClosed()) {
@@ -7647,16 +9113,6 @@ async function startLocalInterface() {
 
     // ── Điều khiển hiển thị cửa sổ trình duyệt Desktop on-demand ──────────────
     // Hiện cửa sổ trình duyệt ra màn hình Desktop cho 1 slot
-    if (request.method === 'POST' && /^\/browser\/close\/\d+$/.test(request.url)) {
-      const slot = Number(request.url.split('/').pop());
-      try {
-        respondWithJson(response, 200, await closeBrowserBySlot(slot));
-      } catch (error) {
-        respondWithJson(response, 404, { error: error.message });
-      }
-      return;
-    }
-
     if (request.method === 'POST' && request.url.startsWith('/browser/show/')) {
       const slot = parseInt(request.url.split('/').pop(), 10);
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
@@ -7669,6 +9125,22 @@ async function startLocalInterface() {
     }
 
     // Thu nhỏ cửa sổ trình duyệt về chạy ngầm cho 1 slot
+    // Tắt riêng một trình duyệt (nút ✕ trên dòng của bảng trình duyệt): như người dùng tự đóng, không bù slot.
+    if (request.method === 'POST' && request.url.startsWith('/browser/close/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!session) { respondWithJson(response, 404, { error: `Không tìm thấy luồng Slot ${slot}` }); return; }
+      session.suppressAutoRefill = true;
+      session.addBrowserLog?.({ type: 'manual_browser_closed', detail: 'Người dùng tắt trình duyệt bằng nút ✕ trong bảng; không tự bù slot.' });
+      if (autoRefill.enabled && !autoRefill.stopRequested && autoRefill.targetCount > 0) {
+        autoRefill.targetCount -= 1;
+        void saveAutoRefillSettings();
+      }
+      await session.browser?.close?.().catch(() => {});
+      respondWithJson(response, 200, { ok: true, slot });
+      return;
+    }
+
     if (request.method === 'POST' && request.url.startsWith('/browser/hide/')) {
       const slot = parseInt(request.url.split('/').pop(), 10);
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
@@ -7702,30 +9174,64 @@ async function startLocalInterface() {
   });
 
   // Không có listener thì EADDRINUSE nổ thành stack trace khi app đã chạy sẵn.
-  server.on('error', (error) => {
+  const listenHost = process.argv.includes('--public') ? '0.0.0.0' : '127.0.0.1';
+  let portTakeoverAttempted = false;
+  server.on('error', async (error) => {
     if (error.code === 'EADDRINUSE') {
-      console.error(`Cổng ${port} đang có tiến trình khác dùng — AutoLeadPC Mac có thể đang mở rồi.`);
-      process.exitCode = 1;
+      if (!portTakeoverAttempted) {
+        portTakeoverAttempted = true;
+        // Máy chủ cũ còn sót (app bị tắt cưỡng) vẫn giữ cổng và phục vụ code cũ.
+        // Dừng nó rồi tự chiếm lại cổng để bản build mới thực sự chạy.
+        const takeover = await releaseStalePortHolder(port);
+        if (takeover.released) {
+          console.log(`[Server] Đã giải phóng cổng ${port}, khởi động lại máy chủ giao diện.`);
+          server.listen(port, listenHost, onServerListening);
+          return;
+        }
+        console.error(`Cổng ${port} đang có tiến trình khác dùng — AutoLeadPC Mac có thể đang mở rồi.`);
+      } else {
+        console.error(`Cổng ${port} vẫn bị chiếm sau khi đã dừng tiến trình cũ.`);
+      }
+      // Không phục vụ được thì thoát hẳn: tiến trình sống sót chỉ giữ cổng và làm
+      // bản app mới không bao giờ lên được cổng (giao diện nối nhầm vào code cũ).
+      process.exit(1);
       return;
     }
     throw error;
   });
 
-  const listenHost = process.argv.includes('--public') ? '0.0.0.0' : '127.0.0.1';
-  server.listen(port, listenHost, async () => {
+  /**
+   * Xử lý sự kiện máy chủ đã lắng nghe xong: mở giao diện và bật các tiến trình nền.
+   *
+   * @return {Promise<void>} Hoàn tất khi giao diện đã được mở (nếu không chạy ẩn).
+   * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+   * @since 2026-10-22
+   */
+  async function onServerListening() {
     const interfaceUrl = `http://127.0.0.1:${port}`;
     console.log(`AutoLeadPC Mac [Bản ${instanceId}] đang chạy tại ${interfaceUrl}`);
     if (listenHost === '0.0.0.0') console.log(`[Hub] Lắng nghe trên tất cả giao diện mạng — agent có thể kết nối qua IP LAN:${port}`);
-    exitWhenParentExits();
     void startTelegramBot();
-    setInterval(() => { void clearAllLogsAndHtml(); }, 5 * 60 * 1000);
+    // Tự xoá log mỗi 10 phút (log trình duyệt, file HTML, file chụp HTML offer-html-full).
+    setInterval(() => void purgeLogsPeriodically(), LOG_PURGE_INTERVAL_MS);
     if (process.env.AUTOLEADPC_NO_OPEN === '1') return;
     try {
       await executeFile('open', [interfaceUrl]);
     } catch {
       console.log(`Mở URL này trong trình duyệt: ${interfaceUrl}`);
     }
-  });
+  }
+
+  // Cài watchdog TRƯỚC khi lắng nghe: nếu lắng nghe hỏng thì tiến trình cũng phải
+  // tự thoát khi cha chết, không được sống sót giữ cổng.
+  exitWhenParentExits();
+  // Dọn trình duyệt mồ côi từ phiên trước: app vừa khởi động là KHÔNG có session nào
+  // trong bộ nhớ, còn lại Chrome/SunBrowser chạy ngầm từ lần trước sẽ biến thành
+  // "web đang chạy nhưng tab Running không thấy gì". Kill sạch trước khi nhận luồng mới.
+  for (const profileRoot of ['AutoLeadPC-2', 'AutoLeadPC-3', 'AutoLeadPC', 'AutoLeadPC-AdsPower-Smoke', 'AutoLeadPC-Debug', 'AutoLeadPC Wine']) {
+    await executeFile('pkill', ['-9', '-f', `user-data-dir.*Application Support/${profileRoot}`]).catch(() => {});
+  }
+  server.listen(port, listenHost, onServerListening);
 }
 
 async function runAgentTask(task) {

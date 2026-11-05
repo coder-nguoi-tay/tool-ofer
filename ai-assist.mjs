@@ -6,74 +6,22 @@
  * @since 2026-10-15
  */
 
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { humanType } from './autofill.mjs';
+import { humanType, getFallbackCity } from './autofill.mjs';
 
 const MAX_ROUNDS = 20;
-const AGT_TIMEOUT_MS = 90_000;
-const MAX_CONCURRENT_AI = 100; // tối đa 100 lượt gọi AI trên mọi engine đồng thời
+const AI_PROGRESS_CHECK_INTERVAL_MS = 5_000;
+const AI_STALLED_ROUND_LIMIT = 3;
+const AI_REQUEST_TIMEOUT_SECONDS = 90;
+const AI_FORM_REPAIR_TIMEOUT_MS = 20_000;
+const MAX_CONCURRENT_AGT = 4;
+const MAX_FORM_REPAIR_ATTEMPTS = 3;
 const CODEX_MODEL = 'gpt-5.6-luna';
-const CODEX_REASONING_EFFORT = 'none';
-let runningAiCount = 0;
-const aiConcurrencyWaiters = [];
-
-/**
- * Chờ đến lượt chạy AI để giới hạn tải chung giữa Codex MCP và CLI.
- * @return {Promise<void>} Hoàn tất khi đã giữ được một lượt chạy AI.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-21
- */
-async function acquireAiConcurrencySlot() {
-  if (runningAiCount < MAX_CONCURRENT_AI) {
-    runningAiCount += 1;
-    return;
-  }
-  await new Promise((resolve) => aiConcurrencyWaiters.push(resolve));
-}
-
-/**
- * Trả lượt chạy AI cho yêu cầu đang chờ tiếp theo.
- * @return {void} Không trả dữ liệu.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-21
- */
-function releaseAiConcurrencySlot() {
-  const nextWaiter = aiConcurrencyWaiters.shift();
-  if (nextWaiter) nextWaiter();
-  else runningAiCount = Math.max(0, runningAiCount - 1);
-}
-
-/**
- * Phát hiện màn Take the Deal và đóng các trình duyệt phụ của phiên.
- * @param {object} page Trang Playwright đang được AI xử lý.
- * @param {object} session Phiên trình duyệt đang giữ trang hiện tại.
- * @param {Function} addLog Hàm ghi log của luồng AI.
- * @return {Promise<boolean>} True nếu trang đang ở màn Take the Deal.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-21
- */
-async function prepareTakeDealStage(page, session, addLog) {
-  const isTakeDealStage = await page.evaluate(() => /\btake\s+the\s+deal\b/i.test(document.body?.innerText || '')).catch(() => false);
-  if (!isTakeDealStage) return false;
-
-  if (!session._takeDealAuxiliaryClosePromise && typeof session.closeAuxiliaryBrowsers === 'function') {
-    session._takeDealAuxiliaryClosePromise = Promise.resolve()
-      .then(() => session.closeAuxiliaryBrowsers())
-      .catch((error) => ({ failed: 1, error: error.message }));
-  }
-
-  if (session._takeDealAuxiliaryClosePromise) {
-    const result = await session._takeDealAuxiliaryClosePromise;
-    addLog({
-      time: new Date().toISOString(),
-      type: 'ai_take_deal_cleanup',
-      detail: `[AI Assist] Đã đóng ${result?.closed ?? 0} trình duyệt phụ trước bước Take the Deal${result?.failed ? `; ${result.failed} lỗi` : ''}.`,
-    });
-  }
-  return true;
-}
+const CODEX_REASONING_EFFORT = 'low';
+let agtRunningCount = 0;
 
 export let globalAiConfig = {
   enabled: true,
@@ -92,6 +40,20 @@ export let globalAiConfig = {
 
 export function setGlobalAiConfig(cfg = {}) {
   globalAiConfig = { ...globalAiConfig, ...cfg };
+}
+
+/**
+ * Tôn trọng thời gian chờ AI đã cấu hình, giới hạn để tránh tiến trình treo vô hạn.
+ *
+ * @param {number|string} configuredSeconds Số giây người dùng cấu hình.
+ * @return {number} Thời gian chờ từ 1 đến 180 giây.
+ * @throws {never} Giá trị không hợp lệ được thay bằng mặc định.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-23
+ */
+export function resolveAiTimeoutSeconds(configuredSeconds) {
+  const seconds = Number(configuredSeconds);
+  return Math.max(1, Math.min(seconds > 0 ? seconds : AI_REQUEST_TIMEOUT_SECONDS, 180));
 }
 
 /**
@@ -116,13 +78,27 @@ export function extractCleanPageStructure(html) {
     .replace(/<!--[\s\S]*?-->/g, '')
     // 3. Xóa dữ liệu base64 dài (data:image/..., data:font/...)
     .replace(/data:[^;]+;base64,[a-zA-Z0-9+/=]+/g, 'data:stripped')
-    // 4. Thu gọn whitespace thừa
+    // 4. Tinh gọn theo hướng FORM-FIRST: loại head và các vùng không chứa form/câu hỏi
+    //    để AI chỉ nhìn thấy form, nút và câu hỏi — không bị văn bản pháp lý/menu loạn.
+    .replace(/<head\b[\s\S]*?<\/head>/gi, '')
+    .replace(/<(header|footer|nav|aside)\b[\s\S]*?<\/\1>/gi, '')
+    .replace(/<(div|section|ul|p)\b[^>]*\s(?:id|class)="[^"]*(?:\blegal\b|legal-|disclaimer|copyright|breadcrumb|cookie|sidebar|social-|related-|blog-|article-|post-|upsell|promo)[^"]*"[^>]*>[\s\S]*?<\/\1>/gi, '<!-- [REGION_DROPPED] -->')
+    // 5. Thu gọn attribute ồn ào (style, on*, gtm, aria không cần thiết)
+    .replace(/\sstyle="[^"]*"/gi, '')
+    .replace(/\son[a-z]+="[^"]*"/gi, '')
+    .replace(/\sdata-gtm[a-z-]*="[^"]*"/gi, '')
+    .replace(/\saria-expanded="[^"]*"/gi, '')
+    .replace(/\saria-selected="[^"]*"/gi, '')
+    // 6. Cắt text node quá dài (legal text, mô tả) giữ 120 ký tự đầu + dấu grompt
+    .replace(/>([^<>{}\n]{200,})</g, (_m, txt) => `>${txt.slice(0, 120)}…<`)
+    // 7. Thu gọn whitespace thừa
     .replace(/[ \t]+/g, ' ')
     .replace(/\n\s*\n+/g, '\n');
 
-  // Giới hạn tối đa 60KB cho AI prompt (đã quá đủ cho mọi form web phức tạp nhất)
-  if (cleaned.length > 60_000) {
-    cleaned = cleaned.slice(0, 60_000) + '\n<!-- [TRUNCATED] -->';
+  // Giới hạn tối đa 40KB cho AI prompt: đủ cho mọi form phức tạp, prompt gọn hơn
+  // giúp AI phản hồi nhanh và bám sát form thay vì dao động quanh nội dung rác.
+  if (cleaned.length > 40_000) {
+    cleaned = cleaned.slice(0, 40_000) + '\n<!-- [TRUNCATED] -->';
   }
 
   return cleaned.trim();
@@ -161,7 +137,7 @@ export function getAgtSpawnConfig(customBin = null) {
  */
 export function callAgt(prompt, options = {}) {
   return new Promise((resolve, reject) => {
-    const timeoutMs = (options.timeoutSeconds || globalAiConfig.timeoutSeconds || 90) * 1000;
+    const timeoutMs = resolveAiTimeoutSeconds(options.timeoutSeconds || globalAiConfig.timeoutSeconds) * 1000;
     const { bin, env } = getAgtSpawnConfig(options.cliBinary);
     const isCodex = bin.includes('codex');
     const args = isCodex
@@ -219,6 +195,92 @@ export function callAgt(prompt, options = {}) {
       reject(e);
     }
   });
+}
+
+/**
+ * Chụp trạng thái tương tác của các frame để phát hiện form có tiến triển hay chưa.
+ *
+ * @param {object} page Trang Playwright cần theo dõi.
+ * @return {Promise<string>} Chuỗi trạng thái form dùng để so sánh giữa hai lần kiểm tra.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
+ */
+async function getFormProgressSignature(page) {
+  try {
+    const frames = typeof page.frames === 'function' ? page.frames() : [page];
+    const frameSignatures = await Promise.all(frames.map(async (frame) => {
+      try {
+        const evaluation = frame.evaluate(() => {
+          const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+          const controlState = Array.from(document.querySelectorAll(
+            'input, textarea, select, [role="checkbox"], [role="radio"]'
+          )).slice(0, 100).map((element) => ({
+            id: element.id || '',
+            name: element.name || '',
+            type: element.type || element.getAttribute('role') || element.tagName,
+            value: element.value || '',
+            checked: Boolean(element.checked) || element.getAttribute('aria-checked') === 'true',
+            invalid: element.getAttribute('aria-invalid') === 'true',
+            disabled: Boolean(element.disabled),
+          }));
+          const messages = Array.from(document.querySelectorAll(
+            '[role="alert"], [aria-invalid="true"], .error, .error-message, .validation-error'
+          )).slice(0, 30).map((element) => normalize(element.innerText || element.textContent).slice(0, 500)).filter(Boolean);
+          const controls = Array.from(document.querySelectorAll(
+            'button, [role="button"], .btn-option, .choice-btn, .answer-btn'
+          )).slice(0, 100).map((element) => ({
+            text: normalize(element.innerText || element.textContent || element.getAttribute('aria-label')).slice(0, 300),
+            selected: Boolean(element.checked) || element.getAttribute('aria-checked') === 'true' ||
+              /active|selected|checked/i.test(String(element.className || '')),
+            disabled: Boolean(element.disabled),
+          }));
+          const regions = Array.from(document.querySelectorAll(
+            'form, [role="form"], .form-container, .survey-container, .quiz-container, .question, .survey-question, .step'
+          )).slice(0, 30).map((element) => normalize(element.innerText).slice(0, 500)).filter(Boolean);
+
+          return JSON.stringify({
+            url: window.location.href,
+            title: document.title,
+            regions,
+            controlState,
+            messages,
+            controls,
+          });
+        }).catch(() => '');
+        let timer;
+        const timeout = new Promise((resolve) => {
+          timer = setTimeout(() => resolve(''), 2000);
+          timer.unref?.();
+        });
+        return await Promise.race([evaluation, timeout]).finally(() => clearTimeout(timer));
+      } catch {
+        return '';
+      }
+    }));
+    return frameSignatures.filter(Boolean).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Chờ tối đa một khoảng ngắn để xác định trạng thái form có thay đổi sau thao tác hay không.
+ *
+ * @param {object} page Trang Playwright cần chờ.
+ * @param {string} previousSignature Trạng thái form trước thao tác.
+ * @param {number} [timeoutMs=AI_PROGRESS_CHECK_INTERVAL_MS] Thời gian tối đa chờ thay đổi.
+ * @return {Promise<boolean>} True nếu form thay đổi trong thời gian chờ.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
+ */
+async function waitForFormProgress(page, previousSignature, timeoutMs = AI_PROGRESS_CHECK_INTERVAL_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !(typeof page.isClosed === 'function' && page.isClosed())) {
+    const currentSignature = await getFormProgressSignature(page);
+    if (currentSignature && currentSignature !== previousSignature) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return false;
 }
 
 /**
@@ -439,25 +501,40 @@ export async function pageHasWork(page) {
 }
 
 /**
- * Thực thi một action trả về từ agy lên trang Playwright.
+ * Thực thi action AI và xác minh trạng thái DOM trước khi báo thành công.
  *
  * @param {object} page Playwright page.
  * @param {{action:string,selector?:string,value?:string}} act Action cần thực thi.
- * @param {object} [session=null] Phiên session để tăng số trường đã điền.
- * @return {Promise<void>}
+ * @param {object} [session=null] Phiên session để cập nhật số trường đã xác minh.
+ * @return {Promise<{ok:boolean,verified:boolean,reason:string}>} Kết quả thao tác và xác minh.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
  */
 export async function executeAction(page, act, session = null) {
-  const { action, selector, value } = act;
-  if (!selector) return;
+  const { action, selector, value } = act ?? {};
+  if (!selector) return { ok: false, verified: false, reason: 'missing_selector' };
+  if (action === 'click' && selector.trim() === '[id="question-answers"]') {
+    return { ok: false, verified: false, reason: 'answer_container_not_button' };
+  }
+  if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
+    return { ok: false, verified: false, reason: 'page_closed' };
+  }
 
-  const locator = page.locator(selector).first();
-  const count = typeof locator.count === 'function' ? await locator.count().catch(() => 0) : 1;
-  if (count === 0) return;
+  let locatorGroup;
+  try {
+    locatorGroup = page.locator(selector);
+  } catch {
+    return { ok: false, verified: false, reason: 'invalid_selector' };
+  }
+  const count = typeof locatorGroup.count === 'function' ? await locatorGroup.count().catch(() => 0) : 1;
+  if (count === 0) return { ok: false, verified: false, reason: 'selector_not_found' };
 
-  let visible = await locator.isVisible({ timeout: 2000 }).catch(() => false);
-  if (!visible) {
-    // Nếu là checkbox hoặc radio, kiểm tra xem label hoặc wrapper có hiển thị không
-    visible = await locator.evaluate((el) => {
+  let locator = null;
+  for (let index = 0; index < count; index += 1) {
+    const candidate = typeof locatorGroup.nth === 'function' ? locatorGroup.nth(index) : locatorGroup.first();
+    let visible = await candidate.isVisible({ timeout: 1000 }).catch(() => false);
+    if (!visible) {
+      visible = await candidate.evaluate((el) => {
       const isInput = el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio');
       if (!isInput) return false;
       const parent = el.closest('label, div, li');
@@ -465,109 +542,262 @@ export async function executeAction(page, act, session = null) {
       const style = window.getComputedStyle ? window.getComputedStyle(parent) : null;
       if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
       return Boolean(parent.offsetWidth || parent.offsetHeight || parent.getClientRects().length);
-    }).catch(() => false);
+      }).catch(() => false);
+    }
+    if (visible) {
+      locator = candidate;
+      break;
+    }
   }
-  if (!visible) return;
+  if (!locator) return { ok: false, verified: false, reason: 'element_not_visible' };
 
-  if (action === 'fill' || action === 'type') {
-    let fillValue = String(value ?? '');
-    if (session?.assignedEmail && (/email|mail/i.test(selector) || /@/.test(fillValue))) {
-      fillValue = session.assignedEmail;
-    }
-    await humanType(locator, fillValue, page);
-    await locator.evaluate((el) => {
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('blur', { bubbles: true }));
-      el.setAttribute('data-ux-ai-done', '1');
-      el.setAttribute('data-ux-filled', '1');
-    }).catch(() => {});
-    if (session) {
-      session.autofillFields = (session.autofillFields || 0) + 1;
-      session.lastActionTime = Date.now();
-    }
-  } else if (action === 'click') {
-    if (typeof locator.click === 'function') {
-      await locator.click({ force: true, timeout: 2500 }).catch(async () => {
-        if (typeof locator.evaluate === 'function') {
-          await locator.evaluate((el) => el.click()).catch(() => {});
-        }
+  try {
+    if (action === 'fill' || action === 'type') {
+      let fillValue = String(value ?? '');
+      if (session?.assignedEmail && (/email|mail/i.test(selector) || /@/.test(fillValue))) {
+        fillValue = session.assignedEmail;
+      }
+      await humanType(locator, fillValue, page);
+      await locator.evaluate((el) => {
+        const field = el.matches?.('input, textarea') ? el : el.querySelector?.('input, textarea');
+        if (!field) return;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+        field.dispatchEvent(new Event('blur', { bubbles: true }));
       });
-    } else if (typeof locator.evaluate === 'function') {
-      await locator.evaluate((el) => el.click()).catch(() => {});
+      const actualValue = typeof locator.inputValue === 'function'
+        ? await locator.inputValue({ timeout: 2000 }).catch(() => locator.evaluate((el) => {
+          const field = el.matches?.('input, textarea') ? el : el.querySelector?.('input, textarea');
+          return field?.value ?? (el.isContentEditable ? el.innerText : '');
+        }))
+        : await locator.evaluate((el) => {
+          const field = el.matches?.('input, textarea') ? el : el.querySelector?.('input, textarea');
+          return field?.value ?? (el.isContentEditable ? el.innerText : '');
+        });
+      const normalizedExpected = String(fillValue).trim().normalize('NFKC');
+      const normalizedActual = String(actualValue ?? '').trim().normalize('NFKC');
+      const isEmail = /email|mail/i.test(selector) || /@/.test(fillValue);
+      const matchesValue = isEmail
+        ? normalizedActual.toLowerCase() === normalizedExpected.toLowerCase()
+        : normalizedActual === normalizedExpected;
+      if (!matchesValue) return { ok: false, verified: false, reason: 'value_not_present' };
+
+      await locator.evaluate((el) => {
+        const field = el.matches?.('input, textarea') ? el : el.querySelector?.('input, textarea');
+        field?.setAttribute('data-ux-ai-done', '1');
+        field?.setAttribute('data-ux-filled', '1');
+      }).catch(() => {});
+      if (session) {
+        session.autofillFields = (session.autofillFields || 0) + 1;
+        session.lastActionTime = Date.now();
+      }
+      return { ok: true, verified: true, reason: 'value_verified' };
     }
-    await locator.evaluate((el) => {
-      el.setAttribute('data-ux-clicked', '1');
-      el.setAttribute('data-ux-ai-done', '1');
-      el.classList.add('active', 'selected');
-      // Nếu là checkbox hoặc radio, luôn đảm bảo checked = true
-      if (el.type === 'checkbox' || el.type === 'radio') {
-        el.checked = true;
-        if (typeof el.setAttribute === 'function') el.setAttribute('aria-checked', 'true');
-      } else {
-        const innerCheck = el.querySelector('input[type="checkbox"], input[type="radio"]');
-        if (innerCheck) {
-          innerCheck.checked = true;
-          if (typeof innerCheck.setAttribute === 'function') innerCheck.setAttribute('aria-checked', 'true');
-        }
-      }
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      // Nếu là thẻ A Jump Page (/next hoặc link chuyển tiếp), hỗ trợ điều hướng thẳng nếu click chưa chuyển
-      if (el.tagName === 'A' && el.href && !el.href.startsWith('javascript:')) {
-        try { window.location.href = el.href; } catch {}
-      }
-    }).catch(() => {});
-    if (session) {
-      session.autofillFields = (session.autofillFields || 0) + 1;
-      session.lastActionTime = Date.now();
-    }
-  } else if (action === 'select') {
-    await locator.selectOption(String(value ?? ''), { force: true, timeout: 2000 }).catch(async () => {
-      await locator.selectOption({ label: String(value ?? '') }, { force: true, timeout: 1000 }).catch(() => {});
-    });
-    await locator.evaluate((el) => {
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.setAttribute('data-ux-ai-done', '1');
-      el.setAttribute('data-ux-filled', '1');
-    }).catch(() => {});
-    if (session) {
-      session.autofillFields = (session.autofillFields || 0) + 1;
-      session.lastActionTime = Date.now();
-    }
-  } else if (action === 'check') {
-    await locator.check({ force: true, timeout: 2000 }).catch(async () => {
-      await locator.click({ force: true, timeout: 1000 }).catch(async () => {
-        await locator.evaluate((el) => {
-          el.checked = true;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }).catch(() => {});
-      });
-    });
-    await locator.evaluate((el) => {
-      el.setAttribute('data-ux-ai-done', '1');
-      el.setAttribute('data-ux-filled', '1');
-      el.checked = true;
-      if (typeof el.setAttribute === 'function') {
-        el.setAttribute('aria-checked', 'true');
-      }
-      el.classList?.add('checked', 'active');
-      const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
-      if (label && label !== el) {
-        try { label.click(); } catch {}
-      }
+
+    if (action === 'select') {
+      let selected = false;
       try {
+        await locator.selectOption(String(value ?? ''), { force: true, timeout: 2000 });
+        selected = true;
+      } catch {
+        try {
+          await locator.selectOption({ label: String(value ?? '') }, { force: true, timeout: 1000 });
+          selected = true;
+        } catch {}
+      }
+      if (!selected) return { ok: false, verified: false, reason: 'select_failed' };
+      const selectedOption = await locator.evaluate((el) => {
+        const option = el.selectedOptions?.[0];
+        return option ? { value: option.value, label: (option.textContent || '').trim() } : null;
+      }).catch(() => null);
+      const expectedOption = String(value ?? '').trim();
+      if (!selectedOption || (selectedOption.value !== expectedOption && selectedOption.label !== expectedOption)) {
+        return { ok: false, verified: false, reason: 'selection_not_verified' };
+      }
+      await locator.evaluate((el) => {
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
-      } catch {}
-    }).catch(() => {});
-    if (session) {
-      session.autofillFields = (session.autofillFields || 0) + 1;
-      session.lastActionTime = Date.now();
+        el.setAttribute('data-ux-ai-done', '1');
+        el.setAttribute('data-ux-filled', '1');
+      });
+      if (session) {
+        session.autofillFields = (session.autofillFields || 0) + 1;
+        session.lastActionTime = Date.now();
+      }
+      return { ok: true, verified: true, reason: 'selection_verified' };
     }
+
+    if (action === 'check') {
+      const alreadyChecked = await locator.evaluate((el) => {
+        const field = el.matches?.('input[type="checkbox"], input[type="radio"]')
+          ? el
+          : el.querySelector?.('input[type="checkbox"], input[type="radio"]');
+        return Boolean(
+          field?.checked ||
+          el.getAttribute('aria-checked') === 'true' ||
+          el.getAttribute('aria-pressed') === 'true' ||
+          el.classList?.contains('checked') ||
+          el.classList?.contains('selected') ||
+          el.classList?.contains('active')
+        );
+      }).catch(() => false);
+      if (alreadyChecked) return { ok: true, verified: true, reason: 'already_checked' };
+
+      let checked = false;
+      if (typeof locator.check === 'function') {
+        try {
+          await locator.check({ force: true, timeout: 2000 });
+          checked = true;
+        } catch {}
+      }
+      if (!checked && typeof locator.click === 'function') {
+        try {
+          await locator.click({ force: true, timeout: 1000 });
+          checked = true;
+        } catch {}
+      }
+      const checkedState = checked ? await locator.evaluate((el) => {
+        const field = el.matches?.('input[type="checkbox"], input[type="radio"]')
+          ? el
+          : el.querySelector?.('input[type="checkbox"], input[type="radio"]');
+        return Boolean(
+          field?.checked ||
+          el.getAttribute('aria-checked') === 'true' ||
+          el.getAttribute('aria-pressed') === 'true' ||
+          el.classList?.contains('checked') ||
+          el.classList?.contains('selected') ||
+          el.classList?.contains('active')
+        );
+      }).catch(() => false) : false;
+      if (!checkedState) return { ok: false, verified: false, reason: 'checked_state_not_verified' };
+      await locator.evaluate((el) => {
+        el.setAttribute('data-ux-ai-done', '1');
+        el.setAttribute('data-ux-filled', '1');
+      }).catch(() => {});
+      if (session) {
+        session.autofillFields = (session.autofillFields || 0) + 1;
+        session.lastActionTime = Date.now();
+      }
+      return { ok: true, verified: true, reason: 'checked_state_verified' };
+    }
+
+    if (action === 'click') {
+      let clicked = false;
+      if (typeof locator.click === 'function') {
+        try {
+          await locator.click({ force: true, timeout: 2500 });
+          clicked = true;
+        } catch {}
+      }
+      if (!clicked && typeof locator.evaluate === 'function') {
+        try {
+          await locator.evaluate((el) => el.click());
+          clicked = true;
+        } catch {}
+      }
+      if (!clicked) return { ok: false, verified: false, reason: 'click_failed' };
+      await locator.evaluate((el) => el.setAttribute('data-ux-clicked', '1')).catch(() => {});
+      if (session) session.lastActionTime = Date.now();
+      return { ok: true, verified: false, reason: 'click_dispatched' };
+    }
+
+    return { ok: false, verified: false, reason: 'unsupported_action' };
+  } catch {
+    return { ok: false, verified: false, reason: 'action_execution_error' };
   }
+}
+
+/**
+ * Đọc trạng thái validation thực của form, bỏ qua nội dung cảnh báo và hướng dẫn chung.
+ *
+ * @param {object} page Trang Playwright cần kiểm tra.
+ * @return {Promise<{errors:string[],emailInput:object|null,emailMissing:boolean,problemInputs:object[],hasBlocker:boolean}|null>} Trạng thái lỗi form đang hiển thị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
+ */
+async function inspectFormRepairState(page) {
+  const evaluation = page.evaluate(() => {
+    const isVisible = (element) => {
+      if (!element) return false;
+      if (element.tagName === 'INPUT' && (element.type === 'checkbox' || element.type === 'radio')) {
+        const parent = element.closest('label, div, li, .form-check, .checkbox') || element;
+        const style = window.getComputedStyle ? window.getComputedStyle(parent) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+        return Boolean(parent.offsetWidth || parent.offsetHeight || parent.getClientRects().length);
+      }
+      const style = window.getComputedStyle ? window.getComputedStyle(element) : null;
+      if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+      return Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+    };
+    const looksLikeValidationMessage = (text) => /required|invalid|incorrect|error|failed|not valid|please (?:enter|provide|select|accept|check)|must be|is missing|cannot be blank|can't be blank|does not match|doesn't match/i.test(text);
+    const explicitErrorSelector = [
+      '.error-message', '.invalid-feedback', '.form-error', '.field-error', '.validation-error',
+      '.help-block.error', '.has-error .help-block', '.msg-error', 'label.error',
+      '.parsley-errors-list.filled', '[data-error]:not([data-error="false"])',
+    ].join(', ');
+    const explicitErrors = Array.from(document.querySelectorAll(explicitErrorSelector))
+      .filter(isVisible)
+      .map((element) => (element.innerText || element.textContent || '').trim())
+      .filter((text) => text.length > 0 && !/^(ok|valid|success|accepted)$/i.test(text));
+    const alertErrors = Array.from(document.querySelectorAll('[role="alert"], [aria-live="assertive"], .alert-danger'))
+      .filter(isVisible)
+      .map((element) => (element.innerText || element.textContent || '').trim())
+      .filter((text) => looksLikeValidationMessage(text));
+    const errors = Array.from(new Set([...explicitErrors, ...alertErrors]));
+    const inputs = Array.from(document.querySelectorAll([
+      'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"])',
+      'select', 'textarea', '[role="checkbox"]', '[role="radio"]', '[role="combobox"]',
+      '[contenteditable="true"]', '.btn-option', 'div.btn-option',
+    ].join(', '))).filter(isVisible);
+
+    let emailInput = null;
+    const problemInputs = [];
+    for (const element of inputs) {
+      if (element.type === 'search' || element.closest?.('form[role="search"], form:has(input[type="search"][name="q"])')) continue;
+      const tag = element.tagName.toLowerCase();
+      const type = (element.type || element.getAttribute('role') || tag).toLowerCase();
+      const id = element.id || '';
+      const name = element.name || '';
+      const placeholder = element.placeholder || '';
+      const value = (element.value || element.innerText || '').trim();
+      const isEmail = type === 'email' || /email|mail/i.test(`${name} ${id} ${placeholder}`);
+      const isPlaceholderMask = /^(\+1|\+1\s*|\(___\)\s*___-____|___-__-____|[_\-()\s.\/]+|mm\/dd\/yyyy)$/i.test(value);
+      const isEmpty = value === '' || isPlaceholderMask;
+      const isInvalid = element.getAttribute('aria-invalid') === 'true' || element.classList.contains('error') || Boolean(element.validity && !element.validity.valid);
+      const isCheckbox = type === 'checkbox' || type === 'radio' || element.getAttribute('role') === 'checkbox';
+      const isChecked = isCheckbox
+        ? Boolean(element.checked || element.getAttribute('aria-checked') === 'true' || element.classList.contains('checked'))
+        : true;
+      const isRequired = Boolean(element.required || element.getAttribute('aria-required') === 'true');
+      const selector = id ? `#${id}` : (name ? `${tag}[name="${name}"]` : tag);
+
+      if (isEmail && !emailInput) {
+        emailInput = { id, name, type, val: value, isEmpty, isInvalid, required: isRequired, selector };
+      }
+      if (isEmpty || isInvalid || (isCheckbox && !isChecked)) {
+        problemInputs.push({
+          tag, type, id, name, placeholder, currentValue: value, isEmpty, isInvalid,
+          required: isRequired, selector,
+        });
+      }
+    }
+
+    const emailMissing = Boolean(emailInput && (emailInput.isEmpty || !emailInput.val.includes('@') || emailInput.isInvalid));
+    const hasRequiredProblem = problemInputs.some((input) => input.required || input.isInvalid);
+    return {
+      errors,
+      emailInput,
+      emailMissing,
+      problemInputs: problemInputs.slice(0, 15),
+      hasBlocker: errors.length > 0 || emailMissing || hasRequiredProblem,
+    };
+  }).catch(() => null);
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), 4000);
+    timer.unref?.();
+  });
+  return Promise.race([evaluation, timeout]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -623,8 +853,10 @@ export async function detectSmartFallbackAction(page, config = null) {
       }
 
       // 2. Câu hỏi khảo sát / quiz buttons / link thẻ a phương án trả lời (btn-option, choice-btn, option-btn, quiz-cards, pills)
-      if (opts.solveSurveyCards !== false) {
+      if (opts.solveSurveyCards !== false && opts.pickRandom === true) {
         const surveyOptions = Array.from(document.querySelectorAll([
+          'button[id^="answer-"]',
+          'button.question-answer-button',
           '[id="btn-option"]:not(.active):not(.selected)',
           '[id^="btn-option"]:not(.active):not(.selected)',
           '[id*="btn-option"]:not(.active):not(.selected)',
@@ -660,11 +892,14 @@ export async function detectSmartFallbackAction(page, config = null) {
           '[role="radio"]:not([aria-checked="true"])',
           'div[class*="button" i]:not(.active):not(.selected)',
           'div[class*="btn-option" i]:not(.active):not(.selected)',
-        ].join(', '))).filter(isVisible);
+        ].join(', '))).filter((el) => isVisible(el) && !el.closest('form[role="search"], form:has(input[type="search"][name="q"])') &&
+          (el.matches('button, a, [role="button"], [role="radio"]')));
 
         if (surveyOptions.length > 0) {
           const randomOpt = surveyOptions[Math.floor(Math.random() * surveyOptions.length)];
-          const sel = randomOpt.id ? `[id="${randomOpt.id}"]` : (randomOpt.className ? `.${randomOpt.className.split(' ')[0]}` : '[id*="btn-option"]');
+          document.querySelectorAll('[data-ux-ai-fallback-choice="1"]').forEach((el) => el.removeAttribute('data-ux-ai-fallback-choice'));
+          randomOpt.setAttribute('data-ux-ai-fallback-choice', '1');
+          const sel = '[data-ux-ai-fallback-choice="1"]';
           return { action: 'click', selector: sel, detail: 'Tự động chọn ngẫu nhiên phương án khảo sát / choice card' };
         }
       }
@@ -781,6 +1016,7 @@ export async function detectSmartFallbackAction(page, config = null) {
  * @param {object} [session={}] Session object để log và cập nhật số trường.
  * @param {object} [options={}] Tùy chọn bổ sung (onLog callback, v.v.).
  * @return {Promise<void>}
+ * @throws {Error} Nếu thao tác Playwright ngoài các nhánh fallback phát sinh lỗi.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-21
  */
@@ -832,6 +1068,7 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
   };
 
   let totalActionsExecuted = 0;
+  let stagnantRounds = 0;
   const maxRounds = cfg.maxRounds || MAX_ROUNDS;
 
   try {
@@ -932,7 +1169,7 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
 
       // Rút gọn và làm sạch HTML chỉ giữ lại cấu trúc tương tác
       const cleanedHtml = extractCleanPageStructure(html);
-      const takeDealStage = await prepareTakeDealStage(page, session, addLog);
+      const formStateBeforeAi = await getFormProgressSignature(page);
 
       const recordJson = JSON.stringify(record ?? {}, null, 2);
       let prompt = `Phân tích cấu trúc HTML giao diện người dùng bên dưới và chuyển đổi thành các thao tác Playwright UI tương ứng.
@@ -959,10 +1196,6 @@ Format các action được hỗ trợ:
 - Tích checkbox: {"action":"check","selector":"CSS_SELECTOR"}
 - Chọn radio hoặc bấm nút / thẻ lựa chọn / nút Tiếp tục: {"action":"click","selector":"CSS_SELECTOR"}`;
 
-      if (takeDealStage) {
-        prompt += `\n\nƯU TIÊN TAKE THE DEAL: Bật/chọn tất cả deal đang hiển thị trên trang (bao gồm checkbox, switch hoặc nút chọn trong từng deal), giữ nguyên lựa chọn đã bật, sau đó bấm nút "Take the Deal" để tiếp tục.`;
-      }
-
       if (cfg.customInstructions && typeof cfg.customInstructions === 'string' && cfg.customInstructions.trim()) {
         prompt += `\n\nHƯỚNG DẪN BỔ SUNG CỦA NGƯỜI DÙNG:\n${cfg.customInstructions.trim()}`;
       }
@@ -970,22 +1203,41 @@ Format các action được hỗ trợ:
       prompt += `\n\nHTML GIAO DIỆN:\n${cleanedHtml}`;
 
       let actions = [];
-      const t0 = Date.now();
+      let t0 = Date.now();
 
       if (cfg.mode === 'heuristic_only') {
         console.log(`[AI-Assist] Slot ${slotNum} round ${round}: Chế độ Heuristic Fallback Only, bỏ qua gọi CLI.`);
       } else if (session.isClosed) {
         break;
       } else {
+        // Tối đa MAX_CONCURRENT_AGT tiến trình AI chạy cùng lúc; slot khác xếp hàng. Ghi log khi phải chờ
+        // để giao diện không trông như AI bị treo, và chỉ tính thời gian phản hồi từ lúc thật sự gọi AI.
+        if (agtRunningCount >= MAX_CONCURRENT_AGT) {
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_queued',
+            detail: `[AI Assist] ⏸ Đang xếp hàng chờ lượt AI (${agtRunningCount}/${MAX_CONCURRENT_AGT} slot đang dùng AI).`,
+          });
+        }
+        const queuedAt = Date.now();
+        while (agtRunningCount >= MAX_CONCURRENT_AGT && !page.isClosed() && !session.isClosed) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        if (page.isClosed() || session.isClosed) break;
+        const queuedSeconds = ((Date.now() - queuedAt) / 1000).toFixed(1);
+        if (Number(queuedSeconds) >= 1) console.log(`[AI-Assist] Slot ${slotNum} round ${round}: chờ lượt AI ${queuedSeconds}s.`);
+        t0 = Date.now();
         addLog({
           time: new Date().toISOString(),
           type: 'ai_waiting_codex',
           detail: `[AI Assist] ⏳ Đang chờ AI phản hồi (vòng ${round}/${maxRounds})… URL: ${page.url()}`,
         });
-        await acquireAiConcurrencySlot();
+        agtRunningCount++;
         try {
-          if (page.isClosed() || session.isClosed) break;
-          const raw = await callAgt(prompt, { cliBinary: cfg.cliBinary, timeoutSeconds: cfg.timeoutSeconds });
+           const raw = await callAgt(prompt, {
+             cliBinary: cfg.cliBinary,
+             timeoutSeconds: resolveAiTimeoutSeconds(cfg.timeoutSeconds),
+           });
           const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
           actions = parseActions(raw);
           console.log(`[AI-Assist] Slot ${slotNum} round ${round}: AI trả ${actions.length} action(s) (${elapsed}s)`);
@@ -1003,7 +1255,7 @@ Format các action được hỗ trợ:
             detail: `[AI Assist] ❌ Lỗi gọi AI sau ${elapsed}s: ${err.message}`,
           });
         } finally {
-          releaseAiConcurrencySlot();
+          agtRunningCount = Math.max(0, agtRunningCount - 1);
         }
       }
 
@@ -1019,13 +1271,23 @@ Format các action được hỗ trợ:
             detail: `[AI Assist] 🛡️ Fallback: ${smartFallback.detail}`,
           });
         } else {
-          console.log(`[AI-Assist] Slot ${slotNum}: không còn việc cần làm ([] trả về).`);
-          addLog({
-            time: new Date().toISOString(),
-            type: 'ai_no_actions',
-            detail: `[AI Assist] Không còn form/câu hỏi cần xử lý.`,
-          });
-          break;
+          const stillHasWork = await pageHasWork(page);
+          if (stillHasWork) {
+            console.log(`[AI-Assist] Slot ${slotNum}: AI chưa đề xuất action; sẽ kiểm tra lại sau ${AI_PROGRESS_CHECK_INTERVAL_MS / 1000}s.`);
+            addLog({
+              time: new Date().toISOString(),
+              type: 'ai_no_actions',
+              detail: `[AI Assist] AI chưa đề xuất action nhưng form còn việc; watchdog sẽ kiểm tra lại sau ${AI_PROGRESS_CHECK_INTERVAL_MS / 1000}s.`,
+            });
+          } else {
+            console.log(`[AI-Assist] Slot ${slotNum}: không còn việc cần làm ([] trả về).`);
+            addLog({
+              time: new Date().toISOString(),
+              type: 'ai_no_actions',
+              detail: `[AI Assist] Không còn form/câu hỏi cần xử lý.`,
+            });
+            break;
+          }
         }
       }
 
@@ -1033,12 +1295,22 @@ Format các action được hỗ trợ:
         if (page.isClosed() || session.isClosed) break;
         try {
           updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#818cf8;font-weight:600;">🤖 AI: ${act.action} ${act.selector || ''}</span>`);
-          await executeAction(page, act, session);
+          const actionResult = await executeAction(page, act, session);
+          if (!actionResult.ok) {
+            addLog({
+              time: new Date().toISOString(),
+              type: 'ai_action_failed',
+              detail: `[AI Assist] Không thực hiện được ${act.action} trên ${act.selector || '(thiếu selector)'}: ${actionResult.reason}.`,
+            });
+            continue;
+          }
           totalActionsExecuted += 1;
           addLog({
             time: new Date().toISOString(),
-            type: 'ai_action',
-            detail: `[AI Assist] Thực thi ${act.action} trên selector: ${act.selector} ${act.value ? `("${act.value}")` : ''}`,
+            type: actionResult.verified ? 'ai_action' : 'ai_action_dispatched',
+            detail: actionResult.verified
+              ? `[AI Assist] Đã xác minh ${act.action} trên selector: ${act.selector} ${act.value ? `("${act.value}")` : ''}`
+              : `[AI Assist] Đã gửi thao tác ${act.action} tới selector: ${act.selector}; đang chờ giao diện xác nhận chuyển bước.`,
           });
           await new Promise((r) => setTimeout(r, 300));
         } catch (actErr) {
@@ -1056,9 +1328,32 @@ Format các action được hỗ trợ:
         });
       }
 
-      // Chờ trang load ổn định hoặc chuyển màn (1.2s)
-      await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
-      await new Promise((r) => setTimeout(r, 1200));
+      // Nếu form vẫn đứng yên sau 5 giây, vòng kế tiếp sẽ gửi lại trạng thái mới cho AI.
+      const formChanged = await waitForFormProgress(page, formStateBeforeAi);
+      if (formChanged) {
+        stagnantRounds = 0;
+        addLog({
+          time: new Date().toISOString(),
+          type: 'ai_form_progress',
+          detail: `[AI Assist] Form đã thay đổi sau vòng ${round}; tiếp tục kiểm tra trạng thái mới.`,
+        });
+      } else {
+        stagnantRounds++;
+        addLog({
+          time: new Date().toISOString(),
+          type: 'ai_watchdog_retry',
+          detail: `[AI Assist] Form không đổi sau ${AI_PROGRESS_CHECK_INTERVAL_MS / 1000}s; sẽ gọi lại AI (${stagnantRounds}/${AI_STALLED_ROUND_LIMIT}).`,
+        });
+        if (stagnantRounds >= AI_STALLED_ROUND_LIMIT) {
+          try { session.triggerAutofillScan?.(); } catch {}
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_watchdog_fallback',
+            detail: `[AI Assist] Form vẫn không đổi sau ${stagnantRounds} lần; đã kích hoạt Autofill fallback và dừng vòng lặp để tránh treo.`,
+          });
+          break;
+        }
+      }
     }
   } finally {
     session.aiRunningPages?.delete(page);
@@ -1085,7 +1380,7 @@ Format các action được hỗ trợ:
  * @param {object} record Bản ghi autofill của session.
  * @param {object} [session={}] Phiên session.
  * @param {object} [options={}] Tùy chọn mở rộng.
- * @return {Promise<{status: string, fixed: boolean, errors: string[], actionsCount: number}>}
+ * @return {Promise<{status: string, fixed: boolean, errors: string[], actionsCount: number}>} Trạng thái sửa form đã được xác minh hoặc lý do chưa sửa được.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-21
  */
@@ -1134,125 +1429,47 @@ export async function inspectAndFixFormWithAi(page, record, session = {}, option
     } catch {}
   };
 
-  const takeDealStage = await prepareTakeDealStage(page, session, addLog);
-
   try {
-    // 1. Quét thu thập chi tiết các lỗi và input có vấn đề từ DOM
-    const diag = await page.evaluate(() => {
-      const isVisible = (el) => {
-        if (!el) return false;
-        if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
-          const parent = el.closest('label, div, li, .form-check, .checkbox') || el;
-          const s = window.getComputedStyle ? window.getComputedStyle(parent) : null;
-          if (s && (s.display === 'none' || s.visibility === 'hidden')) return false;
-          return Boolean(parent.offsetWidth || parent.offsetHeight || parent.getClientRects().length);
-        }
-        const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
-        if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) return false;
-        return Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-      };
+    // AutoFill đã chạy trước khi tới đây; chỉ kiểm tra lại trạng thái sau lượt điền thư viện.
+    const diag = await inspectFormRepairState(page);
 
-      // 1. Quét các thẻ hiển thị thông báo lỗi
-      const errEls = Array.from(document.querySelectorAll([
-        '.error:not(input):not(select):not(form)',
-        '.error-message',
-        '.invalid-feedback',
-        '.form-error',
-        '.field-error',
-        '[role="alert"]',
-        '.alert-danger',
-        '.alert-warning',
-        '.validation-error',
-        '.text-danger',
-        '.help-block.error',
-        '.has-error .help-block',
-        '.msg-error',
-        'label.error',
-        '.parsley-errors-list.filled',
-        '[data-error]'
-      ].join(', '))).filter(isVisible);
-
-      const errors = Array.from(new Set(
-        errEls.map((e) => (e.innerText || e.textContent || '').trim())
-          .filter((t) => t.length > 0 && !/^(ok|valid|success|chấp nhận)$/i.test(t))
-      ));
-
-      // 2. Quét các input, select, textarea và custom input trong div ngoài form
-      const inputs = Array.from(document.querySelectorAll([
-        'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"])',
-        'select',
-        'textarea',
-        '[role="checkbox"]',
-        '[role="radio"]',
-        '[role="combobox"]',
-        '[contenteditable="true"]',
-        'div.input input',
-        'div.field input',
-        '.btn-option',
-        'div.btn-option',
-      ].join(', '))).filter(isVisible);
-
-      let emailInput = null;
-      const problemInputs = [];
-
-      for (const el of inputs) {
-        const tag = el.tagName.toLowerCase();
-        const type = (el.type || tag).toLowerCase();
-        const id = el.id || '';
-        const name = el.name || '';
-        const placeholder = el.placeholder || '';
-        const val = (el.value || el.innerText || '').trim();
-        const isEmail = type === 'email' || /email|mail/i.test(name) || /email|mail/i.test(id) || /email|mail/i.test(placeholder);
-        const isPlaceholderMask = /^(\+1|\+1\s*|\(___\)\s*___-____|___-__-____|[_\-\(\)\s\.\/]+|mm\/dd\/yyyy)$/i.test(val);
-        const isEmpty = val === '' || isPlaceholderMask;
-        const isInvalid = el.getAttribute('aria-invalid') === 'true' || el.classList.contains('error') || (el.validity && !el.validity.valid);
-        const isCheckbox = type === 'checkbox' || el.getAttribute('role') === 'checkbox' || el.classList.contains('custom-checkbox');
-        const isChecked = isCheckbox ? (el.checked || el.getAttribute('aria-checked') === 'true' || el.classList.contains('checked')) : true;
-        const isReq = Boolean(el.required || el.getAttribute('aria-required') === 'true');
-
-        if (isEmail && !emailInput) {
-          emailInput = {
-            id,
-            name,
-            type,
-            val,
-            isEmpty,
-            isInvalid,
-            required: isReq,
-            selector: id ? `#${id}` : (name ? `input[name="${name}"]` : 'input[type="email"]'),
-          };
-        }
-
-        if (isEmpty || isInvalid || (isCheckbox && !isChecked)) {
-          problemInputs.push({
-            tag,
-            type,
-            id,
-            name,
-            placeholder,
-            currentValue: val,
-            isEmpty,
-            isInvalid,
-            required: isReq,
-            selector: id ? `#${id}` : (name ? `${tag}[name="${name}"]` : tag),
-          });
-        }
-      }
-
-      const emailMissing = emailInput ? (emailInput.isEmpty || !emailInput.val.includes('@') || emailInput.isInvalid) : false;
-
-      return {
-        errors,
-        emailInput,
-        emailMissing,
-        problemInputs: problemInputs.slice(0, 15),
-        hasBlocker: errors.length > 0 || emailMissing || problemInputs.some((p) => p.required || p.isInvalid),
-      };
-    }).catch(() => null);
-
-    if (!diag || !diag.hasBlocker) {
+    if (!diag) {
+      updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#f59e0b;font-weight:600;">🤖 Không đọc được form</span>`);
+      addLog({
+        time: new Date().toISOString(),
+        type: 'ai_form_inspection_failed',
+        detail: '[AI Form Fix] Không đọc được trạng thái form trong 4 giây; dừng lượt này để tránh chờ vô hạn.',
+      });
+      return { status: 'inspection_failed', fixed: false, errors: [], actionsCount: 0 };
+    }
+    if (!diag.hasBlocker) {
+      page._aiFormRepairRetry = null;
       return { status: 'clean', fixed: false, errors: [], actionsCount: 0 };
     }
+
+    const retrySignature = createHash('sha256').update(JSON.stringify({
+      url: currentUrl,
+      errors: diag.errors,
+      blockers: diag.problemInputs
+        .filter((input) => input.required || input.isInvalid)
+        .map(({ selector, type, required, isInvalid }) => ({ selector, type, required, isInvalid })),
+      emailMissing: diag.emailMissing,
+    })).digest('hex');
+    const previousRetry = page._aiFormRepairRetry;
+    if (previousRetry?.signature === retrySignature && previousRetry.attempts >= MAX_FORM_REPAIR_ATTEMPTS) {
+      if (!previousRetry.limitLogged) {
+        addLog({
+          time: new Date().toISOString(),
+          type: 'ai_form_retry_limit',
+          detail: `[AI Form Fix] Dừng sau ${MAX_FORM_REPAIR_ATTEMPTS} lần vì cùng lỗi vẫn còn trên form.`,
+        });
+        previousRetry.limitLogged = true;
+      }
+      updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#f59e0b;font-weight:600;">🤖 Dừng sửa form sau ${MAX_FORM_REPAIR_ATTEMPTS} lần</span>`);
+      return { status: 'retry_limit', fixed: false, errors: diag.errors, actionsCount: 0 };
+    }
+    const retryAttempts = previousRetry?.signature === retrySignature ? previousRetry.attempts + 1 : 1;
+    page._aiFormRepairRetry = { signature: retrySignature, attempts: retryAttempts };
 
     const errorSummary = diag.errors.join('; ') || (diag.emailMissing ? 'Thiếu email / email không hợp lệ' : 'Trường bắt buộc chưa điền');
     console.log(`[AI-FormDiagnose] Slot ${slotNum} [IP: ${ip}]: Phát hiện form chưa qua được do lỗi: ${errorSummary}. Đang hỏi AI và tự sửa...`);
@@ -1269,16 +1486,34 @@ export async function inspectAndFixFormWithAi(page, record, session = {}, option
     let html = '';
     try {
       const frames = typeof page.frames === 'function' ? page.frames() : [page];
-      const htmlParts = [];
-      for (const frame of frames) {
+      const htmlParts = await Promise.all(frames.slice(0, 8).map(async (frame) => {
+        let timer;
         try {
-          const frameHtml = await frame.content().catch(() => '');
-          if (frameHtml && frameHtml.length > 50) htmlParts.push(frameHtml);
-        } catch {}
-      }
-      html = htmlParts.join('\n<!-- IFRAME SEPARATOR -->\n');
+          const contentPromise = frame.content().catch(() => '');
+          const timeoutPromise = new Promise((resolve) => {
+            timer = setTimeout(() => resolve(''), 2000);
+            timer.unref?.();
+          });
+          return await Promise.race([contentPromise, timeoutPromise]);
+        } catch {
+          return '';
+        } finally {
+          clearTimeout(timer);
+        }
+      }));
+      html = htmlParts.filter((frameHtml) => frameHtml && frameHtml.length > 50).join('\n<!-- IFRAME SEPARATOR -->\n');
     } catch {
-      html = await page.content?.().catch(() => '') || '';
+      let timer;
+      try {
+        const contentPromise = page.content?.().catch(() => '') || Promise.resolve('');
+        const timeoutPromise = new Promise((resolve) => {
+          timer = setTimeout(() => resolve(''), 2000);
+          timer.unref?.();
+        });
+        html = await Promise.race([contentPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     const cleanedHtml = extractCleanPageStructure(html);
@@ -1289,40 +1524,57 @@ export async function inspectAndFixFormWithAi(page, record, session = {}, option
         ? `${String(record.firstname).toLowerCase()}.${String(record.lastname).toLowerCase()}${Math.floor(1000 + Math.random() * 9000)}@gmail.com`
         : `user${Math.floor(100000 + Math.random() * 900000)}@gmail.com`);
 
+    const effectiveCity = record?.city || record?.town || getFallbackCity(record?.state, record?.zipcode) || 'Wasilla';
+    const enrichedRecord = { ...record, email: candidateEmail, city: effectiveCity, town: effectiveCity };
+
     // Ưu tiên sử dụng Codex SDK + Playwright MCP nếu phiên chạy qua AdsPower và có CDP endpoint
     const activeTargetUrl = (typeof page.url === 'function' ? page.url() : '') || session.targetUrl || session.offerUrl || '';
     if (session.isAdsPower && session.browserWebSocketUrl && cfg.useCodexMcp !== false && !page.isClosed() && activeTargetUrl.startsWith('http')) {
       console.log(`[AI-FormDiagnose] Slot ${slotNum}: Khởi động Codex + Playwright MCP Agent qua CDP endpoint...`);
-      await acquireAiConcurrencySlot();
       try {
-        if (!page.isClosed()) {
-          const { runCodexFormAgent } = await import('./codex-form-agent.mjs');
-          const agentResult = await runCodexFormAgent({
-            endpoint: session.browserWebSocketUrl,
-            targetUrl: activeTargetUrl,
-            formData: { ...record, email: candidateEmail },
-            allowSubmit: Boolean(options.autoSubmit !== false),
-            takeDealStage,
-            session,
-            logger: (m) => console.log(`[Slot ${slotNum}] ${m}`),
+        const { runCodexFormAgent } = await import('./codex-form-agent.mjs');
+        const agentResult = await runCodexFormAgent({
+          endpoint: session.browserWebSocketUrl,
+          targetUrl: activeTargetUrl,
+          formData: enrichedRecord,
+          allowSubmit: Boolean(options.autoSubmit !== false),
+          timeoutMs: AI_FORM_REPAIR_TIMEOUT_MS,
+          session,
+          logger: (m) => console.log(`[Slot ${slotNum}] ${m}`),
+        });
+        if (agentResult?.status === 'timeout') {
+          updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#f59e0b;font-weight:600;">🤖 AI hết giờ; autofill tiếp tục</span>`);
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_form_timeout',
+            detail: `[AI Form Fix] Dừng lượt AI sau ${AI_FORM_REPAIR_TIMEOUT_MS / 1000}s để form không chờ vô hạn.`,
           });
-          if (agentResult && agentResult.success) {
-            return {
-              status: agentResult.status,
-              fixed: true,
-              errors: diag.errors,
-              actionsCount: agentResult.toolCallsCount,
-            };
+          return { status: 'timeout', fixed: false, errors: diag.errors, actionsCount: agentResult.toolCallsCount || 0 };
+        }
+        if (agentResult?.success) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          const afterAgentDiag = await inspectFormRepairState(page);
+          const pageAdvanced = (typeof page.url === 'function' ? page.url() : page.url) !== currentUrl;
+          if (afterAgentDiag && !afterAgentDiag.hasBlocker) {
+            page._aiFormRepairRetry = null;
+            return { status: agentResult.status, fixed: true, errors: diag.errors, actionsCount: agentResult.toolCallsCount };
           }
+          if (pageAdvanced) {
+            page._aiFormRepairRetry = null;
+            return { status: 'progressed', fixed: true, errors: diag.errors, actionsCount: agentResult.toolCallsCount };
+          }
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_form_repair_unverified',
+            detail: '[AI Form Fix] AI đã thao tác nhưng kiểm tra lại vẫn thấy lỗi; chưa ghi nhận form đã sửa.',
+          });
         }
       } catch (agentErr) {
         console.warn(`[AI-FormDiagnose] Slot ${slotNum}: Lỗi Codex Agent (${agentErr.message}), tiếp tục phương thức dự phòng.`);
-      } finally {
-        releaseAiConcurrencySlot();
       }
     }
 
-    if (cfg.mode !== 'heuristic_only' && !page.isClosed()) {
+    if (cfg.mode !== 'heuristic_only' && agtRunningCount < MAX_CONCURRENT_AGT && !page.isClosed()) {
       const prompt = `Phân tích tại sao form trên trang web này chưa submit qua được và sinh JSON actions để sửa triệt để mọi lỗi:
 URL: ${page.url ? page.url() : ''}
 
@@ -1338,7 +1590,7 @@ CÁC TRƯỜNG CÓ VẤN ĐỀ HOẶC CHƯA ĐIỀN:
 ${JSON.stringify(diag.problemInputs, null, 2)}
 
 DỮ LIỆU NGƯỜI DÙNG CUNG CẤP:
-${JSON.stringify({ ...record, email: candidateEmail }, null, 2)}
+${JSON.stringify(enrichedRecord, null, 2)}
 
 YÊU CẦU ĐẦU RA BẮT BUỘC:
 1. Phân tích nguyên nhân tại sao chưa qua được form (ví dụ: thiếu email, email không hợp lệ, sai zip code, chưa tích checkbox điều khoản, số điện thoại không đúng định dạng, v.v.).
@@ -1352,21 +1604,15 @@ KHÔNG giải thích thêm, KHÔNG markdown thừa.
 HTML GIAO DIỆN FORM:
 ${cleanedHtml}`;
 
-      if (takeDealStage) {
-        prompt += `\n\nƯU TIÊN TAKE THE DEAL: Bật/chọn tất cả deal đang hiển thị trên trang (checkbox, switch hoặc nút chọn trong từng deal), giữ nguyên lựa chọn đã bật, rồi bấm "Take the Deal".`;
-      }
-
       try {
-        await acquireAiConcurrencySlot();
-        if (!page.isClosed()) {
-          const raw = await callAgt(prompt, { cliBinary: cfg.cliBinary, timeoutSeconds: 30 });
-          actions = parseActions(raw);
-          console.log(`[AI-FormDiagnose] Slot ${slotNum}: AI trả về ${actions.length} action(s) sửa lỗi form.`);
-        }
+        agtRunningCount++;
+        const raw = await callAgt(prompt, { cliBinary: cfg.cliBinary, timeoutSeconds: AI_REQUEST_TIMEOUT_SECONDS });
+        actions = parseActions(raw);
+        console.log(`[AI-FormDiagnose] Slot ${slotNum}: AI trả về ${actions.length} action(s) sửa lỗi form.`);
       } catch (err) {
         console.warn(`[AI-FormDiagnose] Slot ${slotNum}: AI CLI không phản hồi (${err.message}). Chuyển sang Heuristic Auto-Healer.`);
       } finally {
-        releaseAiConcurrencySlot();
+        agtRunningCount = Math.max(0, agtRunningCount - 1);
       }
     }
 
@@ -1384,23 +1630,27 @@ ${cleanedHtml}`;
 
       // 2. Sửa các input có vấn đề khác
       for (const prob of diag.problemInputs) {
+        const probIdentity = `${prob.name || ''} ${prob.id || ''} ${prob.placeholder || ''} ${prob.selector || ''}`.toLowerCase();
         if (prob.type === 'checkbox') {
           actions.push({ action: 'check', selector: prob.selector });
         } else if (prob.tag === 'select') {
           actions.push({ action: 'select', selector: prob.selector, value: '1' });
-        } else if (prob.type === 'tel' || /phone|mobile/i.test(prob.name + prob.id)) {
+        } else if (/city|town|^ct$/i.test(probIdentity) || prob.id === 'ct' || prob.name === 'city') {
+          const fallbackCity = getFallbackCity(record?.state, record?.zipcode) || 'Wasilla';
+          actions.push({ action: 'fill', selector: prob.selector, value: record?.city || record?.town || fallbackCity });
+        } else if (/zip|postal|^zp$/i.test(probIdentity) || prob.id === 'zp' || prob.name === 'zippost') {
+          actions.push({ action: 'fill', selector: prob.selector, value: record?.zipcode || '99654' });
+        } else if (/first|^fn$/i.test(probIdentity) || prob.id === 'fn' || prob.name === 'firstname') {
+          actions.push({ action: 'fill', selector: prob.selector, value: record?.firstname || 'James' });
+        } else if (/last|^ln$/i.test(probIdentity) || prob.id === 'ln' || prob.name === 'lastname') {
+          actions.push({ action: 'fill', selector: prob.selector, value: record?.lastname || 'Smith' });
+        } else if (/address|street|^ad$/i.test(probIdentity) || prob.id === 'ad' || prob.name === 'address1') {
+          actions.push({ action: 'fill', selector: prob.selector, value: record?.address || '4125 N Inspiration Loop' });
+        } else if (/birth|dob/i.test(probIdentity)) {
+          actions.push({ action: 'fill', selector: prob.selector, value: record?.dob || '04/15/1992' });
+        } else if ((prob.type === 'tel' || /phone|mobile|^tl$/i.test(probIdentity) || prob.id === 'tl') && !/city|town|^ct$|zip|address|street/i.test(probIdentity)) {
           const rawPhone = String(record?.phone || '8149143396').replace(/\D/g, '').slice(-10);
           actions.push({ action: 'fill', selector: prob.selector, value: rawPhone });
-        } else if (/zip|postal/i.test(prob.name + prob.id)) {
-          actions.push({ action: 'fill', selector: prob.selector, value: record?.zipcode || '99654' });
-        } else if (/first/i.test(prob.name + prob.id)) {
-          actions.push({ action: 'fill', selector: prob.selector, value: record?.firstname || 'James' });
-        } else if (/last/i.test(prob.name + prob.id)) {
-          actions.push({ action: 'fill', selector: prob.selector, value: record?.lastname || 'Smith' });
-        } else if (/address|street/i.test(prob.name + prob.id)) {
-          actions.push({ action: 'fill', selector: prob.selector, value: record?.address || '4125 N Inspiration Loop' });
-        } else if (/birth|dob/i.test(prob.name + prob.id)) {
-          actions.push({ action: 'fill', selector: prob.selector, value: record?.dob || '04/15/1992' });
         }
       }
 
@@ -1413,39 +1663,73 @@ ${cleanedHtml}`;
       }
     }
 
+    const beforeRepairState = await getFormProgressSignature(page);
     let actionsCount = 0;
+    let actionsDispatchedCount = 0;
     for (const act of actions) {
       if (page.isClosed() || session.isClosed) break;
       try {
-        await executeAction(page, act, session);
-        actionsCount++;
+        const actionResult = await executeAction(page, act, session);
+        if (!actionResult.ok) {
+          addLog({
+            time: new Date().toISOString(),
+            type: 'ai_form_action_failed',
+            detail: `[AI Form Fix] Không thực hiện được ${act.action} trên ${act.selector || '(thiếu selector)'}: ${actionResult.reason}.`,
+          });
+          continue;
+        }
+        if (actionResult.verified) {
+          actionsCount += 1;
+        } else {
+          actionsDispatchedCount += 1;
+        }
         addLog({
           time: new Date().toISOString(),
-          type: 'ai_form_healed_action',
-          detail: `[AI Form Fix] Thực thi sửa lỗi ${act.action} trên ${act.selector} ${act.value ? `("${act.value}")` : ''}`,
+          type: actionResult.verified ? 'ai_form_action_verified' : 'ai_form_action_dispatched',
+          detail: actionResult.verified
+            ? `[AI Form Fix] Đã xác minh ${act.action} trên ${act.selector}.`
+            : `[AI Form Fix] Đã gửi thao tác ${act.action} tới ${act.selector}; chưa xác nhận form chuyển bước.`,
         });
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((resolve) => setTimeout(resolve, 250));
       } catch (e) {
         console.warn(`[AI-FormDiagnose] Action lỗi: ${act.action} ${act.selector}: ${e.message}`);
       }
     }
 
-    // Sau khi sửa xong: nếu đã điền email, cập nhật cờ session.emailFilled = true
-    if (candidateEmail && (diag.emailMissing || actions.some((a) => /email/i.test(a.selector || '')))) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const afterRepairDiag = await inspectFormRepairState(page);
+    const afterRepairState = await getFormProgressSignature(page);
+    const pageAdvanced = (typeof page.url === 'function' ? page.url() : page.url) !== currentUrl;
+    const formProgressed = Boolean(afterRepairState && afterRepairState !== beforeRepairState);
+    const blockersCleared = Boolean(afterRepairDiag && !afterRepairDiag.hasBlocker);
+
+    // Cập nhật email chỉ khi DOM xác nhận giá trị hợp lệ sau lượt sửa.
+    if (candidateEmail && afterRepairDiag?.emailInput && !afterRepairDiag.emailMissing) {
       session.emailFilled = true;
       session.screenHasEmail = true;
       if (!session.assignedEmail) session.assignedEmail = candidateEmail;
     }
 
-    if (actionsCount > 0) {
-      console.log(`[AI-FormDiagnose] Slot ${slotNum}: Đã thực hiện ${actionsCount} hành động sửa lỗi form.`);
-      updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#10b981;font-weight:600;">🤖 Đã sửa lỗi form (${actionsCount} action)</span>`);
-      // Trigger autofill quét lại để thẩm định
+    if (blockersCleared || pageAdvanced) {
+      page._aiFormRepairRetry = null;
+      console.log(`[AI-FormDiagnose] Slot ${slotNum}: Xác minh form đã hết lỗi hoặc đã chuyển sang màn tiếp theo.`);
+      updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#10b981;font-weight:600;">🤖 Đã xác minh form tiếp tục</span>`);
       session.triggerAutofillScan?.();
-      return { status: 'healed', fixed: true, errors: diag.errors, actionsCount };
+      return { status: pageAdvanced ? 'progressed' : 'healed', fixed: true, errors: diag.errors, actionsCount };
     }
 
-    return { status: 'no_actions', fixed: false, errors: diag.errors, actionsCount: 0 };
+    if (actionsCount > 0 || actionsDispatchedCount > 0 || formProgressed) {
+      addLog({
+        time: new Date().toISOString(),
+        type: 'ai_form_repair_unverified',
+        detail: `[AI Form Fix] Có ${actionsCount} thao tác đã xác minh và ${actionsDispatchedCount} thao tác đã gửi, nhưng form vẫn còn lỗi; chưa ghi nhận đã sửa.`,
+      });
+      updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#f59e0b;font-weight:600;">🤖 Form còn lỗi sau khi sửa</span>`);
+      session.triggerAutofillScan?.();
+      return { status: 'unverified', fixed: false, errors: afterRepairDiag?.errors || diag.errors, actionsCount };
+    }
+
+    return { status: 'no_actions', fixed: false, errors: afterRepairDiag?.errors || diag.errors, actionsCount: 0 };
   } catch (err) {
     console.warn(`[AI-FormDiagnose] Slot ${slotNum} Tab ${tabNum}: Lỗi quy trình chẩn đoán form: ${err.message}`);
     return { status: 'error', fixed: false, errors: [], actionsCount: 0 };

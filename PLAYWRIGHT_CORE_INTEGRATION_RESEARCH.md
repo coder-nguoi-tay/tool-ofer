@@ -22,7 +22,8 @@ Dấu hiệu nhận diện:
 Logic cần áp dụng:
 - ưu tiên xác định `questionType = 'age_range'`
 - nếu record có age data: chọn khoảng tuổi phù hợp với record
-- nếu không có record: chọn option có score cao nhất trong block, ưu tiên khoảng tuổi trung bình hoặc phổ biến trong survey
+- tuổi lấy từ `record.age`; nếu thiếu thì tính từ năm sinh bằng `calculateAge(record)` (đọc được `Năm Sinh`/DOB)
+- nếu không có record: chọn theo thứ tự ưu tiên cố định `25-34` > `35-44` > `45-54` > `18-24` > `55-64` > `65+`
 
 Ví dụ:
 - record.age = 28 => chọn `25-34`
@@ -36,7 +37,7 @@ Dấu hiệu nhận diện:
 
 Logic cần áp dụng:
 - ưu tiên `questionType = 'preference'`
-- nếu record có `favorite_vehicle`, `vehicle_preference`, hoặc tương tự => thay vào 
+- nếu record có `favorite_vehicle`, `vehicle_preference`, hoặc tương tự => ưu tiên match option theo giá trị đó; nếu thiếu thì dùng `vehicle_type`
 - nếu không có record: chọn option chứa từ khóa phổ biến trong block, ví dụ: `SUV`, `Sedan`, `Truck`, `Car`, `Motorcycle`, tùy theo text câu hỏi
 
 #### 17.2.3. Vehicle / current-mode questions
@@ -51,25 +52,15 @@ Logic cần áp dụng:
 
 ### 17.3. Logic mặc định cần bổ sung
 
-```js
-function classifyQuestionText(text) {
-  const t = normalizeText(text || '');
+Mẫu nhận diện nằm ở `QUESTION_TYPE_PATTERNS` (`autofill.mjs`), dùng chung cho `classifyQuestionText` và trong trang. Thứ tự: age → preference → vehicle. Mọi từ khóa dùng `\b` để `page`, `manage`, `care`, `business` không bị nhận nhầm.
 
-  if (/age|years old|how old|age range|under 18|18-24|25-34|35-44|45-54|55-64|65\+/.test(t)) {
-    return 'age_range';
-  }
+| Loại | Từ khóa chính |
+|---|---|
+| `age_range` | age, how old, years old, age range, các khoảng 18-24 … 65+ |
+| `preference` | favorite, prefer(red/ence), like most, what do you like |
+| `vehicle` | vehicle, car, truck, suv, motorcycle, van, bus, drive, transport(ation) |
 
-  if (/favorite|prefer|like most|which do you prefer|what do you like/.test(t)) {
-    return 'preference';
-  }
-
-  if (/vehicle|car|truck|suv|motorcycle|van|bus|drive|currently drive|transport|transportation/.test(t)) {
-    return 'vehicle';
-  }
-
-  return 'unknown';
-}
-```
+Câu như "What type of vehicle do you prefer?" khớp `preference` trước; nhánh `preference` vẫn dùng `vehicle_type` của record như `favorite_vehicle`.
 
 ### 17.4. Matching theo record và block
 
@@ -84,7 +75,8 @@ function classifyQuestionText(text) {
 - chọn option có score cao nhất trong cùng block câu hỏi
 - không chọn từ toàn page
 - không random từ option đầu tiên
-- nếu không đủ confidence => `ambiguous = true`
+- nếu không option nào match: chọn **đáp án đầu tiên không phải** "None of the above / Skip / Prefer not / I do not drive" (yêu cầu của chủ dự án, tránh dừng survey); log `first_answer`
+- `ambiguous = true` chỉ còn khi block không có option dùng được
 
 ### 17.5. Ví dụ thực tế
 
@@ -148,6 +140,14 @@ Các câu hỏi về độ tuổi, sở thích, và phương tiện xe đang đi
 - match theo record nếu có
 - nếu không có record thì dùng scoring block-local
 - verify sau click
-- nếu mơ hồ -> ambiguous, không random click
+- nếu không match -> đáp án đầu tiên hợp lệ (không random, không chọn None/Skip)
 
 Đây là một phần bắt buộc để nâng cấp repo cho form survey/custom widget phức tạp.
+
+### 17.8. Tích hợp với các handler hiện có
+
+- Cài đặt: `handleSurveySemanticQuestions` (`autofill.mjs`), gọi ngay sau `handleAlphaIntentQuestions` trong vòng quét frame.
+- **Chọn block:** chỉ xét block có phần chữ câu hỏi nhận diện được; chữ của chính các option không được tính vào phần chữ câu hỏi. Trong các block hợp lệ lấy block nhiều option nhất.
+- **AlphaQ nhường:** nếu `#questionText`/heading khớp một loại §17, `handleAlphaIntentQuestions` không click đáp án đầu nữa, chỉ còn bấm Continue. Handler semantic đặt `data-ux-qclicked` để AlphaQ nhận ra màn đã được trả lời.
+- **Verify sau click:** kiểm tra `checked` / `aria-*` / class selected, hoặc option đã biến mất (màn chuyển). Không thấy thì log `semantic_q_unverified`, không click lại.
+- Test: `survey-semantic.test.mjs` (phân loại); luồng trình duyệt chạy tay bằng `test-offline-screens.mjs`.

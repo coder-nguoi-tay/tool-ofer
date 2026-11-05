@@ -1272,6 +1272,60 @@
             <span class="form-label" style="min-width:75px;">Link Offer 4:</span>
             <input type="text" id="txtLinkOffer4" class="win-input" style="flex:1;" placeholder="URL Offer 4 (tùy chọn)">
           </div>
+          <div class="form-row" style="margin-top:6px;">
+            <span class="form-label" style="min-width:75px;">Cách giải (1→4):</span>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+              <thead>
+                <tr>
+                  <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc;">Cách giải</th>
+                  <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc;">Link Offer</th>
+                  <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc;">Chế độ</th>
+                  <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc;">Auto Submit</th>
+                  <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc;">Max Pick</th>
+                  <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc;">Pick Random</th>
+                  <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc;">Ghi chú</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="padding:3px 4px;font-weight:bold;">Cách 1</td>
+                  <td style="padding:3px 4px;"><input type="text" id="txtOffer1Link" class="win-input" placeholder="Link Offer 1"></td>
+                  <td style="padding:3px 4px;"><select id="cbbMethod1Mode" class="win-select"><option value="auto_full">auto_full</option><option value="consent_only">consent_only</option><option value="manual">manual</option><option value="skip">skip</option></select></td>
+                  <td style="padding:3px 4px;"><input type="checkbox" id="cbxMethod1AutoSubmit" checked></td>
+                  <td style="padding:3px 4px;"><input type="number" id="nudMethod1MaxPick" value="" style="width:50px;"></td>
+                  <td style="padding:3px 4px;"><input type="checkbox" id="cbxMethod1PickRandom"></td>
+                  <td style="padding:3px 4px;"><input type="text" id="txtMethod1Notes" class="win-input" placeholder="ghi chú..."></td>
+                </tr>
+                <tr>
+                  <td style="padding:3px 4px;font-weight:bold;">Cách 2</td>
+                  <td style="padding:3px 4px;"><input type="text" id="txtOffer2Link" class="win-input" placeholder="Link Offer 2"></td>
+                  <td style="padding:3px 4px;"><select id="cbbMethod2Mode" class="win-select"><option value="auto_full">auto_full</option><option value="consent_only">consent_only</option><option value="manual">manual</option><option value="skip">skip</option></select></td>
+                  <td style="padding:3px 4px;"><input type="checkbox" id="cbxMethod2AutoSubmit" checked></td>
+                  <td style="padding:3px 4px;"><input type="number" id="nudMethod2MaxPick" value="" style="width:50px;"></td>
+                  <td style="padding:3px 4px;"><input type="checkbox" id="cbxMethod2PickRandom"></td>
+                  <td style="padding:3px 4px;"><input type="text" id="txtMethod2Notes" class="win-input" placeholder="ghi chú..."></td>
+                </tr>
+                <tr>
+                  <td style="padding:3px 4px;font-weight:bold;">Cách 3</td>
+                  <td style="padding:3px 4px;"><input type="text" id="txtOffer3Link" class="win-input" placeholder="Link Offer 3"></td>
+                  <td style="padding:3px 4px;"><select id="cbbMethod3Mode" class="win-select"><option value="auto_full">auto_full</option><option value="consent_only">consent_only</option><option value="manual">manual</option><option value="skip">skip</option></select></td>
+                  <td style="padding:3px 4px;"><input type="checkbox" id="cbxMethod3AutoSubmit" checked></td>
+                  <td style="padding:3px 4px;"><input type="number" id="nudMethod3MaxPick" value="" style="width:50px;"></td>
+                  <td style="padding:3px 4px;"><input type="checkbox" id="cbxMethod3PickRandom"></td>
+                  <td style="padding:3px 4px;"><input type="text" id="txtMethod3Notes" class="win-input" placeholder="ghi chú..."></td>
+                </tr>
+                <tr>
+                  <td style="padding:3px 4px;font-weight:bold;">Cách 4</td>
+                  <td style="padding:3px 4px;"><input type="text" id="txtOffer4Link" class="win-input" placeholder="Link Offer 4"></td>
+                  <td style="padding:3px 4px;"><select id="cbbMethod4Mode" class="win-select"><option value="auto_full">auto_full</option><option value="consent_only">consent_only</option><option value="manual">manual</option><option value="skip">skip</option></select></td>
+                  <td style="padding:3px 4px;"><input type="checkbox" id="cbxMethod4AutoSubmit" checked></td>
+                  <td style="padding:3px 4px;"><input type="number" id="nudMethod4MaxPick" value="" style="width:50px;"></td>
+                  <td style="padding:3px 4px;"><input type="checkbox" id="cbxMethod4PickRandom"></td>
+                  <td style="padding:3px 4px;"><input type="text" id="txtMethod4Notes" class="win-input" placeholder="ghi chú..."></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <div class="form-row" style="margin-top:6px;gap:6px;align-items:center;">
             <button type="button" class="win-btn" id="btnSaveOffer" onclick="saveOfferConfig()" style="font-weight:bold;color:#003399;padding:3px 14px;">💾 Lưu Offer</button>
             <button type="button" class="win-btn" id="btnNewOffer" onclick="newOfferConfig()" style="padding:3px 10px;">➕ Thêm mới</button>
@@ -1369,14 +1423,19 @@
               <span class="options-toolbar-hint">Bấm trực tiếp vào từng ô để bật / tắt nhanh</span>
             </div>
             <div class="options-pills-row">
-              <label class="option-pill active" title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
-                <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
+              <label class="option-pill" title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
+                <input type="checkbox" id="cbxRunInApp" onchange="syncOptionPills()">
                 <span class="option-pill-text"><span class="option-pill-icon">📺</span> Chạy trong app (Khi bấm mới hiện)</span>
               </label>
 
               <label class="option-pill active" id="pillMultiTab" title="Chạy đa luồng dạng đa tab trong cùng trình duyệt (tiết kiệm tài nguyên và không bị giới hạn số profile AdsPower).">
                 <input type="checkbox" id="cbxMultiTab" checked onchange="syncOptionPills()">
                 <span class="option-pill-text"><span class="option-pill-icon">📑</span> Đa luồng dạng đa tab</span>
+              </label>
+
+              <label class="option-pill" id="pillCloakBrowser" title="Sử dụng CloakBrowser (Stealth Chromium chống bot Cloudflare Turnstile/FingerprintJS & mô phỏng thao tác người thật Humanize). Với AdsPower chỉ áp dụng lớp Humanize.">
+                <input type="checkbox" id="cbxCloakBrowser" onchange="syncCloakBrowserSetting(this.checked); syncOptionPills();">
+                <span class="option-pill-text"><span class="option-pill-icon">🥷</span> CloakBrowser Stealth</span>
               </label>
 
               <label class="option-pill option-pill-dup" title="Khi bật: chặn IP đã từng chạy thành công cho offer này. Khi tắt: cho phép chạy lại IP cũ.">
@@ -1394,9 +1453,14 @@
                 <span class="option-pill-text"><span class="option-pill-icon">🎯</span> Ẩn trình duyệt (Chỉ hiện khi có Lead)</span>
               </label>
 
-              <label class="option-pill option-pill-leadcheck" title="Kiểm tra lead ở màn 4-5: 1 lần 15s, có lead mới làm tiếp, không thì tự tắt Chrome.">
-                <input type="checkbox" id="cbxCheckLead" checked onchange="syncOptionPills()">
+              <label class="option-pill option-pill-leadcheck" title="Chỉ khi tick: sau khi qua màn nhập email, dừng lại check lead; có lead mới làm tiếp. Bỏ tick thì không check lead.">
+                <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
                 <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (1x15s)</span>
+              </label>
+
+              <label class="option-pill option-pill-leadcheck" title="Sau khi điền email: check lead 2 lần × 30s, không có lead thì tự đóng trình duyệt. Bỏ tick để giữ trình duyệt mở.">
+                <input type="checkbox" id="cbxAutoCloseNoLead">
+                <span class="option-pill-text"><span class="option-pill-icon">🚪</span> Tự đóng khi hết lead (2×30s)</span>
               </label>
 
               <label class="option-pill option-pill-ai" title="AI tự động nhận diện câu hỏi / khảo sát khi bị kẹt và hỗ trợ hoàn tất form.">
@@ -1598,6 +1662,7 @@
             <span id="screenModalFps" style="font-size:11px;color:#38bdf8;background:#1e293b;padding:2px 8px;border-radius:4px;border:1px solid #334155;">🟢 Đang kết nối...</span>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="win-btn" onclick="_goBackScreen()" style="padding:2px 10px;font-size:11px;" title="Quay lại trang vừa rồi của tab đang xem">◀ Quay lại</button>
             <button type="button" class="win-btn" onclick="_quickScroll(0, -500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang lên trên (hoặc dùng con lăn chuột / trackpad)">⬆ Cuộn lên</button>
             <button type="button" class="win-btn" onclick="_quickScroll(0, 500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang xuống dưới (hoặc dùng con lăn chuột / trackpad)">⬇ Cuộn xuống</button>
             <button type="button" class="win-btn" id="btnModalPopOutDesktop" onclick="popOutActiveScreenToDesktop()" style="padding:4px 12px;font-size:11.5px;background:#0284c7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;" title="Bung cửa sổ trình duyệt thật ra màn hình Desktop">🖥️ Mở ra Desktop</button>
@@ -1814,6 +1879,8 @@
             <div class="sub-tab" data-uatab="mac">Mac</div>
             <div class="sub-tab" data-uatab="lin">Linux</div>
             <div class="sub-tab" data-uatab="android">Android</div>
+            <div class="sub-tab" data-uatab="iphone">iPhone</div>
+            <div class="sub-tab" data-uatab="ipad">iPad</div>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
             <span id="lbUaTitle">Useragent:</span>
@@ -2016,8 +2083,25 @@
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkMac" checked> Mac</label>
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkLinux" checked> Linux</label>
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkAndroid"> Android</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkIphone"> iPhone</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkIpad"> iPad</label>
           </div>
           <div style="margin-top:5px;color:#555;font-size:11px;">Các phiên Chrome và AdsPower sẽ xoay vòng qua những thiết bị được chọn.</div>
+        </fieldset>
+
+        <fieldset class="win-group">
+          <legend class="win-legend">CloakBrowser Stealth Engine (Anti-Bot Bypass)</legend>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:bold;color:#003399;">
+            <input type="checkbox" id="chkUseCloakBrowser" onchange="syncCloakBrowserSetting(this.checked)">
+            🥷 Kích hoạt CloakBrowser (Stealth Chromium & Humanize)
+          </label>
+          <div style="font-size:11px;color:#555;margin-left:22px;margin-top:3px;">
+            Vượt kiểm duyệt bot-detection sâu (Cloudflare Turnstile, Kasada, Akamai, FingerprintJS) bằng nhân Chromium Stealth của CloakBrowser và tự động mô phỏng chuột/phím mượt mà như người thật.
+            Lưu ý: nếu chạy qua AdsPower (SunBrowser) thì chỉ có lớp Humanize được áp dụng, không có nhân Chromium vá C++.
+          </div>
+          <div id="cloakBrowserStatusNotice" style="font-size:11px;color:#28a745;margin-left:22px;margin-top:3px;font-weight:bold;">
+            ● CloakBrowser đã sẵn sàng trên hệ thống
+          </div>
         </fieldset>
 
         <fieldset class="win-group">
@@ -2074,6 +2158,9 @@
               <option value="ai_smart_fallback">🤖 AI Fallback</option>
               <option value="ai_error">⚠️ AI lỗi</option>
               <option value="lead_confirmed">✅ Có lead</option>
+              <option value="lead_ip_mismatch">⚠️ Lead chưa khớp IP</option>
+              <option value="lead_check_error">⚠️ Lỗi kiểm tra lead</option>
+              <option value="lead_failed">❌ Không có lead</option>
               <option value="traffic_blocked">🚫 Bị chặn</option>
               <option value="adtrapper_reload">🔄 Tải lại</option>
             </select>
@@ -2084,6 +2171,7 @@
           <div style="display:flex;gap:6px;">
             <button type="button" class="win-btn" id="btnExportLogCsv" onclick="exportLogsCsv()">Export CSV</button>
             <button type="button" class="win-btn" id="btnOpenHtmlFolder" onclick="openLogHtmlFolder()">Open HTML Folder</button>
+            <button type="button" class="win-btn" id="btnDownloadAllInterfaces" onclick="window.location.href='/browser-logs/download-all'">Tải tất cả giao diện</button>
             <button type="button" class="win-btn" onclick="clearLogFilters()">Clear Filter</button>
             <button type="button" class="win-btn win-btn-danger" id="btnClearLogsBtn" onclick="promptClearAllLogs()">Clear Logs</button>
           </div>
@@ -2157,8 +2245,8 @@
             <div class="form-row">
               <span class="form-label">Max Rounds:</span>
               <input type="number" id="nudAiMaxRounds" class="win-input" value="20" min="1" max="50" style="width:65px;">
-              <span style="margin-left:12px;">Timeout (s):</span>
-              <input type="number" id="nudAiTimeout" class="win-input" value="90" min="10" max="300" style="width:65px;">
+              <span style="margin-left:12px;">Timeout AI (s, tối đa 15):</span>
+              <input type="number" id="nudAiTimeout" class="win-input" value="15" min="1" max="15" style="width:65px;">
             </div>
             <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
               <button type="button" class="win-btn win-btn-primary" id="btnTestAiConnection" onclick="testAiConnection()">Kiểm tra kết nối AI CLI</button>
@@ -2422,6 +2510,18 @@
     }
     window.syncOptionPills = syncOptionPills;
 
+    function syncCloakBrowserSetting(enabled) {
+      const cbx = document.getElementById('cbxCloakBrowser');
+      const chk = document.getElementById('chkUseCloakBrowser');
+      if (cbx && cbx.checked !== enabled) cbx.checked = enabled;
+      if (chk && chk.checked !== enabled) chk.checked = enabled;
+      try {
+        localStorage.setItem('autolead_use_cloakbrowser', enabled ? '1' : '0');
+      } catch {}
+      syncOptionPills();
+    }
+    window.syncCloakBrowserSetting = syncCloakBrowserSetting;
+
     document.querySelectorAll('.sub-tab[data-subtab]').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.sub-tab[data-subtab]').forEach(t => t.classList.remove('active'));
@@ -2540,6 +2640,38 @@
     // Offer Config & Presets
     let currentSavedOffers = [];
 
+    /**
+     * Đồng bộ 4 URL và cấu hình giải theo đúng thứ tự, không dồn ô trống sang offer khác.
+     * @param {object[]} methods Các chiến lược đã lưu trong preset.
+     * @return {void} Hoàn tất đồng bộ giao diện.
+     * @throws {never} Ô chưa có trong giao diện được bỏ qua.
+     * @author OpenAI
+     * @since 2026-10-23
+     */
+    function applyOfferMethods(methods = []) {
+      for (let i = 1; i <= 4; i++) {
+        const main = document.getElementById(i === 1 ? 'txtLinkOffer' : `txtLinkOffer${i}`);
+        const link = document.getElementById(`txtOffer${i}Link`);
+        const mc = methods.find((item) => Number(item.offerNumber) === i) || {};
+        if (link) link.value = mc.link || main?.value || '';
+        const mode = document.getElementById(`cbbMethod${i}Mode`);
+        if (mode) mode.value = mc.mode || 'auto_full';
+        const submit = document.getElementById(`cbxMethod${i}AutoSubmit`);
+        if (submit) submit.checked = mc.autoSubmit !== false;
+        const maxPick = document.getElementById(`nudMethod${i}MaxPick`);
+        if (maxPick) maxPick.value = mc.maxPick ?? '';
+        const random = document.getElementById(`cbxMethod${i}PickRandom`);
+        if (random) random.checked = mc.pickRandom === true;
+        const notes = document.getElementById(`txtMethod${i}Notes`);
+        if (notes) notes.value = mc.notes || '';
+        if (main && link && !link.dataset.linkSynced) {
+          main.addEventListener('input', () => { link.value = main.value; });
+          link.addEventListener('input', () => { main.value = link.value; });
+          link.dataset.linkSynced = '1';
+        }
+      }
+    }
+
     function renderSavedOffersDropdown(list, selectedId = '') {
       const cbb = document.getElementById('cbbSavedOffers');
       if (!cbb) return;
@@ -2591,6 +2723,8 @@
           currentSavedOffers = data.savedList;
           renderSavedOffersDropdown(currentSavedOffers, data.NameOffer);
         }
+
+        applyOfferMethods(Array.isArray(data.methodConfigs) ? data.methodConfigs : []);
       }
 
       // Khôi phục trạng thái checkbox Ẩn trình duyệt & Check duplicate
@@ -2647,17 +2781,46 @@
       const link3 = document.getElementById('txtLinkOffer3')?.value.trim() || '';
       const link4 = document.getElementById('txtLinkOffer4')?.value.trim() || '';
 
-      if (!link1 && !link2 && !link3 && !link4) {
+      // Đồng bộ Link Offer từ bảng cách giải nếu ô cũ chưa có dữ liệu
+      const methodLinks = [];
+      const methodConfigs = [];
+      for (let i = 1; i <= 4; i++) {
+        const linkInput = document.getElementById(`txtOffer${i}Link`);
+        const modeSelect = document.getElementById(`cbbMethod${i}Mode`);
+        const autoSubmitCb = document.getElementById(`cbxMethod${i}AutoSubmit`);
+        const maxPickInput = document.getElementById(`nudMethod${i}MaxPick`);
+        const pickRandomCb = document.getElementById(`cbxMethod${i}PickRandom`);
+        const notesInput = document.getElementById(`txtMethod${i}Notes`);
+        const link = linkInput ? linkInput.value.trim() : '';
+        methodLinks[i - 1] = link;
+        methodConfigs.push({
+          offerNumber: i,
+          link: link || null,
+          mode: modeSelect ? modeSelect.value : 'auto_full',
+          autoSubmit: autoSubmitCb ? autoSubmitCb.checked : true,
+          maxPick: maxPickInput && maxPickInput.value.trim() !== '' ? Number(maxPickInput.value) : null,
+          pickRandom: pickRandomCb ? pickRandomCb.checked : false,
+          notes: notesInput ? notesInput.value.trim() : '',
+        });
+      }
+
+      // Nếu bảng cách giải có link mà ô cũ trống, điền ngược lại
+      const finalLink1 = methodLinks[0] || link1;
+      const finalLink2 = methodLinks[1] || link2;
+      const finalLink3 = methodLinks[2] || link3;
+      const finalLink4 = methodLinks[3] || link4;
+
+      if (!finalLink1 && !finalLink2 && !finalLink3 && !finalLink4) {
         if (!silent) showWinAlert('Vui lòng nhập ít nhất Link Offer 1 trước khi bấm Lưu!');
         return;
       }
 
       const payload = {
-        NameOffer: name || (link1 ? link1.split('\n')[0].slice(0, 35) : 'Offer Mới'),
-        LinkOffer: link1,
-        LinkOffer2: link2,
-        LinkOffer3: link3,
-        LinkOffer4: link4,
+        NameOffer: name || (finalLink1 ? finalLink1.split('\n')[0].slice(0, 35) : 'Offer Mới'),
+        LinkOffer: finalLink1,
+        LinkOffer2: finalLink2,
+        LinkOffer3: finalLink3,
+        LinkOffer4: finalLink4,
         TimeLimit: document.getElementById('txtTimeLimit')?.value || '30',
         Complete: document.getElementById('txtTextComplete')?.value || '',
         delayStart: document.getElementById('nudDelayStart')?.value || '1',
@@ -2665,6 +2828,7 @@
         CheckDuplicate: document.getElementById('cbxCheckDuplicateIP')?.checked ?? true,
         HideUntilTarget: document.getElementById('cbxHideUntilTarget')?.checked ?? false,
         HideUntilLead: document.getElementById('cbxHideUntilLead')?.checked ?? false,
+        methodConfigs: methodConfigs,
       };
 
       try {
@@ -2679,7 +2843,7 @@
         }
         const statusEl = document.getElementById('offerSaveStatus');
         if (statusEl) {
-          statusEl.textContent = '✓ Đã lưu Offer thành công!';
+          statusEl.textContent = '✓ Đã lưu Offer + 4 cách giải thành công!';
           statusEl.style.display = 'inline';
           setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3500);
         }
@@ -2687,6 +2851,7 @@
       } else if (!silent) {
         showWinAlert('Không thể lưu Offer: ' + (res?.error || 'Lỗi không xác định'));
       }
+      return res;
     }
 
     function handleSelectSavedOffer() {
@@ -2700,6 +2865,7 @@
         document.getElementById('txtLinkOffer2').value = found.LinkOffer2 || '';
         document.getElementById('txtLinkOffer3').value = found.LinkOffer3 || '';
         document.getElementById('txtLinkOffer4').value = found.LinkOffer4 || '';
+        applyOfferMethods(Array.isArray(found.methodConfigs) ? found.methodConfigs : []);
         if (found.TimeLimit) document.getElementById('txtTimeLimit').value = found.TimeLimit;
         if (found.Complete && found.Complete !== 'id') {
           document.getElementById('txtTextComplete').value = found.Complete;
@@ -2772,6 +2938,7 @@
       document.getElementById('txtLinkOffer2').value = '';
       document.getElementById('txtLinkOffer3').value = '';
       document.getElementById('txtLinkOffer4').value = '';
+      applyOfferMethods();
       const cbb = document.getElementById('cbbSavedOffers');
       if (cbb) cbb.value = '';
       document.getElementById('txtNameOffer').focus();
@@ -2783,6 +2950,7 @@
       document.getElementById('txtLinkOffer2').value = '';
       if (document.getElementById('txtLinkOffer3')) document.getElementById('txtLinkOffer3').value = '';
       if (document.getElementById('txtLinkOffer4')) document.getElementById('txtLinkOffer4').value = '';
+      applyOfferMethods();
       document.getElementById('txtTextComplete').value = '';
       const cbb = document.getElementById('cbbSavedOffers');
       if (cbb) cbb.value = '';
@@ -3003,12 +3171,16 @@
         mac: 'useragentMac.txt',
         lin: 'useragentLinux.txt',
         android: 'useragentAndroid.txt',
+        iphone: 'useragentIphone.txt',
+        ipad: 'useragentIpad.txt',
       };
       const titleMap = {
         win: 'Useragent Windows:',
         mac: 'Useragent Mac:',
         lin: 'Useragent Linux:',
         android: 'Useragent Android:',
+        iphone: 'Useragent iPhone:',
+        ipad: 'Useragent iPad:',
       };
       document.getElementById('lbUaTitle').textContent = titleMap[currentUaTab] || 'Useragent:';
       const filename = fileMap[currentUaTab];
@@ -3024,6 +3196,8 @@
         mac: 'useragentMac.txt',
         lin: 'useragentLinux.txt',
         android: 'useragentAndroid.txt',
+        iphone: 'useragentIphone.txt',
+        ipad: 'useragentIpad.txt',
       };
       const filename = fileMap[currentUaTab];
       const content = document.getElementById('txtCfgUserAgent').value;
@@ -3416,6 +3590,25 @@
 
       syncBrowserChoice(selectedMode, false);
 
+      const savedCloak = (() => {
+        try { return localStorage.getItem('autolead_use_cloakbrowser'); } catch { return null; }
+      })();
+      const cloakEnabled = savedCloak !== null ? savedCloak === '1' : Boolean(data?.CloakBrowser);
+      syncCloakBrowserSetting(cloakEnabled);
+
+      api('/cloakbrowser/status').then((status) => {
+        const el = document.getElementById('cloakBrowserStatusNotice');
+        if (el && status) {
+          if (status.installed) {
+            el.innerHTML = `● CloakBrowser ${status.version || ''} (${status.platform}) đã sẵn sàng trên hệ thống`;
+            el.style.color = '#28a745';
+          } else {
+            el.innerHTML = `○ CloakBrowser chưa tải binary. Khi bấm Start, app sẽ tự động tải phiên bản stealth thích hợp.`;
+            el.style.color = '#d97706';
+          }
+        }
+      }).catch(() => {});
+
       if (data) {
         if (data.AdsPowerApiKey !== undefined) document.getElementById('AdsPowerApiKey').value = data.AdsPowerApiKey;
         if (data.Canvas !== undefined) document.getElementById('CheckBoxCanvas').checked = data.Canvas;
@@ -3428,6 +3621,8 @@
         if (data.Mac !== undefined) document.getElementById('chkMac').checked = data.Mac;
         if (data.Linux !== undefined) document.getElementById('chkLinux').checked = data.Linux;
         if (data.Android !== undefined) document.getElementById('chkAndroid').checked = data.Android;
+        if (data.iPhone !== undefined) document.getElementById('chkIphone').checked = data.iPhone;
+        if (data.iPad !== undefined) document.getElementById('chkIpad').checked = data.iPad;
       }
     }
 
@@ -3451,6 +3646,7 @@
       const payload = {
         browserMode,
         AdsPowerApiKey: document.getElementById('AdsPowerApiKey')?.value ?? '',
+        CloakBrowser: document.getElementById('chkUseCloakBrowser')?.checked ?? document.getElementById('cbxCloakBrowser')?.checked ?? false,
         Canvas: document.getElementById('CheckBoxCanvas')?.checked ?? false,
         ClientRects: document.getElementById('CheckboxClientRects')?.checked ?? true,
         WebGLImage: document.getElementById('CheckBoxWebGLImage')?.checked ?? true,
@@ -3461,6 +3657,8 @@
         Mac: document.getElementById('chkMac')?.checked ?? true,
         Linux: document.getElementById('chkLinux')?.checked ?? true,
         Android: document.getElementById('chkAndroid')?.checked ?? false,
+        iPhone: document.getElementById('chkIphone')?.checked ?? false,
+        iPad: document.getElementById('chkIpad')?.checked ?? false,
       };
       const result = await api('/pc/settings/save', { method: 'POST', body: JSON.stringify(payload) });
       if (result?.error) throw new Error(result.error);
@@ -3514,7 +3712,11 @@
         }
 
       // Tự động lưu các link offer mới điền để không bị mất khi chạy
-      void saveOfferConfig(true);
+       const savedOffer = await saveOfferConfig(true);
+       if (!savedOffer?.success) {
+         showWinAlert('Không lưu được chiến lược offer; đã hủy Start để tránh chạy sai cách giải.');
+         return;
+       }
 
       const concurrency = Math.min(30, Math.max(1, parseInt(document.getElementById('nudThread').value) || 1));
       const scriptPath = document.getElementById('cbbScript').value;
@@ -3542,9 +3744,12 @@
       }
 
       const checkDuplicate = document.getElementById('cbxCheckDuplicateIP') ? document.getElementById('cbxCheckDuplicateIP').checked : true;
-      const enableLeadCheck = document.getElementById('cbxCheckLead') ? document.getElementById('cbxCheckLead').checked : true;
+      const enableLeadCheck = document.getElementById('cbxCheckLead') ? document.getElementById('cbxCheckLead').checked : false;
+      const autoCloseNoLead = document.getElementById('cbxAutoCloseNoLead') ? document.getElementById('cbxAutoCloseNoLead').checked : false;
       const hideUntilTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
       const hideUntilLead = Boolean(document.getElementById('cbxHideUntilLead')?.checked);
+      // "Chạy trong app": đọc trạng thái checkbox thật (bật = chạy ngầm thu nhỏ, tắt = mở cửa sổ Desktop thường)
+      const runInApp = Boolean(document.getElementById('cbxRunInApp')?.checked);
 
       // Dùng lựa chọn đang hiển thị trên Dashboard để gọi đúng trình duyệt.
       const isAdsPower = Boolean(document.getElementById('dashRadioAdsPower')?.checked || document.getElementById('RadioButtonAdspower')?.checked);
@@ -3588,16 +3793,21 @@
             Mac: document.getElementById('chkMac')?.checked ?? false,
             Linux: document.getElementById('chkLinux')?.checked ?? false,
             Android: document.getElementById('chkAndroid')?.checked ?? false,
+            iPhone: document.getElementById('chkIphone')?.checked ?? false,
+            iPad: document.getElementById('chkIpad')?.checked ?? false,
             checkDuplicate,
             autoSubmitForm: true,
             enableLeadCheck,
+            autoCloseNoLead,
             leadCheckInterval: 30,
             leadCheckMaxAttempts: 2,
             leadCheckScreen: 4,
             hideUntilTarget,
             hideUntilLead,
-            runInApp: document.getElementById('cbxRunInApp')?.checked ?? true,
+            runInApp,
+            screenPreviewOnly: runInApp,
             multiTab: document.getElementById('cbxMultiTab') ? document.getElementById('cbxMultiTab').checked : true,
+            useCloakBrowser: Boolean(document.getElementById('cbxCloakBrowser')?.checked || document.getElementById('chkUseCloakBrowser')?.checked),
           })
         });
         if (res.error) {
@@ -3655,15 +3865,21 @@
               Mac: document.getElementById('chkMac')?.checked ?? false,
               Linux: document.getElementById('chkLinux')?.checked ?? false,
               Android: document.getElementById('chkAndroid')?.checked ?? false,
+              iPhone: document.getElementById('chkIphone')?.checked ?? false,
+              iPad: document.getElementById('chkIpad')?.checked ?? false,
               checkDuplicate,
               autoSubmitForm: true,
               enableLeadCheck,
+            autoCloseNoLead,
               leadCheckInterval: 30,
               leadCheckMaxAttempts: 2,
               leadCheckScreen: 4,
               hideUntilTarget,
               hideBrowser: hideUntilTarget,
               hideUntilLead,
+              runInApp,
+              screenPreviewOnly: runInApp,
+              useCloakBrowser: Boolean(document.getElementById('cbxCloakBrowser')?.checked || document.getElementById('chkUseCloakBrowser')?.checked),
             }
           })
         });
@@ -3698,16 +3914,22 @@
             Mac: document.getElementById('chkMac')?.checked ?? false,
             Linux: document.getElementById('chkLinux')?.checked ?? false,
             Android: document.getElementById('chkAndroid')?.checked ?? false,
+            iPhone: document.getElementById('chkIphone')?.checked ?? false,
+            iPad: document.getElementById('chkIpad')?.checked ?? false,
             checkDuplicate,
             autoSubmitForm: true,
             enableLeadCheck,
+            autoCloseNoLead,
             leadCheckInterval: 30,
             leadCheckMaxAttempts: 2,
             leadCheckScreen: 4,
             hideUntilTarget,
             hideBrowser: hideUntilTarget,
             hideUntilLead,
+            runInApp,
+            screenPreviewOnly: runInApp,
             multiTab: document.getElementById('cbxMultiTab') ? document.getElementById('cbxMultiTab').checked : true,
+            useCloakBrowser: Boolean(document.getElementById('cbxCloakBrowser')?.checked || document.getElementById('chkUseCloakBrowser')?.checked),
           })
         });
         if (res.error) {
@@ -3732,31 +3954,27 @@
 
     async function handleStop() {
       document.getElementById('lbStatus').textContent = 'Đang dừng tất cả tiến trình...';
-      try {
-        await Promise.allSettled([
-          api('/auto-refill', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
-          api('/auto-refill/sequential', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
-          api('/stop', { method: 'POST' }),
-          api('/close', { method: 'POST' })
-        ]);
-      } catch {}
+      const result = await api('/stop', { method: 'POST' });
+      if (result?.error) showWinAlert(`Không dừng được trình duyệt: ${result.error}`);
       document.getElementById('lbStatus').textContent = 'Đã dừng toàn bộ luồng & đóng trình duyệt.';
       fetchRunningState();
     }
 
     async function handleCloseAll() {
       document.getElementById('lbStatus').textContent = 'Đang đóng tất cả trình duyệt...';
-      try {
-        await Promise.allSettled([
-          api('/auto-refill', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
-          api('/auto-refill/sequential', { method: 'POST', body: JSON.stringify({ enabled: false }) }),
-          api('/stop', { method: 'POST' }),
-          api('/close', { method: 'POST' })
-        ]);
-      } catch {}
+      const result = await api('/stop', { method: 'POST' });
+      if (result?.error) showWinAlert(`Không đóng được trình duyệt: ${result.error}`);
       document.getElementById('lbStatus').textContent = 'Đã đóng tất cả trình duyệt.';
       fetchRunningState();
     }
+
+    async function closeSingleBrowser(slot) {
+      document.getElementById('lbStatus').textContent = `Đang tắt trình duyệt Slot ${slot}...`;
+      const res = await api(`/browser/close/${slot}`, { method: 'POST' }).catch((err) => ({ error: err.message }));
+      document.getElementById('lbStatus').textContent = res?.error ? `Lỗi tắt Slot ${slot}: ${res.error}` : `✓ Đã tắt trình duyệt Slot ${slot}.`;
+      fetchRunningState();
+    }
+    window.closeSingleBrowser = closeSingleBrowser;
 
     async function toggleBrowserWindow(slot, isCurrentlyVisible) {
       const endpoint = isCurrentlyVisible ? `/browser/hide/${slot}` : `/browser/show/${slot}`;
@@ -3775,26 +3993,6 @@
       }
     }
     window.toggleBrowserWindow = toggleBrowserWindow;
-
-    /**
-     * Đóng một trình duyệt theo slot mà không dừng các slot khác.
-     * @param {number} slot Slot trình duyệt cần đóng.
-     * @return {Promise<void>} Hoàn tất khi trạng thái danh sách được làm mới.
-     * @author ductv <ductv@getflycrm.com>
-     * @since 2026-10-21
-     */
-    async function closeBrowserSlot(slot) {
-      if (!window.confirm(`Đóng riêng trình duyệt Slot ${slot}?`)) return;
-      try {
-        const result = await api(`/browser/close/${slot}`, { method: 'POST' });
-        if (result.error) throw new Error(result.error);
-        document.getElementById('lbStatus').textContent = `✓ Đã đóng trình duyệt Slot ${slot}.`;
-        await fetchRunningState();
-      } catch (error) {
-        showWinAlert(`Không thể đóng Slot ${slot}: ${error.message}`);
-      }
-    }
-    window.closeBrowserSlot = closeBrowserSlot;
 
     async function handleShowAllBrowsers() {
       document.getElementById('lbStatus').textContent = 'Đang bung tất cả cửa sổ trình duyệt ra Desktop...';
@@ -3976,10 +4174,16 @@
         const emptyMsg = currentSelectedRunningOfferTab === 'all'
           ? 'Không có luồng trình duyệt nào đang chạy.'
           : `Không có luồng nào đang chạy cho Offer ${currentSelectedRunningOfferTab}.`;
+        tbody._uxRenderKey = null;
         tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="9"><div class="running-empty-state"><div class="running-empty-icon">💤</div><div class="running-empty-title">${emptyMsg}</div><div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div></div></td></tr>`;
         return;
       }
 
+      // Dữ liệu không đổi thì không dựng lại bảng: dựng lại mỗi 1,5s làm giao diện giật, mất hover
+      // và nút đang bấm bị thay giữa chừng.
+      const renderKey = JSON.stringify([currentSelectedRunningOfferTab, visibleSessions]);
+      if (tbody._uxRenderKey === renderKey) return;
+      tbody._uxRenderKey = renderKey;
       tbody.innerHTML = '';
       visibleSessions.forEach((s, idx) => {
         const tr = document.createElement('tr');
@@ -3988,6 +4192,10 @@
           ? `<span class="run-status-pill status-lead" title="Đã có lead! Đang ở ${screenLabel}">🎯 ${screenLabel}</span>`
           : s.leadCheckStatus === 'checking'
           ? '<span class="run-status-pill status-checking"><span class="spin-dot"></span> Checking</span>'
+          : s.leadCheckStatus === 'unmatched'
+          ? '<span class="run-status-pill status-checking" title="API có lead nhưng IP chưa khớp; trình duyệt được giữ mở">⚠️ Lead chưa khớp IP</span>'
+          : s.leadCheckStatus === 'api_error'
+          ? '<span class="run-status-pill status-checking" title="Không xác minh được do lỗi API; trình duyệt được giữ mở">⚠️ Lỗi API lead</span>'
           : `<span class="run-status-pill status-idle" title="Tiến trình hiện tại: ${screenLabel}">${screenLabel}</span>`;
 
         const actionText = s.aiRunning
@@ -4001,7 +4209,15 @@
           ? `<span class="run-email-cell" onclick="copyTextToClipboard('${escHtml(s.assignedEmail)}')" title="Nhấp để copy email">${escHtml(s.assignedEmail)}</span>`
           : '<span style="color:#94a3b8;">--</span>';
         const passCell = s.assignedPass ? `<span class="run-pass-chip" title="Mật khẩu">${escHtml(s.assignedPass)}</span>` : '<span style="color:#94a3b8;">--</span>';
-        const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || '')}">💻 <strong style="color:#0f172a;">${escHtml(s.deviceProfile || 'Windows 11')}</strong> · <span style="color:#0284c7;font-weight:600;">${escHtml(s.version || 'Chrome')}</span></span>`;
+        const __deviceIcons = { windows: '🪟', macos: '🍎', linux: '🐧', android: '🤖', ios: '📱', ipad: '📟', iphone: '📱' };
+        const __deviceLabels = { windows: 'Windows 11', macos: 'macOS 14', linux: 'Linux', android: 'Android 13', ios: 'iPhone', ipad: 'iPad', iphone: 'iPhone' };
+        const __deviceKey = String(s.deviceProfile || '').toLowerCase().replace(/\s+/g, '-');
+        const __deviceIcon = __deviceIcons[__deviceKey] ?? '🖥️';
+        const __deviceLabel = __deviceLabels[__deviceKey] ?? (s.deviceProfile || 'Windows 11');
+        const __chromeLabel = /SunBrowser/.test(s.version || '')
+          ? (s.version || 'Chrome')
+          : `Chrome ${String(s.version || '').split('.').slice(0, 1).join('') || s.version}`;
+        const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || (__deviceLabel + ' · ' + (s.version || 'Chrome')))}">${__deviceIcon} <strong style="color:#0f172a;">${escHtml(__deviceLabel)}</strong> · <span style="color:#0284c7;font-weight:600;">${escHtml(__chromeLabel)}</span></span>`;
 
         const isWinVis = Boolean(s.isWindowVisible);
         const winBtnLabel = isWinVis ? '🔽 Ẩn' : '🖥️ Hiện';
@@ -4013,7 +4229,7 @@
           <div style="display:flex;gap:4px;justify-content:center;align-items:center;">
             <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;${winBtnStyle}" onclick="event.stopPropagation(); toggleBrowserWindow(${s.slot}, ${isWinVis});" title="${winBtnTitle}">${winBtnLabel}</button>
             <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;" onclick="event.stopPropagation(); openScreenModal(${s.slot});" title="Xem trực tiếp trong app">📺 Xem</button>
-            <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;background:#fff1f2;color:#b91c1c;border:1px solid #fca5a5;" onclick="event.stopPropagation(); closeBrowserSlot(${s.slot});" title="Đóng riêng trình duyệt này">✕ Đóng</button>
+            <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;font-weight:700;" onclick="event.stopPropagation(); closeSingleBrowser(${s.slot});" title="Tắt riêng trình duyệt Slot ${s.slot} (không tự bù slot)">✕</button>
           </div>
         `;
 
@@ -4069,6 +4285,10 @@
         } else if (Array.isArray(res)) {
           logData = res;
         }
+        // Log không đổi thì không dựng lại danh sách (tự làm mới 2s/lần làm tab Log giật và nhảy vị trí cuộn).
+        const logKey = `${JSON.stringify(logData).length}:${res?.htmlCount ?? 0}`;
+        if (logKey === fetchLogs._lastKey) return;
+        fetchLogs._lastKey = logKey;
         renderLogs();
         renderAiActivityGrid();
       } catch {}
@@ -4248,6 +4468,15 @@
         } else if (entry.type === 'lead_confirmed') {
           typeBadge = '<span class="badge-log badge-lead">✅ Có lead</span>';
           detail = `<span style="color:#16a34a;font-weight:600;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'lead_ip_mismatch') {
+          typeBadge = '<span class="badge-log badge-ai-error">⚠️ Lead chưa khớp IP</span>';
+          detail = `<span style="color:#b45309;font-weight:600;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'lead_check_error') {
+          typeBadge = '<span class="badge-log badge-ai-error">⚠️ Lỗi kiểm tra lead</span>';
+          detail = `<span style="color:#dc2626;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'lead_failed') {
+          typeBadge = '<span class="badge-log badge-blocked">❌ Không có lead</span>';
+          detail = `<span style="color:#dc2626;">${escHtml(entry.detail || '')}</span>`;
         } else if (entry.type === 'ai_started') {
           typeBadge = '<span class="badge-log badge-ai">🤖 AI phân tích</span>';
           detail = `<span style="color:#7c3aed;">${escHtml(entry.detail || '')}</span>`;
@@ -4304,9 +4533,9 @@
     }
 
     /**
-     * Hiển thị hoạt động AI và kết quả kiểm tra lead kèm IP đã lưu trong log.
+     * Hiển thị hoạt động AI và các trạng thái xác minh lead trong bảng hoạt động.
      * @return {void} Cập nhật các dòng hoạt động trên giao diện.
-     * @author ductv <ductv@getflycrm.com>
+     * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
      * @since 2026-10-21
      */
     function renderAiActivityGrid() {
@@ -4316,7 +4545,7 @@
       const aiRows = [];
       for (const session of logData) {
         for (const entry of [...session.logs].reverse()) {
-          if (entry.type && (entry.type.startsWith('ai_') || entry.type === 'lead_confirmed' || entry.type === 'traffic_blocked')) {
+          if (entry.type && (entry.type.startsWith('ai_') || entry.type.startsWith('lead_') || entry.type === 'traffic_blocked')) {
             aiRows.push({ session, entry });
           }
         }
@@ -4334,17 +4563,17 @@
         else if (entry.type === 'ai_started') actionBadge = '<span class="badge-log badge-ai">Bắt đầu quét</span>';
         else if (entry.type === 'ai_error') actionBadge = '<span class="badge-log badge-ai-error">Lỗi AI</span>';
         else if (entry.type === 'ai_smart_fallback') actionBadge = '<span class="badge-log badge-ai">Fallback Heuristic</span>';
-
-        const activityDetail = entry.type === 'lead_confirmed'
-          ? `${entry.detail || ''} · IP: ${entry.ip || session.ip || 'không rõ'}`
-          : (entry.detail || entry.url || '');
+        else if (entry.type === 'lead_confirmed') actionBadge = '<span class="badge-log badge-lead">✅ Có lead</span>';
+        else if (entry.type === 'lead_ip_mismatch') actionBadge = '<span class="badge-log badge-ai-error">⚠️ Lead chưa khớp IP</span>';
+        else if (entry.type === 'lead_check_error') actionBadge = '<span class="badge-log badge-ai-error">⚠️ Lỗi kiểm tra lead</span>';
+        else if (entry.type === 'lead_failed') actionBadge = '<span class="badge-log badge-blocked">❌ Không có lead</span>';
 
         return `<tr>
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
           <td>${fmtTime(entry.time)}</td>
           <td style="font-weight:bold;text-align:center;">Slot ${session.slot}</td>
           <td>${actionBadge}</td>
-          <td>${escHtml(activityDetail)}</td>
+          <td>${escHtml(entry.detail || entry.url || '')}</td>
         </tr>`;
       }).join('');
     }
@@ -4456,6 +4685,13 @@
     // ══════════════════════════════════════════════════════════════════════════
     // AI ASSIST CONFIGURATION & TRIGGER MODULE
     // ══════════════════════════════════════════════════════════════════════════
+    /**
+     * Nạp cấu hình AI và đồng bộ giới hạn timeout của watchdog.
+     * @return {Promise<void>} Hoàn tất khi cấu hình được nạp vào giao diện.
+     * @throws {Error} Khi API đọc cấu hình không phản hồi.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-21
+     */
     async function loadAiConfigUi() {
       const cfg = await api('/ai/config');
       if (!cfg || cfg.error) return;
@@ -4463,7 +4699,7 @@
       if (document.getElementById('cbbAiMode')) document.getElementById('cbbAiMode').value = cfg.mode || 'auto_on_stuck';
       if (document.getElementById('cbbAiBinary')) document.getElementById('cbbAiBinary').value = cfg.cliBinary || 'agy';
       if (document.getElementById('nudAiMaxRounds')) document.getElementById('nudAiMaxRounds').value = cfg.maxRounds || 20;
-      if (document.getElementById('nudAiTimeout')) document.getElementById('nudAiTimeout').value = cfg.timeoutSeconds || 90;
+      if (document.getElementById('nudAiTimeout')) document.getElementById('nudAiTimeout').value = Math.min(Number(cfg.timeoutSeconds) || 15, 15);
 
       if (document.getElementById('chkSolveBotQuiz')) document.getElementById('chkSolveBotQuiz').checked = cfg.solveBotQuiz !== false;
       if (document.getElementById('chkSolveSurveyCards')) document.getElementById('chkSolveSurveyCards').checked = cfg.solveSurveyCards !== false;
@@ -4475,13 +4711,20 @@
       if (document.getElementById('cbxAiAssist')) document.getElementById('cbxAiAssist').checked = cfg.enabled !== false && cfg.mode !== 'disabled';
     }
 
+    /**
+     * Lưu cấu hình AI với timeout tối đa 15 giây để watchdog chuyển sang fallback kịp thời.
+     * @return {Promise<void>} Hoàn tất khi cấu hình đã được lưu.
+     * @throws {Error} Khi API lưu cấu hình không phản hồi.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-21
+     */
     async function saveAiConfig() {
       const cfg = {
         enabled: document.getElementById('cbxAiAssist') ? document.getElementById('cbxAiAssist').checked : true,
         mode: document.getElementById('cbbAiMode').value,
         cliBinary: document.getElementById('cbbAiBinary').value,
         maxRounds: parseInt(document.getElementById('nudAiMaxRounds').value) || 20,
-        timeoutSeconds: parseInt(document.getElementById('nudAiTimeout').value) || 90,
+        timeoutSeconds: Math.min(parseInt(document.getElementById('nudAiTimeout').value, 10) || 15, 15),
         solveBotQuiz: document.getElementById('chkSolveBotQuiz').checked,
         solveSurveyCards: document.getElementById('chkSolveSurveyCards').checked,
         clickJumpPage: document.getElementById('chkClickJumpPage').checked,
@@ -4504,13 +4747,20 @@
       }
     }
 
+    /**
+     * Khôi phục cấu hình AI mặc định phù hợp với watchdog 5 giây.
+     * @return {Promise<void>} Hoàn tất khi cấu hình mặc định được lưu và hiển thị.
+     * @throws {Error} Khi API lưu cấu hình mặc định không phản hồi.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-10-21
+     */
     async function resetAiConfig() {
       const defaultCfg = {
         enabled: true,
         mode: 'auto_on_stuck',
         cliBinary: 'agy',
         maxRounds: 20,
-        timeoutSeconds: 90,
+        timeoutSeconds: 15,
         solveBotQuiz: true,
         solveSurveyCards: true,
         clickJumpPage: true,
@@ -4702,7 +4952,6 @@
             </div>
             <div style="display:flex;align-items:center;gap:6px;">
               <button type="button" class="win-btn win-btn-sm" style="font-size:10px;padding:1px 6px;background:#0284c7;color:#fff;border:none;border-radius:2px;cursor:pointer;" onclick="event.stopPropagation(); toggleBrowserWindow(${slot}, ${Boolean(entry.isWindowVisible)});" title="Bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop">${entry.isWindowVisible ? '🔽 Ẩn' : '🖥️ Desktop'}</button>
-              <button type="button" class="win-btn win-btn-sm" style="font-size:10px;padding:1px 6px;background:#fff1f2;color:#b91c1c;border:1px solid #fca5a5;border-radius:2px;cursor:pointer;" onclick="event.stopPropagation(); closeBrowserSlot(${slot});" title="Đóng riêng trình duyệt này">✕ Đóng</button>
               <span class="screen-tile-live-badge"><span class="screen-tile-live-dot"></span> LIVE</span>
             </div>
           `;
@@ -4742,7 +4991,14 @@
         tile.title = ip ? `Slot ${slot} (${ip}) — Nhấp để mở màn hình tương tác full` : `Slot ${slot} — Nhấp để mở màn hình tương tác full`;
         // Refresh ảnh bằng cache-buster
         const img = tile.querySelector('img');
-        if (img) img.src = `/screen/snapshot/${slot}?t=${Date.now()}`;
+        // Tải ảnh mới ở nền rồi mới thay (không nháy đen), bỏ qua nếu ảnh trước chưa tải xong (không dồn request).
+        if (img && !img._uxLoading) {
+          img._uxLoading = true;
+          const next = new Image();
+          next.onload = () => { img.src = next.src; img._uxLoading = false; };
+          next.onerror = () => { img._uxLoading = false; };
+          next.src = `/screen/snapshot/${slot}?t=${Date.now()}`;
+        }
       }
     }
 
@@ -4941,7 +5197,22 @@
       }
 
       // Input forwarding
-      canvas.onmousedown  = (e) => _sendInput(slot, _buildMouseEvent('mousedown', e, canvas));
+      let pasteCatcher = document.getElementById('screenPasteCatcher');
+      if (!pasteCatcher) {
+        pasteCatcher = document.createElement('textarea');
+        pasteCatcher.id = 'screenPasteCatcher';
+        pasteCatcher.tabIndex = -1;
+        pasteCatcher.setAttribute('aria-hidden', 'true');
+        pasteCatcher.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+        document.body.appendChild(pasteCatcher);
+      }
+      canvas.onmousedown  = (e) => {
+        _closeSelectPicker();
+        fetch(`/screen/input/${slot}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_buildMouseEvent('mousedown', e, canvas)) })
+          .then((r) => r.json())
+          .then((data) => { if (data?.select) _openSelectPicker(slot, data.select, e.clientX, e.clientY); })
+          .catch(() => {});
+      };
       canvas.onmouseup    = (e) => {
         if (_mouseMoveTimer) { clearTimeout(_mouseMoveTimer); _mouseMoveTimer = null; }
         _sendInput(slot, _buildMouseEvent('mouseup', e, canvas));
@@ -4949,6 +5220,25 @@
       canvas.onmousemove  = _handleCanvasMouseMove;
       canvas.onwheel      = _handleCanvasWheel;
       canvas.onkeydown    = (e) => {
+        // Phím tắt hệ thống: Cmd/Ctrl + A/X/C/V → gửi shortcut để trình duyệt thực hiện copy/cut/paste/select-all
+        // tự nhiên thay vì gửi phím thường (tránh double-action hoặc bị preventDefault làm mất paste).
+        const isMac = navigator.platform === 'MacIntel';
+        const mod = isMac ? e.metaKey : (e.ctrlKey || e.metaKey);
+        const lowerKey = (e.key || '').toLowerCase();
+        // Cmd/Ctrl+V: server tự đọc clipboard macOS (pbpaste) rồi gõ vào trang. WKWebView của app không phát
+        // sự kiện paste trên canvas nên không lấy chữ từ trình duyệt; preventDefault để không dán hai lần.
+        if (mod && lowerKey === 'v') {
+          e.preventDefault();
+          _sendInput(slot, { type: 'shortcut', command: 'paste', key: e.key, code: e.code, modifiers: _mods(e) });
+          return;
+        }
+        if (mod && ['a', 'x', 'c'].includes(lowerKey)) {
+          const command = lowerKey === 'a' ? 'selectAll'
+            : lowerKey === 'c' ? 'copy'
+            : 'cut';
+          _sendInput(slot, { type: 'shortcut', command, key: e.key, code: e.code, modifiers: _mods(e) });
+          return;
+        }
         if ((e.ctrlKey || e.metaKey) && (e.key === 'w' || e.key === 'W')) {
           e.preventDefault();
           _closeTab(slot, _screenActiveTabIndex);
@@ -4964,13 +5254,27 @@
           modifiers: _mods(e)
         });
       };
-      canvas.onkeyup      = (e) => { e.preventDefault(); };
-      canvas.onpaste      = (e) => {
+      canvas.onkeyup      = (e) => {
+        const isMac = navigator.platform === 'MacIntel';
+        const mod = isMac ? e.metaKey : (e.ctrlKey || e.metaKey);
+        const lowerKey = (e.key || '').toLowerCase();
+        if (mod && ['a', 'x', 'c', 'v'].includes(lowerKey)) {
+          // Không preventDefault để paste/clipboard tự chạy xong.
+          return;
+        }
         e.preventDefault();
+      };
+      canvas.onpaste      = (e) => {
         const pasteText = (e.clipboardData || window.clipboardData)?.getData('text');
         if (pasteText) {
-          _sendInput(slot, { type: 'key', text: pasteText });
+          _sendInput(slot, { type: 'shortcut', command: 'paste', text: pasteText });
         }
+      };
+      pasteCatcher.onpaste = (e) => {
+        e.preventDefault();
+        const pasteText = (e.clipboardData || window.clipboardData)?.getData('text');
+        if (pasteText) _sendInput(slot, { type: 'shortcut', command: 'paste', text: pasteText });
+        canvas.focus();
       };
       canvas.tabIndex = 0;
       canvas.focus();
@@ -4990,6 +5294,7 @@
         canvas.onmousedown = canvas.onmouseup = canvas.onmousemove = canvas.onwheel = canvas.onkeydown = canvas.onkeyup = canvas.onpaste = null;
       }
       document.getElementById('screenTabBar').innerHTML = '';
+      document.getElementById('screenTabBar')._uxRenderKey = null;
     }
 
     async function _fetchAndRenderTabs(slot) {
@@ -4999,6 +5304,10 @@
         const { tabs } = await res.json();
         const bar = document.getElementById('screenTabBar');
         if (!bar) return;
+        // Tab không đổi thì giữ nguyên thanh tab (tránh nháy mỗi 2s).
+        const tabsKey = JSON.stringify([_screenActiveTabIndex, tabs]);
+        if (bar._uxRenderKey === tabsKey) return;
+        bar._uxRenderKey = tabsKey;
         bar.innerHTML = '';
         if (!tabs || tabs.length === 0) return;
 
@@ -5084,6 +5393,14 @@
       } catch {}
     }
 
+    async function _goBackScreen() {
+      if (!_screenActiveSlot) return;
+      const fpsEl = document.getElementById('screenModalFps');
+      const res = await fetch(`/screen/back/${_screenActiveSlot}`, { method: 'POST' }).then((r) => r.json()).catch(() => null);
+      if (fpsEl && res && res.ok === false) fpsEl.textContent = '⚠️ Không còn trang trước để quay lại';
+      _fetchAndRenderTabs(_screenActiveSlot);
+    }
+
     function _quickScroll(deltaX, deltaY) {
       if (!_screenActiveSlot) return;
       const canvas = document.getElementById('screenCanvas');
@@ -5123,6 +5440,54 @@
     }
     function _sendInput(slot, data) {
       fetch(`/screen/input/${slot}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).catch(() => {});
+    }
+
+    // Popup native của ô <select> không có trong ảnh screencast, nên Screen View tự vẽ danh sách lựa chọn.
+    function _closeSelectPicker() {
+      document.getElementById('screenSelectPicker')?.remove();
+    }
+    function _openSelectPicker(slot, select, clientX, clientY) {
+      _closeSelectPicker();
+      const box = document.createElement('div');
+      box.id = 'screenSelectPicker';
+      box.style.cssText = 'position:fixed;z-index:99999;min-width:180px;max-width:360px;max-height:320px;overflow:auto;'
+        + 'background:#fff;color:#111;border:1px solid #888;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.35);font:13px -apple-system,sans-serif;';
+      select.options.forEach((opt, index) => {
+        const item = document.createElement('div');
+        item.textContent = opt.label || '(trống)';
+        item.style.cssText = 'padding:6px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+          + (index === select.selectedIndex ? 'background:#dbeafe;font-weight:600;' : '')
+          + (opt.disabled ? 'color:#aaa;cursor:default;' : '');
+        if (!opt.disabled) {
+          item.onmouseenter = () => { if (index !== select.selectedIndex) item.style.background = '#f1f5f9'; };
+          item.onmouseleave = () => { if (index !== select.selectedIndex) item.style.background = ''; };
+          item.onmousedown = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            _closeSelectPicker();
+            _sendInput(slot, { type: 'select', index });
+          };
+        }
+        box.appendChild(item);
+      });
+      document.body.appendChild(box);
+      const left = Math.max(8, Math.min(clientX, window.innerWidth - box.offsetWidth - 8));
+      const top = clientY + box.offsetHeight + 8 > window.innerHeight ? Math.max(8, clientY - box.offsetHeight) : clientY;
+      box.style.left = `${left}px`;
+      box.style.top = `${top}px`;
+      box.querySelector('[style*="dbeafe"]')?.scrollIntoView({ block: 'nearest' });
+      // Click ra ngoài hoặc bấm Esc thì đóng danh sách.
+      setTimeout(() => {
+        const close = (ev) => {
+          if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+          if (ev.type === 'mousedown' && box.contains(ev.target)) return;
+          _closeSelectPicker();
+          document.removeEventListener('mousedown', close, true);
+          document.removeEventListener('keydown', close, true);
+        };
+        document.addEventListener('mousedown', close, true);
+        document.addEventListener('keydown', close, true);
+      }, 0);
     }
 
     // Cập nhật danh sách slot từ fetchRunningState

@@ -1,0 +1,60 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - heading "Web form" [level=1] [ref=e6]
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - generic [ref=e10]:
+          - text: Text input
+          - textbox "Text input" [active] [ref=e11]
+        - generic [ref=e12]:
+          - text: Password
+          - textbox "Password" [ref=e13]
+        - generic [ref=e14]:
+          - text: Textarea
+          - textbox "Textarea" [ref=e15]
+        - generic [ref=e16]:
+          - text: Disabled input
+          - textbox "Disabled input" [disabled] [ref=e17]
+        - generic [ref=e18]:
+          - text: Readonly input
+          - textbox "Readonly input" [ref=e19]
+        - link "Return to index" [ref=e21] [cursor=pointer]:
+          - /url: ./index.html
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - text: Dropdown (select)
+          - combobox "Dropdown (select)" [ref=e24]:
+            - option "Open this select menu" [selected]
+            - option "One"
+            - option "Two"
+            - option "Three"
+        - generic [ref=e25]:
+          - text: Dropdown (datalist)
+          - combobox "Dropdown (datalist)" [ref=e26]
+        - generic [ref=e27]:
+          - text: File input
+          - button "File input" [ref=e28] [cursor=pointer]
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - checkbox "Checked checkbox" [checked] [ref=e31]
+            - text: Checked checkbox
+          - generic [ref=e32]:
+            - checkbox "Default checkbox" [ref=e33]
+            - text: Default checkbox
+        - generic [ref=e35]:
+          - radio "Checked radio" [checked] [ref=e36]
+          - text: Checked radio
+        - generic [ref=e38]:
+          - radio "Default radio" [ref=e39]
+          - text: Default radio
+        - button "Submit" [ref=e40] [cursor=pointer]
+      - generic [ref=e41]:
+        - generic [ref=e42]:
+          - text: Color picker
+          - textbox "Color picker" [ref=e43] [cursor=pointer]: "#563d7c"
+        - generic [ref=e44]:
+          - text: Date picker
+          - textbox "Date picker" [ref=e45]
+        - generic [ref=e46]:
+          - text: Example range
+          - slider "Example range" [ref=e47]: "5"

@@ -82,3 +82,14 @@ test('createDeviceVariant giữ các thông số đồng bộ với nhau', () =>
     assert.equal(buildStealthConfig(mac, {}, seed).uaData.platformVersion, mac.uaData.platformVersion, 'Init script phải biết platformVersion của máy');
   }
 });
+
+test('pickConfiguredUserAgent: lấy UA trong file và thay bản Chrome bằng bản engine', async () => {
+  const { pickConfiguredUserAgent } = await import('./app.mjs');
+  assert.equal(pickConfiguredUserAgent([], 1), null);
+  const ua = pickConfiguredUserAgent([
+    'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  ], 7);
+  assert.equal(ua('155.0.8037.98'), 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.8037.98 Mobile Safari/537.36');
+  const ios = pickConfiguredUserAgent(['Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1'], 0);
+  assert.match(ios('155.0.8037.98'), /CriOS\/155\.0\.8037\.98 /);
+});

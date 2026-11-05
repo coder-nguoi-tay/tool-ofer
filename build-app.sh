@@ -95,7 +95,10 @@ EOF
     cp -p autoleadpc-icon.svg "$RESOURCES_DIR/autoleadpc-icon.svg"
   fi
 
-  cp -p app.mjs autofill.mjs stealth.mjs stealth.test.mjs survey-solver.mjs survey-solver.test.mjs script.test.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs chrome-versions.test.mjs screen-view.test.mjs proxy-stop.test.mjs check-duplicate.test.mjs toffers-lead.test.mjs adspower-profile.mjs adspower-profile.test.mjs codex-form-agent.mjs codex-form-agent.test.mjs playwright-mcp-human.cjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  # Copy mọi file .test.mjs bằng glob thay vì liệt kê tay: trước đây gói .app thiếu
+  # multi-tab-ai.test.mjs nên test biến mất khỏi bundle trong im lặng.
+  cp -p ./*.test.mjs "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs cloakbrowser-engine.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs codex-form-agent.mjs gologin-profile.mjs local-profile-engine.mjs playwright-mcp-human.cjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs run-tests.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
   if [ -f "Config/Browser/bookmarks.txt" ]; then
     mkdir -p "$LAUNCHER_DIR/Config/Browser"
     cp -p Config/Browser/bookmarks.txt "$LAUNCHER_DIR/Config/Browser/"
@@ -110,6 +113,15 @@ EOF
   # Copy node_modules
   if [ -d "node_modules" ]; then
     cp -R node_modules "$LAUNCHER_DIR/"
+  fi
+
+  # Copy Node runtime độc lập (bản chính thức nodejs.org, không phụ thuộc Homebrew).
+  # Launcher Swift ưu tiên Resources/runtime-node/node trước khi thử node hệ thống,
+  # nên app chạy được trên mọi máy Mac (arm64) kể cả chưa cài Homebrew.
+  if [ -f "runtime-node/node" ]; then
+    mkdir -p "$RESOURCES_DIR/runtime-node"
+    cp -p "runtime-node/node" "$RESOURCES_DIR/runtime-node/node"
+    chmod +x "$RESOURCES_DIR/runtime-node/node"
   fi
 
   # Sign bundle

@@ -262,9 +262,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             throw NSError(domain: "AutoLeadPCMac", code: 1)
         }
 
-        let nodeCandidates = ["/opt/homebrew/bin/node", "/usr/local/bin/node"]
+        // Ưu tiên Node runtime đóng gói sẵn trong chính app (độc lập Homebrew/ dirección hệ thống);
+        // chỉ rơi về node hệ thống khi bản đóng gói thiếu (bản dev trong repo).
+        let bundledNode = Bundle.main.resourceURL?.appendingPathComponent("runtime-node/node")
+        let nodeCandidates: [String] = [
+            bundledNode?.path ?? "",
+            "/opt/homebrew/bin/node",
+            "/usr/local/bin/node",
+        ].filter { !$0.isEmpty }
         guard let nodePath = nodeCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            throw NSError(domain: "AutoLeadPCMac", code: 2, userInfo: [NSLocalizedDescriptionKey: "Không tìm thấy Node.js trong /opt/homebrew/bin hoặc /usr/local/bin."])
+            throw NSError(domain: "AutoLeadPCMac", code: 2, userInfo: [NSLocalizedDescriptionKey: "Không tìm thấy Node.js: cả Node đóng gói trong app (Resources/runtime-node/node) lẫn node hệ thống (/opt/homebrew/bin, /usr/local/bin)."])
         }
 
         let process = Process()

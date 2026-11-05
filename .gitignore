@@ -37,3 +37,6 @@ AutoLeadPC Mac.app/
 *.tmp
 .tmp/
 *.partial/
+
+# Node runtime đóng gói (140 MB, vượt giới hạn 100 MB của GitHub)
+runtime-node/

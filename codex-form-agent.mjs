@@ -77,12 +77,12 @@ export function validateTargetUrl(targetUrl, allowlist = []) {
  * @param {string} params.targetUrl Địa chỉ trang web cần điền form.
  * @param {object} params.formData Dữ liệu form cần điền ({ fields: Record<string, string> } hoặc autofill record).
  * @param {boolean} [params.allowSubmit=false] Có cho phép submit form hay không.
- * @param {boolean} [params.takeDealStage=false] Trang đang hiển thị bước Take the Deal.
+ * @param {number} [params.timeoutMs=20000] Thời gian tối đa cho một lượt AI.
  * @param {string[]} [params.domainAllowlist=[]] Danh sách domain cho phép.
  * @param {Function} [params.approvalGate=null] Hàm kiểm tra phê duyệt trước khi submit.
  * @param {object} [params.session=null] Session trình duyệt hiện tại trong AutoLeadPC để ghi log & badge.
  * @param {Function} [params.logger=console.log] Hàm ghi nhận log.
- * @returns {Promise<object>} Kết quả thực thi.
+ * @returns {Promise<object>} Kết quả thực thi hoặc timeout.
  * @throws {Error} Khi thiếu CDP endpoint hoặc URL đích không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-21
@@ -92,7 +92,7 @@ export async function runCodexFormAgent({
   targetUrl,
   formData = {},
   allowSubmit = false,
-  takeDealStage = false,
+  timeoutMs = 20_000,
   domainAllowlist = [],
   approvalGate = null,
   session = null,
@@ -119,8 +119,8 @@ export async function runCodexFormAgent({
       playwright: {
         command: process.execPath,
         args: [humanWrapperPath, '--cdp-endpoint', endpoint],
-        startup_timeout_sec: 30,
-        tool_timeout_sec: 120,
+        startup_timeout_sec: 8,
+        tool_timeout_sec: 8,
         tools: {
           browser_navigate: { approval_mode: 'approve' },
           browser_tabs: { approval_mode: 'approve' },
@@ -139,8 +139,6 @@ export async function runCodexFormAgent({
   });
 
   const thread = codex.startThread({
-    model: 'gpt-5.6-luna',
-    modelReasoningEffort: 'none',
     skipGitRepoCheck: true,
     approvalPolicy: 'never',
     sandboxMode: 'workspace-write',
@@ -155,7 +153,6 @@ THÔNG TIN NHIỆM VỤ:
 - Dữ liệu form cần điền (FormData):
 ${JSON.stringify(fields, null, 2)}
 - Quyền submit: ${allowSubmit ? 'ĐƯỢC PHÉP SUBMIT' : 'KHÔNG ĐƯỢC SUBMIT (CHỈ ĐIỀN VÀ XÁC MINH)'}
-${takeDealStage ? '- ĐANG Ở BƯỚC TAKE THE DEAL: Bật/chọn tất cả deal đang hiển thị (checkbox, switch hoặc nút chọn trong từng deal), giữ nguyên mục đã bật, rồi bấm nút "Take the Deal".' : ''}
 
 QUY TRÌNH THỰC HIỆN & NGUYÊN TẮC NHẬP LIỆU:
 1. Kiểm tra tab hiện tại: Nếu tab hiện tại đã ở đúng trang web/form cần điền, TUYỆT ĐỐI KHÔNG gọi browser_navigate hay reload lại trang để tránh mất dữ liệu. Chỉ gọi browser_navigate nếu tab đang ở about:blank hoặc domain khác.
@@ -189,9 +186,12 @@ Bắt đầu bằng việc đọc snapshot của trang hiện tại.
 
   const toolCalls = [];
   let finalResponse = '';
+  const abortController = new AbortController();
+  const agentTimer = setTimeout(() => abortController.abort(), timeoutMs);
+  agentTimer.unref?.();
 
   try {
-    const { events } = await thread.runStreamed(prompt);
+    const { events } = await thread.runStreamed(prompt, { signal: abortController.signal });
 
     for await (const event of events) {
       if (event.type === 'item.started') {
@@ -212,7 +212,18 @@ Bắt đầu bằng việc đọc snapshot của trang hiện tại.
       }
     }
   } catch (err) {
+    clearTimeout(agentTimer);
     const safeError = redactSecrets(err.message);
+    if (abortController.signal.aborted) {
+      logMsg(`Dừng lượt xử lý vì vượt quá ${Math.ceil(timeoutMs / 1000)} giây.`);
+      return {
+        success: false,
+        status: 'timeout',
+        error: safeError,
+        toolCalls,
+        finalResponse: redactSecrets(finalResponse),
+      };
+    }
     logMsg(`Lỗi Agent: ${safeError}`);
     session?.updateBadge?.(`⚠️ <strong>Codex AI:</strong> Lỗi (${safeError.slice(0, 30)})`);
     return {
@@ -223,6 +234,7 @@ Bắt đầu bằng việc đọc snapshot của trang hiện tại.
       finalResponse: redactSecrets(finalResponse),
     };
   }
+  clearTimeout(agentTimer);
 
   let submitStatus = allowSubmit ? 'submitted' : 'completed_unsubmitted';
   if (allowSubmit && approvalGate) {
