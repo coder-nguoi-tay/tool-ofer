@@ -1380,6 +1380,34 @@ assert.equal(isEmailFieldName('mail_address'), false);
 assert.equal(isEmailFieldName('mailbox'), false);
 assert.equal(isEmailFieldName('username'), false);
 assert.equal(isEmailFieldName('zipcode'), false);
+assert.equal(isEmailFieldName('mailing_city'), false);
+assert.equal(isEmailFieldName('mailing_state'), false);
+assert.equal(isEmailFieldName('mailing_town'), false);
+assert.equal(isEmailFieldName('mailing_zip'), false);
+assert.equal(isEmailFieldName('mailing_postal'), false);
+
+// 9.1b Ô "mailing ..." là địa chỉ, không được nối @gmail.com; ô email thật vẫn phải nhận email.
+{
+  const record = { email: 'john.doe', address: '123 Main St', city: 'Dallas', state: 'TX', zip: '75001' };
+  const fill = (names, metadata = {}) => matchFieldValue(names, record, { type: 'text', names, ...metadata });
+  assert.equal(fill(['Mailing Address']), '123 Main St');
+  assert.equal(fill(['mailing_street']), '123 Main St');
+  assert.equal(fill(['mailing zip']), '75001');
+  assert.equal(fill(['mailing city']), 'Dallas');
+  assert.equal(fill(['mailing state']), 'TX');
+  assert.equal(fill(['mailing_state']), 'TX');
+  assert.equal(fill(['mail', 'address']), '123 Main St');
+  assert.equal(fill(['mail'], { placeholder: 'Your mail address' }), '123 Main St');
+  assert.equal(fill(['email']), 'john.doe@gmail.com');
+  assert.equal(fill(['mail']), 'john.doe@gmail.com');
+  assert.equal(fill(['Email Address']), 'john.doe@gmail.com');
+  assert.equal(fill(['email', 'zip']), 'john.doe@gmail.com');
+  assert.equal(fill(['Email Address'], { assignedEmail: 'x@y.com' }), 'x@y.com');
+  assert.equal(fill(['address'], { type: 'email' }), 'john.doe@gmail.com');
+  assert.equal(fill(['mailing_address'], { type: 'email' }), 'john.doe@gmail.com');
+  assert.equal(fill(['zipmail'], { type: 'email' }), 'john.doe@gmail.com');
+  assert.equal(fill(['mail'], { assignedEmail: 'jane' }), 'jane@gmail.com');
+}
 
 // 9.2 parseEmailLine
 assert.equal(parseEmailLine('daj.gomezramirez@gmail.com'), 'daj.gomezramirez@gmail.com');

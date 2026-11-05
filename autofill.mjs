@@ -1213,9 +1213,15 @@ function formatMatchedValue(value, metadata = {}) {
     }
   }
 
-  // Tự động bảo đảm Email luôn có domain hợp lệ (@gmail.com) nếu thiếu ký tự @
-  const isEmailField = metadata.type === 'email' || metadata.names?.some((n) => /email|mail/i.test(n));
-  if (isEmailField && val && !val.includes('@')) {
+  // Tự động bảo đảm Email luôn có domain hợp lệ (@gmail.com) nếu thiếu ký tự @.
+  // FIX "Mailing Address": chỉ coi là email khi metadata.type==='email' HOẶC có candidate
+  // thật sự là tên email — và KHÔNG có tên địa chỉ nào khác trong cùng ô,
+  // tránh nối @gmail.com vào địa chỉ đường (123 Main Street Apt 4@gmail.com).
+  const candidates = metadata.names || [];
+  const isAddressName = (n) => /address|street|addr|apt|suite|unit/i.test(n) && !/e-?mail/i.test(n);
+  const addressHints = [...candidates, metadata.name, metadata.id, metadata.placeholder, metadata.ariaLabel, metadata.label];
+  const isEmailVal = metadata.type === 'email' || (candidates.some(isEmailFieldName) && !addressHints.some(isAddressName));
+  if (isEmailVal && val && !val.includes('@')) {
     val = `${val}@gmail.com`;
   }
 
@@ -1234,7 +1240,7 @@ export function isEmailFieldName(candidate) {
   if (!norm) return false;
   if (/email/i.test(norm)) return true;
   if (/^(mail|thudientu|usermail|customermail)$/i.test(norm)) return true;
-  if (/mail/i.test(norm) && !/address|street|diachi|box|list/i.test(norm)) return true;
+  if (/mail/i.test(norm) && !/address|street|diachi|box|list|city|town|state|zip|postal/i.test(norm)) return true;
   return false;
 }
 
@@ -1261,7 +1267,9 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
   const labelLc = String(metadata.label || '').toLowerCase();
   const allText = `${nameLc} ${idLc} ${placeholderLc} ${ariaLc} ${labelLc} ${normalizedCandidates.join(' ')}`;
 
-  const isExplicitAddress = /address|street|addr|apt|suite|unit/.test(allText) && !/email|mail/.test(allText);
+  // FIX "Mailing Address": "mailing" chứa "mail" nhưng đây là ĐỊA CHỈ, không phải email.
+  // Nhận diện địa chỉ chỉ bị triệt tiêu khi text có "email"/"e-mail" nhạt rõ ràng, còn "mailing"/"mail list" không xếp chung ô email.
+  const isExplicitAddress = /address|street|addr|apt|suite|unit/.test(allText) && !/e-?mail/.test(allText);
   const isExplicitZip = /zip|postal|postcode|zippost|\bzp\b/.test(allText);
   const isExplicitCity = /city|town|thanhpho/.test(allText);
   const isExplicitState = /\b(state|province|bang|tinh)\b/.test(allText);
@@ -1282,7 +1290,12 @@ export function matchFieldValue(candidateNames, record, metadata = {}) {
 
   if (!normalizedCandidates.length) return null;
 
-  const isExplicitEmail = metadata.type === 'email' || normalizedCandidates.some(isEmailFieldName);
+  // Email chỉ xác định khi kiểu input là email, hoặc candidate có chữ "email" thật sự,
+  // HOẶC candidate là "mail" ĐỘC LẬP mà trường đó KHÔNG phải địa chỉ (zip/address).
+  const candidatesEmailName = normalizedCandidates.some(isEmailFieldName);
+  const isExplicitEmail = metadata.type === 'email'
+    || normalizedCandidates.some((c) => c.includes('email'))
+    || (candidatesEmailName && !isExplicitAddress && !isExplicitZip && !allText.includes('address'));
   const isEmailField = isExplicitEmail;
   const assignedEmail = metadata.assignedEmail || record.assignedEmail;
   const isExplicitName = normalizedCandidates.some((c) => /^(firstname|lastname|fname|lname|fullname|first|last|name|fn|ln)$/i.test(c)) ||
@@ -2376,7 +2389,12 @@ export async function handleAlphaIntentQuestions(page, frame, options = {}) {
       // Câu age/preference/vehicle do handleSurveySemanticQuestions (§17) trả lời; AlphaQ chỉ bấm Continue.
       const qText = (document.getElementById('questionText')?.innerText || document.querySelector('h1,h2,h3')?.innerText || '').toLowerCase();
       const semanticOwned = qPatterns.some(([, src]) => new RegExp(src).test(qText));
-      if (answers.length && !semanticOwned) {
+      // Quota đáp án theo loại câu: single = 1, multi-select = 2 (nhanh, không cần đúng) rồi bấm tiếp tục.
+      const isMultiSelect = !!document.querySelector('button.ai-submit-button--multiselect, button[class*="multiselect"], [class*="multi-select"], [data-mock-action="multiselect-submit"]');
+      const answerTarget = isMultiSelect ? 2 : 1;
+      const clickedCount = Array.from(document.querySelectorAll('[data-ux-qclicked="1"]')).filter(isVisible).length;
+      const quotaReached = clickedCount >= answerTarget;
+      if (answers.length && !semanticOwned && !quotaReached) {
         // User chỉ rõ: tự động chọn câu trả lời ĐẦU TIÊN; nếu nút đầu là "None of the Above"/"Skip" thì chọn nút đầu còn lại
         const pickable = answers.filter((b) => !/none of the above|none of above|skip|prefer not/i.test(b.innerText || ''));
         const pool = pickable.length ? pickable : answers;
@@ -3500,9 +3518,9 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         );
       }
 
-      // Nếu không khớp trong record, chọn ngẫu nhiên một lựa chọn bất kỳ
+      // Nếu không khớp trong record, chọn lựa chọn ĐẦU TIÊN (nhanh, không cần đúng)
       if (!chosen) {
-        chosen = group.items[Math.floor(Math.random() * group.items.length)];
+        chosen = group.items[0];
       }
 
       try {
@@ -3991,11 +4009,11 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         picked = group.items.find((it) => /^(yes|có)$/i.test(it.text));
       }
 
-      // E. Nếu không khớp tiêu chí riêng: người dùng yêu cầu code hết cho câu trả lời (không yêu cầu đúng sai)
-      // Ưu tiên chọn một lựa chọn hợp lệ (bỏ qua nút none/cancel/back nếu có nhiều lựa chọn)
+      // E. Nếu không khớp tiêu chí riêng: chọn lựa chọn ĐẦU TIÊN (nhanh, không cần đúng),
+      // bỏ qua nút none/cancel/back nếu có lựa chọn khác.
       if (!picked) {
         const pool = group.items.filter((it) => !/none of the above|cancel|back|previous|bỏ qua/i.test(it.text));
-        picked = (pool.length > 0 ? pool : group.items)[Math.floor(Math.random() * (pool.length > 0 ? pool.length : group.items.length))];
+        picked = (pool.length > 0 ? pool : group.items)[0];
       }
 
       if (picked?.uid) {
@@ -6226,12 +6244,18 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   anySiblingChecked: siblings.some((s) => s.checked),
                   multiChoiceGroup: siblings.length >= 2,
                   singleCheckbox: siblings.length === 1,
+                  // Đếm số ô do CHÍNH TOOL đã tick trong nhóm (đánh dấu data-ux-multi-ticked)
+                  // để câu hỏi chọn nhiều đáp án chỉ tick đúng 2 ô đầu rồi dừng.
+                  tickedByUs: siblings.filter((s) => s.getAttribute('data-ux-multi-ticked') === '1').length,
                 };
               }).catch(() => ({ isConsent: false, isNoneOfAbove: false, anySiblingChecked: true, multiChoiceGroup: false, singleCheckbox: false }));
 
-              // Mặc định an toàn: không tick (không tick) nếu phân loại bị lỗi
-              const allowedToTick = cbGroupInfo.singleCheckbox || cbGroupInfo.isConsent ||
-                (cbGroupInfo.multiChoiceGroup && !cbGroupInfo.anySiblingChecked && !cbGroupInfo.isNoneOfAbove);
+              // Mặc định an toàn: không tick nếu phân loại bị lỗi.
+              // Nhóm chọn nhiều: tick tối đa 2 ô ĐẦU TIÊN (nhanh, yêu cầu user), rồi dừng.
+              // Ô đơn/consent: tick như cũ.
+              const multiQuotaReached = cbGroupInfo.multiChoiceGroup && (cbGroupInfo.tickedByUs >= 2);
+              const allowedToTick = !multiQuotaReached && (cbGroupInfo.singleCheckbox || cbGroupInfo.isConsent ||
+                (cbGroupInfo.multiChoiceGroup && !cbGroupInfo.isNoneOfAbove));
               if (!allowedToTick) continue;
 
               try {
@@ -6320,6 +6344,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                 if (!checkedOk) {
                   continue;
                 }
+                // Đánh dấu ô do tool tick để nhóm multi-select đếm đúng quota 2 ô đầu
+                await field.evaluate((el) => { el.dataset.uxMultiTicked = '1'; }).catch(() => {});
                 await field.evaluate((el) => { el.dataset.uxFilled = '1'; }).catch(() => {});
                 addVerifiedFieldCount(session, 1);
                 session.autofillError = null;
