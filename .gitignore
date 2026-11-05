@@ -38,5 +38,6 @@ AutoLeadPC Mac.app/
 .tmp/
 *.partial/
 
-# Node runtime đóng gói (140 MB, vượt giới hạn 100 MB của GitHub)
-runtime-node/
+# Node runtime đóng gói (140 MB) — lưu bằng Git LFS vì vượt giới hạn 100 MB của GitHub
+runtime-node/*
+!runtime-node/node
