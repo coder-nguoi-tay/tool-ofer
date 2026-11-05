@@ -101,7 +101,7 @@ import {
 } from './cloakbrowser-engine.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig } from './ai-assist.mjs';
-import { startTelegramBot, tgNotify } from './tgbot.mjs';
+import { startTelegramBot, reloadTelegramBot, stopTelegramBot, tgNotify } from './tgbot.mjs';
 
 export function getAiConfigFilePath() {
   return join(getAutoLeadPCDir(), 'Config', 'ai-config.json');
@@ -1933,6 +1933,85 @@ function respondWithJson(response, statusCode, responseBody) {
     'cache-control': 'no-store',
   });
   response.end(payload);
+}
+
+/**
+ * Đường dẫn file cấu hình Telegram bot của instance đang chạy.
+ *
+ * @return {string} Đường dẫn tuyệt đối tới telegram-config.json.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-05
+ */
+export function getTelegramConfigPath() {
+  return join(appDataDirectory, 'telegram-config.json');
+}
+
+/**
+ * Đọc cấu hình Telegram bot đã lưu (botToken, allowedUserId, notifyChatId).
+ *
+ * @return {Promise<{botToken: string, allowedUserId: number|null, notifyChatId: number|null}>} Cấu hình đã chuẩn hóa.
+ * @throws {Error} Khi file không tồn tại hoặc JSON hỏng (caller tự bắt).
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-05
+ */
+export async function loadTelegramConfig() {
+  const raw = JSON.parse(await readFile(getTelegramConfigPath(), 'utf8'));
+  return {
+    botToken: String(raw.botToken || '').trim(),
+    allowedUserId: Number(raw.allowedUserId) || null,
+    notifyChatId: Number(raw.notifyChatId) || null,
+  };
+}
+
+/**
+ * Ghi cấu hình Telegram bot xuống đĩa với quyền 0600 (chỉ user sở hữu đọc được).
+ *
+ * @param {{botToken: string, allowedUserId: number, notifyChatId?: number|null}} config Cấu hình cần lưu.
+ * @return {Promise<void>} Hoàn tất khi file đã ghi xong.
+ * @throws {Error} Khi không ghi được file.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-05
+ */
+export async function saveTelegramConfig(config) {
+  await mkdir(appDataDirectory, { recursive: true, mode: 0o700 });
+  const payload = {
+    botToken: String(config.botToken || '').trim(),
+    allowedUserId: Number(config.allowedUserId),
+    notifyChatId: config.notifyChatId ? Number(config.notifyChatId) : Number(config.allowedUserId),
+  };
+  await writeFile(getTelegramConfigPath(), JSON.stringify(payload, null, 2), { mode: 0o600 });
+}
+
+/**
+ * Gửi 1 tin nhắn thử nghiệm tới Telegram để xác nhận token/chat id hợp lệ.
+ *
+ * @param {string} [text] Nội dung tin nhắn thử (mặc định: thông báo kiểm tra kết nối).
+ * @return {Promise<{ok: boolean, message: string}>} Kết quả gửi.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-05
+ */
+export async function sendTelegramTestMessage(text = '✅ AutoLeadPC: kết nối Telegram bot thành công!') {
+  let config;
+  try {
+    config = await loadTelegramConfig();
+  } catch {
+    return { ok: false, message: 'Chưa có cấu hình Telegram. Hãy nhập Bot Token và Chat ID rồi lưu.' };
+  }
+  if (!config.botToken) return { ok: false, message: 'Thiếu Bot Token.' };
+  const chatId = config.notifyChatId || config.allowedUserId;
+  if (!chatId) return { ok: false, message: 'Thiếu Chat ID / User ID để gửi tin.' };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data?.ok) return { ok: true, message: `Đã gửi tin thử tới chat ${chatId}.` };
+    return { ok: false, message: data?.description || `Telegram trả lỗi HTTP ${res.status}.` };
+  } catch (error) {
+    return { ok: false, message: `Không gọi được Telegram API: ${error.message}` };
+  }
 }
 
 /**
@@ -8115,6 +8194,60 @@ async function startLocalInterface() {
         used: proxyQueue.used.length,
         message: `Đã đặt lại: ${proxyQueue.available.length} proxy sẵn sàng dùng lại (đã làm sạch lịch sử trùng IP).`,
       });
+      return;
+    }
+
+    // ─── Telegram bot: xem / lưu cấu hình + gửi tin thử ──────────────────────
+    if (request.method === 'GET' && request.url === '/telegram/config') {
+      try {
+        const config = await loadTelegramConfig();
+        respondWithJson(response, 200, {
+          botTokenMasked: config.botToken ? `${config.botToken.slice(0, 8)}…${config.botToken.slice(-4)}` : '',
+          hasToken: Boolean(config.botToken),
+          allowedUserId: config.allowedUserId || '',
+          notifyChatId: config.notifyChatId || '',
+          configured: Boolean(config.botToken && config.allowedUserId),
+        });
+      } catch {
+        respondWithJson(response, 200, {
+          botTokenMasked: '', hasToken: false, allowedUserId: '', notifyChatId: '', configured: false,
+        });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/telegram/config') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        const botToken = String(body.botToken || '').trim();
+        const allowedUserId = Number(body.allowedUserId);
+        const notifyChatId = body.notifyChatId ? Number(body.notifyChatId) : null;
+        if (!botToken || !/^\d+:[A-Za-z0-9_-]+$/.test(botToken)) {
+          respondWithJson(response, 400, { ok: false, message: 'Bot Token không hợp lệ (dạng 123456789:AA...).' });
+          return;
+        }
+        if (!Number.isFinite(allowedUserId) || allowedUserId <= 0) {
+          respondWithJson(response, 400, { ok: false, message: 'User ID Telegram không hợp lệ (chỉ gồm chữ số).' });
+          return;
+        }
+        await saveTelegramConfig({ botToken, allowedUserId, notifyChatId });
+        const reload = await reloadTelegramBot().catch((error) => ({ running: false, error: error.message }));
+        respondWithJson(response, 200, {
+          ok: true,
+          running: Boolean(reload?.running),
+          message: reload?.running
+            ? 'Đã lưu cấu hình và khởi động lại Telegram bot.'
+            : `Đã lưu cấu hình nhưng bot chưa chạy${reload?.error ? `: ${reload.error}` : ' (kiểm tra lại token/quyền).'}`,
+        });
+      } catch (error) {
+        respondWithJson(response, 500, { ok: false, message: `Lưu cấu hình Telegram thất bại: ${error.message}` });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/telegram/test') {
+      const result = await sendTelegramTestMessage();
+      respondWithJson(response, result.ok ? 200 : 400, result);
       return;
     }
 

@@ -2105,6 +2105,30 @@
         </fieldset>
 
         <fieldset class="win-group">
+          <legend class="win-legend">Telegram Bot</legend>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-top:2px;">Bot Token:
+            <input type="password" id="TgBotToken" autocomplete="off" class="win-input" style="flex:1;" placeholder="123456789:AA...">
+          </label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;">User ID (admin):
+              <input type="text" id="TgAllowedUserId" class="win-input" style="flex:1;" placeholder="VD: 123456789">
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;">Chat ID nhận thông báo:
+              <input type="text" id="TgNotifyChatId" class="win-input" style="flex:1;" placeholder="Để trống = dùng User ID">
+            </label>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <button type="button" class="win-btn win-btn-primary" style="padding:3px 12px;" onclick="saveTelegramConfigUI()">💾 Lưu &amp; khởi động bot</button>
+            <button type="button" class="win-btn" style="padding:3px 12px;" onclick="testTelegramBot()">📨 Gửi tin thử</button>
+            <span id="tgStatus" style="font-size:11px;color:#0078d7;"></span>
+          </div>
+          <div style="font-size:11px;color:#555;margin-top:5px;">
+            Tạo bot với @BotFather → lấy Bot Token. Nhắn <code>/start</code> cho bot rồi lấy User ID (dùng @userinfobot).
+            Khi bot đã chạy, nhắn <code>/help</code> hoặc bấm nút <b>🗑 Xóa tất cả proxy</b> ngay trong Telegram.
+          </div>
+        </fieldset>
+
+        <fieldset class="win-group">
           <legend class="win-legend">Help</legend>
           <textarea id="richTextBoxHelp" class="win-textarea" readonly style="width:100%;height:140px;background:#ffffff;line-height:1.4;"></textarea>
         </fieldset>
@@ -2469,6 +2493,9 @@
       }
       if (tabId === 'ToffersLeads') {
         fetchToffersLeads(false);
+      }
+      if (tabId === 'Settings') {
+        void loadTelegramConfig();
       }
     }
     window.switchTab = switchTab;
@@ -3109,6 +3136,76 @@
       }
     }
     window.clearProxyQueue = clearProxyQueue;
+
+    // ─── Telegram bot: nạp / lưu cấu hình + gửi tin thử ─────────────────────
+    async function loadTelegramConfig() {
+      try {
+        const cfg = await api('/telegram/config');
+        if (cfg?.error) return;
+        const tokenEl = document.getElementById('TgBotToken');
+        const userEl = document.getElementById('TgAllowedUserId');
+        const chatEl = document.getElementById('TgNotifyChatId');
+        const statusEl = document.getElementById('tgStatus');
+        if (tokenEl) {
+          tokenEl.value = '';
+          tokenEl.placeholder = cfg.hasToken
+            ? `Đã lưu: ${cfg.botTokenMasked} (nhập token mới để thay)`
+            : '123456789:AA...';
+        }
+        if (userEl) userEl.value = cfg.allowedUserId || '';
+        if (chatEl) chatEl.value = cfg.notifyChatId || '';
+        if (statusEl) {
+          statusEl.textContent = cfg.configured
+            ? '✅ Đã cấu hình — bot đang chạy.'
+            : '⚠️ Chưa cấu hình bot.';
+          statusEl.style.color = cfg.configured ? '#28a745' : '#c50f1f';
+        }
+      } catch (err) {
+        console.warn('[Telegram] Không nạp được cấu hình:', err.message);
+      }
+    }
+
+    async function saveTelegramConfigUI() {
+      const statusEl = document.getElementById('tgStatus');
+      const botToken = document.getElementById('TgBotToken').value.trim();
+      const allowedUserId = document.getElementById('TgAllowedUserId').value.trim();
+      const notifyChatId = document.getElementById('TgNotifyChatId').value.trim();
+      if (!botToken) {
+        showWinAlert('Nhập Bot Token trước khi lưu.');
+        return;
+      }
+      if (!allowedUserId) {
+        showWinAlert('Nhập User ID Telegram (admin) trước khi lưu.');
+        return;
+      }
+      if (statusEl) { statusEl.textContent = 'Đang lưu...'; statusEl.style.color = '#0078d7'; }
+      const res = await api('/telegram/config', {
+        method: 'POST',
+        body: JSON.stringify({ botToken, allowedUserId, notifyChatId }),
+      });
+      if (res?.ok) {
+        if (statusEl) { statusEl.textContent = res.message || 'Đã lưu cấu hình Telegram.'; statusEl.style.color = '#28a745'; }
+        await loadTelegramConfig();
+      } else {
+        if (statusEl) { statusEl.textContent = res?.message || 'Lưu thất bại.'; statusEl.style.color = '#c50f1f'; }
+        showWinAlert(res?.message || 'Lưu cấu hình Telegram thất bại.');
+      }
+    }
+
+    async function testTelegramBot() {
+      const statusEl = document.getElementById('tgStatus');
+      if (statusEl) { statusEl.textContent = 'Đang gửi tin thử...'; statusEl.style.color = '#0078d7'; }
+      const res = await api('/telegram/test', { method: 'POST' });
+      if (statusEl) {
+        statusEl.textContent = res?.message || (res?.ok ? 'Đã gửi tin thử.' : 'Gửi thử thất bại.');
+        statusEl.style.color = res?.ok ? '#28a745' : '#c50f1f';
+      }
+      showWinAlert(res?.message || (res?.ok ? 'Đã gửi tin thử tới Telegram.' : 'Gửi tin thử thất bại.'));
+    }
+
+    window.loadTelegramConfig = loadTelegramConfig;
+    window.saveTelegramConfigUI = saveTelegramConfigUI;
+    window.testTelegramBot = testTelegramBot;
 
     async function loadProxyType(type) {
       const map = {

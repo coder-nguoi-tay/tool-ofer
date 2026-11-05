@@ -100,6 +100,7 @@ const BTN_MAIN = [
   [{ text: '📊 Status', cb: 'status' }, { text: '▶ Run', cb: 'run' }],
   [{ text: '⏸ Pause', cb: 'pause' }, { text: '🛑 Stop', cb: 'stop' }],
   [{ text: '📦 Proxy', cb: 'proxy' }, { text: '🛒 Mua Proxy', cb: 'buy' }],
+  [{ text: '🗑 Xóa tất cả proxy', cb: 'clear_proxy' }],
 ];
 
 const BTN_RUNNING = [
@@ -127,6 +128,7 @@ Bạn có thể thực hiện các hành động sau:
 - done: xem leads hoàn thành
 - speed: tốc độ leads/giờ
 - reset: reset bộ đếm leads
+- clear_proxy: xóa TOÀN BỘ proxy trong hàng đợi (dùng khi cần nạp danh sách proxy mới)
 - log: log session gần nhất
 - reply: chỉ trả lời bằng text, không thực hiện hành động
 
@@ -194,6 +196,8 @@ function suggestionsToButtons(suggestions = []) {
     'log': { text: '📋 Log', cb: 'log' },
     'reset': { text: '🔄 Reset', cb: 'reset' },
     'clear_log': { text: '🗑 Xóa Log', cb: 'clear_log' },
+    'clear_proxy': { text: '🗑 Xóa tất cả proxy', cb: 'clear_proxy' },
+    'clearproxy': { text: '🗑 Xóa tất cả proxy', cb: 'clear_proxy' },
   };
   const btns = suggestions.map((s) => MAP[s] || MAP[s.toLowerCase()]).filter(Boolean);
   if (!btns.length) return null;
@@ -305,8 +309,20 @@ async function execCommand(chatId, userId, cmdText) {
       `<b>📦 Proxy</b>\nCòn: <b>${pq.available}</b> / Dùng: ${pq.used}\nDual stream: ${pq.dualStream ? '✅' : '❌'}`,
       pq.available < 20
         ? [[{ text: '🛒 Mua thêm proxy', cb: 'buy' }, { text: '📊 Status', cb: 'status' }]]
-        : [[{ text: '📊 Status', cb: 'status' }]],
+        : [[{ text: '📊 Status', cb: 'status' }, { text: '🗑 Xóa tất cả proxy', cb: 'clear_proxy' }]],
     );
+
+  } else if (name === '/clearproxy' || name === '/clear_proxy' || name === 'clearproxy' || name === 'clear_proxy') {
+    // Xóa toàn bộ proxy trong hàng đợi + ô nhập danh sách (giống nút trên giao diện web).
+    const res = await appPost('/proxy-queue/clear').catch((e) => ({ error: e.message }));
+    if (res?.error) {
+      await send(chatId, `❌ Xóa proxy thất bại: ${res.error}`, [[{ text: '📦 Proxy', cb: 'proxy' }]]);
+    } else {
+      await send(chatId,
+        `🗑 <b>Đã xóa tất cả proxy</b>\n${res?.message || 'Hàng đợi proxy đã được làm trống.'}`,
+        [[{ text: '📦 Proxy', cb: 'proxy' }, { text: '📊 Status', cb: 'status' }]],
+      );
+    }
 
   } else if (name === '/email' || name === 'email') {
     const eq = await appGet('/email-queue');
@@ -381,7 +397,7 @@ async function execCommand(chatId, userId, cmdText) {
       (hasAi
         ? '💬 Chat tự nhiên — AI hiểu và thực hiện.\nHoặc dùng các lệnh:\n\n'
         : 'Các lệnh:\n\n') +
-      `/status /run [n] /pause /stop\n/proxy /email /buy\n/done /speed /reset /log`,
+      `/status /run [n] /pause /stop\n/proxy /email /buy\n/done /speed /reset /log\n/clearproxy — xóa tất cả proxy trong hàng đợi`,
       BTN_MAIN,
     );
 
@@ -395,6 +411,7 @@ async function execCommand(chatId, userId, cmdText) {
       { pat: /\b(chạy|run|bật|start|mở)\b(?!.*\d)/, action: () => '/run' },
       { pat: /\b(dừng|stop|tắt|kết thúc|ngừng)\b/, action: () => '/stop' },
       { pat: /\b(tạm dừng|pause|nghỉ)\b/, action: () => '/pause' },
+      { pat: /\b(xóa|xoá|clear)\b.*\b(proxy|proxies)\b|\b(proxy|proxies)\b.*\b(xóa|xoá|clear)\b/, action: () => '/clearproxy' },
       { pat: /\b(proxy|proxies)\b.*\b(còn|bao nhiêu|status|xem)\b|\b(xem|bao nhiêu)\b.*\bproxy\b/, action: () => '/proxy' },
       { pat: /\b(mua|buy|nạp|thêm)\b.*\bproxy\b|\bproxy\b.*\b(mua|buy|nạp)\b/, action: () => '/buy' },
       { pat: /\b(email)\b.*\b(còn|bao nhiêu|xem)\b|\b(xem|bao nhiêu)\b.*\bemail\b/, action: () => '/email' },
@@ -437,6 +454,7 @@ async function execCommand(chatId, userId, cmdText) {
       status: '/status', run: decision.params?.count ? `/run ${decision.params.count}` : '/run',
       stop: '/stop', pause: '/pause', proxy: '/proxy', email: '/email',
       buy_proxy: '/buy', done: '/done', speed: '/speed', reset: '/reset', log: '/log', clear_log: '/clear-log',
+      clear_proxy: '/clearproxy',
     };
     if (decision.action !== 'reply' && actionMap[decision.action]) {
       await execCommand(chatId, userId, actionMap[decision.action]);
@@ -551,15 +569,71 @@ async function pollUpdates() {
 
 // ─── Khởi động ────────────────────────────────────────────────────────────────
 
+/**
+ * Thế hệ (generation) của bot đang chạy. Mỗi lần reload/stop tăng lên 1 để vòng
+ * poll cũ tự thoát, tránh 2 vòng poll cùng gọi Telegram API gây trùng lệnh.
+ *
+ * @type {number}
+ */
+let botGeneration = 0;
+
+/**
+ * Timer kiểm tra/thông báo định kỳ (checkAndNotify mỗi 30s), cần clear khi reload.
+ *
+ * @type {ReturnType<typeof setInterval>|null}
+ */
+let notifyTimer = null;
+
+/**
+ * Dừng bot Telegram hiện tại (nếu đang chạy): tăng generation để vòng poll cũ
+ * thoát và clear timer thông báo.
+ *
+ * @return {void}
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-05
+ */
+export function stopTelegramBot() {
+  botGeneration += 1;
+  if (notifyTimer) {
+    clearInterval(notifyTimer);
+    notifyTimer = null;
+  }
+  cfg = null;
+}
+
+/**
+ * Đọc lại telegram-config.json và khởi động bot với cấu hình mới.
+ * Dùng khi người dùng lưu Bot Token / Chat ID từ giao diện web.
+ *
+ * @return {Promise<{running: boolean, error?: string}>} Trạng thái sau khi reload.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-05
+ */
+export async function reloadTelegramBot() {
+  stopTelegramBot();
+  lastUpdateId = 0;
+  const started = await startTelegramBot();
+  return { running: Boolean(started) };
+}
+
+/**
+ * Khởi động bot Telegram: đọc config, chạy vòng poll update và timer thông báo.
+ *
+ * @return {Promise<boolean>} true nếu bot đã khởi động (có botToken + allowedUserId).
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-10-20
+ */
 export async function startTelegramBot() {
   const configPath = join(homedir(), 'Library', 'Application Support', dataDirName, 'telegram-config.json');
   try {
     const raw = JSON.parse(await readFile(configPath, 'utf8'));
-    if (!raw.botToken || !raw.allowedUserId) return;
+    if (!raw.botToken || !raw.allowedUserId) return false;
     cfg = raw;
     notifyChatId = raw.notifyChatId ?? null;
     console.log('[TGBot] Đã khởi động, allowedUserId:', cfg.allowedUserId);
-  } catch { return; }
+  } catch { return false; }
+
+  const generation = ++botGeneration;
 
   try {
     const state = await appGet('/state');
@@ -567,10 +641,18 @@ export async function startTelegramBot() {
     lastLimitRunCount = sessionLeadsAtBotStart;
   } catch {}
 
-  const poll = async () => { try { await pollUpdates(); } catch {} setTimeout(poll, 1000); };
+  const poll = async () => {
+    if (generation !== botGeneration) return;
+    try { await pollUpdates(); } catch {}
+    if (generation !== botGeneration) return;
+    setTimeout(poll, 1000);
+  };
   void poll();
 
-  setInterval(checkAndNotify, 30_000);
+  notifyTimer = setInterval(() => {
+    if (generation !== botGeneration) return;
+    void checkAndNotify();
+  }, 30_000);
 
   if (cfg.notifyChatId) {
     notifyChatId = cfg.notifyChatId;
@@ -581,4 +663,5 @@ export async function startTelegramBot() {
       running ? BTN_RUNNING : BTN_STOPPED,
     );
   }
+  return true;
 }
