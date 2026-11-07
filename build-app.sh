@@ -188,6 +188,14 @@ if [ -d "$HOME/workspaces" ]; then
   rsync -av --exclude 'node_modules' --exclude '.git' --exclude '*.app' --exclude '*.zip' ./ "$HOME/workspaces/AutoLeadPC-mac/" 2>/dev/null || true
 fi
 
+# Cập nhật bản build vào /Applications/ (nếu có quyền ghi hoặc đã tồn tại)
+if [ -w "/Applications" ] || [ -d "/Applications/AutoLeadPC Mac 2 AdsPower.app" ]; then
+  echo "Cập nhật bản build vào /Applications/ ..."
+  rm -rf "/Applications/AutoLeadPC Mac 2 AdsPower.app"
+  cp -R "AutoLeadPC Mac 2 AdsPower.app" "/Applications/AutoLeadPC Mac 2 AdsPower.app"
+  xattr -dr com.apple.quarantine "/Applications/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
+fi
+
 echo "=========================================="
 echo "Build thành công bản duy nhất:"
 echo "  AutoLeadPC Mac 2 AdsPower.app   → Cổng 3211"
