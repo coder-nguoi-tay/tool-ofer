@@ -5830,7 +5830,7 @@ async function openBrowserWithInstalledChrome({
       // Cài giảm runHeadless vẫn mở cửa sổ thật nhưng bị thu nhỏ ngầm ngay khi mở.
       context = await chromium.launchPersistentContext(userDataDirectory, {
         executablePath: build.executablePath,
-        ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking', '--disable-component-update'],
+        ignoreDefaultArgs: ['--enable-automation', '--enable-unsafe-swiftshader', '--disable-extensions', '--disable-background-networking', '--disable-component-update'],
         headless: trueHeadless,
         viewport: runHeadless ? headlessViewport : null,
         ...(dp.screen && { screen: { width: dp.screen.width, height: dp.screen.height } }),
@@ -5850,9 +5850,9 @@ async function openBrowserWithInstalledChrome({
           '--disable-blink-features=AutomationControlled',
           // WebRTC policy theo cấu hình anti-fingerprint (nhất quán với UI/engine khác).
           `--webrtc-ip-handling-policy=${webrtcPolicy}`,
-          '--disable-gpu',
-          // Chrome mới không tự dùng SwiftShader cho WebGL nữa; thiếu cờ này trang thấy "không có WebGL".
-          '--enable-unsafe-swiftshader',
+          // KHÔNG dùng --disable-gpu và --enable-unsafe-swiftshader:
+          // Tránh lộ card ảo SwiftShader Device (dấu hiệu bot đỏ của Cloudflare/CreepJS).
+          // Cho phép WebGL chạy trên GPU thật (ANGLE Metal trên Mac) — khớp 100% profile người dùng thật.
           '--disable-dev-shm-usage',
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
@@ -5867,6 +5867,16 @@ async function openBrowserWithInstalledChrome({
           '--renderer-process-limit=3',
         ],
       });
+    }
+    // Gắn tầng mô phỏng hành vi người thật (CloakBrowser Humanize) cho Chrome thường:
+    // Tự động biến đổi click, type, fill thành quỹ đạo Bezier mượt mà và độ trễ ngẫu nhiên của người thật.
+    if (!useCloakBrowser) {
+      try {
+        await applyCloakHumanize(context);
+        console.log(`[Chrome] Đã kích hoạt Humanize (quỹ đạo chuột Bezier & gõ phím ngẫu nhiên) cho slot ${(tileIndex ?? 0) + 1}`);
+      } catch (err) {
+        console.warn(`[Chrome] Không gắn được lớp Humanize: ${err.message}`);
+      }
     }
   } catch (error) {
     await relay?.close();
