@@ -1423,8 +1423,8 @@
               <span class="options-toolbar-hint">Bấm trực tiếp vào từng ô để bật / tắt nhanh</span>
             </div>
             <div class="options-pills-row">
-              <label class="option-pill" title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
-                <input type="checkbox" id="cbxRunInApp" onchange="syncOptionPills()">
+              <label class="option-pill is-checked active" title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
+                <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
                 <span class="option-pill-text"><span class="option-pill-icon">📺</span> Chạy trong app (Khi bấm mới hiện)</span>
               </label>
 
@@ -2807,6 +2807,22 @@
             try {
               localStorage.setItem('autoleadpc_hide_until_lead', String(e.target.checked));
             } catch {}
+          });
+        }
+
+        // Tự động bật Chạy trong app (mặc định là true nếu chưa lưu)
+        const cachedRunInApp = localStorage.getItem('autoleadpc_run_in_app');
+        const cbxRunInApp = document.getElementById('cbxRunInApp');
+        if (cbxRunInApp) {
+          cbxRunInApp.checked = (cachedRunInApp === null ? true : cachedRunInApp === 'true');
+        }
+        if (cbxRunInApp && !cbxRunInApp._hasStorageListener) {
+          cbxRunInApp._hasStorageListener = true;
+          cbxRunInApp.addEventListener('change', (e) => {
+            try {
+              localStorage.setItem('autoleadpc_run_in_app', String(e.target.checked));
+            } catch {}
+            syncOptionPills();
           });
         }
 
