@@ -1,6 +1,8 @@
 import { createServer, connect } from 'node:net';
 import { createServer as createHttpServer, request as requestHttp } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Relay SOCKS5 thêm xác thực.
@@ -381,7 +383,8 @@ async function main() {
   console.log('\nCtrl+C để dừng.');
 }
 
-if (import.meta.main) {
+// Không dùng import.meta.main: Node cũ trả undefined nên relay thoát im lặng.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

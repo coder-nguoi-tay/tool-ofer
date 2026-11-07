@@ -51,4 +51,59 @@ test('screen tab closing logic safely updates active index', () => {
   remainingTabs = remainingTabs.filter(i => i !== closeFirst);
   newActiveIndex = Math.max(0, Math.min(closeFirst > 0 ? closeFirst - 1 : 0, remainingTabs.length - 1));
   assert.equal(newActiveIndex, 0, 'Closing first tab should stay on index 0');
+
+  // Đóng tab duy nhất còn lại: kết thúc phiên trình duyệt
+  remainingTabs = [0];
+  const closeOnly = 0;
+  remainingTabs = remainingTabs.filter(i => i !== closeOnly);
+  assert.equal(remainingTabs.length === 0, true, 'Closing the only tab leaves 0 pages and triggers closedSession');
+});
+
+test('screen view navigate URL normalization ensures valid protocol', () => {
+  const normalize = (raw) => {
+    let u = String(raw || '').trim();
+    if (u && !/^https?:\/\//i.test(u)) u = `https://${u}`;
+    return u;
+  };
+  assert.equal(normalize('google.com'), 'https://google.com');
+  assert.equal(normalize('http://localhost:3000'), 'http://localhost:3000');
+  assert.equal(normalize('https://example.com/test'), 'https://example.com/test');
+  assert.equal(normalize(''), '');
+});
+
+test('screen view stream frame queue drops superseded frames to prevent lag', () => {
+  let isRendering = false;
+  let pendingFrame = null;
+  const renderedFrames = [];
+
+  const onFrame = (frameId) => {
+    pendingFrame = frameId;
+    if (!isRendering) {
+      renderLoop();
+    }
+  };
+
+  const renderLoop = () => {
+    if (!pendingFrame) {
+      isRendering = false;
+      return;
+    }
+    isRendering = true;
+    const current = pendingFrame;
+    pendingFrame = null;
+    renderedFrames.push(current);
+    // giả lập đang vẽ
+  };
+
+  // Giả sử có 3 frame đến dồn dập trong khi frame 1 đang vẽ:
+  onFrame(1);
+  assert.equal(renderedFrames.length, 1);
+  assert.equal(isRendering, true);
+
+  onFrame(2); // Frame 2 được lưu vào pending
+  onFrame(3); // Frame 3 ghi đè pending, Frame 2 bị drop tự nhiên!
+
+  assert.equal(pendingFrame, 3);
+  renderLoop();
+  assert.deepEqual(renderedFrames, [1, 3], 'Frame 2 bị drop để frame 3 được render ngay lập tức, không bị dồn trễ');
 });

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { chromium } from 'playwright';
 import { findSubmitButton, handleRadioAndSurveyOptions } from '../autofill.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { existsSync } from 'node:fs';
 
 const offlineFixturePath = fileURLToPath(new URL('./uplevel-zulily-offline.html', import.meta.url));
 
@@ -93,4 +94,5 @@ async function verifyOfflineUplevelFunnel() {
   }
 }
 
-test('Uplevel Rewards / Zulily funnel stays inside the offline test fixture', verifyOfflineUplevelFunnel);
+const skip = !existsSync(chromium.executablePath()) && 'Chưa cài Chromium của Playwright';
+test('Uplevel Rewards / Zulily funnel stays inside the offline test fixture', { skip }, verifyOfflineUplevelFunnel);

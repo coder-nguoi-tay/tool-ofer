@@ -1,6 +1,20 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { autoRefill, closeActiveBrowsers, closeChromeWhenLastTabCloses, queueAutomaticRefill, getDeadOrBlockedReason, watchTrafficBlockedPage, proxyQueue, clearAllProxyQueue } from './app.mjs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test, { after } from 'node:test';
+
+// closeActiveBrowsers chạy `pkill -9` theo mẫu rộng, ghi đè cấu hình tự bù và dọn profile AdsPower.
+// Phải đổi PATH và HOME TRƯỚC khi nạp app.mjs, nếu không test sẽ giết trình duyệt của app đang
+// chạy thật và đụng dữ liệu thật. Vì vậy app.mjs được import động thay vì import tĩnh.
+const sandboxDir = mkdtempSync(join(tmpdir(), 'autolead-proxy-stop-'));
+const pkillLogPath = join(sandboxDir, 'pkill-calls.log');
+writeFileSync(join(sandboxDir, 'pkill'), `#!/bin/sh\necho "$*" >> "${pkillLogPath}"\nexit 1\n`, { mode: 0o755 });
+process.env.PATH = `${sandboxDir}:${process.env.PATH}`;
+process.env.HOME = sandboxDir;
+after(() => rmSync(sandboxDir, { recursive: true, force: true }));
+
+const { autoRefill, closeActiveBrowsers, closeChromeWhenLastTabCloses, queueAutomaticRefill, getDeadOrBlockedReason, watchTrafficBlockedPage, proxyQueue, clearAllProxyQueue } = await import('./app.mjs');
 
 test('đóng tab cuối AdsPower không mở lại tab trống', async () => {
   let onPageClose;
@@ -71,6 +85,9 @@ test('closeActiveBrowsers sets stopRequested and disables autoRefill completely'
   assert.equal(autoRefill.settings, null, 'settings must be cleared');
   assert.equal(autoRefill.targetCount, 0, 'targetCount must be reset to 0');
   assert.equal(result.autoRefillEnabled, false, 'result must report autoRefillEnabled = false');
+  // Bằng chứng lệnh kill đi vào pkill giả, không phải pkill thật của hệ thống.
+  assert.ok(existsSync(pkillLogPath), 'pkill must be intercepted by the sandbox stub');
+  assert.match(readFileSync(pkillLogPath, 'utf8'), /user-data-dir\.\*AutoLeadPC/);
 });
 
 test('queueAutomaticRefill does not schedule refill when stopRequested is true', () => {

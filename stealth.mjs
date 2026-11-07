@@ -110,18 +110,20 @@ export function buildUserAgentOverride(deviceProfile, build, languages) {
  * @since 2026-10-19
  */
 export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1) {
-  const spoof = deviceProfile.spoof;
+  const spoof = deviceProfile.spoof || {};
   return {
-    platform: spoof.platform,
+    platform: spoof.platform || deviceProfile.platform,
     vendor: spoof.vendor,
     maxTouchPoints: spoof.maxTouchPoints,
     hardwareConcurrency: spoof.hardwareConcurrency ?? null,
     deviceMemory: spoof.deviceMemory ?? null,
     webkitOnly: spoof.uaPlatform === 'iOS',
+    isMobile: Boolean(deviceProfile.isMobile),
     uaData: deviceProfile.uaData ? { ...deviceProfile.uaData } : null,
     webglVendor: spoof.webglVendor,
     webglRenderer: spoof.webglRenderer,
     webglParams: spoof.webglParams ?? null,
+    workerInjection: Boolean(antiFingerprint.workerInjection),
     screen: deviceProfile.screen && !deviceProfile.isMobile
       ? { availTop: deviceProfile.screen.availTop ?? 0, availHeight: deviceProfile.screen.availHeight ?? deviceProfile.screen.height, frameHeight: deviceProfile.screen.frameHeight ?? 85 }
       : null,
@@ -231,6 +233,8 @@ export function stealthInitScript(cfg) {
   const nav = G.navigator;
   const navProto = nav && Object.getPrototypeOf(nav);
   if (navProto) {
+    // Chỉ vá webdriver khi automation bị lộ (true); Chrome thật trả false. Tránh tạo khác biệt không cần thiết.
+    if ('webdriver' in nav && nav.webdriver) replaceGetter(navProto, 'webdriver', () => false);
     if (cfg.platform && nav.platform !== cfg.platform) replaceGetter(navProto, 'platform', () => cfg.platform);
     if (cfg.vendor && 'vendor' in nav && nav.vendor !== cfg.vendor) replaceGetter(navProto, 'vendor', () => cfg.vendor);
     if (typeof cfg.maxTouchPoints === 'number' && 'maxTouchPoints' in nav && nav.maxTouchPoints !== cfg.maxTouchPoints) {
@@ -247,6 +251,178 @@ export function stealthInitScript(cfg) {
       try { delete G.chrome; } catch {}
     } else if (cfg.deviceMemory && 'deviceMemory' in nav && nav.deviceMemory !== cfg.deviceMemory) {
       replaceGetter(navProto, 'deviceMemory', () => cfg.deviceMemory);
+    }
+
+    // ── Plugins & MimeTypes: Đồng bộ đúng thực tế cho desktop (có PDF Viewer) và mobile (rỗng) ──
+    if (cfg.isMobile || cfg.webkitOnly) {
+      if ('pdfViewerEnabled' in nav && nav.pdfViewerEnabled !== false) {
+        replaceGetter(navProto, 'pdfViewerEnabled', () => false);
+      }
+    } else {
+      if ('pdfViewerEnabled' in nav && nav.pdfViewerEnabled !== true) {
+        replaceGetter(navProto, 'pdfViewerEnabled', () => true);
+      }
+      if ('plugins' in nav && nav.plugins.length === 0) {
+        const createPlugin = (name, filename, description, mimeTypes) => {
+          const plugin = { name, filename, description, length: mimeTypes.length };
+          mimeTypes.forEach((m, idx) => { plugin[idx] = m; plugin[m.type] = m; });
+          return plugin;
+        };
+        const mimePdf = { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' };
+        const mimeTextPdf = { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' };
+
+        const pluginList = [
+          createPlugin('PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+          createPlugin('Chrome PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+          createPlugin('Chromium PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+          createPlugin('Microsoft Edge PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+          createPlugin('WebKit built-in PDF', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+        ];
+
+        mimePdf.enabledPlugin = pluginList[0];
+        mimeTextPdf.enabledPlugin = pluginList[0];
+
+        const mockPlugins = {
+          length: pluginList.length,
+          item(i) { return this[i] || null; },
+          namedItem(n) { return this[n] || null; },
+          refresh() {},
+        };
+        pluginList.forEach((p, idx) => { mockPlugins[idx] = p; mockPlugins[p.name] = p; });
+
+        const mockMimes = {
+          length: 2,
+          item(i) { return this[i] || null; },
+          namedItem(n) { return this[n] || null; },
+        };
+        mockMimes[0] = mimePdf;
+        mockMimes[1] = mimeTextPdf;
+        mockMimes['application/pdf'] = mimePdf;
+        mockMimes['text/pdf'] = mimeTextPdf;
+
+        if (G.PluginArray && G.PluginArray.prototype) Object.setPrototypeOf(mockPlugins, G.PluginArray.prototype);
+        if (G.MimeTypeArray && G.MimeTypeArray.prototype) Object.setPrototypeOf(mockMimes, G.MimeTypeArray.prototype);
+
+        replaceGetter(navProto, 'plugins', () => mockPlugins);
+        replaceGetter(navProto, 'mimeTypes', () => mockMimes);
+      }
+    }
+  }
+
+  // ── Permissions: Khắc phục lỗi lệch pha Notification.permission vs permissions.query ──
+  if (typeof G.Permissions === 'function' && typeof G.Permissions.prototype.query === 'function') {
+    replaceMethod(G.Permissions.prototype, 'query', (original) => function (parameters) {
+      if (parameters && parameters.name === 'notifications') {
+        const notifState = G.Notification ? G.Notification.permission : 'default';
+        const mappedState = notifState === 'default' ? 'prompt' : notifState;
+        return original.call(this, parameters).then((status) => {
+          if (status && status.state !== mappedState) {
+            try {
+              Object.defineProperty(status, 'state', { get: () => mappedState, configurable: true, enumerable: true });
+            } catch {}
+          }
+          return status;
+        }).catch(() => {
+          const fallback = {
+            state: mappedState,
+            onchange: null,
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false; },
+          };
+          if (G.PermissionStatus && G.PermissionStatus.prototype) {
+            try { Object.setPrototypeOf(fallback, G.PermissionStatus.prototype); } catch {}
+          }
+          return fallback;
+        });
+      }
+      return original.call(this, parameters);
+    });
+  }
+
+  // ── MediaDevices: Giả lập microphone, speaker, camera tối thiểu (tránh rò rỉ mảng rỗng trên headless/VPS) ──
+  if (nav && nav.mediaDevices && typeof nav.mediaDevices.enumerateDevices === 'function') {
+    const mediaProto = Object.getPrototypeOf(nav.mediaDevices);
+    const targetMedia = (mediaProto && Object.getOwnPropertyDescriptor(mediaProto, 'enumerateDevices')) ? mediaProto : nav.mediaDevices;
+    replaceMethod(targetMedia, 'enumerateDevices', (original) => async function () {
+      const devices = await original.call(this).catch(() => []);
+      if (Array.isArray(devices) && devices.length > 0) {
+        return devices;
+      }
+      const genId = (idx, salt) => {
+        const hex = '0123456789abcdef';
+        let str = '';
+        for (let i = 0; i < 64; i += 1) {
+          str += hex[Math.abs(hash(idx * 137 + i + salt)) % 16];
+        }
+        return str;
+      };
+      const groupId = genId(0, 11);
+      const mockList = [
+        { deviceId: 'default', kind: 'audioinput', label: '', groupId },
+        { deviceId: genId(1, 23), kind: 'audioinput', label: '', groupId },
+        { deviceId: 'default', kind: 'audiooutput', label: '', groupId },
+        { deviceId: genId(2, 47), kind: 'audiooutput', label: '', groupId },
+        { deviceId: genId(3, 89), kind: 'videoinput', label: '', groupId: genId(4, 97) },
+      ];
+      const Proto = G.MediaDeviceInfo && G.MediaDeviceInfo.prototype;
+      return mockList.map((d) => (Proto ? Object.assign(Object.create(Proto), d, { toJSON() { return d; } }) : d));
+    });
+  }
+
+  // ── window.chrome: Đảm bảo app, csi, loadTimes trên môi trường Chromium ──
+  if (!cfg.webkitOnly && typeof G.window !== 'undefined') {
+    if (!G.chrome || typeof G.chrome !== 'object') {
+      G.chrome = {};
+    }
+    if (G.window && G.window !== G && !G.window.chrome) {
+      try { G.window.chrome = G.chrome; } catch {}
+    }
+    const c = G.chrome;
+    if (!c.app) {
+      c.app = {
+        isInstalled: false,
+        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+        RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+        getDetails() { return null; },
+        getIsInstalled() { return false; },
+        runningState() { return 'cannot_run'; },
+      };
+      nativeSource.set(c.app.getDetails, 'function getDetails() { [native code] }');
+      nativeSource.set(c.app.getIsInstalled, 'function getIsInstalled() { [native code] }');
+      nativeSource.set(c.app.runningState, 'function runningState() { [native code] }');
+    }
+    if (typeof c.csi !== 'function') {
+      c.csi = function csi() {
+        return {
+          startE: Date.now() - Math.floor(hash(1) % 2000 + 500),
+          onloadT: Date.now(),
+          pageT: Math.floor(hash(2) % 3000 + 800),
+          tran: 15,
+        };
+      };
+      nativeSource.set(c.csi, 'function csi() { [native code] }');
+    }
+    if (typeof c.loadTimes !== 'function') {
+      c.loadTimes = function loadTimes() {
+        const nowSec = Date.now() / 1000;
+        return {
+          requestTime: nowSec - 1.2,
+          startLoadTime: nowSec - 1.1,
+          commitLoadTime: nowSec - 0.7,
+          finishDocumentLoadTime: nowSec - 0.2,
+          finishLoadTime: nowSec,
+          firstPaintTime: nowSec - 0.6,
+          firstPaintAfterLoadTime: 0,
+          navigationType: 'Other',
+          wasFetchedViaSpdy: true,
+          wasNpnNegotiated: true,
+          npnNegotiatedProtocol: 'h2',
+          wasAlternateProtocolAvailable: false,
+          connectionInfo: 'h2',
+        };
+      };
+      nativeSource.set(c.loadTimes, 'function loadTimes() { [native code] }');
     }
   }
 
@@ -588,6 +764,7 @@ export function createDeviceVariant(profileKey, base, seed, minViewport = null) 
       dpr: screen.dpr, hardwareConcurrency: pick(chip.cores), deviceMemory: 8,
       webglRenderer: `ANGLE (Apple, ANGLE Metal Renderer: ${chip.gpu}, Unspecified Version)`,
     });
+    variant.deviceVersion = `macOS ${variant.uaData.platformVersion}`;
     variant.summary = `macOS ${variant.uaData.platformVersion} · ${chip.gpu} · ${variant.spoof.hardwareConcurrency} nhân · ${screen.width}x${screen.height}@${screen.dpr}x`;
   } else if (profileKey === 'windows' || profileKey === 'linux') {
     const isWindows = profileKey === 'windows';
@@ -605,6 +782,7 @@ export function createDeviceVariant(profileKey, base, seed, minViewport = null) 
     // Máy từ 12 luồng trở lên gần như luôn có ≥ 8 GB (Chrome làm tròn xuống và chặn trên ở 8).
     variant.spoof.deviceMemory = variant.spoof.hardwareConcurrency >= 12 ? 8 : pick([4, 8, 8]);
     const osName = isWindows ? (osVersion === '10.0.0' ? 'Windows 10' : 'Windows 11') : `Linux ${osVersion}`;
+    variant.deviceVersion = isWindows ? `${osName} (${osVersion})` : `Linux ${osVersion}`;
     variant.summary = `${osName} · ${gpu.renderer.replace(/^ANGLE \([^,]+, /, '').replace(/ \(0x.*$| Direct3D.*$|,.*$/, '')} · ${variant.spoof.hardwareConcurrency} nhân · ${screen.width}x${screen.height}@${screen.dpr}x`;
   } else if (profileKey === 'android') {
     const device = pick(androidDevices);
@@ -619,6 +797,7 @@ export function createDeviceVariant(profileKey, base, seed, minViewport = null) 
       dpr: device.dpr, hardwareConcurrency: device.cores, deviceMemory: pick([4, 8, 8]),
       webglVendor: device.vendor, webglRenderer: device.gpu,
     });
+    variant.deviceVersion = `Android ${androidMajor} (${device.model})`;
     variant.summary = `Android ${variant.uaData.platformVersion.split('.')[0]} · ${device.model} · ${device.gpu} · ${device.width}x${device.height}@${device.dpr}x`;
   } else if (profileKey === 'ios') {
     const screen = pick(iphoneScreens);
@@ -627,13 +806,521 @@ export function createDeviceVariant(profileKey, base, seed, minViewport = null) 
     variant.screen = { width: screen.width, height: screen.height };
     variant.ua = (v) => `Mozilla/5.0 (iPhone; CPU iPhone OS ${osVersion} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`;
     variant.spoof.hardwareConcurrency = screen.cores;
+    variant.deviceVersion = `iOS ${osVersion.replace(/_/g, '.')} (iPhone)`;
     variant.summary = `iOS ${osVersion.replace(/_/g, '.')} · iPhone ${screen.width}x${screen.height}@3x`;
   } else if (profileKey === 'ipad') {
     const osVersion = pick(iosVersions);
     variant.ua = (v) => `Mozilla/5.0 (iPad; CPU OS ${osVersion} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/${v} Mobile/15E148 Safari/604.1`;
+    variant.deviceVersion = `iPadOS ${osVersion.replace(/_/g, '.')} (iPad)`;
     variant.summary = `iPadOS ${osVersion.replace(/_/g, '.')} · ${base.screen.width}x${base.screen.height}@2x`;
   } else {
+    variant.deviceVersion = base.label;
     variant.summary = base.label;
   }
   return variant;
 }
+
+// ── Profile Coherence Checks: kiểm tra tính nhất quán fingerprint trước/sau khi chạy ──
+
+/**
+ * Xây dựng giá trị fingerprint kỳ vọng dựa trên cấu hình thiết bị và anti-fingerprint.
+ *
+ * @param {object} dp Cấu hình profile thiết bị (DEVICE_PROFILES hoặc createDeviceVariant).
+ * @param {object} antiFingerprint Cấu hình anti-fingerprint từ UI/Settings.
+ * @param {object} options Các tuỳ chọn bổ sung { timezoneId, languages, effectiveBuild }.
+ * @return {object} Đối tượng chứa các giá trị kỳ vọng.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-07
+ */
+export function buildProfileCoherenceExpected(dp, antiFingerprint = {}, options = {}) {
+  const { timezoneId, languages } = options;
+  const spoof = dp?.spoof || {};
+  const platform = dp?.platform || spoof.platform || null;
+  let expectedUaContains = null;
+  if (dp?.isMobile) {
+    expectedUaContains = dp?.uaData?.model || 'Mobile';
+  } else if (platform === 'MacIntel') {
+    expectedUaContains = 'Macintosh';
+  } else if (platform === 'Win32') {
+    expectedUaContains = 'Windows';
+  } else if (platform === 'Linux x86_64') {
+    expectedUaContains = 'Linux';
+  }
+
+  const isIos = spoof.uaPlatform === 'iOS';
+  const isMobile = Boolean(dp?.isMobile);
+
+  return {
+    platform,
+    uaPlatform: spoof.uaPlatform || dp?.uaData?.platform || null,
+    userAgentContains: expectedUaContains,
+    webdriver: false,
+    hardwareConcurrency: spoof.hardwareConcurrency || null,
+    deviceMemory: spoof.deviceMemory ?? null,
+    maxTouchPoints: typeof spoof.maxTouchPoints === 'number' ? spoof.maxTouchPoints : (isMobile ? 5 : 0),
+    devicePixelRatio: dp?.deviceScaleFactor || spoof.dpr || null,
+    webglVendor: antiFingerprint.webgl ? (spoof.webglVendor || null) : null,
+    webglRenderer: antiFingerprint.webgl ? (spoof.webglRenderer || null) : null,
+    timezone: timezoneId || null,
+    languages: Array.isArray(languages) && languages.length > 0 ? languages : ['en-US', 'en'],
+    isMobile,
+    hasChromeObject: !isIos,
+    pdfViewerEnabled: !isMobile && !isIos,
+    hasPlugins: !isMobile && !isIos,
+    notificationPermission: 'default',
+    notificationQueryState: 'prompt',
+  };
+}
+
+/**
+ * Thu thập snapshot fingerprint thực tế đang hiển thị trong trang qua page.evaluate.
+ *
+ * @param {object} page Page Playwright.
+ * @return {Promise<object|null>} Đối tượng snapshot hoặc null.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-07
+ */
+export async function collectProfileCoherenceSnapshot(page) {
+  if (!page || typeof page.evaluate !== 'function') return null;
+  return await page.evaluate(async () => {
+    let webglVendor = null;
+    let webglRenderer = null;
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (gl) {
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        if (ext) {
+          webglVendor = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
+          webglRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+        }
+      }
+    } catch {}
+
+    let timezone = null;
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {}
+
+    let clientHintsPlatform = null;
+    let clientHintsMobile = null;
+    try {
+      if (navigator.userAgentData) {
+        clientHintsPlatform = navigator.userAgentData.platform;
+        clientHintsMobile = navigator.userAgentData.mobile;
+      }
+    } catch {}
+
+    let notificationPermission = null;
+    try {
+      if (typeof Notification !== 'undefined') {
+        notificationPermission = Notification.permission;
+      }
+    } catch {}
+
+    let notificationQueryState = null;
+    try {
+      if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+        const status = await navigator.permissions.query({ name: 'notifications' });
+        notificationQueryState = status ? status.state : null;
+      }
+    } catch {}
+
+    let mediaDevicesCount = null;
+    try {
+      if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
+        const devs = await navigator.mediaDevices.enumerateDevices();
+        mediaDevicesCount = Array.isArray(devs) ? devs.length : 0;
+      }
+    } catch {}
+
+    const hasChromeObject = typeof window.chrome === 'object' && window.chrome !== null && typeof window.chrome.csi === 'function';
+    const pdfViewerEnabled = typeof navigator.pdfViewerEnabled === 'boolean' ? navigator.pdfViewerEnabled : null;
+    const pluginsLength = navigator.plugins ? navigator.plugins.length : 0;
+
+    return {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      webdriver: navigator.webdriver,
+      languages: Array.from(navigator.languages || []),
+      hardwareConcurrency: navigator.hardwareConcurrency,
+      deviceMemory: navigator.deviceMemory,
+      maxTouchPoints: navigator.maxTouchPoints,
+      devicePixelRatio: window.devicePixelRatio,
+      screen: {
+        width: window.screen ? window.screen.width : null,
+        height: window.screen ? window.screen.height : null,
+        availWidth: window.screen ? window.screen.availWidth : null,
+        availHeight: window.screen ? window.screen.availHeight : null,
+      },
+      webgl: { vendor: webglVendor, renderer: webglRenderer },
+      timezone,
+      clientHints: { platform: clientHintsPlatform, mobile: clientHintsMobile },
+      hasChromeObject,
+      pdfViewerEnabled,
+      pluginsLength,
+      notificationPermission,
+      notificationQueryState,
+      mediaDevicesCount,
+    };
+  }).catch((err) => ({ error: err?.message || String(err) }));
+}
+
+/**
+ * So sánh snapshot quan sát được với các giá trị kỳ vọng, phân loại mức độ nghiêm trọng.
+ *
+ * @param {object} snapshot Dữ liệu thu thập từ collectProfileCoherenceSnapshot.
+ * @param {object} expected Dữ liệu kỳ vọng từ buildProfileCoherenceExpected.
+ * @return {object} { consistent: boolean, score: number, mismatches: Array }
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-07
+ */
+export function analyzeProfileCoherence(snapshot, expected) {
+  if (!snapshot || snapshot.error || !expected) {
+    return {
+      consistent: false,
+      score: 0,
+      mismatches: [{
+        key: 'snapshot',
+        expected: 'valid_snapshot',
+        observed: snapshot?.error || 'null',
+        severity: 'critical',
+        message: `Không thu thập được snapshot fingerprint: ${snapshot?.error || 'không có dữ liệu'}`,
+      }],
+    };
+  }
+
+  const mismatches = [];
+
+  // 1. Webdriver: không được phép lộ true
+  if (snapshot.webdriver === true) {
+    mismatches.push({
+      key: 'webdriver',
+      expected: false,
+      observed: true,
+      severity: 'critical',
+      message: 'navigator.webdriver bị lộ true (dấu hiệu bot automation)',
+    });
+  }
+
+  // 2. Platform (Win32, MacIntel, Linux x86_64, iPhone...)
+  if (expected.platform && snapshot.platform && snapshot.platform !== expected.platform) {
+    mismatches.push({
+      key: 'platform',
+      expected: expected.platform,
+      observed: snapshot.platform,
+      severity: 'high',
+      message: `navigator.platform (${snapshot.platform}) không khớp cấu hình máy (${expected.platform})`,
+    });
+  }
+
+  // 3. UserAgent Platform coherence
+  if (expected.userAgentContains && snapshot.userAgent && !snapshot.userAgent.includes(expected.userAgentContains)) {
+    mismatches.push({
+      key: 'userAgent',
+      expected: `chứa "${expected.userAgentContains}"`,
+      observed: snapshot.userAgent.slice(0, 80),
+      severity: 'high',
+      message: `navigator.userAgent không chứa từ khóa hệ điều hành kỳ vọng (${expected.userAgentContains})`,
+    });
+  }
+
+  // 4. Client Hints Platform vs UA Platform
+  if (expected.uaPlatform && snapshot.clientHints?.platform && snapshot.clientHints.platform !== expected.uaPlatform) {
+    mismatches.push({
+      key: 'clientHintsPlatform',
+      expected: expected.uaPlatform,
+      observed: snapshot.clientHints.platform,
+      severity: 'high',
+      message: `sec-ch-ua-platform (${snapshot.clientHints.platform}) lệch với profile (${expected.uaPlatform})`,
+    });
+  }
+
+  // 5. Hardware Concurrency
+  if (expected.hardwareConcurrency && snapshot.hardwareConcurrency && snapshot.hardwareConcurrency !== expected.hardwareConcurrency) {
+    mismatches.push({
+      key: 'hardwareConcurrency',
+      expected: expected.hardwareConcurrency,
+      observed: snapshot.hardwareConcurrency,
+      severity: 'medium',
+      message: `hardwareConcurrency (${snapshot.hardwareConcurrency}) lệch giá trị spoof (${expected.hardwareConcurrency})`,
+    });
+  }
+
+  // 6. WebGL Renderer
+  if (expected.webglRenderer && snapshot.webgl?.renderer && snapshot.webgl.renderer !== expected.webglRenderer) {
+    mismatches.push({
+      key: 'webglRenderer',
+      expected: expected.webglRenderer,
+      observed: snapshot.webgl.renderer,
+      severity: 'medium',
+      message: `WebGL Renderer (${snapshot.webgl.renderer}) lệch GPU profile (${expected.webglRenderer})`,
+    });
+  }
+
+  // 7. Timezone
+  if (expected.timezone && snapshot.timezone && snapshot.timezone !== expected.timezone) {
+    mismatches.push({
+      key: 'timezone',
+      expected: expected.timezone,
+      observed: snapshot.timezone,
+      severity: 'medium',
+      message: `Múi giờ (${snapshot.timezone}) lệch với timezone proxy/profile (${expected.timezone})`,
+    });
+  }
+
+  // 8. MaxTouchPoints
+  if (typeof expected.maxTouchPoints === 'number' && typeof snapshot.maxTouchPoints === 'number') {
+    if (expected.isMobile && snapshot.maxTouchPoints === 0) {
+      mismatches.push({
+        key: 'maxTouchPoints',
+        expected: '> 0',
+        observed: 0,
+        severity: 'high',
+        message: 'Thiết bị mobile nhưng maxTouchPoints = 0 (lộ desktop)',
+      });
+    } else if (!expected.isMobile && snapshot.maxTouchPoints > 0 && expected.maxTouchPoints === 0) {
+      mismatches.push({
+        key: 'maxTouchPoints',
+        expected: 0,
+        observed: snapshot.maxTouchPoints,
+        severity: 'low',
+        message: `Desktop giả lập nhưng có maxTouchPoints = ${snapshot.maxTouchPoints}`,
+      });
+    }
+  }
+
+  // 9. Ngôn ngữ chính
+  if (expected.languages && expected.languages.length > 0 && Array.isArray(snapshot.languages) && snapshot.languages.length > 0) {
+    const primaryExpected = expected.languages[0].toLowerCase();
+    const primaryObserved = (snapshot.languages[0] || '').toLowerCase();
+    if (primaryExpected !== primaryObserved && !primaryObserved.startsWith(primaryExpected.split('-')[0])) {
+      mismatches.push({
+        key: 'languages',
+        expected: expected.languages[0],
+        observed: snapshot.languages[0],
+        severity: 'low',
+        message: `Ngôn ngữ ưu tiên (${snapshot.languages[0]}) không khớp locale proxy (${expected.languages[0]})`,
+      });
+    }
+  }
+
+  // 10. Notification Permission Coherence (lệch Notification.permission vs permissions.query)
+  if (snapshot.notificationPermission === 'default' && snapshot.notificationQueryState === 'denied') {
+    mismatches.push({
+      key: 'notificationPermission',
+      expected: 'prompt',
+      observed: 'denied',
+      severity: 'critical',
+      message: 'Notification.permission là "default" nhưng query({ name: "notifications" }) trả về "denied" (dấu hiệu lộ automation/CreepJS)',
+    });
+  }
+
+  // 11. Chrome object parity
+  if (typeof expected.hasChromeObject === 'boolean' && typeof snapshot.hasChromeObject === 'boolean') {
+    if (expected.hasChromeObject && !snapshot.hasChromeObject) {
+      mismatches.push({
+        key: 'hasChromeObject',
+        expected: true,
+        observed: false,
+        severity: 'high',
+        message: 'Trình duyệt Chromium nhưng thiếu window.chrome hoặc window.chrome.csi',
+      });
+    } else if (!expected.hasChromeObject && snapshot.hasChromeObject) {
+      mismatches.push({
+        key: 'hasChromeObject',
+        expected: false,
+        observed: true,
+        severity: 'medium',
+        message: 'Profile WebKit/iOS nhưng lại tồn tại window.chrome',
+      });
+    }
+  }
+
+  // 12. pdfViewerEnabled parity
+  if (typeof expected.pdfViewerEnabled === 'boolean' && typeof snapshot.pdfViewerEnabled === 'boolean') {
+    if (expected.pdfViewerEnabled !== snapshot.pdfViewerEnabled) {
+      mismatches.push({
+        key: 'pdfViewerEnabled',
+        expected: expected.pdfViewerEnabled,
+        observed: snapshot.pdfViewerEnabled,
+        severity: 'medium',
+        message: `navigator.pdfViewerEnabled (${snapshot.pdfViewerEnabled}) không khớp loại thiết bị (${expected.pdfViewerEnabled ? 'Desktop' : 'Mobile/iOS'})`,
+      });
+    }
+  }
+
+  // 13. Plugins parity (Desktop Chromium phải có plugin PDF)
+  if (expected.hasPlugins === true && typeof snapshot.pluginsLength === 'number' && snapshot.pluginsLength === 0) {
+    mismatches.push({
+      key: 'plugins',
+      expected: '> 0',
+      observed: 0,
+      severity: 'medium',
+      message: 'Desktop Chromium nhưng navigator.plugins rỗng (dấu hiệu headless)',
+    });
+  }
+
+  // 14. MediaDevices rỗng trên Desktop
+  if (typeof snapshot.mediaDevicesCount === 'number' && snapshot.mediaDevicesCount === 0 && !expected.isMobile) {
+    mismatches.push({
+      key: 'mediaDevices',
+      expected: '> 0',
+      observed: 0,
+      severity: 'medium',
+      message: 'navigator.mediaDevices.enumerateDevices trả về mảng rỗng (dấu hiệu VPS headless không thiết bị âm thanh/hình ảnh)',
+    });
+  }
+
+  let penalty = 0;
+  for (const m of mismatches) {
+    if (m.severity === 'critical') penalty += 40;
+    else if (m.severity === 'high') penalty += 20;
+    else if (m.severity === 'medium') penalty += 10;
+    else penalty += 5;
+  }
+
+  return {
+    consistent: mismatches.length === 0,
+    score: Math.max(0, 100 - penalty),
+    mismatches,
+  };
+}
+
+/**
+ * Kiểm tra và ghi log cảnh báo tính nhất quán profile trên một tab đang mở.
+ *
+ * @param {object} page Page Playwright.
+ * @param {object} dp Cấu hình profile thiết bị.
+ * @param {object} antiFingerprint Cấu hình anti-fingerprint.
+ * @param {object} options Tuỳ chọn { timezoneId, languages, onLog, logger }.
+ * @return {Promise<object>} Kết quả kiểm tra.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-07
+ */
+export async function verifyPageProfileCoherence(page, dp, antiFingerprint = {}, options = {}) {
+  const expected = buildProfileCoherenceExpected(dp, antiFingerprint, options);
+  const snapshot = await collectProfileCoherenceSnapshot(page);
+  const analysis = analyzeProfileCoherence(snapshot, expected);
+
+  if (!analysis.consistent) {
+    const criticals = analysis.mismatches.filter((m) => m.severity === 'critical' || m.severity === 'high');
+    const logFn = options.onLog || options.logger;
+    if (typeof logFn === 'function' && criticals.length > 0) {
+      logFn({
+        type: 'profile_coherence_warning',
+        detail: `[Coherence Score ${analysis.score}/100] Cảnh báo lệch fingerprint: ${criticals.map((m) => m.message).join('; ')}`,
+      });
+    }
+  }
+
+  return { expected, snapshot, ...analysis };
+}
+
+// ── Guarded Worker Injection: inject fingerprint cho worker an toàn, không treo ──
+
+/**
+ * Gắn cơ chế tự động inject script chống fingerprint cho Web Worker / SharedWorker / ServiceWorker.
+ *
+ * Tiêu chí an toàn tuyệt đối:
+ * 1. Opt-in: Chỉ bật khi antiFingerprint.workerInjection hoặc options.enabled = true.
+ * 2. An toàn, không gây treo: waitForDebuggerOnStart = false (Worker không bao giờ bị dừng chờ lệnh).
+ * 3. Chống rò rỉ: Tự gỡ bỏ listener khi page / context đóng, có timeout guard.
+ *
+ * @param {object} context BrowserContext của Playwright.
+ * @param {object} page Page Playwright đại diện cho tab.
+ * @param {object} stealthConfig Cấu hình stealth (từ buildStealthConfig).
+ * @param {object} options Các tuỳ chọn bảo vệ { timeoutMs: 3000, enabled: false, onLog: Function }.
+ * @return {Promise<object|null>} Đối tượng quản lý session hoặc null nếu không bật.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-07
+ */
+export async function attachGuardedWorkerInjection(context, page, stealthConfig, options = {}) {
+  const isEnabled = Boolean(options.enabled || stealthConfig?.workerInjection);
+  if (!isEnabled || !context || !page) return null;
+
+  const timeoutMs = options.timeoutMs || 4000;
+  let cdpSession = null;
+
+  try {
+    cdpSession = await Promise.race([
+      context.newCDPSession(page),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('CDP session timeout')), timeoutMs)),
+    ]);
+  } catch (err) {
+    options.onLog?.({
+      type: 'worker_injection_skip',
+      detail: `Không mở được CDP Session cho worker: ${err.message}`,
+    });
+    return null;
+  }
+
+  const workerPatchCode = `
+    (() => {
+      try {
+        const proto = (typeof WorkerGlobalScope !== 'undefined' && self.navigator)
+          ? Object.getPrototypeOf(self.navigator) || self.navigator
+          : null;
+        if (!proto) return;
+        const replace = (key, val) => {
+          try {
+            Object.defineProperty(proto, key, {
+              get: () => val,
+              configurable: true,
+              enumerable: true
+            });
+          } catch {}
+        };
+        ${stealthConfig?.platform ? `replace('platform', ${JSON.stringify(stealthConfig.platform)});` : ''}
+        ${stealthConfig?.hardwareConcurrency ? `replace('hardwareConcurrency', ${Number(stealthConfig.hardwareConcurrency)});` : ''}
+        ${stealthConfig?.deviceMemory ? `replace('deviceMemory', ${Number(stealthConfig.deviceMemory)});` : ''}
+      } catch {}
+    })();
+  `;
+
+  const onAttached = async ({ sessionId, targetInfo }) => {
+    const type = targetInfo?.type;
+    const isWorker = type === 'worker' || type === 'service_worker' || type === 'shared_worker';
+    if (!isWorker || !sessionId) return;
+
+    try {
+      await Promise.race([
+        cdpSession.send('Runtime.evaluate', {
+          expression: workerPatchCode,
+          returnByValue: true,
+        }, sessionId),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Worker inject timeout')), 2000)),
+      ]).catch(() => {});
+      options.onLog?.({
+        type: 'worker_injected',
+        detail: `Đã bảo vệ fingerprint cho ${type} (${targetInfo.url || 'inline/blob'})`,
+      });
+    } catch {}
+  };
+
+  cdpSession.on('Target.attachedToTarget', onAttached);
+
+  try {
+    await cdpSession.send('Target.setAutoAttach', {
+      autoAttach: true,
+      waitForDebuggerOnStart: false,
+      flatten: true,
+      filter: [
+        { type: 'worker', exclude: false },
+        { type: 'service_worker', exclude: false },
+        { type: 'shared_worker', exclude: false },
+      ],
+    }).catch(() => {});
+  } catch {}
+
+  const cleanup = () => {
+    try {
+      cdpSession.off('Target.attachedToTarget', onAttached);
+      cdpSession.detach().catch(() => {});
+    } catch {}
+  };
+
+  page.once?.('close', cleanup);
+  return { cdpSession, cleanup };
+}
+

@@ -24,7 +24,7 @@ const TEST_FILES = [
   'form-reject.test.mjs',
   'cloakbrowser-engine.test.mjs',
   'codex-form-agent.test.mjs',
-  'gologin-profile.test.mjs',
+  'entry-point.test.mjs',
   'local-profile-engine.test.mjs',
   'multi-tab-ai.test.mjs',
   'option-scorer.test.mjs',

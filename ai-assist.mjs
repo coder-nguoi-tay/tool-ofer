@@ -15,8 +15,8 @@ import { humanType, getFallbackCity } from './autofill.mjs';
 const MAX_ROUNDS = 20;
 const AI_PROGRESS_CHECK_INTERVAL_MS = 5_000;
 const AI_STALLED_ROUND_LIMIT = 3;
-const AI_REQUEST_TIMEOUT_SECONDS = 90;
-const AI_FORM_REPAIR_TIMEOUT_MS = 20_000;
+const AI_REQUEST_TIMEOUT_SECONDS = 100;
+const AI_FORM_REPAIR_TIMEOUT_MS = 100_000;
 const MAX_CONCURRENT_AGT = 4;
 const MAX_FORM_REPAIR_ATTEMPTS = 3;
 const CODEX_MODEL = 'gpt-5.6-luna';
@@ -27,9 +27,9 @@ export let globalAiConfig = {
   enabled: true,
   mode: 'auto_on_stuck', // 'auto_on_stuck' | 'continuous' | 'heuristic_only' | 'disabled'
   cliBinary: 'agy',
-  useCodexMcp: true, // Tận dụng OpenAI Codex SDK + Playwright MCP khi chạy trên AdsPower
+  useCodexMcp: false, // Bỏ Codex MCP, chuyển hẳn sang agy CLI tốc độ cao
   maxRounds: 20,
-  timeoutSeconds: 90,
+  timeoutSeconds: 100,
   solveBotQuiz: true,
   solveSurveyCards: true,
   clickJumpPage: true,
@@ -46,14 +46,14 @@ export function setGlobalAiConfig(cfg = {}) {
  * Tôn trọng thời gian chờ AI đã cấu hình, giới hạn để tránh tiến trình treo vô hạn.
  *
  * @param {number|string} configuredSeconds Số giây người dùng cấu hình.
- * @return {number} Thời gian chờ từ 1 đến 180 giây.
+ * @return {number} Thời gian chờ từ 1 đến 300 giây.
  * @throws {never} Giá trị không hợp lệ được thay bằng mặc định.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-23
  */
 export function resolveAiTimeoutSeconds(configuredSeconds) {
   const seconds = Number(configuredSeconds);
-  return Math.max(1, Math.min(seconds > 0 ? seconds : AI_REQUEST_TIMEOUT_SECONDS, 180));
+  return Math.max(1, Math.min(seconds > 0 ? seconds : AI_REQUEST_TIMEOUT_SECONDS, 300));
 }
 
 /**
@@ -109,7 +109,7 @@ export function extractCleanPageStructure(html) {
  * Tự động mở rộng PATH để nhận diện ~/.local/bin, /opt/homebrew/bin, /usr/local/bin.
  */
 export function getAgtSpawnConfig(customBin = null) {
-  let codexBin = customBin || globalAiConfig.cliBinary || process.env.CODEX_BIN || 'codex';
+  let codexBin = customBin || globalAiConfig.cliBinary || process.env.CODEX_BIN || 'agy';
   if (codexBin === 'codex_mcp') codexBin = 'codex';
   const augmentedPath = [
     join(homedir(), '.local', 'bin'),
@@ -126,23 +126,23 @@ export function getAgtSpawnConfig(customBin = null) {
 }
 
 /**
- * Gọi `codex` hoặc `agy` CLI với prompt, trả về text output.
+ * Thực thi một tiến trình AI CLI đơn lẻ (`agy` hoặc `codex`).
  *
- * @param {string} prompt Nội dung truyền vào stdin của codex/agy.
+ * @param {string} prompt Nội dung truyền vào stdin.
  * @param {object} [options={}] Tùy chọn CLI và timeout.
  * @return {Promise<string>} Output từ AI CLI.
- * @throws {Error} Khi CLI timeout hoặc kết thúc với mã lỗi.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-10-21
+ * @throws {Error} Khi CLI timeout, ném lỗi hoặc kết thúc với mã lỗi.
  */
-export function callAgt(prompt, options = {}) {
+export function executeAgtProcess(prompt, options = {}) {
   return new Promise((resolve, reject) => {
     const timeoutMs = resolveAiTimeoutSeconds(options.timeoutSeconds || globalAiConfig.timeoutSeconds) * 1000;
     const { bin, env } = getAgtSpawnConfig(options.cliBinary);
     const isCodex = bin.includes('codex');
-    const args = isCodex
-      ? ['exec', '--model', CODEX_MODEL, '--config', `model_reasoning_effort="${CODEX_REASONING_EFFORT}"`, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--ephemeral', '--json', '-']
-      : [];
+    const isAgy = bin.includes('agy') || !isCodex;
+    // agy: Tắt chế độ suy nghĩ (--effort low), bỏ hỏi quyền (--dangerously-skip-permissions), tắt slash commands để ưu tiên tốc độ tối đa
+    const args = isAgy
+      ? ['--effort', 'low', '--dangerously-skip-permissions', '--disable-slash-commands']
+      : (isCodex ? ['exec', '--model', CODEX_MODEL, '--config', `model_reasoning_effort="${CODEX_REASONING_EFFORT}"`, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--ephemeral', '--json', '-'] : []);
 
     const child = spawn(bin, args, {
       env,
@@ -166,12 +166,30 @@ export function callAgt(prompt, options = {}) {
         return;
       }
       if (isCodex) {
-        // Parse JSONL: gom tất cả item.completed[agent_message].text
-        const text = out.split('\n')
-          .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        // Parse JSONL
+        const lines = out.split('\n').filter(Boolean);
+        const events = lines.map((line) => {
+          try { return JSON.parse(line); } catch { return null; }
+        }).filter(Boolean);
+
+        // Kiểm tra lỗi trong luồng sự kiện Codex (ví dụ usage limit hoặc failure)
+        const errorEv = events.find((ev) => ev.type === 'error' || ev.type === 'turn.failed');
+        if (errorEv) {
+          const errMsg = errorEv.message || errorEv.error?.message || 'Lỗi không xác định từ Codex CLI';
+          reject(new Error(`Codex CLI: ${errMsg}`));
+          return;
+        }
+
+        // gom tất cả item.completed[agent_message].text
+        const text = events
           .filter((ev) => ev?.type === 'item.completed' && ev?.item?.type === 'agent_message')
           .map((ev) => ev.item.text)
           .join('\n');
+
+        if (!text && out.includes('error')) {
+          reject(new Error(`Codex CLI trả về phản hồi không hợp lệ: ${out.slice(0, 200)}`));
+          return;
+        }
         resolve(text || out);
       } else {
         resolve(out);
@@ -195,6 +213,36 @@ export function callAgt(prompt, options = {}) {
       reject(e);
     }
   });
+}
+
+/**
+ * Gọi `codex` hoặc `agy` CLI với prompt, trả về text output kèm cơ chế Smart Fallback tự động.
+ *
+ * @param {string} prompt Nội dung truyền vào stdin của codex/agy.
+ * @param {object} [options={}] Tùy chọn CLI, timeout và fallback.
+ * @return {Promise<string>} Output từ AI CLI.
+ * @throws {Error} Khi CLI timeout hoặc kết thúc với mã lỗi và fallback cũng thất bại.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-10-21
+ */
+export async function callAgt(prompt, options = {}) {
+  const primaryBin = options.cliBinary || globalAiConfig.cliBinary || 'agy';
+  try {
+    return await executeAgtProcess(prompt, { ...options, cliBinary: primaryBin });
+  } catch (err) {
+    if (options.allowFallback === false) {
+      throw err;
+    }
+    const fallbackBin = primaryBin.includes('codex') ? 'agy' : 'codex';
+    try {
+      console.warn(`[AI-Assist] CLI chính (${primaryBin}) lỗi (${err.message}). Đang tự động thử chuyển sang ${fallbackBin}...`);
+      const fallbackResult = await executeAgtProcess(prompt, { ...options, cliBinary: fallbackBin });
+      console.log(`[AI-Assist] ✅ Tự động fallback sang ${fallbackBin} thành công!`);
+      return fallbackResult;
+    } catch {
+      throw err;
+    }
+  }
 }
 
 /**
@@ -1122,7 +1170,7 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
                 box.dispatchEvent(new Event('input', { bubbles: true }));
                 box.dispatchEvent(new Event('change', { bubbles: true }));
               } catch {}
-              c++;
+              if (box.checked) c++;
             }
           }
           return c;
@@ -1172,29 +1220,27 @@ export async function runAiAssist(page, record, session = {}, options = {}) {
       const formStateBeforeAi = await getFormProgressSignature(page);
 
       const recordJson = JSON.stringify(record ?? {}, null, 2);
-      let prompt = `Phân tích cấu trúc HTML giao diện người dùng bên dưới và chuyển đổi thành các thao tác Playwright UI tương ứng.
+      let prompt = `BỎ QUA SUY NGHĨ (NO REASONING/THINKING). KHÔNG GIẢI THÍCH. ƯU TIÊN TỐC ĐỘ TỐI ĐA.
+Sinh ngay mảng JSON thao tác UI để hoàn thành hoặc tiếp tục trang web dưới đây:
 URL: ${page.url()}
 Dữ liệu người dùng cung cấp:
 ${recordJson}
 
-LƯU Ý ĐẶC BIỆT VỀ CẤU TRÚC OFFER / LANDING PAGE:
-- Các trường nhập liệu thường KHÔNG ĐƯỢC BAO BỌC BỞI THẺ <form>, mà chỉ nằm trong các thẻ <div> độc lập mang class như "input", "inut", "form-group", "field", "step", hoặc các thẻ <input> đứng riêng lẻ.
-- Nút bấm (Submit / Continue / Next / Lựa chọn) thường là các thẻ <div>, <a>, <button>, <input> mang class hoặc id như "button", "buttom", "btn", "btn-option", "continue-btn", "next-btn", "cta-button", hoặc role="button".
-- TUYỆT ĐỐI KHÔNG chỉ tìm kiếm trong thẻ <form>. BẮT BUỘC kiểm tra toàn bộ cấu trúc các thẻ <div>, class "input", "button", "btn-option" để tìm ra các ô nhập liệu và nút bấm tương ứng.
+QUY TẮC SIÊU TỐC:
+- KHÔNG CẦN CHỌN ĐÚNG, CHỌN NHANH: Câu hỏi khảo sát / ý kiến / trắc nghiệm -> Chọn ngay đáp án "Yes" hoặc lựa chọn đầu tiên hợp lệ.
+- Trường nhập liệu (tên, họ, email, phone, ngày sinh, địa chỉ, zip): Điền nhanh theo dữ liệu người dùng ở trên.
+- Sau khi điền xong hoặc nếu đã đủ: BẮT BUỘC click nút Tiếp tục / Next / Continue / Submit / Nhận thưởng (class "button", "btn", "continue-btn", "cta-button", ".rjp-cta-button", thẻ <a> link "/next").
+- Chú ý cấu trúc Offer/Landing Page: Các ô nhập và nút bấm thường nằm trong thẻ <div> class "input", "button", "btn-option" (không bắt buộc nằm trong thẻ <form>).
 
 YÊU CẦU ĐẦU RA BẮT BUỘC:
-- Chỉ trả về duy nhất 1 JSON array các action hợp lệ. KHÔNG giải thích, KHÔNG viết markdown thừa, KHÔNG trả về object error hay thông báo từ chối.
-- Nếu gặp câu hỏi logic / kiến thức thông thường (ví dụ: "What sound does a dog make?", "2 + 2 = ?"): BẮT BUỘC chọn đáp án chính xác tương ứng (ví dụ: "Woof", "4").
-- Nếu gặp câu hỏi khảo sát hoặc ý kiến mà không có trong dữ liệu: BẮT BUỘC chọn 1 phương án hợp lý hoặc phổ biến nhất (ví dụ: Yes, Own, Good, hoặc button lựa chọn có sẵn) để tiếp tục quy trình.
-- Nếu trên trang có trường thông tin (tên, họ, email, số điện thoại, ngày sinh, giới tính, địa chỉ, zip): ĐỐI CHIẾU VÀ ĐIỀN CHÍNH XÁC theo dữ liệu người dùng cung cấp ở trên.
-- Nếu các trường đã điền đủ: BẮT BUỘC click vào nút "Next", "Continue", "Submit", "Get Quote", hoặc nút nhận thưởng / Jump Page ("Get My Reward", class ".cta-button", ".rjp-cta-button", link "/next").
-- TUYỆT ĐỐI KHÔNG trả về mảng rỗng [] nếu trên trang vẫn còn câu hỏi, ô nhập, hoặc nút bấm chưa thao tác.
-
-Format các action được hỗ trợ:
-- Điền input/textarea: {"action":"fill","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"}
-- Chọn dropdown: {"action":"select","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"}
-- Tích checkbox: {"action":"check","selector":"CSS_SELECTOR"}
-- Chọn radio hoặc bấm nút / thẻ lựa chọn / nút Tiếp tục: {"action":"click","selector":"CSS_SELECTOR"}`;
+- Trả về DUY NHẤT 1 mảng JSON, bắt đầu bằng [ và kết thúc bằng ]. Tuyệt đối KHÔNG viết bất kỳ chữ nào khác ngoài JSON.
+Format các action:
+[
+  {"action":"fill","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"},
+  {"action":"select","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"},
+  {"action":"check","selector":"CSS_SELECTOR"},
+  {"action":"click","selector":"CSS_SELECTOR"}
+]`;
 
       if (cfg.customInstructions && typeof cfg.customInstructions === 'string' && cfg.customInstructions.trim()) {
         prompt += `\n\nHƯỚNG DẪN BỔ SUNG CỦA NGƯỜI DÙNG:\n${cfg.customInstructions.trim()}`;
@@ -1575,16 +1621,12 @@ export async function inspectAndFixFormWithAi(page, record, session = {}, option
     }
 
     if (cfg.mode !== 'heuristic_only' && agtRunningCount < MAX_CONCURRENT_AGT && !page.isClosed()) {
-      const prompt = `Phân tích tại sao form trên trang web này chưa submit qua được và sinh JSON actions để sửa triệt để mọi lỗi:
+      const prompt = `BỎ QUA SUY NGHĨ (NO REASONING/THINKING). KHÔNG PHÂN TÍCH NGUYÊN NHÂN. KHÔNG GIẢI THÍCH. ƯU TIÊN TỐC ĐỘ TỐI ĐA.
+Sinh ngay mảng JSON sửa các trường lỗi dưới đây và bấm nút tiếp tục:
 URL: ${page.url ? page.url() : ''}
 
-LƯU Ý ĐẶC BIỆT VỀ CẤU TRÚC OFFER / LANDING PAGE:
-- Các trường nhập liệu thường KHÔNG ĐƯỢC BAO BỌC BỞI THẺ <form>, mà chỉ nằm trong các thẻ <div> độc lập mang class như "input", "inut", "form-group", "field", "step", hoặc các thẻ <input> đứng riêng lẻ.
-- Nút bấm (Submit / Continue / Next / Lựa chọn) thường là các thẻ <div>, <a>, <button>, <input> mang class hoặc id như "button", "buttom", "btn", "btn-option", "continue-btn", "next-btn", "cta-button", hoặc role="button".
-- TUYỆT ĐỐI KHÔNG chỉ tìm kiếm trong thẻ <form>. BẮT BUỘC kiểm tra toàn bộ cấu trúc các thẻ <div>, class "input", "button", "btn-option" để tìm ra các ô nhập liệu và nút bấm tương ứng.
-
-LỖI HIỂN THỊ TRÊN FORM TỪ DOM:
-${diag.errors.length > 0 ? diag.errors.map((e) => `- ${e}`).join('\n') : '(Chưa submit thành công, các trường dưới đây có vấn đề)'}
+LỖI GHI NHẬN TỪ DOM:
+${diag.errors.length > 0 ? diag.errors.map((e) => `- ${e}`).join('\n') : '(Chưa submit thành công)'}
 
 CÁC TRƯỜNG CÓ VẤN ĐỀ HOẶC CHƯA ĐIỀN:
 ${JSON.stringify(diag.problemInputs, null, 2)}
@@ -1592,21 +1634,30 @@ ${JSON.stringify(diag.problemInputs, null, 2)}
 DỮ LIỆU NGƯỜI DÙNG CUNG CẤP:
 ${JSON.stringify(enrichedRecord, null, 2)}
 
+QUY TẮC SIÊU TỐC:
+- Sửa ngay trường lỗi/thiếu bằng dữ liệu người dùng (hoặc email/zip/city hợp lệ).
+- Click ngay nút Submit / Next / Continue / CTA (chú ý cả thẻ <div>, <a> class "button", "btn", "continue-btn", "cta-button").
+- Không cần giải thích nguyên nhân, không đắn đo.
+
 YÊU CẦU ĐẦU RA BẮT BUỘC:
-1. Phân tích nguyên nhân tại sao chưa qua được form (ví dụ: thiếu email, email không hợp lệ, sai zip code, chưa tích checkbox điều khoản, số điện thoại không đúng định dạng, v.v.).
-2. Trả về DUY NHẤT một mảng JSON các action để sửa trực tiếp các lỗi đó trên form và bấm nút tiếp tục:
-   - Điền input/textarea: {"action":"fill","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"}
-   - Chọn dropdown: {"action":"select","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"}
-   - Tích checkbox: {"action":"check","selector":"CSS_SELECTOR"}
-   - Nút tiếp tục / submit: {"action":"click","selector":"CSS_SELECTOR"}
-KHÔNG giải thích thêm, KHÔNG markdown thừa.
+- Trả về DUY NHẤT một mảng JSON, bắt đầu bằng [ và kết thúc bằng ]. Tuyệt đối KHÔNG viết thêm bất kỳ chữ nào khác ngoài JSON.
+Format:
+[
+  {"action":"fill","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"},
+  {"action":"select","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"},
+  {"action":"check","selector":"CSS_SELECTOR"},
+  {"action":"click","selector":"CSS_SELECTOR"}
+]
 
 HTML GIAO DIỆN FORM:
 ${cleanedHtml}`;
 
       try {
         agtRunningCount++;
-        const raw = await callAgt(prompt, { cliBinary: cfg.cliBinary, timeoutSeconds: AI_REQUEST_TIMEOUT_SECONDS });
+        const raw = await callAgt(prompt, {
+          cliBinary: cfg.cliBinary,
+          timeoutSeconds: resolveAiTimeoutSeconds(cfg.timeoutSeconds || AI_REQUEST_TIMEOUT_SECONDS),
+        });
         actions = parseActions(raw);
         console.log(`[AI-FormDiagnose] Slot ${slotNum}: AI trả về ${actions.length} action(s) sửa lỗi form.`);
       } catch (err) {

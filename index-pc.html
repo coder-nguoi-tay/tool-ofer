@@ -1453,14 +1453,9 @@
                 <span class="option-pill-text"><span class="option-pill-icon">🎯</span> Ẩn trình duyệt (Chỉ hiện khi có Lead)</span>
               </label>
 
-              <label class="option-pill option-pill-leadcheck" title="Chỉ khi tick: sau khi qua màn nhập email, dừng lại check lead; có lead mới làm tiếp. Bỏ tick thì không check lead.">
+              <label class="option-pill option-pill-leadcheck" title="Chỉ khi tick: sau khi qua màn nhập email, dừng lại kiểm tra lead 1 lần × 20s. Có lead thì tiếp tục, không có lead thì tự động đóng trình duyệt để đổi sock mới. Bỏ tick thì không check lead.">
                 <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
-                <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (1x15s)</span>
-              </label>
-
-              <label class="option-pill option-pill-leadcheck" title="Sau khi điền email: check lead 2 lần × 30s, không có lead thì tự đóng trình duyệt. Bỏ tick để giữ trình duyệt mở.">
-                <input type="checkbox" id="cbxAutoCloseNoLead">
-                <span class="option-pill-text"><span class="option-pill-icon">🚪</span> Tự đóng khi hết lead (2×30s)</span>
+                <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (1×20s)</span>
               </label>
 
               <label class="option-pill option-pill-ai" title="AI tự động nhận diện câu hỏi / khảo sát khi bị kẹt và hỗ trợ hoàn tất form.">
@@ -1666,10 +1661,22 @@
             <button type="button" class="win-btn" onclick="_quickScroll(0, -500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang lên trên (hoặc dùng con lăn chuột / trackpad)">⬆ Cuộn lên</button>
             <button type="button" class="win-btn" onclick="_quickScroll(0, 500)" style="padding:2px 10px;font-size:11px;" title="Cuộn trang xuống dưới (hoặc dùng con lăn chuột / trackpad)">⬇ Cuộn xuống</button>
             <button type="button" class="win-btn" id="btnModalPopOutDesktop" onclick="popOutActiveScreenToDesktop()" style="padding:4px 12px;font-size:11.5px;background:#0284c7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;" title="Bung cửa sổ trình duyệt thật ra màn hình Desktop">🖥️ Mở ra Desktop</button>
-            <button type="button" onclick="closeScreenModal()" style="background:#e11d48;color:#fff;border:none;padding:4px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;">✕ Đóng</button>
+            <button type="button" class="win-btn" onclick="if(_screenActiveSlot){ closeSingleBrowser(_screenActiveSlot); closeScreenModal(); }" style="padding:4px 12px;font-size:11.5px;background:#b91c1c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;" title="Tắt và đóng hoàn toàn trình duyệt này">🛑 Đóng trình duyệt</button>
+            <button type="button" onclick="closeScreenModal()" style="background:#475569;color:#fff;border:none;padding:4px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;" title="Đóng cửa sổ xem trực tiếp">✕ Đóng xem</button>
           </div>
         </div>
         <div id="screenTabBar"></div>
+        <!-- Address Bar & Navigation Toolbar -->
+        <div style="display:flex;align-items:center;gap:6px;padding:4px 14px;background:#1e293b;border-bottom:1px solid #334155;color:#e2e8f0;font-size:12px;flex-shrink:0;">
+          <button type="button" class="win-btn" onclick="_reloadScreen()" style="padding:2px 8px;font-size:11px;" title="Tải lại trang này (Reload / F5)">🔄 Tải lại</button>
+          <div style="flex:1;display:flex;align-items:center;background:#0f172a;border:1px solid #475569;border-radius:4px;padding:2px 8px;gap:6px;">
+            <span style="font-size:11px;color:#94a3b8;">🔒</span>
+            <input type="text" id="screenUrlInput" placeholder="https://..." style="flex:1;background:transparent;border:none;color:#f8fafc;font-size:11.5px;outline:none;font-family:monospace;" onkeydown="if(event.key==='Enter') _navigateToUrl();">
+            <button type="button" onclick="_copyScreenUrl()" style="background:transparent;border:none;color:#38bdf8;cursor:pointer;font-size:11px;padding:1px 5px;" title="Sao chép URL">📋 Copy</button>
+            <button type="button" onclick="_navigateToUrl()" style="background:#0284c7;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:11px;padding:1px 8px;font-weight:600;" title="Đi tới URL (Enter)">➔ Đi</button>
+          </div>
+          <button type="button" class="win-btn" id="btnToggleScreenFit" onclick="_toggleCanvasFit()" style="padding:2px 8px;font-size:11px;" title="Chuyển chế độ Vừa khung (Fit) hoặc Kích thước thực (100%)">🔍 Vừa khung</button>
+        </div>
         <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#090d16;position:relative;">
           <canvas id="screenCanvas" style="max-width:100%;max-height:100%;object-fit:contain;cursor:default;outline:none;" tabindex="0"></canvas>
         </div>
@@ -2077,16 +2084,16 @@
         </fieldset>
 
         <fieldset class="win-group">
-          <legend class="win-legend">Operating System</legend>
-          <div style="display:flex;gap:20px;">
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkWindows" checked> Windows</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkMac" checked> Mac</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkLinux" checked> Linux</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkAndroid"> Android</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkIphone"> iPhone</label>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkIpad"> iPad</label>
+          <legend class="win-legend">Operating System (Hệ điều hành &amp; Phiên bản thiết bị)</legend>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;">
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkWindows" checked> 🪟 Windows (10, 11 22H2/24H2)</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkMac" checked> 🍎 macOS (14.x, 15.x, 26.x)</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkLinux" checked> 🐧 Linux (6.5 - 6.14)</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkAndroid"> 🤖 Android (13 - 16, Pixel/Galaxy)</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkIphone"> 📱 iPhone (iOS 17.6 - 18.6)</label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="chkIpad"> 📟 iPad (iPadOS 17 - 18)</label>
           </div>
-          <div style="margin-top:5px;color:#555;font-size:11px;">Các phiên Chrome và AdsPower sẽ xoay vòng qua những thiết bị được chọn.</div>
+          <div style="margin-top:5px;color:#555;font-size:11px;">Mỗi phiên trình duyệt sẽ tự động giả lập một máy cụ thể với phiên bản OS, GPU, CPU, màn hình và phiên bản Chrome hoàn chỉnh.</div>
         </fieldset>
 
         <fieldset class="win-group">
@@ -2262,15 +2269,14 @@
             <div class="form-row">
               <span class="form-label">CLI Binary:</span>
               <select id="cbbAiBinary" class="win-select" style="flex:1;">
-                <option value="agy">agy (~/.local/bin/agy - Google Antigravity)</option>
-                <option value="codex">codex (/opt/homebrew/bin/codex)</option>
+                <option value="agy" selected>agy (~/.local/bin/agy - Google Antigravity, Tốc độ cao - Mặc định)</option>
               </select>
             </div>
             <div class="form-row">
               <span class="form-label">Max Rounds:</span>
               <input type="number" id="nudAiMaxRounds" class="win-input" value="20" min="1" max="50" style="width:65px;">
-              <span style="margin-left:12px;">Timeout AI (s, tối đa 15):</span>
-              <input type="number" id="nudAiTimeout" class="win-input" value="15" min="1" max="15" style="width:65px;">
+              <span style="margin-left:12px;">Timeout AI (giây, mặc định 100s):</span>
+              <input type="number" id="nudAiTimeout" class="win-input" value="100" min="5" max="300" style="width:65px;">
             </div>
             <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
               <button type="button" class="win-btn win-btn-primary" id="btnTestAiConnection" onclick="testAiConnection()">Kiểm tra kết nối AI CLI</button>
@@ -2745,6 +2751,12 @@
         }
         if (data.delayStart) document.getElementById('nudDelayStart').value = data.delayStart;
         if (data.delayStop) document.getElementById('nudDelayStop').value = data.delayStop;
+        if (data.Thread && document.getElementById('nudThread')) {
+          document.getElementById('nudThread').value = Math.min(30, Math.max(1, parseInt(data.Thread) || 1));
+        }
+        if (data.LimitRun !== undefined && document.getElementById('nudLimitRun')) {
+          document.getElementById('nudLimitRun').value = Math.max(0, parseInt(data.LimitRun) || 0);
+        }
 
         if (Array.isArray(data.savedList)) {
           currentSavedOffers = data.savedList;
@@ -2796,6 +2808,40 @@
               localStorage.setItem('autoleadpc_hide_until_lead', String(e.target.checked));
             } catch {}
           });
+        }
+
+        // Khôi phục và ràng buộc tự chuẩn hoá số luồng (nudThread)
+        const nudTh = document.getElementById('nudThread');
+        const cachedThread = localStorage.getItem('autoleadpc_thread_count');
+        if (nudTh) {
+          if (cachedThread) {
+            nudTh.value = Math.min(30, Math.max(1, parseInt(cachedThread) || 1));
+          }
+          if (!nudTh._hasValidationListener) {
+            nudTh._hasValidationListener = true;
+            nudTh.addEventListener('change', (e) => {
+              const val = Math.min(30, Math.max(1, parseInt(e.target.value) || 1));
+              e.target.value = val;
+              try { localStorage.setItem('autoleadpc_thread_count', String(val)); } catch {}
+            });
+          }
+        }
+
+        // Khôi phục và ràng buộc giới hạn chạy (nudLimitRun)
+        const nudLim = document.getElementById('nudLimitRun');
+        const cachedLimit = localStorage.getItem('autoleadpc_limit_run');
+        if (nudLim) {
+          if (cachedLimit !== null) {
+            nudLim.value = Math.max(0, parseInt(cachedLimit) || 0);
+          }
+          if (!nudLim._hasValidationListener) {
+            nudLim._hasValidationListener = true;
+            nudLim.addEventListener('change', (e) => {
+              const val = Math.max(0, parseInt(e.target.value) || 0);
+              e.target.value = val;
+              try { localStorage.setItem('autoleadpc_limit_run', String(val)); } catch {}
+            });
+          }
         }
         syncOptionPills();
       } catch {}
@@ -2852,6 +2898,8 @@
         Complete: document.getElementById('txtTextComplete')?.value || '',
         delayStart: document.getElementById('nudDelayStart')?.value || '1',
         delayStop: document.getElementById('nudDelayStop')?.value || '1',
+        Thread: document.getElementById('nudThread')?.value || '1',
+        LimitRun: document.getElementById('nudLimitRun')?.value || '0',
         CheckDuplicate: document.getElementById('cbxCheckDuplicateIP')?.checked ?? true,
         HideUntilTarget: document.getElementById('cbxHideUntilTarget')?.checked ?? false,
         HideUntilLead: document.getElementById('cbxHideUntilLead')?.checked ?? false,
@@ -3842,7 +3890,7 @@
 
       const checkDuplicate = document.getElementById('cbxCheckDuplicateIP') ? document.getElementById('cbxCheckDuplicateIP').checked : true;
       const enableLeadCheck = document.getElementById('cbxCheckLead') ? document.getElementById('cbxCheckLead').checked : false;
-      const autoCloseNoLead = document.getElementById('cbxAutoCloseNoLead') ? document.getElementById('cbxAutoCloseNoLead').checked : false;
+      const autoCloseNoLead = enableLeadCheck; // Khi bật Check Lead (1x20s): không có lead sẽ tự động đóng trình duyệt
       const hideUntilTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
       const hideUntilLead = Boolean(document.getElementById('cbxHideUntilLead')?.checked);
       // "Chạy trong app": đọc trạng thái checkbox thật (bật = chạy ngầm thu nhỏ, tắt = mở cửa sổ Desktop thường)
@@ -3896,8 +3944,8 @@
             autoSubmitForm: true,
             enableLeadCheck,
             autoCloseNoLead,
-            leadCheckInterval: 30,
-            leadCheckMaxAttempts: 2,
+            leadCheckInterval: 20,
+            leadCheckMaxAttempts: 1,
             leadCheckScreen: 4,
             hideUntilTarget,
             hideUntilLead,
@@ -3967,9 +4015,9 @@
               checkDuplicate,
               autoSubmitForm: true,
               enableLeadCheck,
-            autoCloseNoLead,
-              leadCheckInterval: 30,
-              leadCheckMaxAttempts: 2,
+              autoCloseNoLead,
+              leadCheckInterval: 20,
+              leadCheckMaxAttempts: 1,
               leadCheckScreen: 4,
               hideUntilTarget,
               hideBrowser: hideUntilTarget,
@@ -4017,8 +4065,8 @@
             autoSubmitForm: true,
             enableLeadCheck,
             autoCloseNoLead,
-            leadCheckInterval: 30,
-            leadCheckMaxAttempts: 2,
+            leadCheckInterval: 20,
+            leadCheckMaxAttempts: 1,
             leadCheckScreen: 4,
             hideUntilTarget,
             hideBrowser: hideUntilTarget,
@@ -4307,14 +4355,13 @@
           : '<span style="color:#94a3b8;">--</span>';
         const passCell = s.assignedPass ? `<span class="run-pass-chip" title="Mật khẩu">${escHtml(s.assignedPass)}</span>` : '<span style="color:#94a3b8;">--</span>';
         const __deviceIcons = { windows: '🪟', macos: '🍎', linux: '🐧', android: '🤖', ios: '📱', ipad: '📟', iphone: '📱' };
-        const __deviceLabels = { windows: 'Windows 11', macos: 'macOS 14', linux: 'Linux', android: 'Android 13', ios: 'iPhone', ipad: 'iPad', iphone: 'iPhone' };
         const __deviceKey = String(s.deviceProfile || '').toLowerCase().replace(/\s+/g, '-');
         const __deviceIcon = __deviceIcons[__deviceKey] ?? '🖥️';
-        const __deviceLabel = __deviceLabels[__deviceKey] ?? (s.deviceProfile || 'Windows 11');
+        const __deviceVersion = s.deviceVersion || (s.deviceSummary ? s.deviceSummary.split(' · ')[0] : null) || s.deviceProfile || 'Windows 11';
         const __chromeLabel = /SunBrowser/.test(s.version || '')
           ? (s.version || 'Chrome')
-          : `Chrome ${String(s.version || '').split('.').slice(0, 1).join('') || s.version}`;
-        const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || (__deviceLabel + ' · ' + (s.version || 'Chrome')))}">${__deviceIcon} <strong style="color:#0f172a;">${escHtml(__deviceLabel)}</strong> · <span style="color:#0284c7;font-weight:600;">${escHtml(__chromeLabel)}</span></span>`;
+          : `Chrome ${String(s.version || '').replace(/^Chrome\s*/i, '') || s.version}`;
+        const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || (__deviceVersion + ' · ' + (s.version || 'Chrome')))}">${__deviceIcon} <strong style="color:#0f172a;">${escHtml(__deviceVersion)}</strong> · <span style="color:#0284c7;font-weight:600;">${escHtml(__chromeLabel)}</span></span>`;
 
         const isWinVis = Boolean(s.isWindowVisible);
         const winBtnLabel = isWinVis ? '🔽 Ẩn' : '🖥️ Hiện';
@@ -4821,7 +4868,7 @@
         mode: document.getElementById('cbbAiMode').value,
         cliBinary: document.getElementById('cbbAiBinary').value,
         maxRounds: parseInt(document.getElementById('nudAiMaxRounds').value) || 20,
-        timeoutSeconds: Math.min(parseInt(document.getElementById('nudAiTimeout').value, 10) || 15, 15),
+        timeoutSeconds: Math.max(5, Math.min(parseInt(document.getElementById('nudAiTimeout').value, 10) || 100, 300)),
         solveBotQuiz: document.getElementById('chkSolveBotQuiz').checked,
         solveSurveyCards: document.getElementById('chkSolveSurveyCards').checked,
         clickJumpPage: document.getElementById('chkClickJumpPage').checked,
@@ -4857,7 +4904,7 @@
         mode: 'auto_on_stuck',
         cliBinary: 'agy',
         maxRounds: 20,
-        timeoutSeconds: 15,
+        timeoutSeconds: 100,
         solveBotQuiz: true,
         solveSurveyCards: true,
         clickJumpPage: true,
@@ -4877,7 +4924,7 @@
 
     async function testAiConnection() {
       const resultEl = document.getElementById('aiTestResult');
-      resultEl.textContent = 'Đang kiểm tra kết nối...';
+      resultEl.textContent = 'Đang kiểm tra kết nối & gửi prompt thử nghiệm...';
       const binary = document.getElementById('cbbAiBinary').value;
 
       const res = await api('/ai/test', {
@@ -4887,7 +4934,7 @@
 
       if (res && res.success) {
         resultEl.style.color = '#008000';
-        resultEl.textContent = `✓ Kết nối thành công! ${res.binary} (${res.version})`;
+        resultEl.textContent = res.message || `✓ Kết nối thành công! ${res.binary} (${res.version})`;
         document.getElementById('aiEngineStatusBadge').innerHTML = `● Sẵn sàng (${escHtml(res.binary)} ${escHtml(res.version)})`;
       } else {
         resultEl.style.color = '#b91c1c';
@@ -5016,7 +5063,7 @@
     }
 
     function _pollThumbnails() {
-      if (!_screenViewActive) return;
+      if (!_screenViewActive || document.hidden) return;
       const tilesDiv = document.getElementById('thumbnailTiles');
       const emptyDiv = document.getElementById('thumbnailEmpty');
       if (_screenSlots.length === 0) {
@@ -5045,10 +5092,11 @@
           header.innerHTML = `
             <div style="display:flex;align-items:center;gap:5px;">
               <span class="screen-tile-slot-badge">Slot ${slot}</span>
-              <span style="font-size:10px;color:#cbd5e1;font-weight:600;">${escHtml(entry.deviceProfile || 'Windows 11')} · <span style="color:#38bdf8;">${escHtml(entry.version || 'Chrome')}</span></span>
+              <span style="font-size:10px;color:#cbd5e1;font-weight:600;" title="${escHtml(entry.deviceSummary || entry.deviceVersion || entry.deviceProfile || '')}">${escHtml(entry.deviceVersion || entry.deviceProfile || 'Windows 11')} · <span style="color:#38bdf8;">${escHtml(entry.version || 'Chrome')}</span></span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;">
               <button type="button" class="win-btn win-btn-sm" style="font-size:10px;padding:1px 6px;background:#0284c7;color:#fff;border:none;border-radius:2px;cursor:pointer;" onclick="event.stopPropagation(); toggleBrowserWindow(${slot}, ${Boolean(entry.isWindowVisible)});" title="Bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop">${entry.isWindowVisible ? '🔽 Ẩn' : '🖥️ Desktop'}</button>
+              <button type="button" class="win-btn win-btn-sm" style="font-size:10px;padding:1px 6px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:2px;cursor:pointer;font-weight:700;" onclick="event.stopPropagation(); closeSingleBrowser(${slot});" title="Đóng trình duyệt Slot ${slot} (✕)">✕</button>
               <span class="screen-tile-live-badge"><span class="screen-tile-live-dot"></span> LIVE</span>
             </div>
           `;
@@ -5086,7 +5134,8 @@
           `;
         }
         tile.title = ip ? `Slot ${slot} (${ip}) — Nhấp để mở màn hình tương tác full` : `Slot ${slot} — Nhấp để mở màn hình tương tác full`;
-        // Refresh ảnh bằng cache-buster
+        // Refresh ảnh bằng cache-buster (chỉ tải khi slot không đang mở xem trực tiếp ở modal)
+        if (_screenActiveSlot === slot) continue;
         const img = tile.querySelector('img');
         // Tải ảnh mới ở nền rồi mới thay (không nháy đen), bỏ qua nếu ảnh trước chưa tải xong (không dồn request).
         if (img && !img._uxLoading) {
@@ -5105,7 +5154,7 @@
       const entry = _screenSlots.find(s => s.slot === slot);
       const modalTitle = document.getElementById('screenModalTitle');
       if (modalTitle) {
-        modalTitle.innerHTML = `Màn hình Slot ${slot} • <span style="color:#22c55e;">🌐 IP: ${escHtml(entry?.ip || 'Direct')}</span> • <span style="color:#cbd5e1;">${escHtml(entry?.deviceProfile || 'Windows 11')}</span> • <span style="color:#38bdf8;">${escHtml(entry?.version || 'Chrome')}</span> <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(nhấp canvas để điều khiển)</span>`;
+        modalTitle.innerHTML = `Màn hình Slot ${slot} • <span style="color:#22c55e;">🌐 IP: ${escHtml(entry?.ip || 'Direct')}</span> • <span style="color:#cbd5e1;" title="${escHtml(entry?.deviceSummary || '')}">${escHtml(entry?.deviceVersion || entry?.deviceProfile || 'Windows 11')}</span> • <span style="color:#38bdf8;">${escHtml(entry?.version || 'Chrome')}</span> <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(nhấp canvas để điều khiển)</span>`;
       }
 
       const fpsEl = document.getElementById('screenModalFps');
@@ -5140,6 +5189,9 @@
       document.getElementById('screenModal').style.display = 'none';
       _stopScreenStream();
       _screenActiveSlot = null;
+      if (_canvasFitMode === 'actual') {
+        _toggleCanvasFit();
+      }
     }
 
     function _startScreenStream(slot) {
@@ -5188,24 +5240,35 @@
       es = new EventSource(`/screen/stream/${slot}`);
       _screenEventSource = es;
 
-      es.onmessage = (e) => {
-        if (!e.data || e.data === 'error') return;
+      let _isRenderingFrame = false;
+      let _pendingFrameData = null;
+
+      const _renderStreamFrame = async () => {
+        if (!_pendingFrameData) {
+          _isRenderingFrame = false;
+          return;
+        }
+        _isRenderingFrame = true;
+        const raw = _pendingFrameData;
+        _pendingFrameData = null;
+
         try {
-          const cleanData = e.data.replace(/[\r\n]/g, '');
-          const bin = atob(cleanData);
-          const bytes = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bmp) => {
-            if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
-              canvas.width = bmp.width;
-              canvas.height = bmp.height;
-            }
-            ctx.drawImage(bmp, 0, 0);
-            bmp.close();
-            _screenFpsCounter++;
-            _lastFrameTime = Date.now();
-          }).catch(() => {
-            // Fallback Image element
+          const cleanData = raw.replace(/[\r\n]/g, '');
+          // Sử dụng fetch data URL: engine C++ native giải mã nhị phân trong nền, không tốn chu kỳ CPU JS
+          const resp = await fetch(`data:image/jpeg;base64,${cleanData}`);
+          const blob = await resp.blob();
+          const bmp = await createImageBitmap(blob);
+          if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+            canvas.width = bmp.width;
+            canvas.height = bmp.height;
+          }
+          ctx.drawImage(bmp, 0, 0);
+          bmp.close();
+          _screenFpsCounter++;
+          _lastFrameTime = Date.now();
+        } catch (err) {
+          try {
+            const cleanData = raw.replace(/[\r\n]/g, '');
             const img = new Image();
             img.onload = () => {
               if (canvas.width !== img.width || canvas.height !== img.height) {
@@ -5217,9 +5280,20 @@
               _lastFrameTime = Date.now();
             };
             img.src = `data:image/jpeg;base64,${cleanData}`;
-          });
-        } catch (err) {
-          console.warn('[ScreenView] Lỗi parse frame SSE:', err);
+          } catch {}
+        } finally {
+          _isRenderingFrame = false;
+          if (_pendingFrameData) {
+            requestAnimationFrame(_renderStreamFrame);
+          }
+        }
+      };
+
+      es.onmessage = (e) => {
+        if (!e.data || e.data === 'error') return;
+        _pendingFrameData = e.data;
+        if (!_isRenderingFrame) {
+          _renderStreamFrame();
         }
       };
 
@@ -5401,6 +5475,14 @@
         const { tabs } = await res.json();
         const bar = document.getElementById('screenTabBar');
         if (!bar) return;
+
+        // Cập nhật ô địa chỉ URL
+        const activeTab = tabs?.find(t => t.index === _screenActiveTabIndex) || tabs?.[0];
+        const urlInput = document.getElementById('screenUrlInput');
+        if (urlInput && activeTab && document.activeElement !== urlInput) {
+          urlInput.value = activeTab.url || '';
+        }
+
         // Tab không đổi thì giữ nguyên thanh tab (tránh nháy mỗi 2s).
         const tabsKey = JSON.stringify([_screenActiveTabIndex, tabs]);
         if (bar._uxRenderKey === tabsKey) return;
@@ -5467,6 +5549,11 @@
           body: JSON.stringify({ index }),
         });
         const data = await res.json().catch(() => ({}));
+        if (data.closedSession) {
+          closeScreenModal();
+          fetchRunningState();
+          return;
+        }
         if (data.activeIndex !== undefined) {
           _screenActiveTabIndex = data.activeIndex;
         } else if (_screenActiveTabIndex >= index && _screenActiveTabIndex > 0) {
@@ -5497,6 +5584,65 @@
       if (fpsEl && res && res.ok === false) fpsEl.textContent = '⚠️ Không còn trang trước để quay lại';
       _fetchAndRenderTabs(_screenActiveSlot);
     }
+    window._goBackScreen = _goBackScreen;
+
+    async function _reloadScreen() {
+      if (!_screenActiveSlot) return;
+      await fetch(`/screen/reload/${_screenActiveSlot}`, { method: 'POST' }).catch(() => {});
+      _fetchAndRenderTabs(_screenActiveSlot);
+    }
+    window._reloadScreen = _reloadScreen;
+
+    async function _navigateToUrl() {
+      if (!_screenActiveSlot) return;
+      const input = document.getElementById('screenUrlInput');
+      const url = input ? input.value.trim() : '';
+      if (!url) return;
+      await fetch(`/screen/navigate/${_screenActiveSlot}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      }).catch(() => {});
+      _fetchAndRenderTabs(_screenActiveSlot);
+    }
+    window._navigateToUrl = _navigateToUrl;
+
+    function _copyScreenUrl() {
+      const input = document.getElementById('screenUrlInput');
+      if (!input || !input.value) return;
+      navigator.clipboard?.writeText(input.value).then(() => {
+        const orig = input.style.background;
+        input.style.background = '#065f46';
+        setTimeout(() => { input.style.background = orig; }, 600);
+      }).catch(() => {
+        input.select();
+        document.execCommand('copy');
+      });
+    }
+    window._copyScreenUrl = _copyScreenUrl;
+
+    let _canvasFitMode = 'fit';
+    function _toggleCanvasFit() {
+      const canvas = document.getElementById('screenCanvas');
+      const btn = document.getElementById('btnToggleScreenFit');
+      if (!canvas || !btn) return;
+      if (_canvasFitMode === 'fit') {
+        _canvasFitMode = 'actual';
+        canvas.style.maxWidth = 'none';
+        canvas.style.maxHeight = 'none';
+        btn.textContent = '🔍 100% Gốc';
+        btn.title = 'Đang hiển thị kích thước gốc (100%); nhấp để thu vừa khung';
+        if (canvas.parentElement) canvas.parentElement.style.overflow = 'auto';
+      } else {
+        _canvasFitMode = 'fit';
+        canvas.style.maxWidth = '100%';
+        canvas.style.maxHeight = '100%';
+        btn.textContent = '🔍 Vừa khung';
+        btn.title = 'Đang thu vừa khung; nhấp để hiển thị kích thước gốc (100%)';
+        if (canvas.parentElement) canvas.parentElement.style.overflow = 'hidden';
+      }
+    }
+    window._toggleCanvasFit = _toggleCanvasFit;
 
     function _quickScroll(deltaX, deltaY) {
       if (!_screenActiveSlot) return;
@@ -5602,6 +5748,8 @@
         currentAction: s.currentAction || s.status || '',
         version: s.version || 'Chrome',
         deviceProfile: s.deviceProfile || 'Windows 11',
+        deviceVersion: s.deviceVersion || (s.deviceSummary ? s.deviceSummary.split(' · ')[0] : s.deviceProfile) || 'Windows 11',
+        deviceSummary: s.deviceSummary || '',
         isWindowVisible: Boolean(s.isWindowVisible),
       }));
     }

@@ -24,6 +24,9 @@ import {
   humanClick,
   naturalMouseDrift,
   ADJACENT_KEYS,
+  hasActiveAddressSuggestions,
+  selectFirstAddressSuggestion,
+  ADDRESS_SUGGESTION_SELECTORS,
 } from './autofill.mjs';
 import { DEFAULT_LEAD_CONFIG, isLeadPresent, normalizeIpAddress, LeadApiError } from './lead-check.mjs';
 import { parseActions, pageHasWork, executeAction, extractCleanPageStructure, detectSmartFallbackAction, inspectAndFixFormWithAi } from './ai-assist.mjs';
@@ -939,8 +942,8 @@ assert.equal(normalizeIpAddress('99.145.85.141'), '99.145.85.141');
 assert.equal(normalizeIpAddress(' 99.145.85.141:8080 '), '99.145.85.141');
 assert.equal(normalizeIpAddress('socks5://1.2.3.4:1080'), '1.2.3.4');
 assert.equal(normalizeIpAddress('http://5.6.7.8:8080'), '5.6.7.8');
-assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 30);
-assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 2);
+assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 20);
+assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 1);
 assert.equal(DEFAULT_LEAD_CONFIG.checkScreen, 4);
 
 const sampleApiResponse = {
@@ -2693,6 +2696,31 @@ const mockLocoFrame = {
 };
 const locoSubmitFound = await findSubmitButton(mockLocoFrame);
 assert.ok(locoSubmitFound, 'findSubmitButton phải tìm được nút submit Get Free Guide của LocoTomato');
+
+// ── Test Address Autocomplete Dropdown Selection (Google Places / Loqate / ARIA) ──
+assert.ok(Array.isArray(ADDRESS_SUGGESTION_SELECTORS) && ADDRESS_SUGGESTION_SELECTORS.length > 10);
+assert.equal(typeof hasActiveAddressSuggestions, 'function');
+assert.equal(typeof selectFirstAddressSuggestion, 'function');
+
+let addressSuggestionClicked = false;
+const mockPacItem = {
+  count: async () => 1,
+  isVisible: async () => true,
+  evaluate: async (fn) => fn({ scrollIntoView: () => {}, dispatchEvent: () => {}, click: () => { addressSuggestionClicked = true; } }),
+  click: async () => { addressSuggestionClicked = true; },
+};
+const mockAddressPage = {
+  locator: (sel) => ({
+    first: () => (sel.includes('.pac-item') ? mockPacItem : { count: async () => 0, isVisible: async () => false }),
+  }),
+  evaluate: async (fn) => true,
+};
+const hasSuggestions = await hasActiveAddressSuggestions(mockAddressPage);
+assert.equal(hasSuggestions, true);
+
+const pickedSuggestion = await selectFirstAddressSuggestion(mockAddressPage);
+assert.equal(pickedSuggestion, true);
+assert.equal(addressSuggestionClicked, true, 'selectFirstAddressSuggestion phải click thành công vào mục gợi ý địa chỉ');
 
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 process.exit(0);

@@ -120,7 +120,7 @@
         <div class="row">
           <div>
             <label for="count">Số cửa sổ</label>
-            <input id="count" name="requestedCount" type="number" min="1" max="6" value="6">
+            <input id="count" name="requestedCount" type="number" min="1" max="30" value="6">
           </div>
           <div>
             <label for="proxy-type">Loại proxy mặc định</label>
@@ -386,12 +386,12 @@
         <div id="device-profiles-panel" style="margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
           <div style="margin-bottom:8px;"><strong style="font-size:14px;">📱 Chế độ thiết bị</strong> <span class="hint" style="font-size:12px;">— mỗi Chrome giả lập một thiết bị khác nhau</span></div>
           <div id="device-profile-checkboxes" style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px;">
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="windows" checked> 🪟 Windows</label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="macos"> 🍎 macOS</label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="linux"> 🐧 Linux</label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="android"> 🤖 Android</label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="ipad"> 📟 iPad</label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="ios"> 📱 iPhone</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="windows" checked> 🪟 Windows (10, 11)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="macos"> 🍎 macOS (14, 15, 26)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="linux"> 🐧 Linux (6.5 - 6.14)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="android"> 🤖 Android (13 - 16)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="ipad"> 📟 iPad (iPadOS 17 - 18)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="ios"> 📱 iPhone (iOS 17 - 18)</label>
           </div>
           <p class="hint" style="margin:8px 0 0;font-size:11px;">Tích nhiều → Chrome xoay vòng thiết bị. Ít nhất 1 phải được chọn. Áp dụng ngay lần mở tiếp theo.</p>
         </div>
@@ -716,7 +716,7 @@
                   <div class="chrome-card-top">
                     <span class="chrome-card-slot">Cửa sổ ${session.slot}</span>
                     <span class="chrome-card-version">v${session.version}</span>
-                    <span style="font-size:11px;margin-left:4px;" title="${session.deviceSummary || deviceLabel}">${deviceIcon}</span>
+                    <span style="font-size:11px;margin-left:4px;" title="${session.deviceSummary || deviceLabel}">${deviceIcon} <strong style="font-size:11px;color:#0f172a;">${session.deviceVersion || (session.deviceSummary ? session.deviceSummary.split(' · ')[0] : deviceLabel)}</strong></span>
                     ${session.streamLabel ? `<span style="background:${session.streamRole === 2 ? '#8b5cf6' : '#2563eb'};color:#fff;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-left:auto;">${session.streamLabel}</span>` : ''}
                   </div>
                   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">

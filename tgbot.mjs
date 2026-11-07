@@ -12,7 +12,7 @@ const instanceId = process.env.AUTOLEADPC_INSTANCE || '1';
 const instanceSuffix = instanceId !== '1' ? `-${instanceId}` : '';
 const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${instanceSuffix}`;
 
-const APP_PORT = Number(process.env.AUTOLEADPC_PORT) || 3210;
+const APP_PORT = Number(process.env.AUTOLEADPC_PORT) || 3211;
 const APP_BASE = `http://127.0.0.1:${APP_PORT}`;
 
 let cfg = null;

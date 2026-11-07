@@ -98,11 +98,13 @@ EOF
   # Copy mọi file .test.mjs bằng glob thay vì liệt kê tay: trước đây gói .app thiếu
   # multi-tab-ai.test.mjs nên test biến mất khỏi bundle trong im lặng.
   cp -p ./*.test.mjs "$LAUNCHER_DIR/"
-  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs cloakbrowser-engine.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs codex-form-agent.mjs gologin-profile.mjs local-profile-engine.mjs playwright-mcp-human.cjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs run-tests.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
-  if [ -f "Config/Browser/bookmarks.txt" ]; then
-    mkdir -p "$LAUNCHER_DIR/Config/Browser"
-    cp -p Config/Browser/bookmarks.txt "$LAUNCHER_DIR/Config/Browser/"
-  fi
+  # run-tests.mjs có liệt kê test trong mock-pages/; test đó còn gọi test-offline-screens.mjs.
+  cp -R mock-pages "$LAUNCHER_DIR/"
+  cp -p test-offline-screens.mjs "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs cloakbrowser-engine.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs codex-form-agent.mjs local-profile-engine.mjs playwright-mcp-human.cjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs run-tests.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  # Chỉ chép Config/Browser: Config/Settings có thể chứa token, không được vào bundle.
+  mkdir -p "$LAUNCHER_DIR/Config"
+  cp -R Config/Browser "$LAUNCHER_DIR/Config/"
   if [ -f "script.mjs" ]; then
     cp -p script.mjs "$LAUNCHER_DIR/"
   fi

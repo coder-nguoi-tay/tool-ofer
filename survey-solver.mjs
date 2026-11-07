@@ -627,12 +627,84 @@ export async function clickSurveyNextButton(frame, options = {}) {
 }
 
 /**
+ * Phân tích và xử lý các câu hỏi Khảo sát dạng Dropdown selection (Select tiêu chuẩn và Custom Listbox).
+ * Tự động nhận diện dropdown đang ở trạng thái placeholder / chưa chọn và chọn 1 option hợp lệ.
+ *
+ * @param {object} frame Frame hoặc Page Playwright.
+ * @param {object} [options={}] Tùy chọn.
+ * @return {Promise<number>} Số câu hỏi dropdown đã được chọn thành công.
+ * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
+ * @since 2026-11-07
+ */
+export async function solveDropdownQuestions(frame, options = {}) {
+  let answered = 0;
+  try {
+    const dropdownGroups = await frame.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el || el.disabled) return false;
+        const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+
+      const groups = [];
+      const selects = Array.from(document.querySelectorAll('select')).filter(isVisible);
+      selects.forEach((sel, idx) => {
+        if (!sel.options || sel.options.length < 2) return;
+        const curOpt = sel.options[sel.selectedIndex];
+        const curVal = String(curOpt?.value ?? '').trim().toLowerCase();
+        const curTxt = String(curOpt?.text ?? '').trim().toLowerCase();
+        const isPlaceholder = !curVal || /^(0|-1|none|placeholder|default|select)$/i.test(curVal) ||
+          /^(select|choose|chọn|vui lòng|pick|--|\.\.\.|please select)/i.test(curTxt);
+        if (isPlaceholder || sel.getAttribute('data-survey-dropdown-filled') !== '1') {
+          const uid = `survey_sel_${idx}_${Date.now()}`;
+          sel.setAttribute('data-survey-dropdown-uid', uid);
+          groups.push({ uid, kind: 'native_select' });
+        }
+      });
+      return groups;
+    }).catch(() => []);
+
+    for (const item of dropdownGroups) {
+      try {
+        const loc = frame.locator(`[data-survey-dropdown-uid="${item.uid}"]`).first();
+        if (await loc.count() > 0) {
+          const picked = await loc.evaluate((sel) => {
+            const valid = Array.from(sel.options).filter((o) => {
+              const val = String(o.value ?? '').trim().toLowerCase();
+              const txt = String(o.text ?? '').trim().toLowerCase();
+              if (!val || /^(0|-1|none|placeholder|default|select)$/i.test(val)) return false;
+              if (/^(select|choose|chọn|vui lòng|pick|--|\.\.\.|please select)/i.test(txt)) return false;
+              return !o.disabled;
+            });
+            if (valid.length > 0) {
+              const target = valid[Math.floor(Math.random() * valid.length)];
+              sel.value = target.value;
+              sel.setAttribute('data-survey-dropdown-filled', '1');
+              sel.dispatchEvent(new Event('input', { bubbles: true }));
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+              sel.dispatchEvent(new Event('blur', { bubbles: true }));
+              return true;
+            }
+            return false;
+          }).catch(() => false);
+          if (picked) answered++;
+        }
+      } catch {}
+    }
+  } catch {}
+  return answered;
+}
+
+/**
  * Giải quyết toàn diện 1 bước khảo sát hiện tại (1 Step):
  * 1. Đánh giá câu hỏi Rating/NPS nếu có.
  * 2. Đánh giá bảng ma trận nếu có.
  * 3. Đánh giá các Checkbox nếu có.
- * 4. Kiểm tra xem trang có Auto-advance (tự nhảy trang) không.
- * 5. Nếu không auto-advance, tự động tìm và click nút Next/Continue.
+ * 4. Đánh giá các Dropdown/Select nếu có.
+ * 5. Kiểm tra xem trang có Auto-advance (tự nhảy trang) không.
+ * 6. Nếu không auto-advance, tự động tìm và click nút Next/Continue.
  *
  * @param {object} frame Frame hoặc Page Playwright.
  * @param {object} [record={}] Dữ liệu record hồ sơ (để khớp đáp án nhân khẩu học).
@@ -654,6 +726,10 @@ export async function solveSurveyStep(frame, record = {}, options = {}) {
   // 3. Giải quyết survey checkboxes
   const checkboxesAnswered = await solveSurveyCheckboxes(frame, options);
   answeredCount += checkboxesAnswered;
+
+  // 4. Giải quyết survey dropdowns/selects
+  const dropdownsAnswered = await solveDropdownQuestions(frame, options);
+  answeredCount += dropdownsAnswered;
 
   if (answeredCount === 0) {
     return {

@@ -43,7 +43,7 @@ Proxy (kể cả user/password), URL, số cửa sổ và dữ liệu tự đi�
 
 ## Chạy từ mã nguồn
 
-Yêu cầu Node.js 20 trở lên.
+Yêu cầu Node.js 20.19+ hoặc 22.12+ (theo yêu cầu của `cloakbrowser`).
 
 ```sh
 npm install

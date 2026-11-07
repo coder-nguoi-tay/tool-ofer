@@ -2,12 +2,13 @@ import { createServer, get as requestHttp } from 'node:http';
 import { createConnection as netCreateConnection } from 'node:net';
 import { get as requestHttps } from 'node:https';
 import { access, appendFile, chmod, cp, mkdir, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir, hostname as getHostname, cpus, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { startManualOpsRecorder } from './observer.mjs';
 import { chromium } from 'playwright';
 import { HttpsProxyAgent } from 'https-proxy-agent';
@@ -91,7 +92,17 @@ import {
 import { startAuthenticatedHttpRelay, startAuthenticatedSocksRelay } from './relay.mjs';
 import { buildAdsPowerProfileRequest, createAdsPowerProfile, getOrCreateAdsPowerProfile, updateAdsPowerProfile, startAdsPowerProfile, stopAdsPowerProfile, deleteAdsPowerProfile, cleanupOrphanedAdsPowerProfiles, listInstalledAdsPowerKernelVersions, selectAdsPowerKernelVersions } from './adspower-profile.mjs';
 import {
-  applyNativeOverrides, buildStealthConfig, buildUserAgentOverride, createDeviceVariant, localeForCountry, stealthInitScript,
+  applyNativeOverrides,
+  attachGuardedWorkerInjection,
+  buildProfileCoherenceExpected,
+  collectProfileCoherenceSnapshot,
+  analyzeProfileCoherence,
+  verifyPageProfileCoherence,
+  buildStealthConfig,
+  buildUserAgentOverride,
+  createDeviceVariant,
+  localeForCountry,
+  stealthInitScript,
 } from './stealth.mjs';
 import {
   isCloakBrowserInstalled,
@@ -100,7 +111,7 @@ import {
   launchCloakBrowserPersistentContext,
 } from './cloakbrowser-engine.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
-import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig } from './ai-assist.mjs';
+import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig, callAgt } from './ai-assist.mjs';
 import { startTelegramBot, reloadTelegramBot, stopTelegramBot, tgNotify } from './tgbot.mjs';
 
 export function getAiConfigFilePath() {
@@ -3579,6 +3590,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     slot: assignedSlot,
     chromeVersion: chromeVer,
     deviceProfile: osDisplay,
+    deviceVersion: osDisplay,
     deviceSummary: useCloakBrowser ? `${osDisplay} · ${chromeVer} · CloakBrowser Humanize` : `${osDisplay} · ${chromeVer} · Anti-Detect Active`,
     useCloakBrowser: Boolean(useCloakBrowser),
     suppressAutoRefill: false,
@@ -4663,6 +4675,7 @@ function getAutoRefillStatus() {
           slot: session.slot ?? (session.tileIndex + 1),
           version: session.chromeVersion,
           deviceProfile: session.deviceProfile ?? 'windows',
+          deviceVersion: session.deviceVersion ?? (session.deviceSummary ? session.deviceSummary.split(' · ')[0] : session.deviceProfile),
           deviceSummary: session.deviceSummary ?? null,
           isWindowVisible: Boolean(session.isWindowVisible),
           exitIp: session.exitIp ?? (session.isManagedProfile ? session.chromeVersion : null),
@@ -5447,8 +5460,8 @@ async function startLeadVerification(session, leadConfig) {
 
   const updateBadge = (text) => { session.updateBadge?.(text); };
 
-  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 30);
-  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 2);
+  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 20);
+  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 1);
 
   const attemptText = maxAttempts > 1 ? `${maxAttempts} lần x ${intervalSeconds}s` : `1 lần ${intervalSeconds}s`;
   session.leadCheckMessage = `Đã nộp ${targetDesc}; bắt đầu chờ kiểm tra lead (${attemptText})...`;
@@ -5739,6 +5752,11 @@ async function openBrowserWithInstalledChrome({
   const geolocation = antiFingerprint.apiFakeIP && (ipLat || ipLng)
     ? { latitude: ipLat, longitude: ipLng, accuracy: 20 + Math.floor(Math.random() * 60) }
     : null;
+  const effectiveProxyUrl = relay?.proxy?.server || proxy?.server || '';
+  const protectWebRtc = Boolean(antiFingerprint?.webrtc);
+  const webrtcPolicy = protectWebRtc
+    ? (effectiveProxyUrl ? 'disable_non_proxied_udp' : 'default_public_interface_only')
+    : 'default';
   let context;
   let verifiedExitIp = null;
   // Chạy có cửa sổ hay không: "Chạy trong app" BẬT (hoặc ẩn-tới-target/lead) = headless ẩn hoàn toàn,
@@ -5788,10 +5806,9 @@ async function openBrowserWithInstalledChrome({
           '--renderer-process-limit=3',
           // Chromium tự bật cờ "do automation" khi điều khiển từ xa — tắt đi cho khớp Chrome thật.
           '--disable-blink-features=AutomationControlled',
-          // WebRTC chỉ đi qua proxy: không để STUN/UDP làm lộ IP thật của máy.
-          '--webrtc-ip-handling-policy=disable_non_proxied_udp',
-          // CloakBrowser tự tra IP exit qua proxy rồi thay vào cờ này (--fingerprint-webrtc-ip=<ip>).
-          '--fingerprint-webrtc-ip=auto',
+          // WebRTC policy theo cấu hình anti-fingerprint (nhất quán với UI/engine khác).
+          `--webrtc-ip-handling-policy=${webrtcPolicy}`,
+          ...(protectWebRtc ? ['--fingerprint-webrtc-ip=auto'] : []),
         ],
         contextOptions: {
           ignoreHTTPSErrors: true,
@@ -5831,8 +5848,8 @@ async function openBrowserWithInstalledChrome({
           '--no-first-run',
           '--no-default-browser-check',
           '--disable-blink-features=AutomationControlled',
-          // WebRTC chỉ đi qua proxy: không để STUN/UDP làm lộ IP thật của máy.
-          '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+          // WebRTC policy theo cấu hình anti-fingerprint (nhất quán với UI/engine khác).
+          `--webrtc-ip-handling-policy=${webrtcPolicy}`,
           '--disable-gpu',
           // Chrome mới không tự dùng SwiftShader cho WebGL nữa; thiếu cờ này trang thấy "không có WebGL".
           '--enable-unsafe-swiftshader',
@@ -5864,6 +5881,7 @@ async function openBrowserWithInstalledChrome({
     // Nhánh CloakBrowser phải lưu profile đã chuẩn hoá (macos/windows) cho khớp engine;
     // nhánh Chrome thường giữ nguyên giá trị thô như trước đây để không đổi hành vi.
     deviceProfile: useCloakBrowser ? profileKey : deviceProfile,
+    deviceVersion: dp.deviceVersion || (dp.summary ? dp.summary.split(' · ')[0] : dp.label),
     deviceSummary: useCloakBrowser ? `${dp.summary} · CloakBrowser Stealth` : dp.summary,
     useCloakBrowser: Boolean(useCloakBrowser),
     suppressAutoRefill: false,
@@ -5915,17 +5933,37 @@ async function openBrowserWithInstalledChrome({
   const nativeOverrides = {
     userAgentOverride: buildUserAgentOverride(dp, effectiveBuild, languages),
     hardwareConcurrency: dp.spoof.hardwareConcurrency,
+    timezoneId,
+    deviceProfile: dp,
   };
   const overrideTasks = new WeakMap();
   const applyDeviceOverrides = (targetPage) => {
     if (!overrideTasks.has(targetPage)) {
-      overrideTasks.set(targetPage, applyNativeOverrides(context, targetPage, nativeOverrides)
-        .catch((error) => console.warn(`[Stealth] Không áp được override cho tab: ${error.message}`)));
+      overrideTasks.set(targetPage, (async () => {
+        await applyNativeOverrides(context, targetPage, nativeOverrides)
+          .catch((error) => console.warn(`[Stealth] Không áp được override cho tab: ${error.message}`));
+        if (antiFingerprint?.workerInjection) {
+          await attachGuardedWorkerInjection(context, targetPage, stealthConfig, {
+            enabled: true,
+            onLog: (entry) => session.addBrowserLog?.(entry, targetPage),
+          }).catch(() => {});
+        }
+      })());
     }
     return overrideTasks.get(targetPage);
   };
   context.on('page', (newPage) => { void applyDeviceOverrides(newPage); });
   await Promise.all(context.pages().map(applyDeviceOverrides));
+
+  // Kiểm tra tính nhất quán profile (coherence) trên tab chính
+  const initialPage = context.pages()[0];
+  if (initialPage) {
+    void verifyPageProfileCoherence(initialPage, dp, antiFingerprint, {
+      timezoneId,
+      languages,
+      onLog: (entry) => session.addBrowserLog?.(entry, initialPage),
+    }).catch(() => {});
+  }
 
   // Lấy từ queue available; nếu cạn thì tái dùng record đã dùng (used) thay vì chạy rỗng
   const recordPool = autofillQueue.available.length > 0
@@ -7547,6 +7585,8 @@ async function startLocalInterface() {
             TimeLimit: getVal('Timeload1') || '30',
             delayStart: getVal('delayStart') || '1',
             delayStop: getVal('delayStop') || '1',
+            Thread: getVal('Thread') || '1',
+            LimitRun: getVal('LimitRun') || '0',
           };
         }
         const listPath = join(offerDir, 'saved-offers.json');
@@ -7586,7 +7626,7 @@ async function startLocalInterface() {
         const link2 = (body.LinkOffer2 || '').trim();
         const link3 = (body.LinkOffer3 || '').trim();
         const link4 = (body.LinkOffer4 || '').trim();
-        const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${link1}\nLinkOffer2=${link2}\nLinkOffer3=${link3}\nLinkOffer4=${link4}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\n`;
+        const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${link1}\nLinkOffer2=${link2}\nLinkOffer3=${link3}\nLinkOffer4=${link4}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\nThread=${body.Thread || '1'}\nLimitRun=${body.LimitRun || '0'}\n`;
         writeFileSync(filePath, iniContent, 'utf8');
 
         // Lưu / cập nhật danh sách preset saved-offers.json
@@ -7610,6 +7650,8 @@ async function startLocalInterface() {
           TimeLimit: body.TimeLimit || '30',
           delayStart: body.delayStart || '1',
           delayStop: body.delayStop || '1',
+          Thread: body.Thread || '1',
+          LimitRun: body.LimitRun || '0',
           methodConfigs: Array.isArray(body.methodConfigs) ? body.methodConfigs : [],
           updatedAt: new Date().toISOString(),
         };
@@ -8638,17 +8680,47 @@ async function startLocalInterface() {
           env: { ...process.env, PATH: augmentedPath },
           timeout: 5000,
         });
-        respondWithJson(response, 200, {
-          success: true,
-          binary: binName,
-          version: stdout.trim(),
-          message: `Đã kết nối thành công: ${binName} (${stdout.trim()})`,
-        });
+
+        const versionStr = stdout.trim();
+
+        // Gửi test prompt ngắn để xác thực AI model có khả dụng và phản hồi thật sự
+        let promptOk = false;
+        let sampleReply = '';
+        let promptErr = null;
+        try {
+          sampleReply = await callAgt('1+1=? Trả lời duy nhất 1 chữ số.', {
+            cliBinary: binName,
+            timeoutSeconds: 15,
+            allowFallback: false,
+          });
+          promptOk = true;
+          sampleReply = String(sampleReply || '').trim().slice(0, 80);
+        } catch (pErr) {
+          promptErr = pErr.message;
+        }
+
+        if (promptOk) {
+          respondWithJson(response, 200, {
+            success: true,
+            binary: binName,
+            version: versionStr,
+            sampleReply,
+            message: `✓ Kết nối thành công: ${binName} (${versionStr}) | AI phản hồi tốt: "${sampleReply}"`,
+          });
+        } else {
+          respondWithJson(response, 200, {
+            success: false,
+            binary: binName,
+            version: versionStr,
+            error: promptErr,
+            message: `Binary "${binName}" (${versionStr}) có mặt nhưng AI không thể phản hồi: ${promptErr}. Gợi ý: Hãy kiểm tra quota / quyền hoặc chuyển sang agy.`,
+          });
+        }
       } catch (err) {
         respondWithJson(response, 200, {
           success: false,
           error: err.message,
-          message: `Không thể gọi binary: ${err.message}`,
+          message: `Không thể tìm thấy hoặc gọi binary "${body?.binary || 'agy'}": ${err.message}`,
         });
       }
       return;
@@ -8867,12 +8939,15 @@ async function startLocalInterface() {
         cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
       });
 
-      // 3. Bắt đầu screencast với format jpeg quality 65
+      // 3. Bắt đầu screencast với độ phân giải theo viewport thực tế, chất lượng sắc nét 75
+      const vp = typeof targetPage?.viewportSize === 'function' ? targetPage.viewportSize() : null;
+      const targetMaxWidth = Math.max(1280, vp?.width || 1280);
+      const targetMaxHeight = Math.max(800, vp?.height || 800);
       await cdpSession.send('Page.startScreencast', {
         format: 'jpeg',
-        quality: 65,
-        maxWidth: 1024,
-        maxHeight: 768,
+        quality: 75,
+        maxWidth: targetMaxWidth,
+        maxHeight: targetMaxHeight,
         everyNthFrame: 1,
       }).catch((err) => {
         console.warn('[ScreenStream] Lỗi startScreencast:', err.message);
@@ -8880,12 +8955,12 @@ async function startLocalInterface() {
 
       // 4. Gửi ngay lập tức 1 frame ban đầu bằng captureScreenshot hoặc page.screenshot để màn hình hiện ảnh trong 15ms
       try {
-        const initShot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 65 }).catch(() => null);
+        const initShot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 75 }).catch(() => null);
         if (initShot?.data && !scObj.sseResponse.writableEnded) {
           scObj.lastFrameTime = Date.now();
           scObj.sseResponse.write(`data: ${initShot.data}\n\n`);
         } else if (targetPage && !targetPage.isClosed() && !scObj.sseResponse.writableEnded) {
-          const buf = await targetPage.screenshot({ type: 'jpeg', quality: 65 }).catch(() => null);
+          const buf = await targetPage.screenshot({ type: 'jpeg', quality: 75 }).catch(() => null);
           if (buf && !scObj.sseResponse.writableEnded) {
             scObj.lastFrameTime = Date.now();
             scObj.sseResponse.write(`data: ${buf.toString('base64')}\n\n`);
@@ -8906,7 +8981,7 @@ async function startLocalInterface() {
           if (scObj.captureInFlight) return;
           scObj.captureInFlight = true;
           try {
-            const shot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 65 }).catch(() => null);
+            const shot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 75 }).catch(() => null);
             if (shot?.data && !scObj.sseResponse.writableEnded) {
               scObj.lastFrameTime = Date.now();
               scObj.sseResponse.write(`data: ${shot.data}\n\n`);
@@ -9001,9 +9076,15 @@ async function startLocalInterface() {
 
         let remainingPages = session.browser.pages().filter(p => !p.isClosed());
         if (remainingPages.length === 0) {
-          const freshPage = await session.browser.newPage();
-          await freshPage.goto('about:blank').catch(() => {});
-          remainingPages = [freshPage];
+          session.suppressAutoRefill = true;
+          session.addBrowserLog?.({ type: 'manual_browser_closed', detail: 'Đã đóng tab cuối cùng qua Screen View; tắt trình duyệt.' });
+          if (autoRefill.enabled && !autoRefill.stopRequested && autoRefill.targetCount > 0) {
+            autoRefill.targetCount -= 1;
+            void saveAutoRefillSettings();
+          }
+          await session.browser?.close?.().catch(() => {});
+          respondWithJson(response, 200, { ok: true, closedSession: true, remaining: 0 });
+          return;
         }
 
         const newActiveIndex = Math.max(0, Math.min(targetIndex > 0 ? targetIndex - 1 : 0, remainingPages.length - 1));
@@ -9033,6 +9114,41 @@ async function startLocalInterface() {
       const backSession = [...activeBrowsers].find((s) => (s.slot ?? s.tileIndex + 1) === slot);
       backSession?.addBrowserLog?.({ type: 'navigate', detail: `Quay lại trang trước qua Screen View: ${sc.page.url()}` });
       respondWithJson(response, 200, { ok: true, url: sc.page.url() });
+      return;
+    }
+
+    // Làm mới (Reload) trang của tab đang xem trong Screen View
+    if (request.method === 'POST' && request.url.startsWith('/screen/reload/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const sc = screencastSessions.get(slot);
+      if (!sc?.page || sc.page.isClosed()) { respondWithJson(response, 404, { error: 'not found' }); return; }
+      await sc.page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+      const reloadSession = [...activeBrowsers].find((s) => (s.slot ?? s.tileIndex + 1) === slot);
+      reloadSession?.addBrowserLog?.({ type: 'navigate', detail: `Làm mới trang qua Screen View: ${sc.page.url()}` });
+      respondWithJson(response, 200, { ok: true, url: sc.page.url() });
+      return;
+    }
+
+    // Điều hướng (Navigate) tới URL mới từ thanh địa chỉ Screen View
+    if (request.method === 'POST' && request.url.startsWith('/screen/navigate/')) {
+      const slot = parseInt(request.url.split('/').pop(), 10);
+      const sc = screencastSessions.get(slot);
+      if (!sc?.page || sc.page.isClosed()) { respondWithJson(response, 404, { error: 'not found' }); return; }
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        let targetUrl = String(body.url || '').trim();
+        if (targetUrl && !/^https?:\/\//i.test(targetUrl)) {
+          targetUrl = `https://${targetUrl}`;
+        }
+        if (targetUrl) {
+          await sc.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+          const navSession = [...activeBrowsers].find((s) => (s.slot ?? s.tileIndex + 1) === slot);
+          navSession?.addBrowserLog?.({ type: 'navigate', detail: `Điều hướng qua Screen View tới: ${targetUrl}` });
+        }
+        respondWithJson(response, 200, { ok: true, url: sc.page.url() });
+      } catch (err) {
+        respondWithJson(response, 500, { error: err.message });
+      }
       return;
     }
 
@@ -9423,7 +9539,8 @@ async function startAgentMode(hubUrl) {
   }
 }
 
-if (import.meta.main) {
+// Không dùng import.meta.main: Node cũ trả undefined nên app thoát im lặng, không lên server.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const hubArg = process.argv.find((a) => a.startsWith('--hub='));
   if (hubArg) {
     startAgentMode(hubArg.slice(6)).catch((e) => { console.error(e.message); process.exitCode = 1; });

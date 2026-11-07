@@ -23,6 +23,7 @@ profiles.json
 *.pem
 *.key
 *.p12
+Config/Settings/Settings.ini
 
 # macOS build artifacts & compiled bundles
 AutoLeadPC Mac.app/

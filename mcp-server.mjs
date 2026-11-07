@@ -6,7 +6,9 @@
  * Đăng ký trong ~/.codex/config.toml:
  *   [mcp_servers.autoleadpc]
  *   command = "node"
- *   args = ["/Users/codernguoitay/AutoLeadPC-mac/mcp-server.mjs"]
+ *   args = ["/Users/codernguoitay/workspaces/AutoLeadPC-mac/mcp-server.mjs"]
+ *
+ * App đóng gói là instance 2: thêm env = { AUTOLEADPC_INSTANCE = "2" } để đọc đúng cấu hình Telegram.
  */
 
 import { createInterface } from 'node:readline';
@@ -14,7 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const APP_PORT = Number(process.env.AUTOLEADPC_PORT) || 3210;
+const APP_PORT = Number(process.env.AUTOLEADPC_PORT) || 3211;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 
 const instanceId = process.env.AUTOLEADPC_INSTANCE || '1';

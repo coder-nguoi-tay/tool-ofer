@@ -1823,6 +1823,174 @@ export async function findSubmitButton(frame) {
 }
 
 /**
+ * Danh sách đầy đủ các selector phần tử gợi ý địa chỉ (Google Places, Loqate, Mapbox, Algolia, ARIA listbox, jQuery UI, Custom).
+ */
+export const ADDRESS_SUGGESTION_SELECTORS = [
+  // 1. Google Places / PCA Predict / Loqate
+  '.pac-container:not([style*="display: none"]) .pac-item',
+  '.pac-container .pac-item',
+  '.pca .pcaitem',
+  '.pac-item',
+  '.pac-item-query',
+  '.pac-matched',
+  '.loco-dropdown .loco-item',
+  '.loco-item',
+  // 2. Mapbox / Algolia / Radar / SmartyStreets
+  '.mapboxgl-ctrl-geocoder--suggestion',
+  '.ap-suggestion',
+  '.radar-autocomplete-item',
+  '.smarty-suggestion',
+  // 3. ARIA Combobox / Listbox
+  '[role="listbox"]:not([style*="display: none"]) [role="option"]',
+  '[role="listbox"] [role="option"]',
+  '[role="combobox"] ~ [role="listbox"] [role="option"]',
+  '[role="combobox"] + div [role="option"]',
+  'ul[role="listbox"] li',
+  // 4. jQuery UI / Typeahead / Select2 / Chosen
+  '.ui-autocomplete:not([style*="display: none"]) .ui-menu-item',
+  '.ui-autocomplete .ui-menu-item',
+  '.ui-menu-item-wrapper',
+  '.select2-results__option--selectable',
+  '.select2-results__option',
+  '.select2-search-choice',
+  '.tt-suggestion',
+  '.typeahead-suggestion',
+  '.chosen-results li.active-result',
+  // 5. Generic Custom Address Autocomplete
+  '.address-predictions li',
+  '.address-predictions div[role="button"]',
+  '.address-autocomplete-item',
+  '.address-suggestion',
+  '.address-results li',
+  '.address-results div[role="button"]',
+  '.address-item',
+  '.prediction-item',
+  '.autocomplete-suggestion',
+  '[class*="autocomplete"] [class*="item"]',
+  '[class*="autocomplete"] [class*="suggestion"]',
+  '[class*="autocomplete"] [class*="option"]',
+  '[class*="address"] [class*="suggestion"]',
+  '[class*="address"] [class*="item"]',
+  '[class*="address"] [class*="result"]',
+  '[class*="address"] [class*="prediction"]',
+  '[data-place-id]',
+  '[data-prediction]',
+  '[data-address-suggestion]',
+  '.saved-address-item',
+  '.address-list li',
+  '.address-list a',
+  '.saved-addresses li',
+  '.saved-addresses a',
+  '.saved-addresses button',
+];
+
+/**
+ * Kiểm tra xem trên trang web có dropdown gợi ý địa chỉ từ API nào đang mở và hiển thị hay không.
+ *
+ * @param {object} page Page Playwright.
+ * @param {object} [frame=null] Frame Playwright (nếu có).
+ * @return {Promise<boolean>} True nếu có menu gợi ý địa chỉ đang mở.
+ */
+export async function hasActiveAddressSuggestions(page, frame = null) {
+  const target = frame || page;
+  if (!target || typeof target.evaluate !== 'function') return false;
+  try {
+    const res = await target.evaluate(() => {
+      if (typeof document === 'undefined') return false;
+      const isVisible = (el) => {
+        if (!el || el.disabled) return false;
+        const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) return false;
+        const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+        return r ? (r.width > 0 && r.height > 0) : true;
+      };
+      const containers = [
+        '.pac-container',
+        '.pca',
+        '.ui-autocomplete',
+        '[role="listbox"]',
+        '.select2-dropdown',
+        '.mapboxgl-ctrl-geocoder',
+        '.address-predictions',
+        '.address-results',
+        '[class*="autocomplete-container"]',
+        '[class*="address-dropdown"]',
+        '.loco-dropdown',
+      ];
+      for (const c of containers) {
+        try {
+          const el = document.querySelector(c);
+          if (el && isVisible(el)) return true;
+        } catch {}
+      }
+      return false;
+    }).catch(() => false);
+    return res === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tự động tìm và chọn phần tử gợi ý địa chỉ đầu tiên từ danh sách API của trang web.
+ * Hỗ trợ Google Places, Loqate, Mapbox, Algolia, ARIA listbox và custom dropdowns.
+ *
+ * @param {object} page Page Playwright.
+ * @param {object} [frame=null] Frame Playwright.
+ * @param {object} [field=null] Locator ô input địa chỉ (dùng cho fallback keyboard).
+ * @param {object} [options={}] Tùy chọn log.
+ * @return {Promise<boolean>} True nếu đã chọn thành công mục gợi ý.
+ */
+export async function selectFirstAddressSuggestion(page, frame = null, field = null, options = {}) {
+  const contexts = [frame, page].filter((c) => c && typeof c.locator === 'function');
+  for (const ctx of contexts) {
+    for (const sel of ADDRESS_SUGGESTION_SELECTORS) {
+      try {
+        const item = ctx.locator(sel).first();
+        if ((await item.count().catch(() => 0)) > 0) {
+          const visible = await item.isVisible({ timeout: 120 }).catch(() => false);
+          if (visible) {
+            // Chuỗi sự kiện đầy đủ cho Google Places / Loqate / custom JS listeners
+            await item.evaluate((el) => {
+              el.scrollIntoView?.({ block: 'nearest' });
+              el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+              el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+              el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+              el.click();
+            }).catch(() => {});
+
+            // Thao tác click Playwright
+            await item.click({ force: true, timeout: 500 }).catch(() => {});
+
+            options.onLog?.({
+              type: 'address_suggestion_selected',
+              detail: `[Address Autocomplete] Đã tự động chọn gợi ý địa chỉ đầu tiên từ API: [${sel.slice(0, 40)}]`,
+            }, page);
+            return true;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // Fallback nếu không click được phần tử DOM: dùng phím ArrowDown + Enter
+  if (field && typeof field.press === 'function') {
+    try {
+      await field.press('ArrowDown').catch(() => {});
+      if (page && typeof page.waitForTimeout === 'function') {
+        await page.waitForTimeout(100).catch(() => {});
+      } else {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      await field.press('Enter').catch(() => {});
+      return true;
+    } catch {}
+  }
+
+  return false;
+}
+
+/**
  * Tính số tuổi ước tính dựa vào ngày sinh trong bản ghi người dùng.
  *
  * @param {object} record Bản ghi người dùng.
@@ -2288,19 +2456,22 @@ export async function handleSurveySemanticQuestions(page, frame, options = {}) {
 
   if (!found) return 0;
   const clearUids = () => frame.evaluate(() => document.querySelectorAll('[data-ux-option-uid]').forEach((n) => n.removeAttribute('data-ux-option-uid'))).catch(() => {});
-  const candidates = await frame.locator('[data-ux-option-uid]').evaluateAll(extractOptionFeaturesInPage, found.nearQuestion).catch(() => []);
+  const optLoc = frame.locator('[data-ux-option-uid]');
+  const candidates = (optLoc && typeof optLoc.evaluateAll === 'function')
+    ? await optLoc.evaluateAll(extractOptionFeaturesInPage, found.nearQuestion).catch(() => [])
+    : [];
   const ranked = rankOptions(candidates);
   // Option điểm < FALLBACK (ẩn, disabled, noise, đã chọn...) không được chọn, kể cả khi đúng nghĩa.
   const usable = ranked.filter((c) => c.tier !== 'skip');
   const choice = chooseSemanticAnswer(found.qType, usable.map((c) => c.label), record, userAge);
   const selected = choice ? usable[choice.index] : null;
-  const head = found.head.slice(0, 60);
+  const head = String(found.head || '').slice(0, 60);
   if (!selected) {
     await clearUids();
     options.onLog?.({
       type: 'semantic_q_ambiguous',
       detail: `[Semantic Q] Câu "${head}" (${found.qType}) — không có option đủ điểm, không bấm.`,
-      decision: buildOptionDecision({ questionText: found.head, ranked, reason: 'no usable candidate' }),
+      decision: buildOptionDecision({ questionText: found.head || '', ranked, reason: 'no usable candidate' }),
     });
     return 0;
   }
@@ -5649,7 +5820,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     console.log(`[LeadCheck] Đã qua màn email (đã hoàn thành ${session.completedScreens || 0} màn). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
     options.onLog?.({
       type: 'screen_target_lead_check',
-      detail: `Đã qua màn email (hoàn thành ${session.completedScreens || 0} màn). Bắt đầu chờ đợi lead (2 lần x 30s)...`,
+      detail: `Đã qua màn email (hoàn thành ${session.completedScreens || 0} màn). Bắt đầu chờ đợi lead (1 lần x 20s)...`,
     }, page);
     if (typeof options.onEmailSubmitted === 'function') {
       options.onEmailSubmitted(session, page);
@@ -6649,50 +6820,48 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               }
             }
 
-            // Với ô địa chỉ, nếu xuất hiện dropdown gợi ý autocomplete (như Google Places, Loqate/Loco, PCA, datalist, select động), tự chọn mục đầu tiên
+            // Với ô địa chỉ (Street Address / City / State / Zip), nếu xuất hiện dropdown gợi ý autocomplete (Google Places, Loqate, PCA, ARIA listbox, Mapbox, v.v.),
+            // BẮT BUỘC phải chờ API trả về và click chọn mục gợi ý đầu tiên thì web mới hợp lệ hóa địa chỉ để cho phép submit!
             const isAddressField = metadata.names.some((n) => /address|street|diachi/i.test(n));
-            if (isAddressField) {
+            const isCityOrStateField = metadata.names.some((n) => /city|thanhpho|state|tinh|province|make|model|school|college|job/i.test(n));
+            const isComboboxOrAutocomplete = Boolean(
+              metadata.ariaAutoComplete ||
+              metadata.classes?.includes('autocomplete') ||
+              metadata.classes?.includes('typeahead') ||
+              metadata.names?.some((n) => /autocomplete|suggest/i.test(n))
+            );
+
+            let selectedSuggestion = false;
+            if (isAddressField || isCityOrStateField || isComboboxOrAutocomplete) {
               try {
-                await page.waitForTimeout(400);
+                // 1. Kích hoạt trigger API gợi ý địa chỉ: focus và dispatch input/keydown
+                await field.evaluate((el) => {
+                  el.focus();
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+                  el.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', bubbles: true }));
+                }).catch(() => {});
 
-                // Mở rộng selectors cho nhiều loại dropdown autocomplete / saved-address khác nhau:
-                // mỗi loại có class/id riêng (user đã báo: các offer có class/id khác nhau),
-                                // nên thử lần lượt theo thứ tự ưu tiên đến generic.
-                const suggestionSelectors = [
-                  // Google Places / PCA autocomplete
-                  '.pac-container .pac-item, .pca .pcaitem, .pac-item',
-                  // Loqate / Loco widget
-                  '.loco-dropdown .loco-item, .loco-item, [class*="loco-"] [class*="suggestion"], [class*="loco-dropdown"] > div',
-                  // jQuery UI autocomplete / Select2 /chosen
-                  '.ui-autocomplete .ui-menu-item, .ui-menu-item, .select2-results__option, .select2-search-choice, .chosen-results li, .chosen-result',
-                  // Generic autocomplete / saved-address dropdown
-                  '.address-autocomplete-item, [class*="autocomplete"] [class*="item"], [class*="autocomplete"] [class*="option"]',
-                  '.suggestion-item, .address-suggestion, .address-item, .saved-address, .address-book-item, .saved-address-item',
-                  '.address-list li, .address-list a, .saved-addresses li, .saved-addresses a, .saved-addresses button',
-                  // ARIA listbox / combobox
-                  '[role="listbox"] [role="option"], [role="listbox"] > div, [role="combobox"] + div [role="option"]',
-                  // HTML5 datalist
-                  'datalist option',
-                  // Dynamic select dropdown (khi hiện select chứa các địa chỉ đã lưu)
-                  'select[class*="address"], select[class*="suggestion"], select[class*="autocomplete"], select[class*="saved"], select[class*="address-list"]',
-                ];
-
-                let selectedSuggestion = false;
-                for (const sel of suggestionSelectors) {
-                  try {
-                    const item = page.locator(sel).first();
-                    if (await item.isVisible({ timeout: 300 }).catch(() => false)) {
-                      await item.click({ force: true, timeout: 1000 }).catch(() => {});
-                      selectedSuggestion = true;
-                      break;
-                    }
-                  } catch {}
+                // 2. Chờ kết quả API gợi ý trả về qua mạng (polling tới ~1.6s, mỗi 150-200ms kiểm tra 1 lần)
+                // Các API gợi ý địa chỉ (Google Maps Places / Loqate) thường debounce 300ms + network delay
+                for (let poll = 0; poll < 8; poll++) {
+                  if (page && typeof page.waitForTimeout === 'function') {
+                    await page.waitForTimeout(poll === 0 ? 300 : 180).catch(() => {});
+                  } else {
+                    await new Promise((r) => setTimeout(r, poll === 0 ? 300 : 180));
+                  }
+                  selectedSuggestion = await selectFirstAddressSuggestion(page, frame, field, options);
+                  if (selectedSuggestion) break;
                 }
 
                 if (!selectedSuggestion) {
                   // Fallback: dùng keyboard navigation (ArrowDown + Enter) để chọn mục đầu dropdown
                   await field.press('ArrowDown').catch(() => {});
-                  await page.waitForTimeout(150);
+                  if (page && typeof page.waitForTimeout === 'function') {
+                    await page.waitForTimeout(120).catch(() => {});
+                  } else {
+                    await new Promise((r) => setTimeout(r, 120));
+                  }
                   await field.press('Enter').catch(() => {});
                 }
               } catch {}
@@ -6719,15 +6888,20 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               }
             }
 
-            // Đảm bảo kích hoạt đầy đủ các sự kiện input, change, blur, keyup để cập nhật floating labels và trình xác thực (không gửi keyup Enter)
-            await field.evaluate((el) => {
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              el.dispatchEvent(new Event('blur', { bubbles: true }));
-              el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-            }).catch(() => {});
-            await field.dispatchEvent('input').catch(() => {});
-            await field.dispatchEvent('change').catch(() => {});
+            // CHỈ dispatch thêm input/change/blur/keyup NẾU CHƯA CHỌN GỢI Ý.
+            // Nếu ĐÃ CHỌN GỢI Ý TỪ API THÀNH CÔNG, TUYỆT ĐỐI KHÔNG dispatch lại input/keyup
+            // vì sẽ làm widget địa chỉ (Google Places/Loqate) coi như ô bị người dùng sửa lại và hủy bỏ place_id đã chọn!
+            if (!selectedSuggestion) {
+              await field.evaluate((el) => {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+              }).catch(() => {});
+              await field.dispatchEvent('input').catch(() => {});
+              await field.dispatchEvent('change').catch(() => {});
+              await field.dispatchEvent('blur').catch(() => {});
+            }
             await field.dispatchEvent('blur').catch(() => {});
           }
 
@@ -7232,7 +7406,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
           console.log(`[LeadCheck] Đang ở Jump Page nhận thưởng (sau Màn ${session.completedScreens || 0}). Bắt đầu tạm dừng và chờ kiểm tra lead...`);
           options.onLog?.({
             type: 'jump_page_lead_check',
-            detail: `Đã tới Jump Page nhận thưởng sau khi điền ${session.completedScreens || 0} màn. Bắt đầu chờ đợi lead (2 lần x 30s)...`,
+            detail: `Đã tới Jump Page nhận thưởng sau khi điền ${session.completedScreens || 0} màn. Bắt đầu chờ đợi lead (1 lần x 20s)...`,
           });
           if (typeof options.onEmailSubmitted === 'function') {
             options.onEmailSubmitted(session, page);
@@ -7412,6 +7586,22 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             }, (session.autofillFields ?? 0) + (session.autofillActions ?? 0)).catch(() => null);
 
             if (btnInfo?.shouldClick) {
+              // BẢO VỆ CHỐNG BẤM SUBMIT KHI DROPDOWN GỢI Ý ĐỊA CHỈ ĐANG MỞ:
+              // Nếu trang web vừa mở dropdown gợi ý địa chỉ từ API, BẮT BUỘC PHẢI CHỌN GỢI Ý ĐẦU TIÊN TRƯỚC
+              // rồi mới cho phép Submit, tránh form bị từ chối do chưa chọn địa chỉ từ danh sách gợi ý!
+              try {
+                const hasOpenSuggestions = await hasActiveAddressSuggestions(page, frame);
+                if (hasOpenSuggestions) {
+                  console.log('[Autofill] Phát hiện dropdown gợi ý địa chỉ đang mở; tự động chọn gợi ý trước khi bấm submit...');
+                  await selectFirstAddressSuggestion(page, frame, null, options);
+                  if (page && typeof page.waitForTimeout === 'function') {
+                    await page.waitForTimeout(350).catch(() => {});
+                  } else {
+                    await new Promise((r) => setTimeout(r, 350));
+                  }
+                }
+              } catch {}
+
               const submitLabel = btnInfo.text || btnInfo.id || 'Submit';
               console.log(`[Autofill] Bấm nút submit: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id}" class="${btnInfo.className || ''}"`);
 

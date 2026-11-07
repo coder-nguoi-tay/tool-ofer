@@ -29,7 +29,6 @@ Tests never open a real browser or hit the Internet (CI sets `PLAYWRIGHT_SKIP_BR
 - **Browser engines** (selected in Settings > Browser), each a separate module that app.mjs dispatches to:
   - Chrome (installed / Chrome-for-Testing builds, profile copied from a template; `chrome-versions.mjs`),
   - AdsPower SunBrowser (`adspower-profile.mjs`, local API + API key),
-  - GoLogin Orbita (`gologin-profile.mjs`, see `GOLOGIN.md`; needs GoLogin Desktop on localhost:36912),
   - CloakBrowser (`cloakbrowser-engine.mjs`), and local profile engine (`local-profile-engine.mjs`, uses a `zero_profile` template under `~/.autoleadpc/Profiles`).
   Each engine attaches to Playwright (often via CDP), then goes through the same IP-verify → open-target → autofill flow.
 - **`stealth.mjs`**: per-session fingerprint (seed → consistent GPU/CPU/RAM/screen/OS), CDP overrides (UA, Client Hints, languages/timezone from proxy country) and the in-page patch script. Details in `README.md` (limitations listed there).
@@ -41,6 +40,6 @@ Tests never open a real browser or hit the Internet (CI sets `PLAYWRIGHT_SKIP_BR
 ## Things to know
 
 - Runtime data lives outside the repo: `~/Library/Application Support/AutoLeadPC/` (preferences.sqlite, chrome-profiles, etc.; unencrypted), `AutoLeadPC-2/` for the second app. Chrome profiles are deleted when their window closes, and deletion is restricted to paths inside `chrome-profiles`.
-- `Config/Settings/Settings.ini` is tracked-looking config that contains a GoLogin API token; don't copy it into logs, docs or commits.
+- `Config/Settings/Settings.ini` is a git-ignored local file that may still hold an old GoLogin API token; don't copy it into logs, docs or commits. GoLogin support has been removed; `app.mjs` only ignores old saved `browserMode: 'Gologin'` settings.
 - `app.mjs` hard-codes a debug HTML capture directory (`/Users/codernguoitay/offer-html-full`) near the top; be aware when running on other machines.
 - Many top-level `test-*.mjs`, `debug-sweep.mjs`, `verify-fingerprint-live.mjs`, `record-offer-flow.mjs` etc. are ad-hoc scripts, not part of `npm test`.
