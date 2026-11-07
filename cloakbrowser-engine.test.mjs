@@ -134,3 +134,55 @@ test('CloakBrowser: khởi chạy persistent context và thực hiện thao tác
     await removeProfileDir(userDataDir);
   }
 });
+
+test('CloakBrowser: chạy đa luồng đồng thời (concurrent multi-threaded persistent contexts)', async (t) => {
+  if (!isCloakBrowserInstalled()) {
+    t.skip('CloakBrowser binary chưa tải xong trên môi trường test');
+    return;
+  }
+
+  const dir1 = `/tmp/cloak-mt-1-${process.pid}-${Date.now()}`;
+  const dir2 = `/tmp/cloak-mt-2-${process.pid}-${Date.now()}`;
+  let ctx1 = null;
+  let ctx2 = null;
+  try {
+    [ctx1, ctx2] = await Promise.all([
+      launchCloakBrowserPersistentContext({
+        userDataDir: dir1,
+        headless: true,
+        humanize: true,
+        args: ['--no-first-run', '--no-default-browser-check'],
+      }),
+      launchCloakBrowserPersistentContext({
+        userDataDir: dir2,
+        headless: true,
+        humanize: true,
+        args: ['--no-first-run', '--no-default-browser-check'],
+      }),
+    ]);
+
+    assert.ok(ctx1, 'Luồng 1 (Context 1) phải chạy được');
+    assert.ok(ctx2, 'Luồng 2 (Context 2) phải chạy được');
+
+    const p1 = ctx1.pages()[0] || await ctx1.newPage();
+    const p2 = ctx2.pages()[0] || await ctx2.newPage();
+
+    await Promise.all([
+      p1.goto('data:text/html,<html><body>Slot 1 Data</body></html>'),
+      p2.goto('data:text/html,<html><body>Slot 2 Data</body></html>'),
+    ]);
+
+    const [t1, t2] = await Promise.all([
+      p1.evaluate(() => document.body.innerText),
+      p2.evaluate(() => document.body.innerText),
+    ]);
+
+    assert.equal(t1, 'Slot 1 Data');
+    assert.equal(t2, 'Slot 2 Data');
+  } finally {
+    if (ctx1) await ctx1.close().catch(() => {});
+    if (ctx2) await ctx2.close().catch(() => {});
+    await removeProfileDir(dir1);
+    await removeProfileDir(dir2);
+  }
+});
