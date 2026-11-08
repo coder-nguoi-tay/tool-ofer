@@ -4073,6 +4073,17 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
       page.goto(primaryUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
       new Promise(r => setTimeout(r, navigationTimeout + 2000)),
     ]);
+    const finalNavUrl = typeof page.url === 'function' ? page.url() : '';
+    if (isToffersDuplicateOfferUrl(finalNavUrl)) {
+      console.log(`[ToffersDup] Slot ${assignedSlot}: URL đích trả về lỗi IP đã click (${finalNavUrl}). Đóng profile và bù slot mới.`);
+      session.isClosed = true;
+      session.suppressAutoRefill = false;
+      await page.close().catch(() => {});
+      await context.close().catch(() => {});
+      await stopProfile(profileId).catch(() => {});
+      if (!autoRefill.stopRequested && autoRefill.enabled) queueAutomaticRefill();
+      return null;
+    }
     if (session.isWindowVisible) {
       await page.bringToFront().catch(() => {});
     }
@@ -6909,6 +6920,22 @@ function attachBrowserLogger(context, session) {
 }
 
 /**
+ * Kiểm tra xem URL có phải là trang thông báo lỗi trùng IP / đã click offer của toffers.top hay không.
+ * Ví dụ: https://toffers.top/error.php?error=ip_74.124.177.158_clicked_offer_2672
+ *
+ * @param {string} url Địa chỉ trang cần kiểm tra.
+ * @return {boolean} True nếu là trang lỗi đã click offer.
+ */
+export function isToffersDuplicateOfferUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return /toffers\.top\/error\.php/i.test(url)
+    || /error\.php\?.*error=.*ip_/i.test(url)
+    || /error\.php\?error=ip_/i.test(url)
+    || /clicked_offer_/i.test(url)
+    || /ip_[\d\.]+_clicked_offer/i.test(url);
+}
+
+/**
  * Kiểm tra xem trang có hiển thị thông báo "Traffic Blocked!" hay không.
  *
  * @param {object} page Tab của Playwright hoặc Puppeteer.
@@ -6923,6 +6950,9 @@ export async function getDeadOrBlockedReason(page) {
     if (typeof currentUrl === 'string') {
       if (currentUrl.startsWith('chrome-error://') || currentUrl.startsWith('about:neterror')) {
         return 'Lỗi mạng trình duyệt (chrome-error)';
+      }
+      if (isToffersDuplicateOfferUrl(currentUrl)) {
+        return 'IP đã click offer trước đó (Toffers Duplicate IP)';
       }
     }
 
@@ -6941,11 +6971,19 @@ export async function getDeadOrBlockedReason(page) {
             } catch {}
             return frameErr ? `Lỗi kết nối (${frameErr})` : 'Lỗi mạng trình duyệt (chrome-error)';
           }
+          if (isToffersDuplicateOfferUrl(frameUrl)) {
+            return 'IP đã click offer trước đó (Toffers Duplicate IP)';
+          }
         }
 
         if (typeof frame.evaluate !== 'function') return null;
 
         const evaluatePromise = frame.evaluate(() => {
+          const winUrl = (typeof window !== 'undefined' && window.location?.href) || '';
+          if (winUrl && (/toffers\.top\/error\.php/i.test(winUrl) || /error\.php\?error=ip_/i.test(winUrl) || /clicked_offer_/i.test(winUrl))) {
+            return 'IP đã click offer trước đó (Toffers Duplicate IP)';
+          }
+
           // 1. Kiểm tra phần tử sub-frame-error hoặc main-frame-error chuẩn của Chromium
           const subFrameError = (typeof document !== 'undefined') && (document.getElementById('sub-frame-error') || document.getElementById('main-frame-error') || document.querySelector?.('#sub-frame-error, #main-frame-error, #sub-frame-error-details, #main-frame-error-details'));
           if (subFrameError) {
@@ -6958,6 +6996,10 @@ export async function getDeadOrBlockedReason(page) {
           const bodyText = (typeof document !== 'undefined' && document.body) ? (document.body.innerText || document.body.textContent || '') : '';
           const docText = (typeof document !== 'undefined' && document.documentElement) ? (document.documentElement.innerText || document.documentElement.textContent || '') : '';
           const fullText = `${title} ${bodyText} ${docText}`;
+
+          if (/clicked_offer_|already clicked offer|ip_[\d\.]+_clicked_offer/i.test(fullText)) {
+            return 'IP đã click offer trước đó (Toffers Duplicate IP)';
+          }
 
           if (/traffic\s+blocked/i.test(fullText)) {
             return 'Traffic Blocked!';
@@ -7159,6 +7201,99 @@ export function watchTrafficBlockedPage(session) {
   const redirectTracker = new WeakMap();
   const nonOfferTracker = new WeakMap();
 
+  // Bắt NGAY LẬP TỨC khi tab chuyển hướng tới trang lỗi đã click offer (toffers.top/error.php)
+  const checkInstantToffersDup = async (p) => {
+    try {
+      if (blocked || checking || !p || (typeof p.isClosed === 'function' && p.isClosed())) return;
+      const u = typeof p.url === 'function' ? p.url() : '';
+      if (isToffersDuplicateOfferUrl(u)) {
+        const slotNum = session.slot ?? ((session.tileIndex ?? 0) + 1);
+        const label = session.chromeVersion
+          ? `Chrome ${session.chromeVersion}`
+          : (session.profileId ? `Profile ${session.profileId}` : `Slot ${slotNum}`);
+        const dupReason = 'IP đã click offer trước đó (Toffers Duplicate IP)';
+
+        console.log(`[ToffersDup] ${label} [Slot ${slotNum}|IP: ${session.exitIp || 'chưa rõ'}]: Phát hiện URL lỗi duplicate offer (${u}). Tự động đóng trình duyệt và bù slot mới ngay lập tức.`);
+        blocked = true;
+        clearInterval(timer);
+        session.closingDueToTrafficBlocked = true;
+
+        if (autoRefill.stopRequested || !autoRefill.enabled) {
+          session.suppressAutoRefill = true;
+          session.isClosed = true;
+          activeBrowsers.delete(session);
+          await p.close().catch(() => {});
+          await session.browser?.close?.().catch(() => {});
+          if (session._cdpBrowser) await session._cdpBrowser?.close?.().catch(() => {});
+          if (session.isAdsPower) void requestManagedProfileStop(session);
+          if (session.proxyKey) {
+            await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
+          }
+          return;
+        }
+
+        session.suppressAutoRefill = false;
+        session.isClosed = true;
+
+        try {
+          if (session.proxyKey) {
+            const history = await readProxyUsageHistory();
+            if (history?.proxies?.[session.proxyKey]) {
+              history.proxies[session.proxyKey] = {
+                ...history.proxies[session.proxyKey],
+                status: 'failed',
+                reason: dupReason,
+                completedAt: new Date().toISOString(),
+              };
+              await persistProxyUsageHistory(history);
+            }
+          }
+        } catch {}
+
+        autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) đã click offer trước đó; đã đóng cửa sổ và đang tự động mở sock khác thay thế…`;
+
+        const logs = browserSessionLogs.get(session);
+        if (logs) {
+          logs.push({
+            time: new Date().toISOString(),
+            offer: session.offerNumber ?? session.streamRole ?? 1,
+            type: 'toffers_duplicate_ip',
+            detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị ${dupReason} [${u}]. Đóng cửa sổ và đổi sock khác.`,
+          });
+          queueSaveBrowserLogs();
+        }
+
+        session.updateBadge?.(`⚠️ <strong>IP trùng offer</strong> Đang đổi sock…`);
+        chromeBuildRotationCounter += 1;
+
+        await p.close().catch(() => {});
+        await session.browser?.close?.().catch(() => {});
+        if (session._cdpBrowser) await session._cdpBrowser?.close?.().catch(() => {});
+        if (session.isAdsPower) void requestManagedProfileStop(session);
+        if (session.proxyKey) {
+          await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
+        }
+
+        if (!autoRefill.stopRequested && autoRefill.enabled) {
+          queueAutomaticRefill();
+        }
+      }
+    } catch {}
+  };
+
+  const bindPageInstantCheck = (p) => {
+    if (!p || p._toffersDupCheckBound) return;
+    p._toffersDupCheckBound = true;
+    p.on?.('framenavigated', () => { void checkInstantToffersDup(p); });
+    void checkInstantToffersDup(p);
+  };
+
+  try {
+    const existing = typeof session.browser?.pages === 'function' ? session.browser.pages() : [];
+    existing.forEach(bindPageInstantCheck);
+    session.browser?.on?.('page', bindPageInstantCheck);
+  } catch {}
+
   const timer = setInterval(() => {
     if (checking || blocked) return;
     checking = true;
@@ -7214,8 +7349,10 @@ export function watchTrafficBlockedPage(session) {
             }
           }
           if (deadReason) {
-            // Tab phụ bị lỗi → chỉ đóng tab đó, quay về tab chính (không đóng browser)
-            if (page !== session.mainPage && !page._uxOriginTab) {
+            const isToffersDup = deadReason.includes('Toffers Duplicate IP') || deadReason.includes('click offer');
+            // Tab phụ bị lỗi thường → chỉ đóng tab đó, quay về tab chính (không đóng browser)
+            // Nếu bị lỗi IP đã click offer (Toffers Duplicate IP) → cả IP đã bị cháy trên offer này, phải đóng toàn bộ trình duyệt và bù slot mới!
+            if (!isToffersDup && page !== session.mainPage && !page._uxOriginTab) {
               console.log(`[DeadTab] Tab phụ bị ${deadReason} (${page.url()}), đóng tab và quay về tab chính.`);
               session.addBrowserLog?.({ type: 'traffic_blocked', detail: `Tab phụ bị ${deadReason}. Đóng tab, giữ trình duyệt.` });
               await page.close().catch(() => {});
@@ -7223,7 +7360,7 @@ export function watchTrafficBlockedPage(session) {
               if (remaining.length > 0) await (session.mainPage?.isClosed?.() ? remaining[0] : session.mainPage).bringToFront().catch(() => {});
               continue;
             }
-            // Tab chính bị lỗi → đóng cả browser như cũ
+            // Tab chính hoặc IP đã click offer bị lỗi → đóng cả browser và bù slot mới
             blocked = true;
             clearInterval(timer);
             session.closingDueToTrafficBlocked = true;
@@ -7233,6 +7370,8 @@ export function watchTrafficBlockedPage(session) {
               activeBrowsers.delete(session);
               await page.close().catch(() => {});
               await session.browser?.close?.().catch(() => {});
+              if (session._cdpBrowser) await session._cdpBrowser?.close?.().catch(() => {});
+              if (session.isAdsPower) void requestManagedProfileStop(session);
               if (session.proxyKey) {
                 await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
               }
@@ -7280,6 +7419,8 @@ export function watchTrafficBlockedPage(session) {
             chromeBuildRotationCounter += 1;
             await page.close().catch(() => {});
             await session.browser?.close?.().catch(() => {});
+            if (session._cdpBrowser) await session._cdpBrowser?.close?.().catch(() => {});
+            if (session.isAdsPower) void requestManagedProfileStop(session);
             if (session.proxyKey) {
               await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
             }

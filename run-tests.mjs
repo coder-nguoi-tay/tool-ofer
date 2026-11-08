@@ -38,6 +38,7 @@ const TEST_FILES = [
   'survey-semantic.test.mjs',
   'survey-solver.test.mjs',
   'toffers-lead.test.mjs',
+  'toffers-duplicate-close.test.mjs',
 ];
 
 const rootDir = dirname(fileURLToPath(import.meta.url));

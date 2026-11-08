@@ -7978,7 +7978,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
     const scan = async () => {
       if (filling || page.isClosed() || page._aiFormFixing || page._aiAssistRunning) return;
       const u = typeof page.url === 'function' ? page.url() : '';
-      if (!u || u.startsWith('chrome-error:') || u.startsWith('about:') || u.startsWith('chrome:')) {
+      if (!u || u.startsWith('chrome-error:') || u.startsWith('about:') || u.startsWith('chrome:') || /toffers\.top\/error\.php/i.test(u) || /error\.php\?.*error=.*ip_/i.test(u) || /clicked_offer_/i.test(u)) {
         return;
       }
       // BẢO VỆ TRÁNH KẸT >20s: trang Cloudflare "Just a moment..." (challenge) không có form nào
