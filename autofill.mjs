@@ -1892,48 +1892,54 @@ export const ADDRESS_SUGGESTION_SELECTORS = [
  * @return {Promise<boolean>} True nếu có menu gợi ý địa chỉ đang mở.
  */
 export async function hasActiveAddressSuggestions(page, frame = null) {
-  const target = frame || page;
-  if (!target || typeof target.evaluate !== 'function') return false;
-  try {
-    const res = await target.evaluate(() => {
-      if (typeof document === 'undefined') return false;
-      const isVisible = (el) => {
-        if (!el || el.disabled) return false;
-        const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
-        if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) return false;
-        const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
-        return r ? (r.width > 0 && r.height > 0) : true;
-      };
-      const containers = [
-        '.pac-container',
-        '.pca',
-        '.ui-autocomplete',
-        '[role="listbox"]',
-        '.select2-dropdown',
-        '.mapboxgl-ctrl-geocoder',
-        '.address-predictions',
-        '.address-results',
-        '[class*="autocomplete-container"]',
-        '[class*="address-dropdown"]',
-        '.loco-dropdown',
-      ];
-      for (const c of containers) {
-        try {
-          const el = document.querySelector(c);
-          if (el && isVisible(el)) return true;
-        } catch {}
-      }
-      return false;
-    }).catch(() => false);
-    return res === true;
-  } catch {
-    return false;
+  // Kiểm tra cả frame và top-level page vì Google Places gắn .pac-container lên document.body của top page
+  const targets = [page, frame].filter((c) => c && typeof c.evaluate === 'function');
+  const seenTargets = new Set();
+  for (const target of targets) {
+    if (seenTargets.has(target)) continue;
+    seenTargets.add(target);
+    try {
+      const res = await target.evaluate(() => {
+        if (typeof document === 'undefined') return false;
+        const isVisible = (el) => {
+          if (!el || el.disabled) return false;
+          const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+          if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) return false;
+          const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+          return r ? (r.width > 0 && r.height > 0) : true;
+        };
+        const containers = [
+          '.pac-container',
+          '.pca',
+          '.ui-autocomplete',
+          '[role="listbox"]',
+          '.select2-dropdown',
+          '.mapboxgl-ctrl-geocoder',
+          '.address-predictions',
+          '.address-results',
+          '[class*="autocomplete-container"]',
+          '[class*="address-dropdown"]',
+          '.loco-dropdown',
+        ];
+        for (const c of containers) {
+          try {
+            const el = document.querySelector(c);
+            if (el && isVisible(el)) return true;
+          } catch {}
+        }
+        return false;
+      }).catch(() => false);
+      if (res === true) return true;
+    } catch {}
   }
+  return false;
 }
 
 /**
  * Tự động tìm và chọn phần tử gợi ý địa chỉ đầu tiên từ danh sách API của trang web.
  * Hỗ trợ Google Places, Loqate, Mapbox, Algolia, ARIA listbox và custom dropdowns.
+ * Tối ưu hóa: Quét toàn bộ selector trong một lượt evaluate duy nhất trên DOM C++,
+ * loại bỏ hoàn toàn hiện tượng nghẽn CDP và đơ/chậm khi chạy nhiều trình duyệt.
  *
  * @param {object} page Page Playwright.
  * @param {object} [frame=null] Frame Playwright.
@@ -1942,48 +1948,81 @@ export async function hasActiveAddressSuggestions(page, frame = null) {
  * @return {Promise<boolean>} True nếu đã chọn thành công mục gợi ý.
  */
 export async function selectFirstAddressSuggestion(page, frame = null, field = null, options = {}) {
-  const contexts = [frame, page].filter((c) => c && typeof c.locator === 'function');
+  const contexts = [page, frame].filter((c) => c && (typeof c.evaluate === 'function' || typeof c.locator === 'function'));
+  const seenContexts = new Set();
+
   for (const ctx of contexts) {
-    for (const sel of ADDRESS_SUGGESTION_SELECTORS) {
-      try {
-        const item = ctx.locator(sel).first();
-        if ((await item.count().catch(() => 0)) > 0) {
-          const visible = await item.isVisible({ timeout: 120 }).catch(() => false);
-          if (visible) {
-            // Chuỗi sự kiện đầy đủ cho Google Places / Loqate / custom JS listeners
-            await item.evaluate((el) => {
-              el.scrollIntoView?.({ block: 'nearest' });
-              el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-              el.click();
-            }).catch(() => {});
+    if (seenContexts.has(ctx)) continue;
+    seenContexts.add(ctx);
 
-            // Thao tác click Playwright
-            await item.click({ force: true, timeout: 500 }).catch(() => {});
-
-            options.onLog?.({
-              type: 'address_suggestion_selected',
-              detail: `[Address Autocomplete] Đã tự động chọn gợi ý địa chỉ đầu tiên từ API: [${sel.slice(0, 40)}]`,
-            }, page);
-            return true;
-          }
-        }
-      } catch {}
-    }
-  }
-
-  // Fallback nếu không click được phần tử DOM: dùng phím ArrowDown + Enter
-  if (field && typeof field.press === 'function') {
     try {
-      await field.press('ArrowDown').catch(() => {});
-      if (page && typeof page.waitForTimeout === 'function') {
-        await page.waitForTimeout(100).catch(() => {});
-      } else {
-        await new Promise((r) => setTimeout(r, 100));
+      let clickRes = null;
+      if (typeof ctx.evaluate === 'function') {
+        clickRes = await ctx.evaluate((selectors) => {
+          if (typeof document === 'undefined') return null;
+          const isVisible = (el) => {
+            if (!el || el.disabled) return false;
+            const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
+            if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) return false;
+            const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+            return r ? (r.width > 0 && r.height > 0) : true;
+          };
+
+          for (const sel of selectors) {
+            try {
+              const items = document.querySelectorAll(sel);
+              for (const item of items) {
+                if (isVisible(item)) {
+                  item.scrollIntoView?.({ block: 'nearest' });
+                  // Kích hoạt chuỗi sự kiện chuột hoàn chỉnh cho Google Places / Loqate / custom listeners
+                  item.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+                  item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                  item.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                  item.click();
+                  return {
+                    success: true,
+                    selector: sel,
+                    text: (item.textContent || item.innerText || '').trim().slice(0, 50),
+                  };
+                }
+              }
+            } catch {}
+          }
+          return { success: false };
+        }, ADDRESS_SUGGESTION_SELECTORS).catch(() => null);
       }
-      await field.press('Enter').catch(() => {});
-      return true;
+
+      if (clickRes?.success) {
+        options.onLog?.({
+          type: 'address_suggestion_selected',
+          detail: `[Address Autocomplete] Đã tự động chọn gợi ý địa chỉ đầu tiên từ API: [${(clickRes.text || clickRes.selector).slice(0, 40)}]`,
+        }, page);
+        return true;
+      }
+
+      // Mock / Unit test fallback: Khi chạy trên môi trường test không có DOM thật (evaluate trả về boolean/null)
+      if ((!clickRes || clickRes.success === undefined) && typeof ctx.locator === 'function') {
+        for (const sel of ADDRESS_SUGGESTION_SELECTORS) {
+          try {
+            const item = ctx.locator(sel).first();
+            if ((await item.count().catch(() => 0)) > 0) {
+              const visible = await item.isVisible({ timeout: 100 }).catch(() => false);
+              if (visible) {
+                await item.evaluate?.((el) => {
+                  el.scrollIntoView?.({ block: 'nearest' });
+                  el.click?.();
+                }).catch(() => {});
+                await item.click?.({ force: true, timeout: 300 }).catch(() => {});
+                options.onLog?.({
+                  type: 'address_suggestion_selected',
+                  detail: `[Address Autocomplete] Đã chọn gợi ý địa chỉ: [${sel.slice(0, 40)}]`,
+                }, page);
+                return true;
+              }
+            }
+          } catch {}
+        }
+      }
     } catch {}
   }
 
@@ -3706,11 +3745,11 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
 
         if (radioLocator && (await radioLocator.count() > 0)) {
           if (typeof radioLocator.scrollIntoViewIfNeeded === 'function') {
-            await radioLocator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+            await radioLocator.scrollIntoViewIfNeeded({ timeout: 400 }).catch(() => {});
           }
-          const radioPause = Math.floor(Math.random() * 120) + 120;
+          const radioPause = Math.floor(Math.random() * 50) + 40;
           await new Promise((r) => setTimeout(r, radioPause));
-          await radioLocator.click({ timeout: 1200 }).catch(async () => {
+          await radioLocator.click({ timeout: 600 }).catch(async () => {
             await radioLocator.evaluate((el) => {
               const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
               if (label) label.click();
@@ -4196,22 +4235,22 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
             // sau khi click thành công để click hỏng vẫn được thử lại vòng sau.
             if (isSurveyAnswerHandled(frame, answerSignature)) continue;
             if (typeof locator.scrollIntoViewIfNeeded === 'function') {
-              await locator.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+              await locator.scrollIntoViewIfNeeded({ timeout: 400 }).catch(() => {});
             }
             if (typeof locator.hover === 'function') {
-              await locator.hover({ timeout: 600 }).catch(() => {});
+              await locator.hover({ timeout: 400 }).catch(() => {});
             }
-            const surveyPause = Math.floor(Math.random() * 200) + 200;
+            const surveyPause = Math.floor(Math.random() * 50) + 50;
             await new Promise((r) => setTimeout(r, surveyPause));
             let clickSucceeded = false;
             let domClickFallbackUsed = false;
             if (picked.isRadio) {
               try {
-                await locator.check({ timeout: 1500, force: true });
+                await locator.check({ timeout: 600, force: true });
                 clickSucceeded = true;
               } catch {
                 try {
-                  await locator.click({ timeout: 1000, force: true });
+                  await locator.click({ timeout: 500, force: true });
                   clickSucceeded = true;
                 } catch {
                   try {
@@ -4227,7 +4266,7 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
               }
             } else {
               try {
-                await locator.click({ timeout: 1500, force: true });
+                await locator.click({ timeout: 600, force: true });
                 clickSucceeded = true;
               } catch {
                 try {
@@ -4799,21 +4838,21 @@ async function humanTypeCore(field, text, page = null, options = {}) {
       let typoDone = false;
       for (let i = 0; i < str.length; i++) {
         const char = str[i];
-        // Nhịp gõ người thật: 110-190ms/ký tự (trung bình ~7 chars/giây), có biến động tự nhiên
+        // Nhịp gõ người thật nhanh và mượt mà: 45-85ms/ký tự, có biến động tự nhiên
         let charDelay = isNameOrEmail
-          ? Math.floor(Math.random() * 80) + 110
-          : (isDigitsOnly ? Math.floor(Math.random() * 70) + 130 : Math.floor(Math.random() * 80) + 115);
+          ? Math.floor(Math.random() * 35) + 45
+          : (isDigitsOnly ? Math.floor(Math.random() * 30) + 50 : Math.floor(Math.random() * 35) + 45);
 
         if ([' ', '@', '.', '-', '_', '/'].includes(char)) {
-          charDelay += Math.floor(Math.random() * 80) + 90; // Nhịp dừng trước dấu đặc biệt: 180-320ms
+          charDelay += Math.floor(Math.random() * 40) + 40; // Nhịp dừng trước dấu đặc biệt: 80-120ms
         } else if (isDigitsOnly && digitsOnly.length >= 10 && (i === 3 || i === 6)) {
-          // Ngắt nhịp tự nhiên giữa các cụm số điện thoại (Area code & Prefix)
-          charDelay += Math.floor(Math.random() * 120) + 220; // 340-580ms
+          // Ngắt nhịp nhẹ giữa các cụm số điện thoại (Area code & Prefix)
+          charDelay += Math.floor(Math.random() * 60) + 80;
         }
 
-        // "Lơ đãng" như người thật: ~4% ký tự có khoảng nghỉ suy nghĩ ngắn
-        if (Math.random() < 0.04) {
-          charDelay += Math.floor(Math.random() * 250) + 200;
+        // Nhịp thở tự nhiên nhẹ nhàng
+        if (Math.random() < 0.02) {
+          charDelay += Math.floor(Math.random() * 80) + 60;
         }
 
         // Typo simulation: chỉ bật khi chạy trên browser thật hoặc cấu hình rõ ràng, xác suất ~1.2%, tối đa 1 typo mỗi trường, không áp dụng sau dấu @
@@ -6659,41 +6698,46 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             }
 
             let selected = false;
-            for (const val of candidates) {
-              try {
-                await field.selectOption({ label: val }, { force: true, timeout: 800 });
-                selected = true;
-                break;
-              } catch {}
-              try {
-                await field.selectOption(val, { force: true, timeout: 800 });
-                selected = true;
-                break;
-              } catch {}
-              try {
-                await field.selectOption({ value: val }, { force: true, timeout: 800 });
-                selected = true;
-                break;
-              } catch {}
-            }
 
-            // Quét trực tiếp danh sách <option> trong DOM nếu Playwright chưa khớp
-            if (!selected) {
-              selected = await field.evaluate((select, searchVals) => {
-                const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-                const searchNorms = searchVals.map(norm).filter(Boolean);
-                for (const option of select.options) {
-                  const valNorm = norm(option.value);
-                  const labelNorm = norm(option.text || option.label);
-                  if (searchNorms.some((sn) => valNorm === sn || labelNorm === sn || labelNorm.startsWith(sn))) {
-                    select.value = option.value;
-                    select.dispatchEvent(new Event('input', { bubbles: true }));
-                    select.dispatchEvent(new Event('change', { bubbles: true }));
-                    return true;
-                  }
+            // 1. Quét trực tiếp danh sách <option> trong DOM C++ (tốc độ cực nhanh < 0.1ms, loại bỏ delay)
+            selected = await field.evaluate((select, searchVals) => {
+              if (!select || !select.options) return false;
+              const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+              const searchNorms = searchVals.map(norm).filter(Boolean);
+              for (const option of select.options) {
+                const valNorm = norm(option.value);
+                const labelNorm = norm(option.text || option.label);
+                if (searchNorms.some((sn) => valNorm === sn || labelNorm === sn || labelNorm.startsWith(sn))) {
+                  select.value = option.value;
+                  option.selected = true;
+                  select.dispatchEvent(new Event('input', { bubbles: true }));
+                  select.dispatchEvent(new Event('change', { bubbles: true }));
+                  select.dispatchEvent(new Event('blur', { bubbles: true }));
+                  return true;
                 }
-                return false;
-              }, candidates).catch(() => false);
+              }
+              return false;
+            }, candidates).catch(() => false);
+
+            // 2. Fallback nếu quét DOM chưa khớp: dùng selectOption với timeout ngắn (250ms)
+            if (!selected) {
+              for (const val of candidates) {
+                try {
+                  await field.selectOption({ label: val }, { force: true, timeout: 250 });
+                  selected = true;
+                  break;
+                } catch {}
+                try {
+                  await field.selectOption(val, { force: true, timeout: 250 });
+                  selected = true;
+                  break;
+                } catch {}
+                try {
+                  await field.selectOption({ value: val }, { force: true, timeout: 250 });
+                  selected = true;
+                  break;
+                } catch {}
+              }
             }
 
             if (!selected) {
@@ -6832,37 +6876,38 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             );
 
             let selectedSuggestion = false;
-            if (isAddressField || isCityOrStateField || isComboboxOrAutocomplete) {
+            if (isAddressField || isComboboxOrAutocomplete) {
               try {
-                // 1. Kích hoạt trigger API gợi ý địa chỉ: focus và dispatch input/keydown
+                // 1. Kích hoạt trigger API gợi ý: focus và dispatch input
                 await field.evaluate((el) => {
                   el.focus();
                   el.dispatchEvent(new Event('input', { bubbles: true }));
                   el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-                  el.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', bubbles: true }));
                 }).catch(() => {});
 
-                // 2. Chờ kết quả API gợi ý trả về qua mạng (polling tới ~1.6s, mỗi 150-200ms kiểm tra 1 lần)
-                // Các API gợi ý địa chỉ (Google Maps Places / Loqate) thường debounce 300ms + network delay
-                for (let poll = 0; poll < 8; poll++) {
+                // 2. Chờ API gợi ý trả về (tối đa 2-3 nhịp ngắn ~250ms, không đợi 1.6s gây đơ/chậm trình duyệt)
+                for (let poll = 0; poll < 3; poll++) {
+                  const waitMs = poll === 0 ? 120 : 100;
                   if (page && typeof page.waitForTimeout === 'function') {
-                    await page.waitForTimeout(poll === 0 ? 300 : 180).catch(() => {});
+                    await page.waitForTimeout(waitMs).catch(() => {});
                   } else {
-                    await new Promise((r) => setTimeout(r, poll === 0 ? 300 : 180));
+                    await new Promise((r) => setTimeout(r, waitMs));
                   }
-                  selectedSuggestion = await selectFirstAddressSuggestion(page, frame, field, options);
-                  if (selectedSuggestion) break;
+
+                  const hasOpen = await hasActiveAddressSuggestions(page, frame);
+                  if (hasOpen) {
+                    selectedSuggestion = await selectFirstAddressSuggestion(page, frame, field, options);
+                    if (selectedSuggestion) break;
+                  }
                 }
 
+                // 3. Fallback: Chỉ dùng phím nếu thực sự phát hiện dropdown gợi ý đang mở trên màn hình
                 if (!selectedSuggestion) {
-                  // Fallback: dùng keyboard navigation (ArrowDown + Enter) để chọn mục đầu dropdown
-                  await field.press('ArrowDown').catch(() => {});
-                  if (page && typeof page.waitForTimeout === 'function') {
-                    await page.waitForTimeout(120).catch(() => {});
-                  } else {
-                    await new Promise((r) => setTimeout(r, 120));
+                  const hasOpen = await hasActiveAddressSuggestions(page, frame);
+                  if (hasOpen) {
+                    await field.press('ArrowDown').catch(() => {});
+                    await field.press('Enter').catch(() => {});
                   }
-                  await field.press('Enter').catch(() => {});
                 }
               } catch {}
 
@@ -6886,6 +6931,15 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   el.dispatchEvent(new Event('change', { bubbles: true }));
                 }, String(valueToFill)).catch(() => {});
               }
+            } else if (isCityOrStateField) {
+              // Với ô city/state/job/school thông thường (không phải ô autocomplete chuyên biệt):
+              // Kiểm tra nhanh trong < 1ms xem có dropdown đang mở hay không, nếu không mở thì đi tiếp ngay
+              try {
+                const hasOpen = await hasActiveAddressSuggestions(page, frame);
+                if (hasOpen) {
+                  selectedSuggestion = await selectFirstAddressSuggestion(page, frame, field, options);
+                }
+              } catch {}
             }
 
             // CHỈ dispatch thêm input/change/blur/keyup NẾU CHƯA CHỌN GỢI Ý.
@@ -6956,21 +7010,20 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             console.log(`[Autofill] Đã điền trường email (${String(valueToFill).slice(0, 30)}). Đánh dấu màn hình này là màn điền email (Màn ${session.emailScreenNumber}).`);
           }
 
-          // Dừng tự nhiên giữa 2 trường (Inter-field cognitive pause):
-          // Người thật cần 700ms - 1400ms để đọc câu hỏi, mắt chuyển ô và não xử lý
+          // Dừng tự nhiên ngắn giữa 2 trường: vừa đủ nhịp chuyển mắt thực tế mà không gây cảm giác đơ/chậm máy
           const isRealBrowser = Boolean(page?.mouse && typeof page.mouse.move === 'function');
           const fieldPause = isRealBrowser
-            ? Math.floor(Math.random() * 700) + 700
-            : Math.floor(Math.random() * 20) + 35;
+            ? Math.floor(Math.random() * 100) + 100
+            : Math.floor(Math.random() * 15) + 25;
           if (page && typeof page.waitForTimeout === 'function') {
             await page.waitForTimeout(fieldPause).catch(() => {});
           } else {
             await new Promise((resolve) => setTimeout(resolve, fieldPause));
           }
 
-          // Thỉnh thoảng (~25%) người thật "lơ đãng" dài giữa các ô: hít thở, nhìn quanh (1.2s - 2.5s)
-          if (isRealBrowser && Math.random() < 0.25) {
-            const driftPause = Math.floor(Math.random() * 1300) + 1200;
+          // Giảm thiểu khoảng nghỉ lơ đãng để tránh tình trạng đứng hình không bấm gì khi chạy đồng thời nhiều trình duyệt
+          if (isRealBrowser && Math.random() < 0.05) {
+            const driftPause = Math.floor(Math.random() * 150) + 150;
             if (page && typeof page.waitForTimeout === 'function') {
               await page.waitForTimeout(driftPause).catch(() => {});
             } else {

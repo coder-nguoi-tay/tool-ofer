@@ -5868,16 +5868,6 @@ async function openBrowserWithInstalledChrome({
         ],
       });
     }
-    // Gắn tầng mô phỏng hành vi người thật (CloakBrowser Humanize) cho Chrome thường:
-    // Tự động biến đổi click, type, fill thành quỹ đạo Bezier mượt mà và độ trễ ngẫu nhiên của người thật.
-    if (!useCloakBrowser) {
-      try {
-        await applyCloakHumanize(context);
-        console.log(`[Chrome] Đã kích hoạt Humanize (quỹ đạo chuột Bezier & gõ phím ngẫu nhiên) cho slot ${(tileIndex ?? 0) + 1}`);
-      } catch (err) {
-        console.warn(`[Chrome] Không gắn được lớp Humanize: ${err.message}`);
-      }
-    }
   } catch (error) {
     await relay?.close();
     throw error;
