@@ -3238,7 +3238,10 @@
     // ── 711Proxy ──
     async function proxy711Init() {
       const cfg = await api('/711proxy/config');
-      if (cfg && cfg.username) document.getElementById('inp711User').value = cfg.username;
+      if (cfg) {
+        if (cfg.username) document.getElementById('inp711User').value = cfg.username;
+        if (cfg.passwd) document.getElementById('inp711Pass').value = cfg.passwd;
+      }
       const ar = await api('/711proxy/autorefill');
       if (ar && !ar.error) {
         document.getElementById('chk711AutoRefill').checked = !!ar.enabled;
@@ -3269,12 +3272,12 @@
       document.getElementById('lbl711Balance').textContent = 'Đang đăng nhập...';
       const res = await api('/711proxy/login', { method: 'POST', body: JSON.stringify({ username, passwd }) });
       if (res && res.ok) {
-        document.getElementById('inp711Pass').value = '';
-        document.getElementById('lbl711Balance').textContent = 'Đã đăng nhập ✓';
+        if (passwd) document.getElementById('inp711Pass').value = passwd;
+        document.getElementById('lbl711Balance').textContent = 'Đã lưu mật khẩu & đăng nhập thành công ✓';
         if (res.whitelist && res.whitelist.ok) {
           document.getElementById('lbl711Status').textContent = `Đã whitelist IP ${res.whitelist.ip} ✓`;
         }
-        proxy711FetchBalance();
+        proxy711FetchBalance(true);
       } else {
         document.getElementById('lbl711Balance').textContent = '';
         showWinAlert('Lỗi đăng nhập: ' + (res?.error || 'Không xác định'));

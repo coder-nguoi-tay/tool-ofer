@@ -24,6 +24,20 @@ profiles.json
 *.key
 *.p12
 Config/Settings/Settings.ini
+Config/Settings/*.ini
+*.ini
+
+# Provider credentials & local app configurations
+711proxy-config.json
+711proxy-autorefill.json
+*711*config*.json
+*711*token*.json
+bandwidth-daily.json
+email-queue.json
+email-autorefill.json
+device-profiles.json
+toffers-config.json
+toffers-leads.json
 
 # macOS build artifacts & compiled bundles
 AutoLeadPC Mac.app/

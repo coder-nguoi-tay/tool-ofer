@@ -1622,6 +1622,26 @@ async function loadProxy711Config() {
     if (d.tokenExpiry) proxy711.tokenExpiry = Number(d.tokenExpiry);
     if (d.packageGb) proxy711.packageGb = Number(d.packageGb);
   } catch {}
+
+  // Đọc dự phòng từ Config/Settings/Settings.ini nếu chưa có thông tin
+  if (!proxy711.username || !proxy711.passwd) {
+    try {
+      const candidatePaths = [
+        join(dirname(fileURLToPath(import.meta.url)), 'Config', 'Settings', 'Settings.ini'),
+        join(getAutoLeadPCDir(), 'Config', 'Settings', 'Settings.ini'),
+      ];
+      for (const iniPath of candidatePaths) {
+        if (existsSync(iniPath)) {
+          const text = readFileSync(iniPath, 'utf8');
+          const userM = text.match(/^\s*(?:Username|Proxy711User)\s*=\s*(.+)$/im);
+          const passM = text.match(/^\s*(?:Passwd|Password|Proxy711Pass)\s*=\s*(.+)$/im);
+          if (userM && !proxy711.username) proxy711.username = userM[1].trim();
+          if (passM && !proxy711.passwd) proxy711.passwd = passM[1].trim();
+          if (proxy711.username && proxy711.passwd) break;
+        }
+      }
+    } catch {}
+  }
 }
 
 async function saveProxy711Config() {
@@ -1632,6 +1652,26 @@ async function saveProxy711Config() {
     tokenExpiry: proxy711.tokenExpiry,
     packageGb: proxy711.packageGb || 0,
   })).catch(() => {});
+
+  // Đồng thời lưu vào Config/Settings/Settings.ini (mục [Proxy711] - file này được gitignore hoàn toàn)
+  try {
+    const candidatePaths = [
+      join(dirname(fileURLToPath(import.meta.url)), 'Config', 'Settings', 'Settings.ini'),
+      join(getAutoLeadPCDir(), 'Config', 'Settings', 'Settings.ini'),
+    ];
+    for (const iniPath of candidatePaths) {
+      const dir = dirname(iniPath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      let text = existsSync(iniPath) ? readFileSync(iniPath, 'utf8') : '';
+      const section = `[Proxy711]\nUsername=${proxy711.username}\nPasswd=${proxy711.passwd || ''}\n`;
+      if (text.includes('[Proxy711]')) {
+        text = text.replace(/\[Proxy711\][\s\S]*?(?=\n\[|$)/, section);
+      } else {
+        text = text.trim() ? `${text.trim()}\n\n${section}` : section;
+      }
+      writeFileSync(iniPath, text, 'utf8');
+    }
+  } catch {}
 }
 
 async function ensure711Token() {
@@ -8541,6 +8581,7 @@ async function startLocalInterface() {
     if (request.method === 'GET' && request.url === '/711proxy/config') {
       respondWithJson(response, 200, {
         username: proxy711.username,
+        passwd: proxy711.passwd || '',
         hasToken: Boolean(proxy711.token && Date.now() < proxy711.tokenExpiry),
       });
       return;
