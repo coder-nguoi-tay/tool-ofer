@@ -1373,6 +1373,7 @@ export function getBandwidthSummary() {
       receivedFormatted: formatBytes(bandwidthDailyStats.totalDownloadAllTime),
     },
     daily: dailyList,
+    proxy711: getCached711Balance(),
   };
 }
 
@@ -1490,18 +1491,136 @@ const proxyQueuePath = join(appDataDirectory, 'proxy-queue.json');
 export const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
 export const emailQueuePath = join(appDataDirectory, 'email-queue.json');
 const proxy711ConfigPath = join(appDataDirectory, '711proxy-config.json');
-const proxy711 = { username: '', passwd: '', token: '', tokenExpiry: 0 };
+const proxy711 = { username: '', passwd: '', token: '', tokenExpiry: 0, packageGb: 0 };
 const proxy711AutoRefillConfigPath = join(appDataDirectory, '711proxy-autorefill.json');
 const proxy711AutoRefill = { enabled: false, region: 'US', count: 50, sessTime: 20, sessAuto: false };
 let proxy711AutoRefilling = false;
 
+let cached711Balance = {
+  ok: false,
+  flow_balance: 0,
+  flowFormatted: '0 B',
+  remainingGb: 0,
+  remainingFormatted: '0 GB',
+  packageGb: 0,
+  packageFormatted: '0 GB',
+  usedGb: 0,
+  usedFormatted: '0 GB',
+  usedPercent: 0,
+  remainingPercent: 0,
+  lastUpdated: 0,
+  error: null,
+};
+
+export function getCached711Balance() {
+  return cached711Balance;
+}
+
+export async function get711Balance(force = false) {
+  if (!force && cached711Balance.ok && (Date.now() - cached711Balance.lastUpdated < 15_000)) {
+    return cached711Balance;
+  }
+
+  const token = await ensure711Token();
+  if (!token) {
+    cached711Balance = {
+      ...cached711Balance,
+      ok: false,
+      error: 'Chưa đăng nhập 711proxy.',
+    };
+    return cached711Balance;
+  }
+
+  try {
+    let res = await fetch('https://server.711proxy.com/wapi/balance/', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    let text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch {}
+
+    if (data?.code === 41010 || data?.error?.toLowerCase().includes('token')) {
+      proxy711.token = '';
+      proxy711.tokenExpiry = 0;
+      await saveProxy711Config();
+      if (proxy711.username && proxy711.passwd) {
+        const freshToken = await fetch711Token(proxy711.username, proxy711.passwd).catch(() => null);
+        if (freshToken) {
+          res = await fetch('https://server.711proxy.com/wapi/balance/', {
+            headers: { Authorization: `Bearer ${freshToken}` },
+          });
+          text = await res.text();
+          try { data = JSON.parse(text); } catch {}
+        }
+      }
+    }
+
+    if (data && (data.code === 200 || data.code === 0) && typeof data.flow_balance === 'number') {
+      const flowBytes = data.flow_balance;
+      const remainingGb = Number((flowBytes / (1024 ** 3)).toFixed(3));
+
+      let packageGb = Number(proxy711.packageGb) || 0;
+      if (packageGb <= 0 || packageGb < remainingGb) {
+        packageGb = Math.max(1, Math.ceil(remainingGb));
+        proxy711.packageGb = packageGb;
+        void saveProxy711Config();
+      }
+
+      const usedGb = Math.max(0, Number((packageGb - remainingGb).toFixed(3)));
+      const usedPercent = packageGb > 0 ? Math.min(100, Number(((usedGb / packageGb) * 100).toFixed(1))) : 0;
+      const remainingPercent = Number(Math.max(0, 100 - usedPercent).toFixed(1));
+
+      cached711Balance = {
+        ok: true,
+        flow_balance: flowBytes,
+        flowFormatted: formatBytes(flowBytes),
+        remainingGb,
+        remainingFormatted: `${remainingGb.toFixed(2)} GB`,
+        packageGb,
+        packageFormatted: `${packageGb.toFixed(2)} GB`,
+        usedGb,
+        usedFormatted: `${usedGb.toFixed(2)} GB`,
+        usedPercent,
+        remainingPercent,
+        lastUpdated: Date.now(),
+        error: null,
+      };
+      return cached711Balance;
+    }
+
+    throw new Error(data?.message || data?.error || data?.msg || `Lỗi API 711: ${text.slice(0, 100)}`);
+  } catch (err) {
+    cached711Balance = {
+      ...cached711Balance,
+      ok: false,
+      error: err.message,
+    };
+    return cached711Balance;
+  }
+}
+
+let proxy711BalanceTimer = null;
+export function start711BalanceBackgroundPolling(intervalMs = 30_000) {
+  if (proxy711BalanceTimer) clearInterval(proxy711BalanceTimer);
+  if (proxy711.username && proxy711.passwd) {
+    void get711Balance(false);
+  }
+  proxy711BalanceTimer = setInterval(() => {
+    if (proxy711.username && proxy711.passwd) {
+      void get711Balance(false);
+    }
+  }, intervalMs);
+}
+
 async function loadProxy711Config() {
+  await seedFileIfMissing(proxy711ConfigPath, '711proxy-config.json');
   try {
     const d = JSON.parse(await readFile(proxy711ConfigPath, 'utf8'));
     if (d.username) proxy711.username = d.username;
     if (d.passwd) proxy711.passwd = d.passwd;
     if (d.token) proxy711.token = d.token;
     if (d.tokenExpiry) proxy711.tokenExpiry = Number(d.tokenExpiry);
+    if (d.packageGb) proxy711.packageGb = Number(d.packageGb);
   } catch {}
 }
 
@@ -1511,6 +1630,7 @@ async function saveProxy711Config() {
     passwd: proxy711.passwd || '',
     token: proxy711.token,
     tokenExpiry: proxy711.tokenExpiry,
+    packageGb: proxy711.packageGb || 0,
   })).catch(() => {});
 }
 
@@ -1650,25 +1770,33 @@ async function autoRefillProxyIfNeeded() {
 
 async function fetch711Token(username, passwd) {
   for (const endpoint of [
-    'https://server.711proxy.com/eapi/token/',
     'https://server.711proxy.com/wapi/token/',
+    'https://server.711proxy.com/eapi/token/',
   ]) {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, passwd }),
-    });
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); } catch { continue; }
-    if (data.results) {
-      proxy711.username = username;
-      proxy711.passwd = passwd;
-      proxy711.token = data.results;
-      proxy711.tokenExpiry = Date.now() + 3_600_000;
-      await saveProxy711Config();
-      return proxy711.token;
-    }
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, passwd }),
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { continue; }
+      if (data?.results) {
+        const rawToken = typeof data.results === 'object' && data.results.token
+          ? data.results.token
+          : data.results;
+        if (typeof rawToken === 'string' && rawToken.length > 0) {
+          proxy711.username = username;
+          proxy711.passwd = passwd;
+          proxy711.token = rawToken;
+          proxy711.tokenExpiry = Date.now() + 3_600_000;
+          await saveProxy711Config();
+          void get711Balance(true);
+          return proxy711.token;
+        }
+      }
+    } catch {}
   }
   throw new Error('Đăng nhập thất bại. Kiểm tra lại tài khoản 711proxy.');
 }
@@ -7795,6 +7923,7 @@ async function startLocalInterface() {
   await loadLeadStats();
   await loadBandwidthStats();
   startToffersBackgroundPolling(10_000);
+  start711BalanceBackgroundPolling(30_000);
   const interfaceHtml = readFileSync(userInterfacePath, 'utf8');
   const interfacePcHtml = existsSync(userInterfacePcPath) ? readFileSync(userInterfacePcPath, 'utf8') : interfaceHtml;
   const handlers = {
@@ -8464,22 +8593,41 @@ async function startLocalInterface() {
       return;
     }
 
-    if (request.method === 'GET' && request.url === '/711proxy/balance') {
-      if (!proxy711.token || Date.now() >= proxy711.tokenExpiry) {
-        respondWithJson(response, 401, { error: 'Chưa đăng nhập.' }); return;
-      }
+    if (request.method === 'GET' && (request.url === '/711proxy/balance' || request.url.startsWith('/711proxy/balance?'))) {
+      const urlObj = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+      const force = urlObj.searchParams.get('refresh') === '1' || urlObj.searchParams.get('force') === '1';
+      const bal = await get711Balance(force);
+      respondWithJson(response, bal.ok ? 200 : 400, bal);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/711proxy/package') {
       try {
-        let data;
-        for (const ep of ['https://server.711proxy.com/eapi/balance/', 'https://server.711proxy.com/wapi/balance/']) {
-          const r = await fetch(ep, { headers: { Authorization: `Bearer ${proxy711.token}` } });
-          const t = await r.text();
-          console.log(`[711Proxy] balance ${ep}:`, t.slice(0, 300));
-          try { const d = JSON.parse(t); if (d && typeof d === 'object') { data = d; break; } } catch {}
+        const body = JSON.parse(await readRequestBody(request));
+        const val = Number(body.packageGb);
+        if (!val || val <= 0 || isNaN(val)) {
+          respondWithJson(response, 400, { error: 'Số GB gói không hợp lệ.' });
+          return;
         }
-        if (!data) throw new Error('Không lấy được số dư.');
-        respondWithJson(response, 200, data);
+        proxy711.packageGb = val;
+        await saveProxy711Config();
+        if (cached711Balance.ok) {
+          const remainingGb = cached711Balance.remainingGb;
+          const usedGb = Math.max(0, Number((val - remainingGb).toFixed(3)));
+          const usedPercent = val > 0 ? Math.min(100, Number(((usedGb / val) * 100).toFixed(1))) : 0;
+          cached711Balance = {
+            ...cached711Balance,
+            packageGb: val,
+            packageFormatted: `${val.toFixed(2)} GB`,
+            usedGb,
+            usedFormatted: `${usedGb.toFixed(2)} GB`,
+            usedPercent,
+            remainingPercent: Number(Math.max(0, 100 - usedPercent).toFixed(1)),
+          };
+        }
+        respondWithJson(response, 200, { ok: true, packageGb: val, balance: cached711Balance });
       } catch (e) {
-        respondWithJson(response, 500, { error: e.message });
+        respondWithJson(response, 400, { error: e.message });
       }
       return;
     }

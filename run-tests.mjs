@@ -39,6 +39,7 @@ const TEST_FILES = [
   'survey-solver.test.mjs',
   'toffers-lead.test.mjs',
   'toffers-duplicate-close.test.mjs',
+  'proxy711-balance.test.mjs',
 ];
 
 const rootDir = dirname(fileURLToPath(import.meta.url));

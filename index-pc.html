@@ -1595,6 +1595,9 @@
               <span class="run-stat-chip chip-bandwidth" id="runStatBandwidthChip" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;cursor:pointer;" onclick="openBandwidthModal()" title="Tổng băng thông tiêu thụ hôm nay (Click để xem thống kê chi tiết theo ngày)">
                 📶 <b id="runStatBandwidthToday">0 B</b> hôm nay
               </span>
+              <span class="run-stat-chip chip-711" id="runStat711Chip" style="background:#f0fdf4;color:#047857;border:1px solid #6ee7b7;cursor:pointer;display:inline-flex;align-items:center;gap:4px;" onclick="openBandwidthModal()" title="Số dư băng thông 711Proxy còn lại (Click xem chi tiết: Số đang có, Số đã dùng, Còn lại)">
+                🌐 711: Còn <b id="runStat711Remaining">--</b>
+              </span>
               <span class="run-stat-chip" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;cursor:pointer;" onclick="switchTab('ToffersLeads')" title="Số Point hiện tại từ toffers.top (Click xem danh sách lead)">
                 💎 <b id="runStatPoint">--</b> pt
               </span>
@@ -1719,6 +1722,78 @@
               <div style="font-size:11px;color:#64748b;font-weight:600;margin-bottom:4px;">📊 TỔNG TÍCH LŨY (ALL-TIME)</div>
               <div style="font-size:20px;font-weight:800;color:#4338ca;" id="bwStatAllTimeTotal">0 B</div>
               <div style="font-size:10.5px;color:#475569;margin-top:4px;" id="bwStatAllTimeSub">0 ngày sử dụng đã ghi nhận</div>
+            </div>
+          </div>
+
+          <!-- 711Proxy Bandwidth Status Card -->
+          <div style="background:linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);border-bottom:1px solid #a7f3d0;padding:12px 16px;flex-shrink:0;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:16px;">🌐</span>
+                <span style="font-weight:700;font-size:12.5px;color:#065f46;">Gói Băng Thông 711Proxy (Realtime API)</span>
+                <span id="bw711Badge" class="live-pill" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;">
+                  <span class="live-dot" style="background:#22c55e;"></span> Đã kết nối
+                </span>
+                <span id="bw711UpdatedTime" style="font-size:11px;color:#64748b;"></span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <button type="button" class="win-btn win-btn-sm" onclick="proxy711FetchBalance(true)" style="font-size:11px;" title="Cập nhật trực tiếp số dư từ server 711Proxy">🔄 Cập nhật 711</button>
+                <button type="button" class="win-btn win-btn-sm" onclick="toggle711PackageEdit()" style="font-size:11px;" title="Chỉnh sửa số GB của gói mua">⚙️ Cấu hình gói</button>
+              </div>
+            </div>
+
+            <!-- 3 Stat Metrics: Đang có, Đã dùng, Còn lại -->
+            <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;">
+              <!-- 1. Số đang có -->
+              <div style="background:rgba(255,255,255,0.9);border:1px solid #bbf7d0;border-radius:6px;padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+                <div style="font-size:10.5px;font-weight:700;color:#166534;text-transform:uppercase;">📦 SỐ ĐANG CÓ (TỔNG GÓI)</div>
+                <div style="font-size:20px;font-weight:800;color:#15803d;margin:2px 0;" id="bw711Total">-- GB</div>
+                <div style="font-size:10px;color:#475569;" id="bw711TotalSub">Gói dung lượng mua</div>
+              </div>
+
+              <!-- 2. Số đã dùng -->
+              <div style="background:rgba(255,255,255,0.9);border:1px solid #fed7aa;border-radius:6px;padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+                <div style="font-size:10.5px;font-weight:700;color:#9a3412;text-transform:uppercase;">📉 SỐ ĐÃ DÙNG (USED)</div>
+                <div style="font-size:20px;font-weight:800;color:#c2410c;margin:2px 0;" id="bw711Used">-- GB</div>
+                <div style="font-size:10px;color:#475569;" id="bw711UsedSub">Đã tiêu thụ <b id="bw711UsedPct">0%</b></div>
+              </div>
+
+              <!-- 3. Số GB còn lại -->
+              <div style="background:rgba(255,255,255,0.9);border:1px solid #86efac;border-radius:6px;padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+                <div style="font-size:10.5px;font-weight:700;color:#047857;text-transform:uppercase;">🔋 SỐ GB CÒN LẠI (BALANCE)</div>
+                <div style="font-size:20px;font-weight:800;color:#059669;margin:2px 0;" id="bw711Remaining">-- GB</div>
+                <div style="font-size:10px;color:#475569;" id="bw711RemainingSub">Từ server 711proxy</div>
+              </div>
+            </div>
+
+            <!-- Visual Progress Bar -->
+            <div style="margin-top:8px;">
+              <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#374151;margin-bottom:3px;">
+                <span>Tiến độ: <b id="bw711ProgressText">0% đã dùng</b></span>
+                <span>Còn lại: <b id="bw711RemainingText">0%</b></span>
+              </div>
+              <div style="background:#e2e8f0;height:9px;border-radius:5px;overflow:hidden;position:relative;">
+                <div id="bw711ProgressBar" style="background:linear-gradient(90deg, #10b981 0%, #059669 100%);height:100%;width:0%;transition:width 0.4s ease;"></div>
+              </div>
+            </div>
+
+            <!-- Collapsible Edit Package Form -->
+            <div id="bw711PackageEditDrawer" style="display:none;margin-top:10px;padding:8px 12px;background:#fff;border:1px dashed #6ee7b7;border-radius:6px;">
+              <div style="font-size:11px;font-weight:600;color:#065f46;margin-bottom:6px;">Cài đặt dung lượng gói 711Proxy đã mua:</div>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span style="font-size:11px;color:#555;">Chọn nhanh:</span>
+                <button type="button" class="win-btn win-btn-sm" onclick="set711PackageGb(1)">1 GB</button>
+                <button type="button" class="win-btn win-btn-sm" onclick="set711PackageGb(2)">2 GB</button>
+                <button type="button" class="win-btn win-btn-sm" onclick="set711PackageGb(5)">5 GB</button>
+                <button type="button" class="win-btn win-btn-sm" onclick="set711PackageGb(10)">10 GB</button>
+                <button type="button" class="win-btn win-btn-sm" onclick="set711PackageGb(20)">20 GB</button>
+                <button type="button" class="win-btn win-btn-sm" onclick="set711PackageGb(50)">50 GB</button>
+                <span style="font-size:11px;color:#555;margin-left:4px;">Hoặc nhập:</span>
+                <input type="number" id="inp711CustomPackageGb" step="0.5" min="0.5" placeholder="Ví dụ: 3.5" style="width:75px;padding:2px 6px;font-size:11px;border:1px solid #cbd5e1;border-radius:3px;">
+                <span style="font-size:11px;color:#555;">GB</span>
+                <button type="button" class="win-btn win-btn-primary win-btn-sm" onclick="save711CustomPackageGb()">Lưu gói</button>
+                <button type="button" class="win-btn win-btn-sm" onclick="toggle711PackageEdit(false)">Đóng</button>
+              </div>
             </div>
           </div>
 
@@ -3227,19 +3302,152 @@
     }
     window.proxy711UpdateWhitelist = proxy711UpdateWhitelist;
 
-    async function proxy711FetchBalance() {
-      const res = await api('/711proxy/balance');
-      if (!res || res.error || (res.code && res.code !== 0 && res.code !== 200)) {
-        // Balance API không hỗ trợ tài khoản này — không sao, gen proxy vẫn dùng được
-        document.getElementById('lbl711Balance').textContent = '';
-        return;
+    function update711BalanceDisplay(data) {
+      if (!data) return;
+      window.cached711Balance = data;
+      const ok = Boolean(data.ok);
+      const pkgFormatted = data.packageFormatted || (data.packageGb ? `${data.packageGb.toFixed(2)} GB` : '--');
+      const usedFormatted = data.usedFormatted || (data.usedGb !== undefined ? `${data.usedGb.toFixed(2)} GB` : '--');
+      const remFormatted = data.remainingFormatted || (data.remainingGb !== undefined ? `${data.remainingGb.toFixed(2)} GB` : '--');
+      const usedPct = data.usedPercent !== undefined ? data.usedPercent : 0;
+      const remPct = data.remainingPercent !== undefined ? data.remainingPercent : 0;
+      const bytes = data.flow_balance || 0;
+
+      // Update Top Status Bar chip
+      const elRun711 = document.getElementById('runStat711Remaining');
+      if (elRun711) {
+        elRun711.textContent = ok ? remFormatted : '--';
       }
-      const bytes = res.flow_balance ?? res.balance ?? res.traffic ?? null;
-      if (bytes !== null) {
-        const gb = (Number(bytes) / 1024 / 1024 / 1024).toFixed(2);
-        document.getElementById('lbl711Balance').textContent = `Số dư: ${gb} GB`;
+
+      // Update Proxy Tab Label
+      const elLblBal = document.getElementById('lbl711Balance');
+      if (elLblBal) {
+        if (ok) {
+          elLblBal.innerHTML = `Số dư: <b style="color:#059669;">${remFormatted}</b> / Gói: <b>${pkgFormatted}</b> (Đã dùng: ${usedFormatted})`;
+        } else if (data.error) {
+          elLblBal.textContent = data.error;
+        }
+      }
+
+      // Update Bandwidth Modal Elements
+      const elTotal = document.getElementById('bw711Total');
+      if (elTotal) elTotal.textContent = ok ? pkgFormatted : '--';
+
+      const elUsed = document.getElementById('bw711Used');
+      if (elUsed) elUsed.textContent = ok ? usedFormatted : '--';
+
+      const elUsedPct = document.getElementById('bw711UsedPct');
+      if (elUsedPct) elUsedPct.textContent = `${usedPct}%`;
+
+      const elRemaining = document.getElementById('bw711Remaining');
+      if (elRemaining) elRemaining.textContent = ok ? remFormatted : '--';
+
+      const elRemSub = document.getElementById('bw711RemainingSub');
+      if (elRemSub) {
+        elRemSub.textContent = ok ? `${bytes.toLocaleString()} Bytes` : (data.error || 'Chưa có dữ liệu');
+      }
+
+      const elBar = document.getElementById('bw711ProgressBar');
+      if (elBar) {
+        elBar.style.width = `${Math.min(100, Math.max(0, remPct))}%`;
+        if (remPct <= 5) {
+          elBar.style.background = 'linear-gradient(90deg, #ef4444 0%, #dc2626 100%)';
+        } else if (remPct <= 20) {
+          elBar.style.background = 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)';
+        } else {
+          elBar.style.background = 'linear-gradient(90deg, #10b981 0%, #059669 100%)';
+        }
+      }
+
+      const elProgText = document.getElementById('bw711ProgressText');
+      if (elProgText) elProgText.textContent = `${usedPct}% đã dùng (${usedFormatted})`;
+
+      const elRemText = document.getElementById('bw711RemainingText');
+      if (elRemText) elRemText.textContent = `${remPct}% còn lại (${remFormatted})`;
+
+      const elBadge = document.getElementById('bw711Badge');
+      if (elBadge) {
+        if (ok) {
+          elBadge.className = 'live-pill';
+          elBadge.style.background = '#dcfce7';
+          elBadge.style.color = '#15803d';
+          elBadge.style.border = '1px solid #86efac';
+          elBadge.innerHTML = '<span class="live-dot" style="background:#22c55e;"></span> Đã kết nối';
+        } else {
+          elBadge.className = 'live-pill';
+          elBadge.style.background = '#fee2e2';
+          elBadge.style.color = '#b91c1c';
+          elBadge.style.border = '1px solid #fca5a5';
+          elBadge.innerHTML = '⚠️ Chưa kết nối';
+        }
+      }
+
+      const elTime = document.getElementById('bw711UpdatedTime');
+      if (elTime && data.lastUpdated) {
+        const d = new Date(data.lastUpdated);
+        elTime.textContent = `(${d.toLocaleTimeString('vi-VN')})`;
+      }
+
+      const inpCustom = document.getElementById('inp711CustomPackageGb');
+      if (inpCustom && data.packageGb && !inpCustom.value) {
+        inpCustom.value = data.packageGb;
       }
     }
+    window.update711BalanceDisplay = update711BalanceDisplay;
+
+    async function proxy711FetchBalance(force = false) {
+      try {
+        const url = force ? '/711proxy/balance?refresh=1' : '/711proxy/balance';
+        const res = await api(url);
+        if (res) {
+          update711BalanceDisplay(res);
+        }
+      } catch (err) {
+        console.warn('Lỗi lấy số dư 711proxy:', err);
+      }
+    }
+    window.proxy711FetchBalance = proxy711FetchBalance;
+
+    function toggle711PackageEdit(forceShow = null) {
+      const drawer = document.getElementById('bw711PackageEditDrawer');
+      if (!drawer) return;
+      if (typeof forceShow === 'boolean') {
+        drawer.style.display = forceShow ? 'block' : 'none';
+      } else {
+        drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
+      }
+    }
+    window.toggle711PackageEdit = toggle711PackageEdit;
+
+    async function set711PackageGb(gb) {
+      try {
+        const res = await api('/711proxy/package', {
+          method: 'POST',
+          body: JSON.stringify({ packageGb: gb })
+        });
+        if (res && res.ok) {
+          update711BalanceDisplay(res.balance);
+          toggle711PackageEdit(false);
+          showWinAlert(`Đã cài đặt gói 711Proxy: ${gb} GB`);
+        } else {
+          showWinAlert('Lỗi: ' + (res?.error || 'Không lưu được cấu hình gói'));
+        }
+      } catch (err) {
+        showWinAlert('Lỗi: ' + err.message);
+      }
+    }
+    window.set711PackageGb = set711PackageGb;
+
+    async function save711CustomPackageGb() {
+      const inp = document.getElementById('inp711CustomPackageGb');
+      const val = parseFloat(inp?.value);
+      if (!val || val <= 0 || isNaN(val)) {
+        showWinAlert('Vui lòng nhập số GB hợp lệ (lớn hơn 0).');
+        return;
+      }
+      await set711PackageGb(val);
+    }
+    window.save711CustomPackageGb = save711CustomPackageGb;
 
     async function proxy711Generate() {
       const btn = document.getElementById('btn711Generate');
@@ -4366,6 +4574,9 @@
         if (elBwToday) elBwToday.textContent = state.bandwidth.today.formatted || '0 B';
         const sbBwToday = document.getElementById('sbBandwidthToday');
         if (sbBwToday) sbBwToday.textContent = state.bandwidth.today.formatted || '0 B';
+      }
+      if (state.bandwidth && state.bandwidth.proxy711) {
+        update711BalanceDisplay(state.bandwidth.proxy711);
       }
 
       // Update IP display on top title bar and bottom status bar
@@ -6213,6 +6424,7 @@
       const modal = document.getElementById('bandwidthModal');
       if (modal) modal.style.display = 'flex';
       fetchBandwidthStats();
+      proxy711FetchBalance(false);
       if (!_bandwidthAutoRefreshTimer) {
         _bandwidthAutoRefreshTimer = setInterval(fetchBandwidthStats, 2000);
       }
@@ -6262,6 +6474,13 @@
       const allTime = data.allTime || {};
       const activeSlots = data.activeSlots || [];
       const dailyList = data.daily || [];
+
+      // Update 711Proxy Bandwidth Metrics
+      if (data.proxy711) {
+        update711BalanceDisplay(data.proxy711);
+      } else if (window.cached711Balance) {
+        update711BalanceDisplay(window.cached711Balance);
+      }
 
       // Update Top Stat Cards
       const elTodayDate = document.getElementById('bwStatTodayDate');
@@ -6412,6 +6631,7 @@
 
     fetchToffersLeads(false);
     toggleLeadAutoRefresh(true);
+    proxy711FetchBalance(false);
   </script>
 
   <!-- Windows Form Dialog for HTML Snapshot View -->
