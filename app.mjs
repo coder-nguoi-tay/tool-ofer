@@ -1198,6 +1198,184 @@ export function saveAndRecordLeadIpStats(entry) {
   return res;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// BANDWIDTH TRACKING & DAILY STATS
+// ══════════════════════════════════════════════════════════════════════════
+export const bandwidthStatsPath = join(appDataDirectory, 'bandwidth-daily.json');
+let saveBandwidthTimer = null;
+
+export const bandwidthDailyStats = {
+  totalBytesAllTime: 0,
+  totalUploadAllTime: 0,
+  totalDownloadAllTime: 0,
+  totalRequestsAllTime: 0,
+  daily: {},
+};
+
+export function formatBytes(bytes, decimals = 2) {
+  if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  if (i <= 0) return `${Math.round(bytes)} B`;
+  const val = (bytes / Math.pow(k, i)).toFixed(dm);
+  return `${val} ${sizes[i]}`;
+}
+
+export function getLocalDateKey() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export async function loadBandwidthStats() {
+  try {
+    const raw = JSON.parse(await readFile(bandwidthStatsPath, 'utf8'));
+    if (raw && typeof raw === 'object') {
+      bandwidthDailyStats.totalBytesAllTime = Number(raw.totalBytesAllTime) || 0;
+      bandwidthDailyStats.totalUploadAllTime = Number(raw.totalUploadAllTime) || 0;
+      bandwidthDailyStats.totalDownloadAllTime = Number(raw.totalDownloadAllTime) || 0;
+      bandwidthDailyStats.totalRequestsAllTime = Number(raw.totalRequestsAllTime) || 0;
+      bandwidthDailyStats.daily = (raw.daily && typeof raw.daily === 'object') ? raw.daily : {};
+    }
+    console.log(`[Bandwidth] Đã tải thống kê băng thông (${Object.keys(bandwidthDailyStats.daily).length} ngày, tổng all-time: ${formatBytes(bandwidthDailyStats.totalBytesAllTime)})`);
+  } catch {}
+}
+
+export function queueSaveBandwidthStats() {
+  if (saveBandwidthTimer) return;
+  saveBandwidthTimer = setTimeout(async () => {
+    saveBandwidthTimer = null;
+    try {
+      await mkdir(appDataDirectory, { recursive: true });
+      await writeFile(bandwidthStatsPath, JSON.stringify(bandwidthDailyStats, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[Bandwidth] Lỗi khi lưu bandwidth-daily.json:', err.message);
+    }
+  }, 2000);
+}
+
+export function saveBandwidthStatsSync() {
+  try {
+    mkdirSync(appDataDirectory, { recursive: true });
+    writeFileSync(bandwidthStatsPath, JSON.stringify(bandwidthDailyStats, null, 2), 'utf8');
+  } catch {}
+}
+
+process.on('exit', () => {
+  saveBandwidthStatsSync();
+});
+
+export function recordBandwidthUsage(bytes, up = 0, down = 0) {
+  if (bytes <= 0 && up <= 0 && down <= 0) return;
+  const dateKey = getLocalDateKey();
+  if (!bandwidthDailyStats.daily[dateKey]) {
+    bandwidthDailyStats.daily[dateKey] = {
+      date: dateKey,
+      bytesSent: 0,
+      bytesReceived: 0,
+      totalBytes: 0,
+      requestCount: 0,
+    };
+  }
+  const day = bandwidthDailyStats.daily[dateKey];
+  day.bytesSent = (day.bytesSent || 0) + up;
+  day.bytesReceived = (day.bytesReceived || 0) + down;
+  day.totalBytes = (day.totalBytes || 0) + bytes;
+  day.requestCount = (day.requestCount || 0) + 1;
+
+  bandwidthDailyStats.totalUploadAllTime += up;
+  bandwidthDailyStats.totalDownloadAllTime += down;
+  bandwidthDailyStats.totalBytesAllTime += bytes;
+  bandwidthDailyStats.totalRequestsAllTime += 1;
+
+  queueSaveBandwidthStats();
+}
+
+export function attachBandwidthTracker(context, session) {
+  if (!context || !session) return;
+  if (session._bandwidthTrackerAttached) return;
+  session._bandwidthTrackerAttached = true;
+
+  session.bandwidthBytes = session.bandwidthBytes || 0;
+  session.bytesSent = session.bytesSent || 0;
+  session.bytesReceived = session.bytesReceived || 0;
+  session.requestCount = session.requestCount || 0;
+  session.bandwidthFormatted = formatBytes(session.bandwidthBytes);
+
+  const handleRequestFinishedOrFailed = async (req) => {
+    try {
+      const sizes = await req.sizes().catch(() => null);
+      if (!sizes) return;
+      const up = Math.max(0, (sizes.requestHeadersSize || 0) + (sizes.requestBodySize || 0));
+      const down = Math.max(0, (sizes.responseHeadersSize || 0) + (sizes.responseBodySize || 0));
+      const bytes = up + down;
+      if (bytes <= 0) return;
+
+      session.bytesSent = (session.bytesSent || 0) + up;
+      session.bytesReceived = (session.bytesReceived || 0) + down;
+      session.bandwidthBytes = (session.bandwidthBytes || 0) + bytes;
+      session.requestCount = (session.requestCount || 0) + 1;
+      session.bandwidthFormatted = formatBytes(session.bandwidthBytes);
+
+      // Ghi nhận băng thông cho từng tab cụ thể
+      const page = req.frame()?.page?.();
+      if (page) {
+        page._bytesSent = (page._bytesSent || 0) + up;
+        page._bytesReceived = (page._bytesReceived || 0) + down;
+        page._bandwidthBytes = (page._bandwidthBytes || 0) + bytes;
+        page._requestCount = (page._requestCount || 0) + 1;
+        page._bandwidthFormatted = formatBytes(page._bandwidthBytes);
+      }
+
+      recordBandwidthUsage(bytes, up, down);
+    } catch {}
+  };
+
+  context.on('requestfinished', handleRequestFinishedOrFailed);
+  context.on('requestfailed', handleRequestFinishedOrFailed);
+}
+
+export function getBandwidthSummary() {
+  const todayKey = getLocalDateKey();
+  const todayStats = bandwidthDailyStats.daily[todayKey] || {
+    date: todayKey,
+    bytesSent: 0,
+    bytesReceived: 0,
+    totalBytes: 0,
+    requestCount: 0,
+  };
+
+  const dailyList = Object.values(bandwidthDailyStats.daily).map((d) => ({
+    ...d,
+    formatted: formatBytes(d.totalBytes || 0),
+    sentFormatted: formatBytes(d.bytesSent || 0),
+    receivedFormatted: formatBytes(d.bytesReceived || 0),
+  })).sort((a, b) => b.date.localeCompare(a.date));
+
+  return {
+    today: {
+      ...todayStats,
+      formatted: formatBytes(todayStats.totalBytes || 0),
+      sentFormatted: formatBytes(todayStats.bytesSent || 0),
+      receivedFormatted: formatBytes(todayStats.bytesReceived || 0),
+    },
+    allTime: {
+      totalBytes: bandwidthDailyStats.totalBytesAllTime,
+      bytesSent: bandwidthDailyStats.totalUploadAllTime,
+      bytesReceived: bandwidthDailyStats.totalDownloadAllTime,
+      requestCount: bandwidthDailyStats.totalRequestsAllTime,
+      formatted: formatBytes(bandwidthDailyStats.totalBytesAllTime),
+      sentFormatted: formatBytes(bandwidthDailyStats.totalUploadAllTime),
+      receivedFormatted: formatBytes(bandwidthDailyStats.totalDownloadAllTime),
+    },
+    daily: dailyList,
+  };
+}
+
 export let latestToffersOverview = {
   success: false,
   point: null,
@@ -3623,9 +3801,15 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     isWindowVisible: false,
     leadCheckStatus: null,
     leadCheckMessage: null,
+    bandwidthBytes: 0,
+    bytesSent: 0,
+    bytesReceived: 0,
+    requestCount: 0,
+    bandwidthFormatted: '0 B',
     updateBadge: (text) => { session.badgeText = text; },
   };
   activeBrowsers.add(session);
+  attachBandwidthTracker(context, session);
   try { if (session.browser) attachFullHtmlLoggerToContext(session.browser); } catch {}
   try { if (session._cdpBrowser) attachFullHtmlLoggerToBrowser(session._cdpBrowser); } catch {}
 
@@ -3806,6 +3990,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   suppressBringToFrontWhileHidden(context, session);
   limitOfferTabs(context, session);
   attachBrowserLogger(context, session);
+  attachBandwidthTracker(context, session);
   if (useCloakBrowser) {
     // AdsPower chạy SunBrowser (Chromium thường) — chỉ có lớp Humanize (JS) được gắn,
     // KHÔNG phải nhân Chromium vá C++ của CloakBrowser. Không được ghi "C++ Patched".
@@ -4663,6 +4848,7 @@ function getAutoRefillStatus() {
     activeCount: activeBrowsers.size,
     targetCount: autoRefill.targetCount,
     message: autoRefill.message,
+    bandwidth: getBandwidthSummary(),
     chromeSessions: [...activeBrowsers]
       .filter((session) => !session.isClosed && session.chromeVersion && (session.exitIp || session.isManagedProfile))
       .map((session) => {
@@ -4672,6 +4858,11 @@ function getAutoRefillStatus() {
           index: idx,
           url: (typeof p.url === 'function' ? p.url() : '') || '',
           aiRunning: Boolean(p._aiAssistRunning || p._aiFormFixing),
+          bandwidthBytes: p._bandwidthBytes || 0,
+          bandwidthFormatted: formatBytes(p._bandwidthBytes || 0),
+          bytesSent: p._bytesSent || 0,
+          bytesReceived: p._bytesReceived || 0,
+          requestCount: p._requestCount || 0,
         }));
         const anyTabAiRunning = Boolean(session.aiAssistRunning || livePages.some(p => p._aiAssistRunning || p._aiFormFixing));
         const aiRunningCount = livePages.filter(p => p._aiAssistRunning || p._aiFormFixing).length;
@@ -4706,6 +4897,11 @@ function getAutoRefillStatus() {
           streamLabel: session.streamLabel ?? '',
           offerNumber: session.offerNumber ?? session.streamRole ?? 1,
           websiteUrl: session.websiteUrl ?? null,
+          bandwidthBytes: session.bandwidthBytes || 0,
+          bandwidthFormatted: formatBytes(session.bandwidthBytes || 0),
+          bytesSent: session.bytesSent || 0,
+          bytesReceived: session.bytesReceived || 0,
+          requestCount: session.requestCount || 0,
           tabCount,
           tabs: tabsInfo,
           aiRunning: anyTabAiRunning,
@@ -5901,6 +6097,11 @@ async function openBrowserWithInstalledChrome({
     hasShownWindow: false,
     leadCheckStatus: null,
     leadCheckMessage: null,
+    bandwidthBytes: 0,
+    bytesSent: 0,
+    bytesReceived: 0,
+    requestCount: 0,
+    bandwidthFormatted: '0 B',
     extensions: extensionNames.length > 0
       ? extensionNames.join(', ')
       : `không có (${templateSkipReason ?? 'profile mẫu chưa cài extension nào'})`,
@@ -5924,6 +6125,7 @@ async function openBrowserWithInstalledChrome({
   suppressBringToFrontWhileHidden(context, session);
   limitOfferTabs(context, session);
   attachBrowserLogger(context, session);
+  attachBandwidthTracker(context, session);
   if (useCloakBrowser) {
     session.addLog({
       type: 'cloakbrowser_active',
@@ -7450,6 +7652,7 @@ async function startLocalInterface() {
   loadAiConfig();
   await loadToffersConfig();
   await loadLeadStats();
+  await loadBandwidthStats();
   startToffersBackgroundPolling(10_000);
   const interfaceHtml = readFileSync(userInterfacePath, 'utf8');
   const interfacePcHtml = existsSync(userInterfacePcPath) ? readFileSync(userInterfacePcPath, 'utf8') : interfaceHtml;
@@ -7994,6 +8197,73 @@ async function startLocalInterface() {
           activeLocks: activeProxyLocks.size,
         },
       });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/bandwidth/stats') {
+      const summary = getBandwidthSummary();
+      const sessionsBw = [...activeBrowsers]
+        .filter((session) => !session.isClosed && (session.exitIp || session.isManagedProfile || session.slot))
+        .map((session) => {
+          const livePages = session.browser?.pages ? session.browser.pages().filter(p => !p.isClosed()) : [];
+          return {
+            slot: session.slot ?? (session.tileIndex + 1),
+            exitIp: session.exitIp || 'Direct',
+            proxy: session.proxyServer || session.proxyKey || 'Direct',
+            totalBytes: session.bandwidthBytes || 0,
+            formatted: formatBytes(session.bandwidthBytes || 0),
+            bytesSent: session.bytesSent || 0,
+            bytesReceived: session.bytesReceived || 0,
+            requestCount: session.requestCount || 0,
+            tabs: livePages.map((p, idx) => ({
+              index: idx,
+              url: (typeof p.url === 'function' ? p.url() : '') || '',
+              totalBytes: p._bandwidthBytes || 0,
+              formatted: formatBytes(p._bandwidthBytes || 0),
+              bytesSent: p._bytesSent || 0,
+              bytesReceived: p._bytesReceived || 0,
+              requestCount: p._requestCount || 0,
+            })),
+          };
+        })
+        .sort((a, b) => a.slot - b.slot);
+
+      respondWithJson(response, 200, {
+        ...summary,
+        activeSlots: sessionsBw,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/bandwidth/reset') {
+      try {
+        const bodyText = await readRequestBody(request).catch(() => '{}');
+        const body = JSON.parse(bodyText || '{}');
+        const scope = body.scope || 'today';
+        const todayKey = getLocalDateKey();
+
+        if (scope === 'today') {
+          if (bandwidthDailyStats.daily[todayKey]) {
+            const todayOld = bandwidthDailyStats.daily[todayKey];
+            bandwidthDailyStats.totalBytesAllTime = Math.max(0, bandwidthDailyStats.totalBytesAllTime - (todayOld.totalBytes || 0));
+            bandwidthDailyStats.totalUploadAllTime = Math.max(0, bandwidthDailyStats.totalUploadAllTime - (todayOld.bytesSent || 0));
+            bandwidthDailyStats.totalDownloadAllTime = Math.max(0, bandwidthDailyStats.totalDownloadAllTime - (todayOld.bytesReceived || 0));
+            bandwidthDailyStats.totalRequestsAllTime = Math.max(0, bandwidthDailyStats.totalRequestsAllTime - (todayOld.requestCount || 0));
+            delete bandwidthDailyStats.daily[todayKey];
+          }
+        } else if (scope === 'all') {
+          bandwidthDailyStats.totalBytesAllTime = 0;
+          bandwidthDailyStats.totalUploadAllTime = 0;
+          bandwidthDailyStats.totalDownloadAllTime = 0;
+          bandwidthDailyStats.totalRequestsAllTime = 0;
+          bandwidthDailyStats.daily = {};
+        }
+
+        queueSaveBandwidthStats();
+        respondWithJson(response, 200, { ok: true, message: `Đã đặt lại dữ liệu băng thông (${scope}).` });
+      } catch (err) {
+        respondWithJson(response, 500, { error: err.message });
+      }
       return;
     }
 
@@ -9060,8 +9330,20 @@ async function startLocalInterface() {
         index: i,
         url: p.url(),
         title: await p.title().catch(() => p.url()),
+        bandwidthBytes: p._bandwidthBytes || 0,
+        bandwidthFormatted: formatBytes(p._bandwidthBytes || 0),
+        bytesSent: p._bytesSent || 0,
+        bytesReceived: p._bytesReceived || 0,
+        requestCount: p._requestCount || 0,
       })));
-      respondWithJson(response, 200, { tabs });
+      respondWithJson(response, 200, {
+        tabs,
+        bandwidthBytes: session.bandwidthBytes || 0,
+        bandwidthFormatted: formatBytes(session.bandwidthBytes || 0),
+        bytesSent: session.bytesSent || 0,
+        bytesReceived: session.bytesReceived || 0,
+        requestCount: session.requestCount || 0,
+      });
       return;
     }
 

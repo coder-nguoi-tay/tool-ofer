@@ -1564,6 +1564,7 @@
                 <span class="proxy-badge-dot"></span>
                 <span id="lbProxyUsed">0</span> used
               </span>
+              <button type="button" class="win-btn" style="padding:2px 10px;margin-left:4px;gap:4px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-weight:600;" onclick="openBandwidthModal()" title="Xem bảng thống kê băng thông chi tiết theo từng tab và từng ngày">📶 Thống kê băng thông</button>
               <button type="button" class="win-btn" style="padding:2px 10px;margin-left:4px;gap:4px;" onclick="resetProxyQueue()" title="Reset lại trạng thái các proxy trong danh sách về ban đầu">🔄 Reset hàng đợi</button>
               <button type="button" class="win-btn" style="padding:2px 10px;margin-left:4px;gap:4px;color:#b91c1c;" onclick="clearProxyQueue()" title="Xóa toàn bộ proxy trong hàng đợi và ô nhập để nạp danh sách mới">🗑️ Xóa hết proxy</button>
             </div>
@@ -1590,6 +1591,9 @@
               </span>
               <span class="run-stat-chip chip-ai" title="Số luồng đang được AI hỗ trợ giải quyết">
                 🤖 <b id="runStatAi">0</b> AI
+              </span>
+              <span class="run-stat-chip chip-bandwidth" id="runStatBandwidthChip" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;cursor:pointer;" onclick="openBandwidthModal()" title="Tổng băng thông tiêu thụ hôm nay (Click để xem thống kê chi tiết theo ngày)">
+                📶 <b id="runStatBandwidthToday">0 B</b> hôm nay
               </span>
               <span class="run-stat-chip" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;cursor:pointer;" onclick="switchTab('ToffersLeads')" title="Số Point hiện tại từ toffers.top (Click xem danh sách lead)">
                 💎 <b id="runStatPoint">--</b> pt
@@ -1625,6 +1629,7 @@
                 <th style="width:95px;">Thread</th>
                 <th style="width:135px;text-align:center;">Cửa sổ & Xem</th>
                 <th style="width:125px;">IP Thoát</th>
+                <th style="width:115px;text-align:center;">📶 Băng thông</th>
                 <th style="width:230px;">Hành động hiện tại</th>
                 <th style="width:105px;">Trạng thái</th>
                 <th style="width:145px;">Thiết bị & Chrome</th>
@@ -1636,7 +1641,7 @@
             <tbody id="dgvRunningBody">
               <tr>
                 <td class="cell-selector">►</td>
-                <td colspan="9">
+                <td colspan="10">
                   <div class="running-empty-state">
                     <div class="running-empty-icon">💤</div>
                     <div class="running-empty-title">Không có luồng trình duyệt nào đang chạy</div>
@@ -1679,6 +1684,101 @@
         </div>
         <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#090d16;position:relative;">
           <canvas id="screenCanvas" style="max-width:100%;max-height:100%;object-fit:contain;cursor:default;outline:none;" tabindex="0"></canvas>
+        </div>
+      </div>
+
+      <!-- Bandwidth Statistics Modal -->
+      <div id="bandwidthModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.75);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;">
+        <div style="background:#ffffff;border:1px solid #94a3b8;border-radius:8px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);width:920px;max-width:95vw;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
+          <!-- Modal Header -->
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);border-bottom:1px solid #cbd5e1;flex-shrink:0;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:16px;">📶</span>
+              <span style="font-weight:700;font-size:13px;color:#0f172a;">Thống kê Băng thông Proxy (Realtime & Theo ngày)</span>
+              <span class="live-pill" style="margin-left:4px;"><span class="live-dot"></span> Live</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button type="button" class="win-btn win-btn-sm" onclick="fetchBandwidthStats()" title="Tải lại số liệu băng thông">🔄 Làm mới</button>
+              <button type="button" class="win-btn win-btn-sm" onclick="closeBandwidthModal()" style="font-weight:700;padding:2px 8px;" title="Đóng cửa sổ">✕</button>
+            </div>
+          </div>
+
+          <!-- Top Stat Cards -->
+          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;padding:12px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
+            <div style="background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+              <div style="font-size:11px;color:#64748b;font-weight:600;margin-bottom:4px;">📅 HÔM NAY (<span id="bwStatTodayDate">--</span>)</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;" id="bwStatTodayTotal">0 B</div>
+              <div style="font-size:10.5px;color:#475569;margin-top:4px;" id="bwStatTodaySub">↑ Gửi: 0 B · ↓ Tải: 0 B · 0 reqs</div>
+            </div>
+            <div style="background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+              <div style="font-size:11px;color:#64748b;font-weight:600;margin-bottom:4px;">🌐 ĐANG CHẠY (REALTIME)</div>
+              <div style="font-size:20px;font-weight:800;color:#0284c7;" id="bwStatActiveTotal">0 B</div>
+              <div style="font-size:10.5px;color:#475569;margin-top:4px;" id="bwStatActiveSub">0 luồng đang hoạt động</div>
+            </div>
+            <div style="background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+              <div style="font-size:11px;color:#64748b;font-weight:600;margin-bottom:4px;">📊 TỔNG TÍCH LŨY (ALL-TIME)</div>
+              <div style="font-size:20px;font-weight:800;color:#4338ca;" id="bwStatAllTimeTotal">0 B</div>
+              <div style="font-size:10.5px;color:#475569;margin-top:4px;" id="bwStatAllTimeSub">0 ngày sử dụng đã ghi nhận</div>
+            </div>
+          </div>
+
+          <!-- Sub-Tabs Header -->
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:#f1f5f9;border-bottom:1px solid #cbd5e1;flex-shrink:0;">
+            <div class="win-tab-headers" style="margin:0;border:none;">
+              <div class="win-tab active" id="bwTabBtnSlots" onclick="switchBandwidthSubTab('slots')">🖥️ Luồng & Tab đang chạy (<span id="bwTabSlotsCount">0</span>)</div>
+              <div class="win-tab" id="bwTabBtnDaily" onclick="switchBandwidthSubTab('daily')">📅 Lịch sử theo ngày (<span id="bwTabDailyCount">0</span>)</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button type="button" class="win-btn win-btn-sm" style="font-size:11px;color:#b91c1c;" onclick="handleResetBandwidth('today')" title="Đặt lại bộ đếm băng thông của riêng ngày hôm nay về 0">🗑️ Đặt lại hôm nay</button>
+              <button type="button" class="win-btn win-btn-sm" style="font-size:11px;color:#b91c1c;background:#fee2e2;border-color:#fca5a5;" onclick="handleResetBandwidth('all')" title="Xóa toàn bộ lịch sử băng thông các ngày">⚠️ Xóa toàn bộ lịch sử</button>
+            </div>
+          </div>
+
+          <!-- Sub-Tab Content: Active Slots & Tabs -->
+          <div id="bwSubPanelSlots" style="flex:1;overflow:auto;padding:10px 16px;">
+            <table class="win-grid" style="width:100%;">
+              <thead>
+                <tr>
+                  <th style="width:65px;text-align:center;">Slot</th>
+                  <th style="width:130px;">IP Thoát</th>
+                  <th style="width:140px;">Proxy</th>
+                  <th style="width:70px;text-align:center;">Số tab</th>
+                  <th style="width:100px;text-align:right;">Upload (↑)</th>
+                  <th style="width:100px;text-align:right;">Download (↓)</th>
+                  <th style="width:110px;text-align:right;color:#047857;">Tổng</th>
+                  <th>Chi tiết từng tab</th>
+                </tr>
+              </thead>
+              <tbody id="bwTableSlotsBody">
+                <tr><td colspan="8" style="text-align:center;padding:25px;color:#94a3b8;">Không có luồng nào đang hoạt động.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Sub-Tab Content: Daily History -->
+          <div id="bwSubPanelDaily" style="flex:1;overflow:auto;padding:10px 16px;display:none;">
+            <table class="win-grid" style="width:100%;">
+              <thead>
+                <tr>
+                  <th style="width:130px;">Ngày</th>
+                  <th style="width:110px;text-align:right;">Upload (↑ Gửi)</th>
+                  <th style="width:110px;text-align:right;">Download (↓ Tải)</th>
+                  <th style="width:120px;text-align:right;color:#047857;font-weight:700;">Tổng băng thông</th>
+                  <th style="width:90px;text-align:center;">Số Requests</th>
+                  <th style="width:180px;">Tỷ trọng / Biểu đồ</th>
+                </tr>
+              </thead>
+              <tbody id="bwTableDailyBody">
+                <tr><td colspan="6" style="text-align:center;padding:25px;color:#94a3b8;">Chưa có dữ liệu lịch sử các ngày.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Modal Footer -->
+          <div style="padding:8px 16px;background:#f8fafc;border-top:1px solid #cbd5e1;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;font-size:11px;color:#64748b;">
+            <span>💡 Băng thông được tính tự động từ toàn bộ lưu lượng tải trang, ảnh, scripts, XHR & requests qua proxy.</span>
+            <button type="button" class="win-btn" onclick="closeBandwidthModal()" style="padding:3px 14px;font-size:11.5px;">Đóng</button>
+          </div>
         </div>
       </div>
 
@@ -2457,6 +2557,7 @@
     <div class="win-statusbar">
       <div class="status-panel status-panel-flex" id="lbStatus">Ready</div>
       <div class="status-panel" id="sbActiveIpsPanel" style="color:#0284c7;font-weight:600;">🌐 IP: <b id="sbActiveIps" style="color:#16a34a;">--</b></div>
+      <div class="status-panel" style="cursor:pointer;color:#047857;" onclick="openBandwidthModal()" title="Băng thông mạng proxy hôm nay (Click để xem chi tiết theo ngày)">📶 Băng thông: <b id="sbBandwidthToday" style="font-weight:700;">0 B</b></div>
       <div class="status-panel" style="cursor:pointer;" onclick="switchTab('ToffersLeads')" title="Số Point toffers.top">💎 Point: <b id="sbToffersPoint">--</b></div>
       <div class="status-panel">Total Run: <b id="lbTotalRun">0</b></div>
       <div class="status-panel">Total RRS: <b id="lbTotalRRS">0</b></div>
@@ -4258,6 +4359,15 @@
       const elAi = document.getElementById('runStatAi');
       if (elAi) elAi.textContent = totalAi;
 
+      // Update Bandwidth Today Chips & Status
+      if (state.bandwidth && state.bandwidth.today) {
+        window.cachedBandwidthStats = state.bandwidth;
+        const elBwToday = document.getElementById('runStatBandwidthToday');
+        if (elBwToday) elBwToday.textContent = state.bandwidth.today.formatted || '0 B';
+        const sbBwToday = document.getElementById('sbBandwidthToday');
+        if (sbBwToday) sbBwToday.textContent = state.bandwidth.today.formatted || '0 B';
+      }
+
       // Update IP display on top title bar and bottom status bar
       const activeIps = sessions.filter(s => s.exitIp).map(s => `S${s.slot}: ${s.exitIp}`);
       const sbIpsEl = document.getElementById('sbActiveIps');
@@ -4336,7 +4446,7 @@
           ? 'Không có luồng trình duyệt nào đang chạy.'
           : `Không có luồng nào đang chạy cho Offer ${currentSelectedRunningOfferTab}.`;
         tbody._uxRenderKey = null;
-        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="9"><div class="running-empty-state"><div class="running-empty-icon">💤</div><div class="running-empty-title">${emptyMsg}</div><div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="11"><div class="running-empty-state"><div class="running-empty-icon">💤</div><div class="running-empty-title">${emptyMsg}</div><div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div></div></td></tr>`;
         return;
       }
 
@@ -4379,6 +4489,23 @@
           : `Chrome ${String(s.version || '').replace(/^Chrome\s*/i, '') || s.version}`;
         const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || (__deviceVersion + ' · ' + (s.version || 'Chrome')))}">${__deviceIcon} <strong style="color:#0f172a;">${escHtml(__deviceVersion)}</strong> · <span style="color:#0284c7;font-weight:600;">${escHtml(__chromeLabel)}</span></span>`;
 
+        const bwFormatted = s.bandwidthFormatted || '0 B';
+        const bwUp = s.bytesSent ? formatBytes(s.bytesSent) : '0 B';
+        const bwDown = s.bytesReceived ? formatBytes(s.bytesReceived) : '0 B';
+        const bwReqs = s.requestCount || 0;
+        const tabsDetail = Array.isArray(s.tabs) && s.tabs.length > 0
+          ? s.tabs.map((t, i) => `• Tab ${i+1}: ${t.bandwidthFormatted || '0 B'} (${t.url ? (t.url.length > 40 ? t.url.slice(0, 40) + '...' : t.url) : 'Trang'})`).join('\n')
+          : '';
+        const bwTooltip = `Slot ${s.slot} (${s.exitIp || 'Direct'})\nTổng: ${bwFormatted}\n↑ Gửi: ${bwUp}\n↓ Tải: ${bwDown}\nRequests: ${bwReqs}${tabsDetail ? '\n\nChi tiết tab:\n' + tabsDetail : ''}\n\n(Bấm để xem thống kê theo ngày)`;
+        const tabBadge = (s.tabCount || 1) > 1 ? `<span style="font-size:9px;background:#e2e8f0;color:#475569;padding:1px 4px;border-radius:3px;margin-left:3px;font-weight:600;">${s.tabCount} tabs</span>` : '';
+
+        const bandwidthCell = `
+          <div style="cursor:pointer;font-size:11px;" onclick="event.stopPropagation(); openBandwidthModal(${s.slot});" title="${escHtml(bwTooltip)}">
+            <span style="font-weight:700;color:#047857;">📶 ${bwFormatted}</span>${tabBadge}
+            <span style="font-size:9.5px;color:#64748b;display:block;line-height:1.2;">↑${bwUp} · ↓${bwDown}</span>
+          </div>
+        `;
+
         const isWinVis = Boolean(s.isWindowVisible);
         const winBtnLabel = isWinVis ? '🔽 Ẩn' : '🖥️ Hiện';
         const winBtnTitle = isWinVis ? 'Thu nhỏ cửa sổ về chạy ngầm' : 'Bung cửa sổ trình duyệt ra màn hình Desktop';
@@ -4401,6 +4528,7 @@
           <td style="text-align:center;white-space:nowrap;">${threadBadge}</td>
           <td style="text-align:center;white-space:nowrap;">${actionButtons}</td>
           <td>${exitIpBadge}</td>
+          <td style="white-space:nowrap;">${bandwidthCell}</td>
           <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(s.websiteUrl || '')}">${actionText}</td>
           <td>${leadBadge}</td>
           <td>${deviceInfo}</td>
@@ -5141,10 +5269,16 @@
           } else {
             statusHtml = `<span style="color:#94a3b8;">${currentAction || 'Đang mở offer...'}</span>`;
           }
+          const bwBadge = entry.bandwidthFormatted
+            ? `<span style="font-size:10px;background:#064e3b;color:#6ee7b7;padding:1px 5px;border-radius:3px;font-weight:600;" title="Băng thông: ↑${entry.bytesSent ? formatBytes(entry.bytesSent) : '0 B'} · ↓${entry.bytesReceived ? formatBytes(entry.bytesReceived) : '0 B'}">📶 ${entry.bandwidthFormatted}</span>`
+            : '';
           footer.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
               <span>🌐 <b>${ip || 'Đang kết nối...'}</b></span>
-              <span style="font-size:10px;background:#1e293b;padding:1px 5px;border-radius:3px;">Offer ${offerNumber || 1}</span>
+              <div style="display:flex;align-items:center;gap:4px;">
+                ${bwBadge}
+                <span style="font-size:10px;background:#1e293b;padding:1px 5px;border-radius:3px;">Offer ${offerNumber || 1}</span>
+              </div>
             </div>
             <div style="font-size:11px;">${statusHtml}</div>
           `;
@@ -5170,7 +5304,7 @@
       const entry = _screenSlots.find(s => s.slot === slot);
       const modalTitle = document.getElementById('screenModalTitle');
       if (modalTitle) {
-        modalTitle.innerHTML = `Màn hình Slot ${slot} • <span style="color:#22c55e;">🌐 IP: ${escHtml(entry?.ip || 'Direct')}</span> • <span style="color:#cbd5e1;" title="${escHtml(entry?.deviceSummary || '')}">${escHtml(entry?.deviceVersion || entry?.deviceProfile || 'Windows 11')}</span> • <span style="color:#38bdf8;">${escHtml(entry?.version || 'Chrome')}</span> <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(nhấp canvas để điều khiển)</span>`;
+        modalTitle.innerHTML = `Màn hình Slot ${slot} • <span style="color:#22c55e;">🌐 IP: ${escHtml(entry?.ip || 'Direct')}</span> • <span style="color:#a7f3d0;font-weight:600;" title="Băng thông luồng này">📶 ${escHtml(entry?.bandwidthFormatted || '0 B')}</span> • <span style="color:#cbd5e1;" title="${escHtml(entry?.deviceSummary || '')}">${escHtml(entry?.deviceVersion || entry?.deviceProfile || 'Windows 11')}</span> • <span style="color:#38bdf8;">${escHtml(entry?.version || 'Chrome')}</span> <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(nhấp canvas để điều khiển)</span>`;
       }
 
       const fpsEl = document.getElementById('screenModalFps');
@@ -5510,7 +5644,8 @@
           const chip = document.createElement('div');
           const isActive = tab.index === _screenActiveTabIndex;
           chip.className = `screen-tab-chip ${isActive ? 'active' : ''}`;
-          chip.title = tab.url || `Tab ${tab.index + 1}`;
+          const bwStr = tab.bandwidthFormatted ? ` · 📶 ${tab.bandwidthFormatted}` : '';
+          chip.title = (tab.url || `Tab ${tab.index + 1}`) + (tab.bandwidthFormatted ? `\nBăng thông: ${tab.bandwidthFormatted} (↑${formatBytes(tab.bytesSent || 0)} · ↓${formatBytes(tab.bytesReceived || 0)})` : '');
           chip.onclick = () => _switchTab(slot, tab.index);
 
           const icon = document.createElement('span');
@@ -5520,7 +5655,7 @@
 
           const label = document.createElement('span');
           label.className = 'screen-tab-label';
-          label.textContent = tab.title || tab.url || `Tab ${tab.index + 1}`;
+          label.textContent = (tab.title || tab.url || `Tab ${tab.index + 1}`) + bwStr;
           chip.appendChild(label);
 
           const closeBtn = document.createElement('span');
@@ -5767,6 +5902,11 @@
         deviceVersion: s.deviceVersion || (s.deviceSummary ? s.deviceSummary.split(' · ')[0] : s.deviceProfile) || 'Windows 11',
         deviceSummary: s.deviceSummary || '',
         isWindowVisible: Boolean(s.isWindowVisible),
+        bandwidthBytes: s.bandwidthBytes || 0,
+        bandwidthFormatted: s.bandwidthFormatted || '0 B',
+        bytesSent: s.bytesSent || 0,
+        bytesReceived: s.bytesReceived || 0,
+        tabs: s.tabs || [],
       }));
     }
 
@@ -6036,6 +6176,239 @@
         document.getElementById('leadCustomCookie').value = savedLeadCookie;
       }
     } catch {}
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // BANDWIDTH MONITORING & STATS MODULE
+    // ══════════════════════════════════════════════════════════════════════════
+    let _activeBandwidthSubTab = 'slots';
+    let _bandwidthModalHighlightSlot = null;
+    let _bandwidthAutoRefreshTimer = null;
+
+    function formatBytes(bytes, decimals = 2) {
+      if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B';
+      const k = 1024;
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      if (i <= 0) return `${Math.round(bytes)} B`;
+      const val = (bytes / Math.pow(k, i)).toFixed(dm);
+      return `${val} ${sizes[i]}`;
+    }
+    window.formatBytes = formatBytes;
+
+    async function fetchBandwidthStats() {
+      try {
+        const res = await api('/bandwidth/stats');
+        if (!res) return;
+        window.cachedBandwidthStats = res;
+        renderBandwidthModal();
+      } catch (err) {
+        console.warn('Lỗi lấy thống kê băng thông:', err);
+      }
+    }
+    window.fetchBandwidthStats = fetchBandwidthStats;
+
+    function openBandwidthModal(highlightSlot = null) {
+      _bandwidthModalHighlightSlot = highlightSlot;
+      const modal = document.getElementById('bandwidthModal');
+      if (modal) modal.style.display = 'flex';
+      fetchBandwidthStats();
+      if (!_bandwidthAutoRefreshTimer) {
+        _bandwidthAutoRefreshTimer = setInterval(fetchBandwidthStats, 2000);
+      }
+    }
+    window.openBandwidthModal = openBandwidthModal;
+
+    function closeBandwidthModal() {
+      const modal = document.getElementById('bandwidthModal');
+      if (modal) modal.style.display = 'none';
+      _bandwidthModalHighlightSlot = null;
+      if (_bandwidthAutoRefreshTimer) {
+        clearInterval(_bandwidthAutoRefreshTimer);
+        _bandwidthAutoRefreshTimer = null;
+      }
+    }
+    window.closeBandwidthModal = closeBandwidthModal;
+
+    function switchBandwidthSubTab(tab) {
+      _activeBandwidthSubTab = tab;
+      const btnSlots = document.getElementById('bwTabBtnSlots');
+      const btnDaily = document.getElementById('bwTabBtnDaily');
+      const panelSlots = document.getElementById('bwSubPanelSlots');
+      const panelDaily = document.getElementById('bwSubPanelDaily');
+
+      if (btnSlots && btnDaily && panelSlots && panelDaily) {
+        if (tab === 'slots') {
+          btnSlots.classList.add('active');
+          btnDaily.classList.remove('active');
+          panelSlots.style.display = 'block';
+          panelDaily.style.display = 'none';
+        } else {
+          btnDaily.classList.add('active');
+          btnSlots.classList.remove('active');
+          panelDaily.style.display = 'block';
+          panelSlots.style.display = 'none';
+        }
+      }
+      renderBandwidthModal();
+    }
+    window.switchBandwidthSubTab = switchBandwidthSubTab;
+
+    function renderBandwidthModal() {
+      const data = window.cachedBandwidthStats;
+      if (!data) return;
+
+      const today = data.today || {};
+      const allTime = data.allTime || {};
+      const activeSlots = data.activeSlots || [];
+      const dailyList = data.daily || [];
+
+      // Update Top Stat Cards
+      const elTodayDate = document.getElementById('bwStatTodayDate');
+      if (elTodayDate) elTodayDate.textContent = today.date || 'Hôm nay';
+
+      const elTodayTotal = document.getElementById('bwStatTodayTotal');
+      if (elTodayTotal) elTodayTotal.textContent = today.formatted || formatBytes(today.totalBytes || 0);
+
+      const elTodaySub = document.getElementById('bwStatTodaySub');
+      if (elTodaySub) {
+        const upStr = today.sentFormatted || formatBytes(today.bytesSent || 0);
+        const downStr = today.receivedFormatted || formatBytes(today.bytesReceived || 0);
+        const reqStr = (today.requestCount || 0).toLocaleString();
+        elTodaySub.textContent = `↑ Gửi: ${upStr} · ↓ Tải: ${downStr} · ${reqStr} reqs`;
+      }
+
+      // Active Slots Card
+      const activeBytesTotal = activeSlots.reduce((sum, s) => sum + (s.totalBytes || 0), 0);
+      const elActiveTotal = document.getElementById('bwStatActiveTotal');
+      if (elActiveTotal) elActiveTotal.textContent = formatBytes(activeBytesTotal);
+
+      const elActiveSub = document.getElementById('bwStatActiveSub');
+      if (elActiveSub) elActiveSub.textContent = `${activeSlots.length} luồng đang mở (${activeSlots.reduce((sum, s) => sum + (s.tabs?.length || 1), 0)} tabs)`;
+
+      // All-Time Card
+      const elAllTimeTotal = document.getElementById('bwStatAllTimeTotal');
+      if (elAllTimeTotal) elAllTimeTotal.textContent = allTime.formatted || formatBytes(allTime.totalBytes || 0);
+
+      const elAllTimeSub = document.getElementById('bwStatAllTimeSub');
+      if (elAllTimeSub) {
+        const daysCount = dailyList.length;
+        const totalReqs = (allTime.requestCount || 0).toLocaleString();
+        elAllTimeSub.textContent = `${daysCount} ngày ghi nhận · ${totalReqs} requests`;
+      }
+
+      // Sub-Tabs counts
+      const elSlotsCount = document.getElementById('bwTabSlotsCount');
+      if (elSlotsCount) elSlotsCount.textContent = activeSlots.length;
+
+      const elDailyCount = document.getElementById('bwTabDailyCount');
+      if (elDailyCount) elDailyCount.textContent = dailyList.length;
+
+      // Render Active Slots Table
+      const slotsTbody = document.getElementById('bwTableSlotsBody');
+      if (slotsTbody) {
+        if (activeSlots.length === 0) {
+          slotsTbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:25px;color:#94a3b8;">Không có luồng nào đang hoạt động.</td></tr>';
+        } else {
+          slotsTbody.innerHTML = activeSlots.map(s => {
+            const isHighlighted = _bandwidthModalHighlightSlot && s.slot === _bandwidthModalHighlightSlot;
+            const bgStyle = isHighlighted ? 'background:#ecfdf5;' : '';
+            const upStr = formatBytes(s.bytesSent || 0);
+            const downStr = formatBytes(s.bytesReceived || 0);
+            const totalStr = s.formatted || formatBytes(s.totalBytes || 0);
+            const tabs = s.tabs || [];
+            const tabsCount = tabs.length || 1;
+
+            const tabsHtml = tabs.length > 0
+              ? tabs.map((t, idx) => {
+                  const tTotal = t.formatted || formatBytes(t.totalBytes || 0);
+                  const tUp = formatBytes(t.bytesSent || 0);
+                  const tDown = formatBytes(t.bytesReceived || 0);
+                  const urlLabel = t.url ? (t.url.length > 45 ? t.url.slice(0, 45) + '...' : t.url) : 'Trang trống';
+                  return `<div style="font-size:10.5px;padding:2px 0;border-bottom:1px dashed #e2e8f0;display:flex;justify-content:space-between;gap:8px;">
+                    <span style="color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(t.url)}">🌐 Tab ${idx + 1}: ${escHtml(urlLabel)}</span>
+                    <span style="white-space:nowrap;"><b style="color:#047857;">${tTotal}</b> <span style="color:#64748b;font-size:9.5px;">(↑${tUp} · ↓${tDown})</span></span>
+                  </div>`;
+                }).join('')
+              : '<span style="color:#94a3b8;font-size:10px;">1 tab</span>';
+
+            return `
+              <tr style="${bgStyle}">
+                <td style="text-align:center;font-weight:700;"><span class="run-slot-badge">Slot ${s.slot}</span></td>
+                <td><span class="run-ip-chip">${escHtml(s.exitIp || 'Direct')}</span></td>
+                <td style="font-size:10.5px;color:#475569;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(s.proxy)}">${escHtml(s.proxy || 'Direct')}</td>
+                <td style="text-align:center;"><span style="font-size:10px;background:#e2e8f0;padding:1px 6px;border-radius:10px;font-weight:600;">${tabsCount}</span></td>
+                <td style="text-align:right;font-size:11px;color:#64748b;">${upStr}</td>
+                <td style="text-align:right;font-size:11px;color:#64748b;">${downStr}</td>
+                <td style="text-align:right;font-weight:800;font-size:11.5px;color:#047857;">${totalStr}</td>
+                <td><div style="max-height:80px;overflow-y:auto;">${tabsHtml}</div></td>
+              </tr>
+            `;
+          }).join('');
+        }
+      }
+
+      // Render Daily History Table
+      const dailyTbody = document.getElementById('bwTableDailyBody');
+      if (dailyTbody) {
+        if (dailyList.length === 0) {
+          dailyTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:25px;color:#94a3b8;">Chưa có dữ liệu lịch sử các ngày.</td></tr>';
+        } else {
+          const maxDayBytes = Math.max(...dailyList.map(d => d.totalBytes || 0), 1);
+          const allBytes = allTime.totalBytes || 1;
+
+          dailyTbody.innerHTML = dailyList.map(d => {
+            const isToday = d.date === today.date;
+            const dateLabel = isToday ? `<b>${d.date}</b> <span style="font-size:9.5px;background:#ecfdf5;color:#047857;padding:1px 5px;border-radius:3px;font-weight:700;">Hôm nay</span>` : d.date;
+            const totalStr = d.formatted || formatBytes(d.totalBytes || 0);
+            const upStr = d.sentFormatted || formatBytes(d.bytesSent || 0);
+            const downStr = d.receivedFormatted || formatBytes(d.bytesReceived || 0);
+            const reqCount = (d.requestCount || 0).toLocaleString();
+            const pct = Math.min(100, Math.round(((d.totalBytes || 0) / allBytes) * 100));
+            const barWidth = Math.min(100, Math.round(((d.totalBytes || 0) / maxDayBytes) * 100));
+
+            return `
+              <tr style="${isToday ? 'background:#f0fdf4;' : ''}">
+                <td style="white-space:nowrap;">${dateLabel}</td>
+                <td style="text-align:right;font-size:11px;color:#64748b;">${upStr}</td>
+                <td style="text-align:right;font-size:11px;color:#64748b;">${downStr}</td>
+                <td style="text-align:right;font-weight:800;font-size:12px;color:#047857;">${totalStr}</td>
+                <td style="text-align:center;font-size:11px;font-weight:600;color:#334155;">${reqCount}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <div style="flex:1;background:#e2e8f0;height:8px;border-radius:4px;overflow:hidden;">
+                      <div style="background:linear-gradient(90deg, #10b981 0%, #059669 100%);height:100%;width:${barWidth}%;"></div>
+                    </div>
+                    <span style="font-size:10px;color:#64748b;min-width:32px;text-align:right;">${pct}%</span>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('');
+        }
+      }
+    }
+
+    async function handleResetBandwidth(scope) {
+      const confirmMsg = scope === 'today'
+        ? 'Bạn có chắc chắn muốn đặt lại bộ đếm băng thông của ngày HÔM NAY về 0?'
+        : 'CẢNH BÁO: Thao tác này sẽ XÓA TOÀN BỘ lịch sử thống kê băng thông tất cả các ngày!\n\nBạn có chắc chắn muốn tiếp tục?';
+      if (!confirm(confirmMsg)) return;
+
+      try {
+        const res = await api('/bandwidth/reset', { scope });
+        if (res && res.ok) {
+          alert(res.message || 'Đã đặt lại dữ liệu băng thông.');
+          fetchBandwidthStats();
+          fetchRunningState();
+        } else {
+          alert('Lỗi: ' + (res?.error || 'Không thực hiện được.'));
+        }
+      } catch (err) {
+        alert('Lỗi: ' + err.message);
+      }
+    }
+    window.handleResetBandwidth = handleResetBandwidth;
 
     fetchToffersLeads(false);
     toggleLeadAutoRefresh(true);

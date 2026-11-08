@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path';
  */
 const TEST_FILES = [
   'adspower-profile.test.mjs',
+  'bandwidth-tracker.test.mjs',
   'browser-profile-path.test.mjs',
   'browser-session-lifecycle.test.mjs',
   'check-duplicate.test.mjs',
