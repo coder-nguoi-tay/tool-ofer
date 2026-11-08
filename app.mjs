@@ -335,7 +335,15 @@ export function suppressBringToFrontWhileHidden(context, session) {
     if (!page || page._uxFrontGuard) return;
     page._uxFrontGuard = true;
     const original = page.bringToFront.bind(page);
-    page.bringToFront = () => (session.runHidden && session.isWindowVisible !== true ? Promise.resolve() : original());
+    page.bringToFront = () => {
+      // Khi chạy đa trình duyệt (nhiều cửa sổ song song) hoặc chạy ngầm trong app:
+      // Chặn bringToFront cướp focus hệ điều hành để các cửa sổ không đè lên nhau,
+      // không gửi sự kiện blur làm gián đoạn ô nhập và dropdown của các luồng khác.
+      if (session.runHidden || (activeBrowsers && activeBrowsers.size > 1) || session.isWindowVisible !== true) {
+        return Promise.resolve();
+      }
+      return original();
+    };
   };
   context.pages().forEach(guard);
   context.on('page', guard);
@@ -3541,7 +3549,6 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
       const win = await cdpSession.send('Browser.getWindowForTarget');
       cdpWindowId = win.windowId;
       await hideWindowOffscreen(cdpSession, cdpWindowId);
-      execFile('osascript', ['-e', 'tell application "System Events" to set visible of every process whose name is "SunBrowser" to false'], () => {});
     }
   } catch {}
 
@@ -3764,7 +3771,6 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
         if (activePage) await activePage.bringToFront().catch(() => {});
         console.log(`[AdsPower] Slot ${assignedSlot}: Đã hiển thị cửa sổ trình duyệt ra Desktop.`);
         session.addBrowserLog?.({ type: 'navigate', detail: 'Đã hiển thị cửa sổ trình duyệt ra Desktop.' });
-        execFile('osascript', ['-e', 'tell application "System Events" to set visible of every process whose name is "SunBrowser" to true\ntell application "System Events" to set frontmost of every process whose name is "SunBrowser" to true'], () => {});
       }
     } catch (err) {
       console.warn('[AdsPower] Lỗi hiển thị cửa sổ:', err.message);
@@ -3786,7 +3792,6 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
         session.isWindowVisible = false;
         console.log(`[AdsPower] Slot ${assignedSlot}: Đã thu nhỏ cửa sổ về chạy ngầm.`);
         session.addBrowserLog?.({ type: 'navigate', detail: 'Đã thu nhỏ cửa sổ về chạy ngầm.' });
-        execFile('osascript', ['-e', 'tell application "System Events" to set visible of every process whose name is "SunBrowser" to false'], () => {});
       }
     } catch (err) {
       console.warn('[AdsPower] Lỗi thu nhỏ cửa sổ:', err.message);

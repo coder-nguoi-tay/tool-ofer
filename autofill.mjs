@@ -2119,7 +2119,6 @@ export async function handleAdsmithSurvey(page, frame, options = {}) {
         const iframeLoc = frame.locator('#AS_IFRAME, #AS_SURVEY iframe').first();
         const visible = await iframeLoc.isVisible().catch(() => false);
         if (visible) {
-          await page.bringToFront().catch(() => {});
           const box = await iframeLoc.boundingBox().catch(() => null);
           if (box && box.width > 10 && box.height > 10) {
             await page.mouse.click(box.x + box.width / 2, box.y + Math.min(40, box.height / 2), { delay: 30 }).catch(() => {});
@@ -2165,7 +2164,6 @@ export async function handleAdsmithSurvey(page, frame, options = {}) {
     if (groups) {
       const radioLoc = frame.locator(`input[name="${groups}"]:not(:checked)`).first();
       if (await radioLoc.count().catch(() => 0) > 0) {
-        await page.bringToFront().catch(() => {});
         await radioLoc.click({ force: true, timeout: 3000 }).catch(() => {});
         done += 1;
         options.onLog?.({ type: 'as_answered', field: groups, detail: `[AS Survey] Đã chọn ngẫu nhiên đáp án cho nhóm "${groups}".` });
@@ -2194,7 +2192,6 @@ export async function handleAdsmithSurvey(page, frame, options = {}) {
         return `[data-ux-as-next="${uid}"]`;
       }).catch(() => null);
       if (btn) {
-        await page.bringToFront().catch(() => {});
         await frame.locator(btn).first().click({ force: true, timeout: 3000 }).catch(() => {});
         done += 1;
         options.onLog?.({ type: 'submit_clicked', detail: `[AS Survey] Đã bấm nút Continue bên trong khảo sát adsmith.` });
@@ -2233,7 +2230,6 @@ export async function handleAlphaIntentSoiCards(page, frame, options = {}) {
         return box && !box.checked;
       }).catch(() => false);
       if (unchecked) {
-        await page.bringToFront().catch(() => {});
         await consentLoc.click({ force: true, timeout: 3000 }).catch(() => {});
         done += 1;
         options.onLog?.({ type: 'soi_consent', detail: '[Alpha SOI] Đã tick consent TCPA của thẻ offer.' });
@@ -2263,7 +2259,6 @@ export async function handleAlphaIntentSoiCards(page, frame, options = {}) {
     try {
       const btnLoc = frame.locator(choice === 'yes' ? '#ct-creative-submit-yes' : '#ct-creative-submit-no').first();
       if (await btnLoc.count().catch(() => 0) > 0) {
-        await page.bringToFront().catch(() => {});
         const clicked = await btnLoc.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
         if (!clicked) {
           // Fallback JS click (alpha-intent onclick vẫn chạy được)
@@ -2534,13 +2529,11 @@ export async function handleSurveySemanticQuestions(page, frame, options = {}) {
       let a = el.parentElement;
       while (a && a !== document.body) { a.style.visibility = 'visible'; a = a.parentElement; }
     }, sel).catch(() => {});
-    await page.bringToFront().catch(() => {});
     let fallbackUsed = selected.tier === 'fallback';
     let clicked = await loc.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
     if (!clicked) {
       const box = await loc.boundingBox().catch(() => null);
       if (box && box.width > 2 && box.height > 2) {
-        await page.bringToFront().catch(() => {});
         await page.mouse.click(box.x + Math.min(box.width / 2, box.width - 3), box.y + Math.min(box.height / 2, box.height - 3), { delay: 20 });
         clicked = true;
         fallbackUsed = true;
@@ -2642,13 +2635,11 @@ export async function handleAlphaIntentQuestions(page, frame, options = {}) {
         el.classList.remove('ai-pointer-events-none');
         el.style.pointerEvents = 'auto';
       }, action).catch(() => {});
-      await page.bringToFront().catch(() => {});
       const ok = await loc.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
       if (!ok) {
         // Fallback: click chuột thật theo tọa độ (sự kiện isTrusted như người bấm)
         const box = await loc.boundingBox().catch(() => null);
         if (box && box.width > 2 && box.height > 2) {
-          await page.bringToFront().catch(() => {});
           await page.mouse.click(box.x + Math.min(box.width / 2, box.width - 3), box.y + Math.min(box.height / 2, box.height - 3), { delay: 20 }).catch(() => {});
         }
       }
@@ -2749,12 +2740,10 @@ export async function handleOfferwallTasks(page, frame, options = {}) {
         let a = el.parentElement;
         while (a && a !== document.body) { a.style.visibility = 'visible'; a = a.parentElement; }
       }, sel).catch(() => {});
-      await page.bringToFront().catch(() => {});
       let clicked = await loc.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
       if (!clicked) {
         const box = await loc.boundingBox().catch(() => null);
         if (box && box.width > 2 && box.height > 2) {
-          await page.bringToFront().catch(() => {});
           await page.mouse.click(box.x + Math.min(box.width / 2, box.width - 3), box.y + Math.min(box.height / 2, box.height - 3), { delay: 20 }).catch(() => {});
           clicked = true;
         }
@@ -2828,12 +2817,10 @@ export async function handleMuiQuestionButtons(page, frame, options = {}) {
         let a = el.parentElement;
         while (a && a !== document.body) { a.style.visibility = 'visible'; a = a.parentElement; }
       }, pick.uid).catch(() => {});
-      await page.bringToFront().catch(() => {});
       let clicked = await loc.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
       if (!clicked) {
         const box = await loc.boundingBox().catch(() => null);
         if (box && box.width > 2 && box.height > 2) {
-          await page.bringToFront().catch(() => {});
           await page.mouse.click(box.x + Math.min(box.width / 2, box.width - 3), box.y + Math.min(box.height / 2, box.height - 3), { delay: 20 }).catch(() => {});
           clicked = true;
         }
@@ -2896,12 +2883,10 @@ export async function handleGoogleOauthSkip(page, frame, options = {}) {
         let a = el.parentElement;
         while (a && a !== document.body) { a.style.visibility = 'visible'; a = a.parentElement; }
       }).catch(() => {});
-      await page.bringToFront().catch(() => {});
       let clicked = await loc.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
       if (!clicked) {
         const box = await loc.boundingBox().catch(() => null);
         if (box && box.width > 2 && box.height > 2) {
-          await page.bringToFront().catch(() => {});
           await page.mouse.click(box.x + Math.min(box.width / 2, box.width - 3), box.y + Math.min(box.height / 2, box.height - 3), { delay: 20 }).catch(() => {});
           clicked = true;
         }
@@ -3161,10 +3146,6 @@ export async function handleTwyOfferCards(frame, record = {}, options = {}) {
     if (!sel) return false;
     let clicked = false;
     try {
-      const page = typeof frame.page === 'function' ? frame.page() : null;
-      if (page && typeof page.bringToFront === 'function') {
-        await page.bringToFront().catch(() => {});
-      }
       await frame.locator(sel).first().click({ force: true, timeout: 4000 }).catch(() => {});
       clicked = true;
     } catch {}
@@ -4807,12 +4788,12 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   try {
     const isMac = process.platform === 'darwin';
     const selectAllKey = isMac ? 'Meta+A' : 'Control+A';
-    if (activePage?.keyboard) {
-      await activePage.keyboard.press(selectAllKey).catch(() => {});
-      await activePage.keyboard.press('Backspace').catch(() => {});
-    } else if (typeof field.press === 'function') {
+    if (typeof field.press === 'function') {
       await field.press(selectAllKey).catch(() => {});
       await field.press('Backspace').catch(() => {});
+    } else if (activePage?.keyboard) {
+      await activePage.keyboard.press(selectAllKey).catch(() => {});
+      await activePage.keyboard.press('Backspace').catch(() => {});
     }
   } catch {}
 
@@ -7030,12 +7011,6 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               await new Promise((resolve) => setTimeout(resolve, driftPause));
             }
           }
-
-          // 40% xác suất nhấn phím Tab để nhảy ô tiếp theo theo thói quen gõ form nhanh của người dùng
-          if (isRealBrowser && Math.random() < 0.4 && page?.keyboard) {
-            await page.keyboard.press('Tab').catch(() => {});
-            await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 60) + 40));
-          }
         } catch {
           // Trường có thể không tương tác được lúc này
         }
@@ -7409,18 +7384,6 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
             }, page);
             options.onScreenAdvanced?.(session, session.currentScreen, session.pageJumps);
 
-            // Copy nguyên HTML của màn vừa tới vào clipboard
-            try {
-              const screenHtml = await page.content().catch(() => '');
-              const copied = await copyHtmlToClipboard(screenHtml);
-              if (copied) {
-                options.onLog?.({
-                  type: 'html_copied',
-                  detail: `Đã copy HTML Màn ${session.currentScreen} vào clipboard (${screenHtml.length} ký tự).`,
-                }, page);
-              }
-            } catch {}
-
             // Gỡ bỏ bộ đếm submit trên các nút của màn mới
             await frame.evaluate(() => {
               document.querySelectorAll('[data-ux-submit-count], [data-ux-submitted]').forEach((b) => {
@@ -7738,7 +7701,6 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
                   });
                   openedPopup._uxClosedByApp = 'đóng popup';
                   await openedPopup.close().catch(() => {});
-                  await page.bringToFront().catch(() => {});
                 }
 
                 // 2. Chỉ khôi phục về initialUrl nếu trang chính bị đẩy sang URL quảng cáo rác trắng trợn
