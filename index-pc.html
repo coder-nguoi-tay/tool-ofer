@@ -1501,26 +1501,73 @@
         <!-- 711Proxy -->
         <fieldset class="win-group" id="fieldset711proxy">
           <legend class="win-legend">711Proxy – Mua proxy nhanh:</legend>
+
+          <!-- Mode Selector Header -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
+            <div style="display:inline-flex;gap:12px;align-items:center;font-size:12px;font-weight:600;">
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:#1e3a8a;">
+                <input type="radio" name="rd711AuthMode" id="rd711ModeSubuser" value="subuser" checked onchange="switch711AuthMode('subuser')">
+                ⚡ User &amp; Pass (Không cần Whitelist IP - Khuyên dùng)
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:#475569;">
+                <input type="radio" name="rd711AuthMode" id="rd711ModeApi" value="api" onchange="switch711AuthMode('api')">
+                🌐 API Whitelist IP
+              </label>
+            </div>
+            <div style="display:inline-flex;align-items:center;gap:6px;">
+              <span id="lbl711Balance" style="font-size:12px;font-weight:600;color:#15803d;"></span>
+            </div>
+          </div>
+
+          <!-- Section 1: User & Pass Mode (Default / Recommended) -->
+          <div id="sec711Subuser" style="background:#f8fafc;padding:8px 10px;border-radius:4px;border:1px solid #cbd5e1;margin-bottom:8px;">
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <label style="font-size:11px;color:#334155;font-weight:600;">Sub-user (Tài khoản con)</label>
+                <input type="text" id="inp711SubUser" placeholder="Tên sub-user (vd: mac1)" style="width:140px;padding:3px 6px;border:1px solid #94a3b8;font-size:12px;" autocomplete="off" onchange="save711SubuserConfig()">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <label style="font-size:11px;color:#334155;font-weight:600;">Sub-password</label>
+                <input type="password" id="inp711SubPass" placeholder="Mật khẩu sub-user" style="width:130px;padding:3px 6px;border:1px solid #94a3b8;font-size:12px;" autocomplete="off" onchange="save711SubuserConfig()">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <label style="font-size:11px;color:#334155;font-weight:600;">Gateway Host</label>
+                <select id="sel711Gateway" style="padding:3px 6px;border:1px solid #94a3b8;font-size:12px;width:170px;" onchange="save711SubuserConfig()">
+                  <option value="global.rotgbapi.trustsource.live:10000">Global (Mặc định - 10000)</option>
+                  <option value="as.rotgbapi.trustsource.live:10000">Asia (Châu Á - 10000)</option>
+                  <option value="us.rotgbapi.trustsource.live:10000">US (Bắc Mỹ - 10000)</option>
+                </select>
+              </div>
+              <button type="button" class="win-btn" style="font-size:11.5px;padding:3px 10px;" onclick="save711SubuserConfig(true)" title="Lưu cấu hình Sub-user vào hệ thống">Lưu Sub-user</button>
+            </div>
+            <div style="margin-top:6px;font-size:11px;color:#64748b;line-height:1.4;">
+              💡 Tạo sub-user tại <a href="https://dashboard.711proxy.com/sub-user" target="_blank" style="color:#2563eb;text-decoration:underline;font-weight:600;">dashboard.711proxy.com/sub-user</a>. Sau khi điền, app tạo proxy trực tiếp chạy trên mọi máy Mac/PC mà <b>hoàn toàn không cần Whitelist IP mỗi ngày nữa</b>.
+            </div>
+          </div>
+
+          <!-- Section 2: API Whitelist Mode (Collapsible / Alternative) -->
+          <div id="sec711Api" style="display:none;background:#f8fafc;padding:8px 10px;border-radius:4px;border:1px solid #cbd5e1;margin-bottom:8px;">
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <label style="font-size:11px;color:#555;">Email tài khoản chính</label>
+                <input type="text" id="inp711User" placeholder="Email tài khoản" style="width:160px;padding:3px 6px;border:1px solid #abadb3;font-size:12px;" autocomplete="username">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <label style="font-size:11px;color:#555;">Password chính</label>
+                <input type="password" id="inp711Pass" placeholder="Mật khẩu" style="width:130px;padding:3px 6px;border:1px solid #abadb3;font-size:12px;" autocomplete="current-password">
+              </div>
+              <button type="button" class="win-btn win-btn-primary" style="font-size:12px;padding:3px 10px;" onclick="proxy711Login()">Đăng nhập &amp; Lưu</button>
+              <button type="button" class="win-btn" id="btn711Whitelist" style="font-size:12px;padding:3px 10px;" onclick="proxy711UpdateWhitelist()" title="Tự động lấy IP máy Mac hiện tại và thêm vào whitelist 711proxy">Thêm IP Whitelist</button>
+            </div>
+            <!-- Whitelist Status Row -->
+            <div style="margin-top:6px;display:flex;align-items:center;gap:8px;font-size:11.5px;flex-wrap:wrap;">
+              <span style="color:#555;">🌐 IP máy hiện tại: <b id="lbl711MyIp" style="color:#0f172a;font-family:monospace;">Đang kiểm tra...</b></span>
+              <button type="button" class="win-btn win-btn-sm" onclick="copyCurrentPublicIp()" style="font-size:10.5px;padding:1px 8px;" title="Sao chép IP vào bộ nhớ tạm">📋 Copy IP</button>
+            </div>
+          </div>
+
+          <!-- Section 3: Shared Generation Toolbar -->
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
-            <div style="display:flex;flex-direction:column;gap:2px;">
-              <label style="font-size:11px;color:#555;">Username</label>
-              <input type="text" id="inp711User" placeholder="Email tài khoản" style="width:160px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;" autocomplete="username">
-            </div>
-            <div style="display:flex;flex-direction:column;gap:2px;">
-              <label style="font-size:11px;color:#555;">Password</label>
-              <input type="password" id="inp711Pass" placeholder="Mật khẩu" style="width:130px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;" autocomplete="current-password">
-            </div>
-            <button type="button" class="win-btn win-btn-primary" style="font-size:12px;" onclick="proxy711Login()">Đăng nhập</button>
-            <button type="button" class="win-btn" id="btn711Whitelist" style="font-size:12px;" onclick="proxy711UpdateWhitelist()" title="Tự động lấy IP máy Mac hiện tại và thêm vào whitelist 711proxy">Thêm IP Whitelist</button>
-            <span id="lbl711Balance" style="font-size:12px;color:#555;align-self:center;min-width:80px;"></span>
-          </div>
-          <!-- Whitelist Status Row -->
-          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;font-size:11.5px;flex-wrap:wrap;">
-            <span style="color:#555;">🌐 IP máy hiện tại: <b id="lbl711MyIp" style="color:#0f172a;font-family:monospace;">Đang kiểm tra...</b></span>
-            <button type="button" class="win-btn win-btn-sm" onclick="copyCurrentPublicIp()" style="font-size:10.5px;padding:1px 8px;" title="Sao chép IP vào bộ nhớ tạm">📋 Copy IP</button>
-            <span id="lbl711Status" style="font-size:11.5px;font-weight:600;color:#2563eb;"></span>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px;">
             <div style="display:flex;flex-direction:column;gap:2px;">
               <label style="font-size:11px;color:#555;">Khu vực</label>
               <select id="sel711Region" style="padding:2px 6px;border:1px solid #abadb3;font-size:12px;width:80px;">
@@ -1529,6 +1576,7 @@
                 <option value="CA">CA</option>
                 <option value="AU">AU</option>
                 <option value="DE">DE</option>
+                <option value="GLOBAL">GLOBAL</option>
               </select>
             </div>
             <div style="display:flex;flex-direction:column;gap:2px;">
@@ -1540,13 +1588,13 @@
               <input type="number" id="inp711SessTime" value="20" min="1" max="120" style="width:60px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;">
             </div>
             <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
-              <input type="checkbox" id="chk711SessAuto"> Đổi IP trước hạn
+              <input type="checkbox" id="chk711SessAuto" checked> Đổi IP trước hạn
             </label>
             <button type="button" class="win-btn win-btn-primary" id="btn711Generate" style="font-size:12px;" onclick="proxy711Generate()">Tạo proxy</button>
             <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
               <input type="checkbox" id="chk711AutoRefill" onchange="proxy711SaveAutoRefill()"> Tự động nạp khi hết
             </label>
-            <span id="lbl711Status" style="font-size:11px;color:#555;align-self:center;"></span>
+            <span id="lbl711Status" style="font-size:11.5px;font-weight:600;color:#2563eb;align-self:center;"></span>
           </div>
         </fieldset>
 
@@ -3243,11 +3291,75 @@
     }
 
     // ── 711Proxy ──
+    function switch711AuthMode(mode) {
+      const secSub = document.getElementById('sec711Subuser');
+      const secApi = document.getElementById('sec711Api');
+      const isSub = mode === 'subuser';
+      if (secSub) secSub.style.display = isSub ? 'block' : 'none';
+      if (secApi) secApi.style.display = isSub ? 'none' : 'block';
+      void api('/711proxy/config', {
+        method: 'POST',
+        body: JSON.stringify({ authMode: mode }),
+      });
+    }
+    window.switch711AuthMode = switch711AuthMode;
+
+    async function save711SubuserConfig(notify = false) {
+      const subuser = document.getElementById('inp711SubUser')?.value?.trim();
+      const subpass = document.getElementById('inp711SubPass')?.value;
+      const gateway = document.getElementById('sel711Gateway')?.value || 'global.rotgbapi.trustsource.live:10000';
+      const [gatewayHost, gatewayPort] = gateway.split(':');
+      const res = await api('/711proxy/config', {
+        method: 'POST',
+        body: JSON.stringify({
+          authMode: 'subuser',
+          subuser,
+          subpass,
+          gatewayHost,
+          gatewayPort: parseInt(gatewayPort) || 10000,
+        }),
+      });
+      if (notify) {
+        if (res && res.ok) showWinAlert('Đã lưu cấu hình Sub-user 711Proxy thành công!');
+        else showWinAlert('Lỗi: ' + (res?.error || 'Không lưu được'));
+      }
+    }
+    window.save711SubuserConfig = save711SubuserConfig;
+
     async function proxy711Init() {
       const cfg = await api('/711proxy/config');
       if (cfg) {
         if (cfg.username) document.getElementById('inp711User').value = cfg.username;
         if (cfg.passwd) document.getElementById('inp711Pass').value = cfg.passwd;
+        if (cfg.subuser) document.getElementById('inp711SubUser').value = cfg.subuser;
+        if (cfg.subpass) document.getElementById('inp711SubPass').value = cfg.subpass;
+        if (cfg.gatewayHost && cfg.gatewayPort) {
+          const gwVal = `${cfg.gatewayHost}:${cfg.gatewayPort}`;
+          const gwEl = document.getElementById('sel711Gateway');
+          if (gwEl) {
+            let found = false;
+            for (const opt of gwEl.options) {
+              if (opt.value === gwVal) { gwEl.value = gwVal; found = true; break; }
+            }
+            if (!found && gwVal) {
+              const opt = document.createElement('option');
+              opt.value = gwVal;
+              opt.textContent = gwVal;
+              gwEl.appendChild(opt);
+              gwEl.value = gwVal;
+            }
+          }
+        }
+        const authMode = cfg.authMode || 'subuser';
+        if (authMode === 'api') {
+          const rdApi = document.getElementById('rd711ModeApi');
+          if (rdApi) rdApi.checked = true;
+          switch711AuthMode('api');
+        } else {
+          const rdSub = document.getElementById('rd711ModeSubuser');
+          if (rdSub) rdSub.checked = true;
+          switch711AuthMode('subuser');
+        }
       }
       const ar = await api('/711proxy/autorefill');
       if (ar && !ar.error) {
@@ -3521,10 +3633,22 @@
     async function proxy711Generate() {
       const btn = document.getElementById('btn711Generate');
       if (btn.disabled) return;
+      const isSubuser = document.getElementById('rd711ModeSubuser')?.checked;
+      const authMode = isSubuser ? 'subuser' : 'api';
+      const subuser = document.getElementById('inp711SubUser')?.value?.trim() || '';
+      const subpass = document.getElementById('inp711SubPass')?.value || '';
+      const gateway = document.getElementById('sel711Gateway')?.value || '';
+
+      if (isSubuser && (!subuser || !subpass)) {
+        showWinAlert('Vui lòng nhập Tên Sub-user và Mật khẩu sub-user 711Proxy.\n(Tạo tài khoản con tại https://dashboard.711proxy.com/sub-user)');
+        return;
+      }
+
       const region = document.getElementById('sel711Region').value;
       const count = parseInt(document.getElementById('inp711Count').value) || 50;
       const sessTime = parseInt(document.getElementById('inp711SessTime').value) || 20;
       const sessAuto = document.getElementById('chk711SessAuto').checked;
+
       // Lưu cài đặt hiện tại vào auto-refill config
       await api('/711proxy/autorefill', {
         method: 'POST',
@@ -3533,20 +3657,42 @@
           region, count, sessTime, sessAuto,
         }),
       });
+
       btn.disabled = true;
-      document.getElementById('lbl711Status').textContent = `Đang tạo ${count} proxy...`;
+      const stEl = document.getElementById('lbl711Status');
+      if (stEl) {
+        stEl.style.color = '#2563eb';
+        stEl.textContent = `Đang tạo ${count} proxy (${isSubuser ? 'User & Pass' : 'API'})...`;
+      }
+
       const res = await api('/711proxy/generate', {
         method: 'POST',
-        body: JSON.stringify({ region, count, sessTime, sessAuto }),
+        body: JSON.stringify({
+          authMode,
+          subuser,
+          subpass,
+          gateway,
+          region,
+          count,
+          sessTime,
+          sessAuto,
+        }),
       });
       btn.disabled = false;
       if (res && res.added !== undefined) {
-        document.getElementById('lbl711Status').textContent = '';
+        if (stEl) {
+          stEl.style.color = '#15803d';
+          stEl.textContent = `✅ Đã tạo ${res.added} proxy (${res.authMode === 'subuser' ? 'User:Pass' : 'API'}) lúc ${new Date().toLocaleTimeString('vi-VN')}!`;
+        }
         await loadProxyQueue();
         showWinAlert(res.message);
       } else {
-        document.getElementById('lbl711Status').textContent = '';
-        showWinAlert('Lỗi tạo proxy: ' + (res?.error || 'Không xác định'));
+        const err = res?.error || 'Không xác định';
+        if (stEl) {
+          stEl.style.color = '#b91c1c';
+          stEl.textContent = `⚠️ Lỗi: ${err}`;
+        }
+        showWinAlert('Lỗi tạo proxy: ' + err);
       }
     }
     // ─────────────────────────────────────────────────────────

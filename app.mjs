@@ -1491,7 +1491,18 @@ const proxyQueuePath = join(appDataDirectory, 'proxy-queue.json');
 export const proxyQueue = { available: /** @type {string[]} */ ([]), used: /** @type {string[]} */ ([]) };
 export const emailQueuePath = join(appDataDirectory, 'email-queue.json');
 const proxy711ConfigPath = join(appDataDirectory, '711proxy-config.json');
-const proxy711 = { username: '', passwd: '', token: '', tokenExpiry: 0, packageGb: 0 };
+export const proxy711 = {
+  authMode: 'subuser', // 'subuser' (User/Pass Auth - khuyên dùng) hoặc 'api' (IP Whitelist)
+  username: '',
+  passwd: '',
+  token: '',
+  tokenExpiry: 0,
+  packageGb: 0,
+  subuser: '',
+  subpass: '',
+  gatewayHost: 'global.rotgbapi.trustsource.live',
+  gatewayPort: 10000,
+};
 const proxy711AutoRefillConfigPath = join(appDataDirectory, '711proxy-autorefill.json');
 const proxy711AutoRefill = { enabled: false, region: 'US', count: 50, sessTime: 20, sessAuto: false };
 let proxy711AutoRefilling = false;
@@ -1640,27 +1651,40 @@ async function loadProxy711Config() {
     if (d.token) proxy711.token = d.token;
     if (d.tokenExpiry) proxy711.tokenExpiry = Number(d.tokenExpiry);
     if (d.packageGb) proxy711.packageGb = Number(d.packageGb);
+    if (d.authMode) proxy711.authMode = d.authMode;
+    if (d.subuser) proxy711.subuser = d.subuser;
+    if (d.subpass) proxy711.subpass = d.subpass;
+    if (d.gatewayHost) proxy711.gatewayHost = d.gatewayHost;
+    if (d.gatewayPort) proxy711.gatewayPort = Number(d.gatewayPort);
   } catch {}
 
   // Đọc dự phòng từ Config/Settings/Settings.ini nếu chưa có thông tin
-  if (!proxy711.username || !proxy711.passwd) {
-    try {
-      const candidatePaths = [
-        join(dirname(fileURLToPath(import.meta.url)), 'Config', 'Settings', 'Settings.ini'),
-        join(getAutoLeadPCDir(), 'Config', 'Settings', 'Settings.ini'),
-      ];
-      for (const iniPath of candidatePaths) {
-        if (existsSync(iniPath)) {
-          const text = readFileSync(iniPath, 'utf8');
-          const userM = text.match(/^\s*(?:Username|Proxy711User)\s*=\s*(.+)$/im);
-          const passM = text.match(/^\s*(?:Passwd|Password|Proxy711Pass)\s*=\s*(.+)$/im);
-          if (userM && !proxy711.username) proxy711.username = userM[1].trim();
-          if (passM && !proxy711.passwd) proxy711.passwd = passM[1].trim();
-          if (proxy711.username && proxy711.passwd) break;
-        }
+  try {
+    const candidatePaths = [
+      join(dirname(fileURLToPath(import.meta.url)), 'Config', 'Settings', 'Settings.ini'),
+      join(getAutoLeadPCDir(), 'Config', 'Settings', 'Settings.ini'),
+    ];
+    for (const iniPath of candidatePaths) {
+      if (existsSync(iniPath)) {
+        const text = readFileSync(iniPath, 'utf8');
+        const userM = text.match(/^\s*(?:Username|Proxy711User)\s*=\s*(.+)$/im);
+        const passM = text.match(/^\s*(?:Passwd|Password|Proxy711Pass)\s*=\s*(.+)$/im);
+        const authM = text.match(/^\s*(?:AuthMode|Proxy711AuthMode)\s*=\s*(.+)$/im);
+        const subuserM = text.match(/^\s*(?:Subuser|Proxy711SubUser)\s*=\s*(.+)$/im);
+        const subpassM = text.match(/^\s*(?:Subpass|Proxy711SubPass)\s*=\s*(.+)$/im);
+        const hostM = text.match(/^\s*(?:GatewayHost|Proxy711GatewayHost)\s*=\s*(.+)$/im);
+        const portM = text.match(/^\s*(?:GatewayPort|Proxy711GatewayPort)\s*=\s*(.+)$/im);
+        if (userM && !proxy711.username) proxy711.username = userM[1].trim();
+        if (passM && !proxy711.passwd) proxy711.passwd = passM[1].trim();
+        if (authM && !proxy711.authMode) proxy711.authMode = authM[1].trim();
+        if (subuserM && !proxy711.subuser) proxy711.subuser = subuserM[1].trim();
+        if (subpassM && !proxy711.subpass) proxy711.subpass = subpassM[1].trim();
+        if (hostM && !proxy711.gatewayHost) proxy711.gatewayHost = hostM[1].trim();
+        if (portM && !proxy711.gatewayPort) proxy711.gatewayPort = Number(portM[1].trim()) || 10000;
+        if (proxy711.username && proxy711.passwd) break;
       }
-    } catch {}
-  }
+    }
+  } catch {}
 }
 
 async function saveProxy711Config() {
@@ -1670,6 +1694,11 @@ async function saveProxy711Config() {
     token: proxy711.token,
     tokenExpiry: proxy711.tokenExpiry,
     packageGb: proxy711.packageGb || 0,
+    authMode: proxy711.authMode || 'subuser',
+    subuser: proxy711.subuser || '',
+    subpass: proxy711.subpass || '',
+    gatewayHost: proxy711.gatewayHost || 'global.rotgbapi.trustsource.live',
+    gatewayPort: proxy711.gatewayPort || 10000,
   })).catch(() => {});
 
   // Đồng thời lưu vào Config/Settings/Settings.ini (mục [Proxy711] - file này được gitignore hoàn toàn)
@@ -1682,7 +1711,7 @@ async function saveProxy711Config() {
       const dir = dirname(iniPath);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       let text = existsSync(iniPath) ? readFileSync(iniPath, 'utf8') : '';
-      const section = `[Proxy711]\nUsername=${proxy711.username}\nPasswd=${proxy711.passwd || ''}\n`;
+      const section = `[Proxy711]\nUsername=${proxy711.username}\nPasswd=${proxy711.passwd || ''}\nAuthMode=${proxy711.authMode || 'subuser'}\nSubuser=${proxy711.subuser || ''}\nSubpass=${proxy711.subpass || ''}\nGatewayHost=${proxy711.gatewayHost || 'global.rotgbapi.trustsource.live'}\nGatewayPort=${proxy711.gatewayPort || 10000}\n`;
       if (text.includes('[Proxy711]')) {
         text = text.replace(/\[Proxy711\][\s\S]*?(?=\n\[|$)/, section);
       } else {
@@ -1751,6 +1780,61 @@ export async function add711IpWhitelist(ip, token = null, retry = true) {
   throw new Error(data?.msg || data?.message || data?.error || `HTTP ${res.status}: ${text.slice(0, 150)}`);
 }
 
+/**
+ * Tạo danh sách proxy 711 định dạng User & Pass Auth (Sub-user).
+ *
+ * Chế độ này dùng trực tiếp gateway của 711proxy, KHÔNG cần Whitelist IP,
+ * chạy được trên bất kỳ máy Mac/PC nào, đổi WiFi/IP không ảnh hưởng.
+ * Mỗi proxy được cấp một session sticky riêng biệt trong thời gian định cấu hình.
+ *
+ * @param {Object} [opts]
+ * @param {string} [opts.subuser] Tên tài khoản con (Sub-user)
+ * @param {string} [opts.subpass] Mật khẩu tài khoản con
+ * @param {number} [opts.count=50] Số lượng proxy cần tạo
+ * @param {string} [opts.region='US'] Mã quốc gia (US, GB, CA...) hoặc GLOBAL
+ * @param {number} [opts.sessTime=20] Thời gian giữ nguyên IP mỗi session (phút)
+ * @param {boolean} [opts.sessAuto=true] Tự động đổi IP mới khi hết giờ phiên
+ * @param {string} [opts.gatewayHost='global.rotgbapi.trustsource.live']
+ * @param {number} [opts.gatewayPort=10000]
+ * @return {string[]} Danh sách URL proxy HTTP đầy đủ thông tin xác thực
+ */
+export function generate711SubuserProxies({
+  subuser = proxy711.subuser,
+  subpass = proxy711.subpass,
+  count = 50,
+  region = 'US',
+  sessTime = 20,
+  sessAuto = true,
+  gatewayHost = proxy711.gatewayHost || 'global.rotgbapi.trustsource.live',
+  gatewayPort = proxy711.gatewayPort || 10000,
+} = {}) {
+  const su = String(subuser || proxy711.subuser || '').trim();
+  const sp = String(subpass || proxy711.subpass || '').trim();
+  if (!su || !sp) {
+    throw new Error('Chưa nhập Sub-user và Sub-password của 711Proxy. Vui lòng tạo tài khoản con trên dashboard 711proxy rồi điền vào app.');
+  }
+
+  const cleanHost = String(gatewayHost).trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  const [hostOnly, portOnly] = cleanHost.split(':');
+  const finalHost = hostOnly || 'global.rotgbapi.trustsource.live';
+  const finalPort = portOnly ? parseInt(portOnly) : (gatewayPort || 10000);
+
+  const lines = [];
+  const safeCount = Math.min(500, Math.max(1, parseInt(count) || 50));
+  const cleanRegion = String(region || '').trim().toUpperCase();
+
+  for (let i = 0; i < safeCount; i++) {
+    const sessId = Math.random().toString(36).slice(2, 10);
+    const regPart = cleanRegion && cleanRegion !== 'GLOBAL' ? `-region-${cleanRegion}` : '';
+    const sessPart = sessTime > 0 ? `-session-${sessId}-sessTime-${sessTime}` : '';
+    const autoPart = sessAuto ? '-sessAuto-1' : '';
+    const userString = `${su}-zone-custom${regPart}${sessPart}${autoPart}`;
+    const proxyUrl = `http://${encodeURIComponent(userString)}:${encodeURIComponent(sp)}@${finalHost}:${finalPort}`;
+    lines.push(proxyUrl);
+  }
+  return lines;
+}
+
 async function loadProxy711AutoRefillConfig() {
   try {
     const d = JSON.parse(await readFile(proxy711AutoRefillConfigPath, 'utf8'));
@@ -1771,6 +1855,28 @@ async function autoRefillProxyIfNeeded() {
   if (proxyQueue.available.length > 0) return;
   proxy711AutoRefilling = true;
   try {
+    let proxyLines = [];
+    if (proxy711.authMode === 'subuser' || (proxy711.subuser && proxy711.subpass)) {
+      proxyLines = generate711SubuserProxies({
+        subuser: proxy711.subuser,
+        subpass: proxy711.subpass,
+        count: proxy711AutoRefill.count,
+        region: proxy711AutoRefill.region,
+        sessTime: proxy711AutoRefill.sessTime,
+        sessAuto: proxy711AutoRefill.sessAuto,
+        gatewayHost: proxy711.gatewayHost,
+        gatewayPort: proxy711.gatewayPort,
+      });
+      const added = importProxyLines(proxyLines, 'http');
+      if (added > 0) {
+        await saveProxyQueue();
+        console.log(`[Proxy711AutoRefill] Đã tự động tạo thêm ${added} proxy (User:Pass Auth).`);
+        void tgNotify(`📦 Tự động tạo thêm <b>${added} proxy</b> từ 711proxy (User:Pass Auth, ${proxy711AutoRefill.region}). Hàng đợi: ${proxyQueue.available.length} proxy.`);
+        queueAutomaticRefill();
+      }
+      return;
+    }
+
     const genUrl = new URL('http://global.rotgbapi.trustsource.live:8089/gen');
     genUrl.searchParams.set('zone', 'custom');
     genUrl.searchParams.set('ptype', '1');
@@ -1810,7 +1916,7 @@ async function autoRefillProxyIfNeeded() {
     }
 
     const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const proxyLines = rawLines.map((l) => {
+    proxyLines = rawLines.map((l) => {
       if (/^https?:\/\//i.test(l)) return l;
       const at = l.lastIndexOf('@');
       if (at > 0) return `http://${l.slice(0, at)}@${l.slice(at + 1)}`;
@@ -8619,7 +8725,28 @@ async function startLocalInterface() {
         username: proxy711.username,
         passwd: proxy711.passwd || '',
         hasToken: Boolean(proxy711.token && Date.now() < proxy711.tokenExpiry),
+        authMode: proxy711.authMode || 'subuser',
+        subuser: proxy711.subuser || '',
+        subpass: proxy711.subpass || '',
+        gatewayHost: proxy711.gatewayHost || 'global.rotgbapi.trustsource.live',
+        gatewayPort: proxy711.gatewayPort || 10000,
       });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/711proxy/config') {
+      try {
+        const body = JSON.parse(await readRequestBody(request));
+        if (body.authMode) proxy711.authMode = body.authMode;
+        if (body.subuser !== undefined) proxy711.subuser = String(body.subuser).trim();
+        if (body.subpass !== undefined) proxy711.subpass = String(body.subpass).trim();
+        if (body.gatewayHost) proxy711.gatewayHost = String(body.gatewayHost).trim();
+        if (body.gatewayPort) proxy711.gatewayPort = parseInt(body.gatewayPort) || 10000;
+        await saveProxy711Config();
+        respondWithJson(response, 200, { ok: true, config: proxy711 });
+      } catch (e) {
+        respondWithJson(response, 400, { error: e.message });
+      }
       return;
     }
 
@@ -8741,75 +8868,109 @@ async function startLocalInterface() {
 
     if (request.method === 'POST' && request.url === '/711proxy/generate') {
       const body = JSON.parse(await readRequestBody(request));
-      const region = (body.region || 'US').toUpperCase();
+      const authMode = body.authMode || proxy711.authMode || ((body.subuser || proxy711.subuser) ? 'subuser' : 'api');
       const count = Math.min(Math.max(parseInt(body.count) || 50, 1), 200);
+      const region = String(body.region || proxy711AutoRefill.region || 'US').trim().toUpperCase();
       const sessTime = Math.max(parseInt(body.sessTime) || 20, 1);
-      const sessAuto = body.sessAuto ? 1 : 0;
-
-      async function doGenerate() {
-        const genUrl = new URL('http://global.rotgbapi.trustsource.live:8089/gen');
-        genUrl.searchParams.set('zone', 'custom');
-        genUrl.searchParams.set('ptype', '1');
-        genUrl.searchParams.set('region', region);
-        genUrl.searchParams.set('count', String(count));
-        genUrl.searchParams.set('proto', 'http');
-        genUrl.searchParams.set('stype', 'text');
-        genUrl.searchParams.set('split', '\r\n');
-        genUrl.searchParams.set('sessType', 'sticky');
-        genUrl.searchParams.set('sessTime', String(sessTime));
-        genUrl.searchParams.set('sessAuto', String(sessAuto));
-        const res = await fetch(genUrl.toString());
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-        const text = await res.text();
-        if (!text.trim() || text.includes('"code"') || text.toLowerCase().includes('whitelist')) throw new Error(text.slice(0, 300));
-        return text;
-      }
+      const sessAuto = body.sessAuto !== undefined ? Boolean(body.sessAuto) : proxy711AutoRefill.sessAuto;
 
       try {
-        let text;
-        try {
-          text = await doGenerate();
-        } catch (e) {
-          // Nếu lỗi whitelist → tự cập nhật IP rồi retry 1 lần
-          const errMsg = e.message.toLowerCase();
-          if (errMsg.includes('whitelist')) {
-            const ipRes = await fetch('https://api.ipify.org?format=json').catch(() => null);
-            const ip = ipRes ? (await ipRes.json().catch(() => ({}))).ip : null;
-            const token = await ensure711Token();
-            if (ip && token) {
-              try {
-                await add711IpWhitelist(ip, token);
-                await new Promise((r) => setTimeout(r, 2000));
-                text = await doGenerate(); // retry
-              } catch (wErr) {
-                throw new Error(`IP ${ip} chưa được whitelist 711proxy. Tự cập nhật whitelist thất bại (${wErr.message}). Vui lòng kiểm tra lại tài khoản hoặc vào https://dashboard.711proxy.com/whitelist/ thêm IP.`);
+        let proxyLines = [];
+        if (authMode === 'subuser' || body.subuser || proxy711.subuser) {
+          const subuser = String(body.subuser || proxy711.subuser || '').trim();
+          const subpass = String(body.subpass || proxy711.subpass || '').trim();
+          const gateway = String(body.gateway || `${proxy711.gatewayHost}:${proxy711.gatewayPort}`).trim();
+          if (!subuser || !subpass) {
+            throw new Error('Chưa nhập Sub-user hoặc Sub-password 711Proxy. Vui lòng tạo tài khoản con trên dashboard 711proxy rồi điền vào app.');
+          }
+          proxy711.subuser = subuser;
+          proxy711.subpass = subpass;
+          proxy711.authMode = 'subuser';
+          if (gateway) {
+            const [gh, gp] = gateway.split(':');
+            if (gh) proxy711.gatewayHost = gh;
+            if (gp) proxy711.gatewayPort = parseInt(gp) || 10000;
+          }
+          await saveProxy711Config();
+
+          proxyLines = generate711SubuserProxies({
+            subuser,
+            subpass,
+            count,
+            region,
+            sessTime,
+            sessAuto,
+            gatewayHost: proxy711.gatewayHost,
+            gatewayPort: proxy711.gatewayPort,
+          });
+        } else {
+          async function doGenerate() {
+            const genUrl = new URL('http://global.rotgbapi.trustsource.live:8089/gen');
+            genUrl.searchParams.set('zone', 'custom');
+            genUrl.searchParams.set('ptype', '1');
+            genUrl.searchParams.set('region', region);
+            genUrl.searchParams.set('count', String(count));
+            genUrl.searchParams.set('proto', 'http');
+            genUrl.searchParams.set('stype', 'text');
+            genUrl.searchParams.set('split', '\r\n');
+            genUrl.searchParams.set('sessType', 'sticky');
+            genUrl.searchParams.set('sessTime', String(sessTime));
+            genUrl.searchParams.set('sessAuto', String(sessAuto ? 1 : 0));
+            const res = await fetch(genUrl.toString());
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+            const text = await res.text();
+            if (!text.trim() || text.includes('"code"') || text.toLowerCase().includes('whitelist')) throw new Error(text.slice(0, 300));
+            return text;
+          }
+
+          let text;
+          try {
+            text = await doGenerate();
+          } catch (e) {
+            // Nếu lỗi whitelist → tự cập nhật IP rồi retry 1 lần
+            const errMsg = e.message.toLowerCase();
+            if (errMsg.includes('whitelist')) {
+              const ipRes = await fetch('https://api.ipify.org?format=json').catch(() => null);
+              const ip = ipRes ? (await ipRes.json().catch(() => ({}))).ip : null;
+              const token = await ensure711Token();
+              if (ip && token) {
+                try {
+                  await add711IpWhitelist(ip, token);
+                  await new Promise((r) => setTimeout(r, 2000));
+                  text = await doGenerate(); // retry
+                } catch (wErr) {
+                  throw new Error(`IP ${ip} chưa được whitelist 711proxy. Tự cập nhật whitelist thất bại (${wErr.message}).`);
+                }
+              } else {
+                throw new Error(`IP ${ip || 'của bạn'} chưa có trong whitelist 711proxy. Vui lòng chuyển sang dùng chế độ User & Pass (không cần whitelist) hoặc đăng nhập để whitelist.`);
               }
             } else {
-              throw new Error(`IP ${ip || 'của bạn'} chưa có trong whitelist 711proxy. Vui lòng nhập mật khẩu tài khoản 711proxy ở trên rồi bấm "Đăng nhập" để tự động thêm IP vào whitelist (hoặc vào https://dashboard.711proxy.com/whitelist/ thêm IP).`);
+              throw e;
             }
-          } else {
-            throw e;
           }
+          // Chuẩn hóa: host:port → http://host:port, user:pass@host:port → http://user:pass@host:port
+          const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+          proxyLines = rawLines.map((l) => {
+            if (/^https?:\/\//i.test(l)) return l;
+            const at = l.lastIndexOf('@');
+            if (at > 0) return `http://${l.slice(0, at)}@${l.slice(at + 1)}`;
+            const parts = l.split(':');
+            if (parts.length === 4) return `http://${encodeURIComponent(parts[2])}:${encodeURIComponent(parts[3])}@${parts[0]}:${parts[1]}`;
+            // host:port không có creds
+            return `http://${l}`;
+          });
         }
-        // Chuẩn hóa: host:port → http://host:port, user:pass@host:port → http://user:pass@host:port
-        const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        const proxyLines = rawLines.map((l) => {
-          if (/^https?:\/\//i.test(l)) return l;
-          const at = l.lastIndexOf('@');
-          if (at > 0) return `http://${l.slice(0, at)}@${l.slice(at + 1)}`;
-          const parts = l.split(':');
-          if (parts.length === 4) return `http://${encodeURIComponent(parts[2])}:${encodeURIComponent(parts[3])}@${parts[0]}:${parts[1]}`;
-          // host:port không có creds
-          return `http://${l}`;
-        });
+
         const added = importProxyLines(proxyLines, 'http');
         await saveProxyQueue();
         respondWithJson(response, 200, {
+          ok: true,
           added,
           total: proxyQueue.available.length,
+          authMode,
           lines: proxyLines,
           preview: proxyLines.slice(0, 3),
-          message: `Đã thêm ${added} proxy vào hàng đợi (tổng ${proxyQueue.available.length} sẵn sàng).`,
+          message: `Đã nạp ${added} proxy (${authMode === 'subuser' ? 'User & Pass' : 'API Whitelist'}, ${region}, ${sessTime}p) vào hàng đợi (tổng ${proxyQueue.available.length} sẵn sàng).`,
         });
       } catch (e) {
         respondWithJson(response, 500, { error: e.message });

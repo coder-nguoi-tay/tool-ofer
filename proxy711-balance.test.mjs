@@ -5,6 +5,8 @@ import {
   getBandwidthSummary,
   add711IpWhitelist,
   fetch711Token,
+  generate711SubuserProxies,
+  parseProxyLine,
 } from './app.mjs';
 
 test('getCached711Balance returns proper schema and initial properties', () => {
@@ -56,5 +58,33 @@ test('fetch711Token throws on invalid credentials', async () => {
   await assert.rejects(
     async () => fetch711Token('invalid_user_test_xyz', 'invalid_pwd_test_xyz'),
     { message: /Đăng nhập thất bại/ }
+  );
+});
+
+test('generate711SubuserProxies produces valid sticky session proxy URLs', () => {
+  const proxies = generate711SubuserProxies({
+    subuser: 'testuser',
+    subpass: 'secret123',
+    count: 5,
+    region: 'US',
+    sessTime: 20,
+    sessAuto: true,
+  });
+
+  assert.equal(proxies.length, 5);
+  for (const p of proxies) {
+    assert.ok(p.startsWith('http://testuser-zone-custom-region-US-session-'));
+    assert.ok(p.includes('-sessTime-20-sessAuto-1:secret123@global.rotgbapi.trustsource.live:10000'));
+    const parsed = parseProxyLine(p, 1);
+    assert.equal(parsed.server, 'http://global.rotgbapi.trustsource.live:10000');
+    assert.ok(parsed.username.includes('testuser-zone-custom-region-US'));
+    assert.equal(parsed.password, 'secret123');
+  }
+});
+
+test('generate711SubuserProxies throws when subuser or subpass is missing', () => {
+  assert.throws(
+    () => generate711SubuserProxies({ subuser: '', subpass: '' }),
+    { message: /Chưa nhập Sub-user/ }
   );
 });
