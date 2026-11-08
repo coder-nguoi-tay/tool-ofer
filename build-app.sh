@@ -137,53 +137,12 @@ build_app_bundle "AutoLeadPC Mac 2 AdsPower.app" "2" 3211 "com.autolead.mac2.ads
 
 rm -f "$TMP_BIN"
 
-echo "Triển khai vào ~/Downloads/ ..."
-mkdir -p "$HOME/Downloads/AutoLeadPC-mac"
-
-# Dọn dẹp triệt để toàn bộ bản build cũ và backup thừa
-rm -rf "$HOME/Downloads/AutoLeadPC Mac 1.app" \
-       "$HOME/Downloads/AutoLeadPC Mac 2.app" \
-       "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.app" \
-       "$HOME/Downloads/AutoLeadPC Mac 3.app" \
-       "$HOME/Downloads/AutoLeadPC Wine.app" \
-       "$HOME/Downloads/AutoLeadPC Mac.app" \
-       "$HOME/Downloads/AutoLeadPC.app" \
-       "$HOME/Downloads/AutoleadMac.app" \
-       "$HOME/Downloads/Autolead.app" \
-       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app.backup-"* \
-       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app.previous-"* \
-       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app.signature-recovery-"* \
-       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app.staged-"* \
-       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.launcher-previous-"* \
-       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.nested-copy-"* \
-       "$HOME/Downloads/AutoLeadPC Mac 2.app.backup-"* \
-       "$HOME/Downloads/AutoLeadPC Mac 2.app.source-backup-"* \
-       "$HOME/Downloads/AutoleadMac.zip" \
-       "$HOME/Downloads/Autolead.zip" \
-       "$HOME/Downloads/AutoLeadPC.zip" \
-       "$HOME/Downloads/AutoLeadPC Mac 2 - Chrome.zip" \
-       "$HOME/Downloads/AutoLeadPC_Mac2.zip" \
-       "$HOME/Downloads/AutoLeadPC-mac/"*.app \
-       "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app" \
-       "AutoleadMac.app" \
-       "Autolead.app"
-
-rm -rf "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app"
-cp -R "AutoLeadPC Mac 2 AdsPower.app" "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app"
-cp -R "AutoLeadPC Mac 2 AdsPower.app" "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 AdsPower.app"
-
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$HOME/Downloads/AutoLeadPC-mac/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
-
-rm -f "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.zip" 2>/dev/null || true
-(cd "$HOME/Downloads" && zip -rq "AutoLeadPC Mac 2 AdsPower.zip" "AutoLeadPC Mac 2 AdsPower.app")
-
 # Đồng bộ bản build & code sang ~/workspaces/
 if [ -d "$HOME/workspaces" ]; then
   echo "Đồng bộ bản build & code sang $HOME/workspaces/ ..."
   rm -rf "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
   cp -R "AutoLeadPC Mac 2 AdsPower.app" "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
-  cp "$HOME/Downloads/AutoLeadPC Mac 2 AdsPower.zip" "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.zip" 2>/dev/null || true
+  (cd "$HOME/workspaces" && zip -rq "AutoLeadPC Mac 2 AdsPower.zip" "AutoLeadPC Mac 2 AdsPower.app") 2>/dev/null || true
   xattr -dr com.apple.quarantine "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
   rsync -av --exclude 'node_modules' --exclude '.git' --exclude '*.app' --exclude '*.zip' ./ "$HOME/workspaces/AutoLeadPC-mac/" 2>/dev/null || true
 fi
@@ -200,6 +159,6 @@ echo "=========================================="
 echo "Build thành công bản duy nhất:"
 echo "  AutoLeadPC Mac 2 AdsPower.app   → Cổng 3211"
 echo "Đã lưu tại:"
-echo "  - $HOME/Downloads/AutoLeadPC Mac 2 AdsPower.app"
+echo "  - /Applications/AutoLeadPC Mac 2 AdsPower.app"
 echo "  - $HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
 echo "=========================================="
