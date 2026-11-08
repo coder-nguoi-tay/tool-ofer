@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             backing: .buffered,
             defer: false
         )
-        window.minSize = NSSize(width: 880, height: 640)
+        window.minSize = NSSize(width: 840, height: 580)
         window.title = "\(appTitle)"
         window.center()
         window.contentView = webView

@@ -144,7 +144,13 @@
       border-bottom: 1px solid var(--card-border);
       gap: 4px;
       flex-shrink: 0;
-      /* overflow-x: auto; */
+      overflow-x: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .win-tab-headers::-webkit-scrollbar {
+      display: none;
     }
 
     .win-tab {
@@ -761,6 +767,134 @@
       gap: 7px;
     }
 
+    .offer-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+
+    .offer-toolbar-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1.2;
+      min-width: 260px;
+    }
+
+    .offer-toolbar-item.offer-name-group {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .offer-toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 12px;
+    }
+
+    .options-category-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 8px 14px;
+    }
+
+    /* Responsive Media Queries theo kích thước cửa sổ */
+    @media (max-width: 1120px) {
+      .options-category-grid {
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 10px 12px;
+      }
+    }
+
+    @media (max-width: 980px) {
+      .settings-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .offer-toolbar-item {
+        min-width: 240px;
+      }
+      .running-header-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+      }
+      .running-header-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 4px;
+      }
+    }
+
+    @media (max-width: 820px) {
+      .win-tab-content {
+        padding: 8px 8px;
+      }
+      fieldset.win-group {
+        padding: 8px 10px 10px 10px;
+        margin: 4px 0 8px 0;
+      }
+      .options-category-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .offer-toolbar-item {
+        min-width: 100%;
+      }
+      .offer-toolbar-actions {
+        width: 100%;
+        justify-content: flex-start;
+        margin-top: 2px;
+      }
+      .controls-action-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .controls-btn-group {
+        justify-content: flex-start;
+      }
+      .controls-stats-group {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+    }
+
+    .options-group-block {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .options-group-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 2px;
+    }
+
+    .options-group-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
     .option-pill {
       display: inline-flex;
       align-items: center;
@@ -967,17 +1101,33 @@
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      padding: 3px 9px;
+      padding: 4px 10px;
       background: #131d31;
       border: 1px solid #22324e;
-      border-radius: 4px;
+      border-radius: 5px;
       font-size: 11px;
       color: #cbd5e1;
+      transition: all 0.15s ease;
+    }
+
+    .stat-pill:hover {
+      border-color: #38bdf8;
+      box-shadow: 0 1px 4px rgba(56, 189, 248, 0.15);
     }
 
     .stat-pill b {
       color: #38bdf8;
       font-size: 12px;
+    }
+
+    .stat-pill-highlight {
+      border-color: rgba(56, 189, 248, 0.35);
+      background: rgba(56, 189, 248, 0.08);
+    }
+
+    .stat-pill-lead {
+      border-color: rgba(34, 197, 94, 0.35);
+      background: rgba(34, 197, 94, 0.08);
     }
 
     /* ==========================================================================
@@ -1536,65 +1686,73 @@
         </fieldset>
 
         <!-- pnlOffer Panel -->
-        <fieldset class="win-group" id="pnlOffer">
-          <legend class="win-legend">Offer (Chạy nhiều luồng & nhiều Offer)</legend>
-          <div class="form-row" style="margin-bottom:6px;">
-            <span class="form-label" style="min-width:75px;">Offer đã lưu:</span>
-            <select id="cbbSavedOffers" class="win-select" style="flex:1;" onchange="handleSelectSavedOffer()">
-              <option value="">-- Chọn danh sách Offer đã lưu --</option>
-            </select>
-            <button type="button" class="win-btn" id="btnDeleteSavedOffer" onclick="deleteSavedOffer()"
-              title="Xoá Offer đang chọn khỏi danh sách">Xoá</button>
+        <fieldset class="win-group" id="pnlOffer" style="margin-bottom:8px;">
+          <legend class="win-legend">📋 Cấu hình Offer</legend>
+          
+          <!-- Hàng 1: Quản lý Offer đã lưu + Tên Offer + Nút thao tác -->
+          <div class="offer-toolbar">
+            <div class="offer-toolbar-item">
+              <span class="form-label" style="min-width:70px;flex-shrink:0;">Offer đã lưu:</span>
+              <select id="cbbSavedOffers" class="win-select" style="flex:1;min-width:0;" onchange="handleSelectSavedOffer()">
+                <option value="">-- Chọn danh sách Offer đã lưu --</option>
+              </select>
+              <button type="button" class="win-btn win-btn-danger" id="btnDeleteSavedOffer" onclick="deleteSavedOffer()"
+                style="padding:2px 10px;font-size:11px;flex-shrink:0;white-space:nowrap;" title="Xoá Offer đang chọn khỏi danh sách">🗑 Xoá</button>
+            </div>
+            <div class="offer-toolbar-item offer-name-group">
+              <span class="form-label" style="min-width:55px;flex-shrink:0;">Tên Offer:</span>
+              <input type="text" id="txtNameOffer" class="win-input" style="flex:1;min-width:0;" value="demosite|de"
+                placeholder="Nhập tên offer để lưu và phân loại">
+            </div>
+            <div class="offer-toolbar-actions">
+              <button type="button" class="win-btn win-btn-primary" id="btnSaveOffer" onclick="saveOfferConfig()"
+                style="font-weight:bold;padding:3px 12px;font-size:11px;">💾 Lưu Offer</button>
+              <button type="button" class="win-btn" id="btnNewOffer" onclick="newOfferConfig()"
+                style="padding:3px 8px;font-size:11px;">➕ Mới</button>
+              <button type="button" class="win-btn" id="btnResetOffer" onclick="resetOfferConfig()"
+                style="padding:3px 8px;font-size:11px;">🔄 Xoá form</button>
+              <span id="offerSaveStatus" style="font-size:11px;color:#10b981;font-weight:bold;margin-left:4px;"></span>
+            </div>
           </div>
-          <div class="form-row">
-            <span class="form-label" style="min-width:75px;">Tên Offer:</span>
-            <input type="text" id="txtNameOffer" class="win-input" style="flex:1;" value="demosite|de"
-              placeholder="Nhập tên offer để lưu và phân loại">
-          </div>
-          <div class="form-row">
-            <span class="form-label" style="min-width:75px;">Link Offer 1:</span>
+
+          <!-- Hàng 2: Link Offer chính (hỗ trợ dán nhiều dòng) + nút mở rộng Link 2..4 -->
+          <div class="form-row" style="margin-bottom:4px;">
+            <span class="form-label" style="min-width:70px;">Link Offer:</span>
             <input type="text" id="txtLinkOffer" class="win-input" style="flex:1;"
               value="https://demoqa.com/automation-practice-form"
-              placeholder="URL Offer 1 (hoặc dán danh sách nhiều link, mỗi dòng 1 link)">
+              placeholder="Dán URL Offer (hoặc dán nhiều link, mỗi dòng 1 link để tự động luân phiên)">
+            <button type="button" class="win-btn" id="btnToggleExtraLinks" onclick="toggleExtraOfferLinks()"
+              style="padding:2px 8px;font-size:11px;color:#38bdf8;white-space:nowrap;"
+              title="Mở rộng thêm ô điền Link 2, Link 3, Link 4 dự phòng">➕ Thêm Link 2, 3, 4</button>
           </div>
-          <div class="form-row">
-            <span class="form-label" style="min-width:75px;">Link Offer 2:</span>
-            <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;"
-              placeholder="URL Offer 2 (tùy chọn)">
-          </div>
-          <div class="form-row">
-            <span class="form-label" style="min-width:75px;">Link Offer 3:</span>
-            <input type="text" id="txtLinkOffer3" class="win-input" style="flex:1;"
-              placeholder="URL Offer 3 (tùy chọn)">
-          </div>
-          <div class="form-row">
-            <span class="form-label" style="min-width:75px;">Link Offer 4:</span>
-            <input type="text" id="txtLinkOffer4" class="win-input" style="flex:1;"
-              placeholder="URL Offer 4 (tùy chọn)">
-          </div>
-          <div class="form-row" style="margin-top:6px;gap:6px;align-items:center;">
-            <button type="button" class="win-btn win-btn-primary" id="btnSaveOffer" onclick="saveOfferConfig()"
-              style="font-weight:bold;padding:3px 14px;">💾 Lưu Offer</button>
-            <button type="button" class="win-btn" id="btnNewOffer" onclick="newOfferConfig()"
-              style="padding:3px 10px;">➕ Thêm mới</button>
-            <button type="button" class="win-btn" id="btnResetOffer" onclick="resetOfferConfig()"
-              style="padding:3px 10px;">🔄 Xoá form</button>
-            <span id="offerSaveStatus" style="font-size:11px;color:#10b981;font-weight:bold;margin-left:6px;"></span>
-          </div>
-          <div style="font-size:10px;color:#94a3b8;margin-top:4px;">
-            💡 <em>Mẹo: Điền các Link Offer 1..4 (hoặc dán nhiều link vào ô Link Offer 1, mỗi dòng 1 link) rồi bấm
-              <b>"💾 Lưu Offer"</b> để lưu lại. Khi chạy nhiều luồng, hệ thống sẽ tự động luân phiên phân bổ Offer 1, 2,
-              3, 4... cho từng luồng.</em>
+
+          <!-- Khối mở rộng Link 2, 3, 4 (ẩn mặc định, tự hiện khi có link 2..4) -->
+          <div id="extraOfferLinks" style="display:none;padding:6px 8px;background:rgba(15,23,42,0.6);border:1px dashed #22324e;border-radius:5px;margin-bottom:6px;">
+            <div class="form-row" style="margin-bottom:4px;">
+              <span class="form-label" style="min-width:70px;color:#94a3b8;font-size:11px;">Link Offer 2:</span>
+              <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;"
+                placeholder="URL Offer 2 (tùy chọn)">
+            </div>
+            <div class="form-row" style="margin-bottom:4px;">
+              <span class="form-label" style="min-width:70px;color:#94a3b8;font-size:11px;">Link Offer 3:</span>
+              <input type="text" id="txtLinkOffer3" class="win-input" style="flex:1;"
+                placeholder="URL Offer 3 (tùy chọn)">
+            </div>
+            <div class="form-row">
+              <span class="form-label" style="min-width:70px;color:#94a3b8;font-size:11px;">Link Offer 4:</span>
+              <input type="text" id="txtLinkOffer4" class="win-input" style="flex:1;"
+                placeholder="URL Offer 4 (tùy chọn)">
+            </div>
           </div>
         </fieldset>
 
         <!-- panel2 Setting & Controls -->
         <fieldset class="win-group">
-          <legend class="win-legend">Setting</legend>
+          <legend class="win-legend">⚙️ Thiết lập Vận hành &amp; Trình duyệt</legend>
 
           <!-- Browser Selection Bar on Dashboard -->
           <div
-            style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:6px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:5px 10px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div style="display:flex;align-items:center;gap:10px;">
               <span style="font-weight:700;color:#38bdf8;font-size:11.5px;letter-spacing:0.3px;">Trình duyệt:</span>
               <div
@@ -1621,133 +1779,153 @@
           <select id="cbbScript" style="display:none;">
             <option value="" selected>-- Mặc định (Tự động + AI Assist) --</option>
           </select>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+
+          <!-- Grid Thiết lập 2 Cột Cân Đối & Tự Động Co Giãn -->
+          <div class="settings-grid">
+            <!-- Cột Trái: Proxy, Chế độ chạy, Chuỗi hoàn thành -->
             <div>
-              <div class="form-row">
-                <span class="form-label">Proxy:</span>
+              <div class="form-row" style="margin-bottom:5px;">
+                <span class="form-label" style="min-width:85px;">Proxy:</span>
                 <select id="cbbProxy" class="win-select" style="flex:1;" onchange="loadProxyType(this.value)">
                   <option value="proxy" selected>Proxy &amp; Socks5 (Config/Proxy/proxy.txt)</option>
                   <option value="direct">Direct (Không dùng proxy)</option>
                 </select>
                 <button type="button" class="win-btn"
                   style="padding:1px 8px;font-size:11px;height:24px;color:#38bdf8;white-space:nowrap;"
-                  onclick="switchTab('Info'); switchInfoSubTab('proxy');" title="Mở danh sách proxy ở tab Tài nguyên">📋
-                  Quản lý proxy</button>
+                  onclick="switchTab('Info'); switchInfoSubTab('proxy');" title="Mở danh sách proxy ở tab Tài nguyên">📋 Quản lý</button>
               </div>
-              <div class="form-row">
-                <span class="form-label">Chế độ chạy:</span>
+              <div class="form-row" style="margin-bottom:5px;">
+                <span class="form-label" style="min-width:85px;">Chế độ chạy:</span>
                 <select id="cbxAuto" class="win-select" style="flex:1;">
                   <option value="auto">Auto refill (Tự động lặp lại)</option>
                   <option value="sequential">Sequential (Tuần tự delay 5s)</option>
                   <option value="manual">Manual work (Làm thủ công)</option>
                 </select>
               </div>
+              <div class="form-row">
+                <span class="form-label" style="min-width:85px;">Chuỗi xong:</span>
+                <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" value=""
+                  placeholder="Ví dụ: thank you (bỏ trống nếu không cần kiểm tra)">
+              </div>
             </div>
 
+            <!-- Cột Phải: Số luồng, Giới hạn, Timeout, Delay -->
             <div>
-              <div class="form-row">
-                <span class="form-label">Số luồng:</span>
-                <div style="display:flex;align-items:center;gap:6px;flex:1;">
-                  <input type="number" id="nudThread" class="win-input" value="1" min="1" max="30" style="width:100px;">
-                  <span style="margin-left:6px;font-size:11px;color:#94a3b8;">Giới hạn chạy:</span>
-                  <input type="number" id="nudLimitRun" class="win-input" value="0" min="0" style="width:55px;"
+              <div class="form-row" style="margin-bottom:5px;">
+                <span class="form-label" style="min-width:75px;">Số luồng:</span>
+                <div style="display:flex;align-items:center;gap:6px;flex:1;flex-wrap:wrap;">
+                  <input type="number" id="nudThread" class="win-input" value="1" min="1" max="30" style="width:58px;">
+                  <span style="font-size:11px;color:#94a3b8;margin-left:6px;">Giới hạn:</span>
+                  <input type="number" id="nudLimitRun" class="win-input" value="0" min="0" style="width:52px;"
                     title="0 = Chạy không giới hạn">
-                  <span style="font-size:10px;color:#64748b;">(0 = ∞)</span>
+                  <span style="font-size:10px;color:#64748b;">(0=∞)</span>
                 </div>
               </div>
               <div class="form-row">
-                <span class="form-label">Thời gian chờ:</span>
-                <div style="display:flex;align-items:center;gap:6px;flex:1;">
-                  <input type="number" id="txtTimeLimit" class="win-input" value="30" style="width:100px;"
+                <span class="form-label" style="min-width:75px;">Chờ tối đa:</span>
+                <div style="display:flex;align-items:center;gap:6px;flex:1;flex-wrap:wrap;">
+                  <input type="number" id="txtTimeLimit" class="win-input" value="30" style="width:72px;"
                     title="Thời gian chờ tối đa (giây)">
-                  <span style="font-size:11px;color:#94a3b8;">s | Delay:</span>
-                  <input type="number" id="nudDelayStart" class="win-input" value="1" min="0" style="width:40px;">
+                  <span style="font-size:11px;color:#94a3b8;">s</span>
+                  <span style="font-size:11px;color:#94a3b8;margin-left:6px;">Delay:</span>
+                  <input type="number" id="nudDelayStart" class="win-input" value="1" min="0" style="width:42px;">
                   <span style="color:#64748b;">-</span>
-                  <input type="number" id="nudDelayStop" class="win-input" value="1" min="0" style="width:40px;">
+                  <input type="number" id="nudDelayStop" class="win-input" value="1" min="0" style="width:42px;">
                   <span style="font-size:11px;color:#94a3b8;">s</span>
                 </div>
               </div>
             </div>
           </div>
-          <div class="form-row" style="margin-top:6px;">
-            <span class="form-label">Chuỗi hoàn thành:</span>
-            <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" value=""
-              placeholder="Ví dụ: thank you (chuỗi báo thành công, bỏ trống nếu không cần kiểm tra)">
-          </div>
 
-          <!-- Options Toolbar: Tuỳ chọn thực thi & Chế độ chạy ngầm -->
+          <!-- Options Toolbar: Tuỳ chọn thực thi & Chế độ chạy ngầm (Phân 3 Nhóm Rõ Ràng) -->
           <div class="options-toolbar">
             <div class="options-toolbar-header">
-              <span class="options-toolbar-title">⚡ Tuỳ chọn thực thi & Chế độ chạy ngầm:</span>
+              <span class="options-toolbar-title">⚡ Tuỳ chọn thực thi &amp; Chế độ chạy ngầm:</span>
               <span class="options-toolbar-hint">Bấm trực tiếp vào từng ô để bật / tắt nhanh</span>
             </div>
-            <div class="options-pills-row">
-              <label class="option-pill is-checked active"
-                title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
-                <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
-                <span class="option-pill-text"><span class="option-pill-icon">📺</span> Chạy trong app (Khi bấm mới
-                  hiện)</span>
-              </label>
+            
+            <div class="options-category-grid">
+              <!-- Cụm 1: Chế độ hiển thị màn hình -->
+              <div class="options-group-block">
+                <div class="options-group-label">🖥️ Hiển thị cửa sổ:</div>
+                <div class="options-group-pills">
+                  <label class="option-pill is-checked active"
+                    title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
+                    <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
+                    <span class="option-pill-text"><span class="option-pill-icon">📺</span> Chạy trong app</span>
+                  </label>
 
-              <label class="option-pill active" id="pillMultiTab"
-                title="Chạy đa luồng dạng đa tab trong cùng trình duyệt (tiết kiệm tài nguyên và không bị giới hạn số profile AdsPower).">
-                <input type="checkbox" id="cbxMultiTab" checked onchange="syncOptionPills()">
-                <span class="option-pill-text"><span class="option-pill-icon">📑</span> Đa luồng dạng đa tab</span>
-              </label>
+                  <label class="option-pill"
+                    title="Chạy ngầm ẩn trình duyệt trong lúc kiểm tra IP và chuyển hướng; chỉ hiển thị lên màn hình khi đã vào trang đích thành công.">
+                    <input type="checkbox" id="cbxHideUntilTarget"
+                      onchange="if(this.checked){const el=document.getElementById('cbxHideUntilLead');if(el)el.checked=false;} syncOptionPills();">
+                    <span class="option-pill-text"><span class="option-pill-icon">🌐</span> Ẩn đến trang đích</span>
+                  </label>
 
-              <label class="option-pill" id="pillCloakBrowser"
-                title="Sử dụng CloakBrowser (Stealth Chromium chống bot Cloudflare Turnstile/FingerprintJS & mô phỏng thao tác người thật Humanize). Với AdsPower chỉ áp dụng lớp Humanize.">
-                <input type="checkbox" id="cbxCloakBrowser"
-                  onchange="syncCloakBrowserSetting(this.checked); syncOptionPills();">
-                <span class="option-pill-text"><span class="option-pill-icon">🥷</span> CloakBrowser Stealth</span>
-              </label>
+                  <label class="option-pill option-pill-hidelead"
+                    title="Chạy ngầm ẩn trình duyệt hoàn toàn; chỉ những IP nào kiểm tra có lead mới hiển thị lên màn hình, không có lead sẽ tự động đóng.">
+                    <input type="checkbox" id="cbxHideUntilLead"
+                      onchange="if(this.checked){const t=document.getElementById('cbxHideUntilTarget');if(t)t.checked=false;const c=document.getElementById('cbxCheckLead');if(c)c.checked=true;} syncOptionPills();">
+                    <span class="option-pill-text"><span class="option-pill-icon">🎯</span> Chỉ hiện khi có Lead</span>
+                  </label>
+                </div>
+              </div>
 
-              <label class="option-pill is-checked" id="pillDataSaver"
-                title="Tiết kiệm băng thông proxy: Tự động chặn Video quảng cáo, Media nặng và mạng Ads rác (vẫn giữ nguyên 100% hình ảnh Captcha và câu hỏi khảo sát).">
-                <input type="checkbox" id="cbxDataSaver" checked onchange="syncOptionPills()">
-                <span class="option-pill-text"><span class="option-pill-icon">⚡</span> Tiết kiệm data (Chặn
-                  Video/Ads)</span>
-              </label>
+              <!-- Cụm 2: Mạng & Tiết kiệm tài nguyên -->
+              <div class="options-group-block">
+                <div class="options-group-label">⚡ Mạng &amp; Tối ưu:</div>
+                <div class="options-group-pills">
+                  <label class="option-pill active" id="pillMultiTab"
+                    title="Chạy đa luồng dạng đa tab trong cùng trình duyệt (tiết kiệm tài nguyên và không bị giới hạn số profile AdsPower).">
+                    <input type="checkbox" id="cbxMultiTab" checked onchange="syncOptionPills()">
+                    <span class="option-pill-text"><span class="option-pill-icon">📑</span> Đa luồng đa tab</span>
+                  </label>
 
-              <label class="option-pill option-pill-dup"
-                title="Khi bật: chặn IP đã từng chạy thành công cho offer này. Khi tắt: cho phép chạy lại IP cũ.">
-                <input type="checkbox" id="cbxCheckDuplicateIP" checked onchange="syncOptionPills()">
-                <span class="option-pill-text"><span class="option-pill-icon">🛡️</span> Check duplicate IP</span>
-              </label>
+                  <label class="option-pill is-checked" id="pillDataSaver"
+                    title="Tiết kiệm băng thông proxy: Tự động chặn Video quảng cáo, Media nặng và mạng Ads rác (vẫn giữ nguyên 100% hình ảnh Captcha và câu hỏi khảo sát).">
+                    <input type="checkbox" id="cbxDataSaver" checked onchange="syncOptionPills()">
+                    <span class="option-pill-text"><span class="option-pill-icon">⚡</span> Tiết kiệm data (Chặn Ads/Video)</span>
+                  </label>
 
-              <label class="option-pill"
-                title="Chạy ngầm ẩn trình duyệt trong lúc kiểm tra IP và chuyển hướng; chỉ hiển thị lên màn hình khi đã vào trang đích thành công.">
-                <input type="checkbox" id="cbxHideUntilTarget"
-                  onchange="if(this.checked){const el=document.getElementById('cbxHideUntilLead');if(el)el.checked=false;} syncOptionPills();">
-                <span class="option-pill-text"><span class="option-pill-icon">🌐</span> Ẩn đến trang đích</span>
-              </label>
+                  <label class="option-pill option-pill-dup"
+                    title="Khi bật: chặn IP đã từng chạy thành công cho offer này. Khi tắt: cho phép chạy lại IP cũ.">
+                    <input type="checkbox" id="cbxCheckDuplicateIP" checked onchange="syncOptionPills()">
+                    <span class="option-pill-text"><span class="option-pill-icon">🛡️</span> Check duplicate IP</span>
+                  </label>
+                </div>
+              </div>
 
-              <label class="option-pill option-pill-hidelead"
-                title="Chạy ngầm ẩn trình duyệt hoàn toàn; chỉ những IP nào kiểm tra có lead mới hiển thị lên màn hình, không có lead sẽ tự động đóng.">
-                <input type="checkbox" id="cbxHideUntilLead"
-                  onchange="if(this.checked){const t=document.getElementById('cbxHideUntilTarget');if(t)t.checked=false;const c=document.getElementById('cbxCheckLead');if(c)c.checked=true;} syncOptionPills();">
-                <span class="option-pill-text"><span class="option-pill-icon">🎯</span> Ẩn trình duyệt (Chỉ hiện khi có
-                  Lead)</span>
-              </label>
+              <!-- Cụm 3: Tự động hoá & Khảo sát -->
+              <div class="options-group-block">
+                <div class="options-group-label">🤖 Tự động thông minh:</div>
+                <div class="options-group-pills">
+                  <label class="option-pill option-pill-ai"
+                    title="AI tự động nhận diện câu hỏi / khảo sát khi bị kẹt và hỗ trợ hoàn tất form.">
+                    <input type="checkbox" id="cbxAiAssist" checked
+                      onchange="toggleAiAssistDashboard(this.checked); syncOptionPills();">
+                    <span class="option-pill-text"><span class="option-pill-icon">🤖</span> AI Assist</span>
+                  </label>
 
-              <label class="option-pill option-pill-leadcheck"
-                title="Chỉ khi tick: sau khi qua màn nhập email, dừng lại kiểm tra lead 1 lần × 20s. Có lead thì tiếp tục, không có lead thì tự động đóng trình duyệt để đổi sock mới. Bỏ tick thì không check lead.">
-                <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
-                <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (1×20s)</span>
-              </label>
+                  <label class="option-pill" id="pillCloakBrowser"
+                    title="Sử dụng CloakBrowser (Stealth Chromium chống bot Cloudflare Turnstile/FingerprintJS & mô phỏng thao tác người thật Humanize). Với AdsPower chỉ áp dụng lớp Humanize.">
+                    <input type="checkbox" id="cbxCloakBrowser"
+                      onchange="syncCloakBrowserSetting(this.checked); syncOptionPills();">
+                    <span class="option-pill-text"><span class="option-pill-icon">🥷</span> CloakBrowser Stealth</span>
+                  </label>
 
-              <label class="option-pill option-pill-ai"
-                title="AI tự động nhận diện câu hỏi / khảo sát khi bị kẹt và hỗ trợ hoàn tất form.">
-                <input type="checkbox" id="cbxAiAssist" checked
-                  onchange="toggleAiAssistDashboard(this.checked); syncOptionPills();">
-                <span class="option-pill-text"><span class="option-pill-icon">🤖</span> AI Assist</span>
-              </label>
+                  <label class="option-pill option-pill-leadcheck"
+                    title="Chỉ khi tick: sau khi qua màn nhập email, dừng lại kiểm tra lead 1 lần × 20s. Có lead thì tiếp tục, không có lead thì tự động đóng trình duyệt để đổi sock mới. Bỏ tick thì không check lead.">
+                    <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
+                    <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (1×20s)</span>
+                  </label>
 
-              <label class="option-pill" style="display:none;"
-                title="Lưu lại toàn bộ dữ liệu RRS (profile, cookies, storage) sau khi hoàn tất phiên làm việc.">
-                <input type="checkbox" id="cbxRRS" onchange="syncOptionPills()">
-                <span class="option-pill-text"><span class="option-pill-icon">💾</span> Save RRS</span>
-              </label>
+                  <label class="option-pill" style="display:none;"
+                    title="Lưu lại toàn bộ dữ liệu RRS (profile, cookies, storage) sau khi hoàn tất phiên làm việc.">
+                    <input type="checkbox" id="cbxRRS" onchange="syncOptionPills()">
+                    <span class="option-pill-text"><span class="option-pill-icon">💾</span> Save RRS</span>
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1755,10 +1933,12 @@
           <div class="controls-action-bar">
             <div class="controls-btn-group">
               <button type="button" class="win-btn win-btn-primary" id="btnStart"
-                style="padding:4px 22px;font-size:12px;gap:5px;" onclick="handleStart()">▶ Start</button>
+                style="padding:5px 26px;font-size:12.5px;font-weight:700;letter-spacing:0.3px;gap:6px;box-shadow:0 2px 6px rgba(16,185,129,0.3);"
+                onclick="handleStart()">▶ Start</button>
               <button type="button" class="win-btn win-btn-danger" id="btnStop"
-                style="padding:4px 20px;font-size:12px;gap:5px;" onclick="handleStop()">⏹ Stop</button>
-              <button type="button" class="win-btn" id="btnCloseChrome" style="padding:4px 14px;gap:5px;"
+                style="padding:5px 20px;font-size:12px;font-weight:600;gap:6px;"
+                onclick="handleStop()">⏹ Stop</button>
+              <button type="button" class="win-btn" id="btnCloseChrome" style="padding:5px 14px;gap:6px;font-size:12px;"
                 onclick="handleCloseAll()">✕ Close Chrome</button>
             </div>
             <div class="controls-stats-group">
@@ -1770,15 +1950,15 @@
                 <span>Total RRS:</span>
                 <b id="lbTotalRRS">0</b>
               </div>
-              <div class="stat-pill" style="cursor:pointer;" onclick="switchTab('ToffersLeads')"
+              <div class="stat-pill stat-pill-highlight" style="cursor:pointer;" onclick="switchTab('ToffersLeads')"
                 title="Số Point hiện tại trên toffers.top (Click xem danh sách lead)">
                 <span>💎 Point:</span>
-                <b id="lbToffersPoint" style="color:#0284c7;">--</b>
+                <b id="lbToffersPoint" style="color:#38bdf8;">--</b>
               </div>
-              <div class="stat-pill" style="cursor:pointer;" onclick="switchTab('ToffersLeads')"
+              <div class="stat-pill stat-pill-lead" style="cursor:pointer;" onclick="switchTab('ToffersLeads')"
                 title="Số Lead ghi nhận trên toffers.top (Click xem danh sách lead)">
                 <span>🎯 Leads:</span>
-                <b id="lbToffersLeadCount" style="color:#16a34a;">--</b>
+                <b id="lbToffersLeadCount" style="color:#22c55e;">--</b>
               </div>
             </div>
           </div>
@@ -3340,6 +3520,19 @@
       }
     }
 
+    function toggleExtraOfferLinks(forceShow) {
+      const el = document.getElementById('extraOfferLinks');
+      const btn = document.getElementById('btnToggleExtraLinks');
+      if (!el) return;
+      const willShow = typeof forceShow === 'boolean' ? forceShow : (el.style.display === 'none');
+      el.style.display = willShow ? 'block' : 'none';
+      if (btn) {
+        btn.innerHTML = willShow ? '▲ Thu gọn Link 2..4' : '➕ Thêm Link 2, 3, 4';
+        btn.style.color = willShow ? '#94a3b8' : '#38bdf8';
+      }
+    }
+    window.toggleExtraOfferLinks = toggleExtraOfferLinks;
+
     function renderSavedOffersDropdown(list, selectedId = '') {
       const cbb = document.getElementById('cbbSavedOffers');
       if (!cbb) return;
@@ -3367,6 +3560,7 @@
           if (c.LinkOffer2 && document.getElementById('txtLinkOffer2')) document.getElementById('txtLinkOffer2').value = c.LinkOffer2;
           if (c.LinkOffer3 && document.getElementById('txtLinkOffer3')) document.getElementById('txtLinkOffer3').value = c.LinkOffer3;
           if (c.LinkOffer4 && document.getElementById('txtLinkOffer4')) document.getElementById('txtLinkOffer4').value = c.LinkOffer4;
+          if (c.LinkOffer2 || c.LinkOffer3 || c.LinkOffer4) toggleExtraOfferLinks(true);
         }
       } catch { }
 
@@ -3378,6 +3572,7 @@
         if (data.LinkOffer2 !== undefined && data.LinkOffer2 !== '') document.getElementById('txtLinkOffer2').value = data.LinkOffer2;
         if (data.LinkOffer3 !== undefined && data.LinkOffer3 !== '') document.getElementById('txtLinkOffer3').value = data.LinkOffer3;
         if (data.LinkOffer4 !== undefined && data.LinkOffer4 !== '') document.getElementById('txtLinkOffer4').value = data.LinkOffer4;
+        if (data.LinkOffer2 || data.LinkOffer3 || data.LinkOffer4) toggleExtraOfferLinks(true);
         if (data.TimeLimit) document.getElementById('txtTimeLimit').value = data.TimeLimit;
         if (data.Complete && data.Complete !== 'id') {
           document.getElementById('txtTextComplete').value = data.Complete;
@@ -3583,6 +3778,7 @@
         document.getElementById('txtLinkOffer2').value = found.LinkOffer2 || '';
         document.getElementById('txtLinkOffer3').value = found.LinkOffer3 || '';
         document.getElementById('txtLinkOffer4').value = found.LinkOffer4 || '';
+        if (found.LinkOffer2 || found.LinkOffer3 || found.LinkOffer4) toggleExtraOfferLinks(true);
         applyOfferMethods(Array.isArray(found.methodConfigs) ? found.methodConfigs : []);
         if (found.TimeLimit) document.getElementById('txtTimeLimit').value = found.TimeLimit;
         if (found.Complete && found.Complete !== 'id') {
