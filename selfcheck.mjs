@@ -57,6 +57,8 @@ import {
   isPlausibleGmail,
   importEmailLines,
   dequeueNextEmail,
+  emailAutoRefill,
+  refillEmailBatchFromSource,
   DEVICE_PROFILES,
   autoRefill,
   getNextDeviceProfile,
@@ -1456,6 +1458,23 @@ assert.equal(thirdDequeued, 'third.lead@gmail.com');
 const recycledEmail = dequeueNextEmail();
 assert.equal(recycledEmail, 'first.lead@gmail.com');
 assert.equal(emailQueue.used.length, 1);
+
+// 9.3b refillEmailBatchFromSource: nạp từng lô từ file, cộng thêm, nhớ vị trí, bỏ trùng và dòng hỏng
+{
+  const { mkdtemp, writeFile: writeTmp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const src = join(await mkdtemp(join(tmpdir(), 'email-src-')), 'emails.txt');
+  await writeTmp(src, 'aaaaaa.one@gmail.com\nfirst.lead@gmail.com\nbad@gmail.com\nbbbbbb.two@gmail.com\ncccccc.three@gmail.com\n');
+  const savedRefill = { ...emailAutoRefill };
+  Object.assign(emailAutoRefill, { sourcePath: src, byteOffset: 0, batchSize: 2 });
+  emailQueue.available = [];
+  assert.equal(await refillEmailBatchFromSource(), 2);
+  assert.deepEqual(emailQueue.available, ['aaaaaa.one@gmail.com', 'bbbbbb.two@gmail.com']);
+  assert.equal(await refillEmailBatchFromSource(), 1);
+  assert.equal(emailQueue.available.at(-1), 'cccccc.three@gmail.com');
+  assert.equal(await refillEmailBatchFromSource(), 0);
+  Object.assign(emailAutoRefill, savedRefill);
+}
 
 // 9.4 matchFieldValue ưu tiên tuyệt đối assignedEmail khi điền ô email
 const sampleUserEmail = 'daj.gomezramirez@gmail.com';

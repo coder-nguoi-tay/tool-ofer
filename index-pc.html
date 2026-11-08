@@ -1511,8 +1511,14 @@
               <input type="password" id="inp711Pass" placeholder="Mật khẩu" style="width:130px;padding:2px 6px;border:1px solid #abadb3;font-size:12px;" autocomplete="current-password">
             </div>
             <button type="button" class="win-btn win-btn-primary" style="font-size:12px;" onclick="proxy711Login()">Đăng nhập</button>
-            <button type="button" class="win-btn" id="btn711Whitelist" style="font-size:12px;" onclick="proxy711UpdateWhitelist()" title="Tự động thêm IP mạng hiện tại vào whitelist 711proxy">Thêm IP Whitelist</button>
+            <button type="button" class="win-btn" id="btn711Whitelist" style="font-size:12px;" onclick="proxy711UpdateWhitelist()" title="Tự động lấy IP máy Mac hiện tại và thêm vào whitelist 711proxy">Thêm IP Whitelist</button>
             <span id="lbl711Balance" style="font-size:12px;color:#555;align-self:center;min-width:80px;"></span>
+          </div>
+          <!-- Whitelist Status Row -->
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;font-size:11.5px;flex-wrap:wrap;">
+            <span style="color:#555;">🌐 IP máy hiện tại: <b id="lbl711MyIp" style="color:#0f172a;font-family:monospace;">Đang kiểm tra...</b></span>
+            <button type="button" class="win-btn win-btn-sm" onclick="copyCurrentPublicIp()" style="font-size:10.5px;padding:1px 8px;" title="Sao chép IP vào bộ nhớ tạm">📋 Copy IP</button>
+            <span id="lbl711Status" style="font-size:11.5px;font-weight:600;color:#2563eb;"></span>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px;">
             <div style="display:flex;flex-direction:column;gap:2px;">
@@ -2182,6 +2188,7 @@
               <input type="number" id="numAutoRefillBatch" value="1000" min="100" max="50000" step="100"
                 style="width:64px;padding:2px 4px;border:1px solid #aaa;font-size:11px;" onchange="saveAutoRefillConfig()">
             </label>
+            <button type="button" class="win-btn win-btn-primary" style="font-size:11px;padding:2px 8px;" onclick="loadEmailFromPath()" title="Nạp ngay 1 lô email (số ở ô Mỗi lần) từ file ở path, cộng thêm vào danh sách">Nạp từ path</button>
             <button type="button" class="win-btn" style="font-size:11px;padding:2px 8px;" onclick="resetAutoRefillCursor()">Reset vị trí</button>
           </div>
           <textarea id="txtEmailList" class="win-textarea" style="width:100%;height:calc(100% - 60px);"></textarea>
@@ -3250,6 +3257,7 @@
         if (ar.sessTime) document.getElementById('inp711SessTime').value = ar.sessTime;
         document.getElementById('chk711SessAuto').checked = !!ar.sessAuto;
       }
+      void checkMyPublicIp();
     }
 
     async function proxy711SaveAutoRefill() {
@@ -3274,8 +3282,19 @@
       if (res && res.ok) {
         if (passwd) document.getElementById('inp711Pass').value = passwd;
         document.getElementById('lbl711Balance').textContent = 'Đã lưu mật khẩu & đăng nhập thành công ✓';
-        if (res.whitelist && res.whitelist.ok) {
-          document.getElementById('lbl711Status').textContent = `Đã whitelist IP ${res.whitelist.ip} ✓`;
+        if (res.whitelist) {
+          const st = document.getElementById('lbl711Status');
+          if (res.whitelist.ok) {
+            if (st) {
+              st.style.color = '#15803d';
+              st.textContent = `✅ Đã whitelist IP ${res.whitelist.ip} ✓`;
+            }
+          } else if (res.whitelist.error) {
+            if (st) {
+              st.style.color = '#b91c1c';
+              st.textContent = `⚠️ Whitelist: ${res.whitelist.error}`;
+            }
+          }
         }
         proxy711FetchBalance(true);
       } else {
@@ -3284,20 +3303,67 @@
       }
     }
 
+    async function copyCurrentPublicIp() {
+      const ip = document.getElementById('lbl711MyIp')?.textContent?.trim();
+      if (!ip || ip.includes('...')) return;
+      try {
+        await navigator.clipboard.writeText(ip);
+        showWinAlert(`Đã sao chép IP ${ip} vào bộ nhớ tạm.`);
+      } catch {
+        prompt('Copy IP:', ip);
+      }
+    }
+    window.copyCurrentPublicIp = copyCurrentPublicIp;
+
+    async function checkMyPublicIp() {
+      try {
+        const ipRes = await fetch('https://api.ipify.org?format=json').catch(() => null);
+        if (ipRes && ipRes.ok) {
+          const { ip } = await ipRes.json();
+          if (ip) {
+            window.myCurrentPublicIp = ip;
+            const el = document.getElementById('lbl711MyIp');
+            if (el) el.textContent = ip;
+            return ip;
+          }
+        }
+      } catch {}
+      return null;
+    }
+    window.checkMyPublicIp = checkMyPublicIp;
+
     async function proxy711UpdateWhitelist() {
       const btn = document.getElementById('btn711Whitelist');
       if (btn) btn.disabled = true;
-      document.getElementById('lbl711Status').textContent = 'Đang kiểm tra & cập nhật IP whitelist...';
+      const statusEl = document.getElementById('lbl711Status');
+      if (statusEl) {
+        statusEl.style.color = '#2563eb';
+        statusEl.textContent = 'Đang kiểm tra IP & thêm vào 711proxy whitelist...';
+      }
       try {
         const res = await api('/711proxy/update-whitelist', { method: 'POST' });
         if (res && res.ok) {
-          document.getElementById('lbl711Status').textContent = `Whitelist thành công IP ${res.ip} ✓`;
-          showWinAlert(`Đã thêm IP ${res.ip} vào whitelist 711proxy thành công! Giờ bạn có thể tạo proxy bình thường.`);
+          if (res.ip && document.getElementById('lbl711MyIp')) {
+            document.getElementById('lbl711MyIp').textContent = res.ip;
+          }
+          if (statusEl) {
+            statusEl.style.color = '#15803d';
+            statusEl.textContent = `✅ Đã thêm IP ${res.ip} vào Whitelist lúc ${new Date().toLocaleTimeString('vi-VN')}!`;
+          }
+          showWinAlert(`Đã thêm IP ${res.ip} vào whitelist 711proxy thành công!\nBạn có thể tạo và sử dụng proxy bình thường.`);
         } else {
-          document.getElementById('lbl711Status').textContent = 'Lỗi whitelist';
-          showWinAlert(res?.error || 'Không thể cập nhật whitelist.');
+          const err = res?.error || 'Không thể cập nhật whitelist.';
+          if (statusEl) {
+            statusEl.style.color = '#b91c1c';
+            statusEl.textContent = `⚠️ ${err}`;
+          }
+          showWinAlert(`Lỗi cập nhật whitelist: ${err}`);
         }
       } catch (err) {
+        if (statusEl) {
+          statusEl.style.color = '#b91c1c';
+          statusEl.textContent = `⚠️ Lỗi: ${err.message}`;
+        }
         showWinAlert('Lỗi: ' + (err.message || err));
       } finally {
         if (btn) btn.disabled = false;
@@ -3859,6 +3925,24 @@
         }),
       });
       showWinAlert(`Đã chọn file nguồn:\n${path}`);
+    }
+
+    /**
+     * Nạp ngay một lô email từ path trong ô đường dẫn, cộng thêm vào hàng đợi.
+     *
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-11-08
+     */
+    async function loadEmailFromPath() {
+      const res = await api('/email-queue/load-from-path', {
+        method: 'POST',
+        body: JSON.stringify({
+          sourcePath: document.getElementById('txtAutoRefillPath').value,
+          batchSize: parseInt(document.getElementById('numAutoRefillBatch').value) || 1000,
+        }),
+      });
+      showWinAlert(res.error || res.message);
+      await loadEmailList();
     }
 
     async function resetAutoRefillCursor() {

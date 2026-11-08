@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   getCached711Balance,
   getBandwidthSummary,
+  add711IpWhitelist,
+  fetch711Token,
 } from './app.mjs';
 
 test('getCached711Balance returns proper schema and initial properties', () => {
@@ -41,4 +43,18 @@ test('711Proxy balance calculation math accurately handles GB conversions', () =
   const remainingPercent = Number((100 - usedPercent).toFixed(1));
   assert.ok(remainingPercent > 80 && remainingPercent < 82);
   assert.equal(Number((usedPercent + remainingPercent).toFixed(1)), 100);
+});
+
+test('add711IpWhitelist requires an IP argument', async () => {
+  await assert.rejects(
+    async () => add711IpWhitelist(''),
+    { message: /Cần địa chỉ IP/ }
+  );
+});
+
+test('fetch711Token throws on invalid credentials', async () => {
+  await assert.rejects(
+    async () => fetch711Token('invalid_user_test_xyz', 'invalid_pwd_test_xyz'),
+    { message: /Đăng nhập thất bại/ }
+  );
 });

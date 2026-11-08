@@ -1532,12 +1532,24 @@ export async function get711Balance(force = false) {
   }
 
   try {
-    let res = await fetch('https://server.711proxy.com/wapi/balance/', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    let text = await res.text();
+    const candidateBalanceUrls = [
+      'https://server.711proxy.com/eapi/balance/',
+      'https://server.711proxy.com/wapi/balance/',
+    ];
     let data = null;
-    try { data = JSON.parse(text); } catch {}
+    let text = '';
+    for (const url of candidateBalanceUrls) {
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        text = await res.text();
+        try { data = JSON.parse(text); } catch {}
+        if (data && (data.code === 200 || data.code === 0) && typeof data.flow_balance === 'number') {
+          break;
+        }
+      } catch {}
+    }
 
     if (data?.code === 41010 || data?.error?.toLowerCase().includes('token')) {
       proxy711.token = '';
@@ -1546,11 +1558,18 @@ export async function get711Balance(force = false) {
       if (proxy711.username && proxy711.passwd) {
         const freshToken = await fetch711Token(proxy711.username, proxy711.passwd).catch(() => null);
         if (freshToken) {
-          res = await fetch('https://server.711proxy.com/wapi/balance/', {
-            headers: { Authorization: `Bearer ${freshToken}` },
-          });
-          text = await res.text();
-          try { data = JSON.parse(text); } catch {}
+          for (const url of candidateBalanceUrls) {
+            try {
+              const res = await fetch(url, {
+                headers: { Authorization: `Bearer ${freshToken}` },
+              });
+              text = await res.text();
+              try { data = JSON.parse(text); } catch {}
+              if (data && (data.code === 200 || data.code === 0) && typeof data.flow_balance === 'number') {
+                break;
+              }
+            } catch {}
+          }
         }
       }
     }
@@ -1678,6 +1697,9 @@ async function ensure711Token() {
   if (proxy711.token && Date.now() < proxy711.tokenExpiry) {
     return proxy711.token;
   }
+  if (!proxy711.username || !proxy711.passwd) {
+    await loadProxy711Config();
+  }
   if (proxy711.username && proxy711.passwd) {
     try {
       return await fetch711Token(proxy711.username, proxy711.passwd);
@@ -1686,44 +1708,47 @@ async function ensure711Token() {
   return null;
 }
 
-export async function add711IpWhitelist(ip, token = null) {
+export async function add711IpWhitelist(ip, token = null, retry = true) {
   if (!ip) throw new Error('Cần địa chỉ IP để thêm vào whitelist.');
   const curToken = token || await ensure711Token();
   if (!curToken) {
     throw new Error(`Chưa đăng nhập 711proxy. Vui lòng đăng nhập 711proxy trên app để tự động thêm IP ${ip} vào whitelist.`);
   }
 
-  const res = await fetch('https://server.711proxy.com/whitelist/', {
+  const res = await fetch('https://server.711proxy.com/eapi/whitelist/', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${curToken}`,
     },
-    body: JSON.stringify({ ip: [ip], status: true }),
+    body: JSON.stringify({ whitelist: ip, action: 'add' }),
   });
 
   const text = await res.text();
   let data = null;
   try { data = JSON.parse(text); } catch {}
 
-  if (data?.code === 41010 || data?.error?.toLowerCase().includes('token')) {
+  if (res.ok && (data?.code === 200 || data?.code === 0 || data?.msg === 'success.')) {
+    return { ok: true, ip, data };
+  }
+
+  if (data?.code === 41005 || data?.msg?.includes('flow not enough')) {
+    throw new Error('Gói dung lượng 711proxy của tài khoản hiện tại bằng 0 hoặc đã hết hạn (flow not enough). Vui lòng mua/nạp gói GB trên 711proxy rồi bấm lại.');
+  }
+
+  if (data?.code === 41010 && retry) {
     proxy711.token = '';
     proxy711.tokenExpiry = 0;
     await saveProxy711Config();
     if (proxy711.username && proxy711.passwd) {
       const freshToken = await fetch711Token(proxy711.username, proxy711.passwd).catch(() => null);
       if (freshToken) {
-        return add711IpWhitelist(ip, freshToken);
+        return add711IpWhitelist(ip, freshToken, false);
       }
     }
-    throw new Error(`Token 711proxy hết hạn (41010). Vui lòng đăng nhập lại rồi thêm IP ${ip} vào whitelist.`);
   }
 
-  if (res.ok || (data && !data.error && data.code === 0)) {
-    return { ok: true, ip, data };
-  }
-
-  throw new Error(data?.message || data?.error || `HTTP ${res.status}: ${text.slice(0, 200)}`);
+  throw new Error(data?.msg || data?.message || data?.error || `HTTP ${res.status}: ${text.slice(0, 150)}`);
 }
 
 async function loadProxy711AutoRefillConfig() {
@@ -1763,7 +1788,7 @@ async function autoRefillProxyIfNeeded() {
       const res = await fetch(genUrl.toString());
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
       text = await res.text();
-      if (!text.trim() || text.includes('"code"')) throw new Error(text.slice(0, 200));
+      if (!text.trim() || text.includes('"code"') || text.toLowerCase().includes('whitelist')) throw new Error(text.slice(0, 200));
     } catch (e) {
       if (e.message.toLowerCase().includes('whitelist')) {
         const ipRes = await fetch('https://api.ipify.org?format=json').catch(() => null);
@@ -1808,10 +1833,10 @@ async function autoRefillProxyIfNeeded() {
   }
 }
 
-async function fetch711Token(username, passwd) {
+export async function fetch711Token(username, passwd) {
   for (const endpoint of [
-    'https://server.711proxy.com/wapi/token/',
     'https://server.711proxy.com/eapi/token/',
+    'https://server.711proxy.com/wapi/token/',
   ]) {
     try {
       const res = await fetch(endpoint, {
@@ -1822,10 +1847,8 @@ async function fetch711Token(username, passwd) {
       const text = await res.text();
       let data;
       try { data = JSON.parse(text); } catch { continue; }
-      if (data?.results) {
-        const rawToken = typeof data.results === 'object' && data.results.token
-          ? data.results.token
-          : data.results;
+      if (data) {
+        const rawToken = data?.results?.token || (typeof data?.results === 'string' ? data.results : null) || data?.data?.token;
         if (typeof rawToken === 'string' && rawToken.length > 0) {
           proxy711.username = username;
           proxy711.passwd = passwd;
@@ -3041,23 +3064,36 @@ async function readEmailBatchFromSource(filePath, byteOffset, batchSize) {
   return { emails, newByteOffset: byteOffset + bytesConsumed };
 }
 
+/**
+ * Đọc một lô email (batchSize) từ file nguồn tại vị trí đang nhớ, cộng thêm vào hàng đợi và lưu vị trí mới.
+ *
+ * @return {Promise<number>} Số email mới đã nạp; 0 khi đã đọc hết file.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-08
+ */
+export async function refillEmailBatchFromSource() {
+  const { emails, newByteOffset } = await readEmailBatchFromSource(
+    emailAutoRefill.sourcePath, emailAutoRefill.byteOffset, emailAutoRefill.batchSize
+  );
+  if (emails.length === 0) return 0;
+  emailQueue.available.push(...emails);
+  emailAutoRefill.byteOffset = newByteOffset;
+  await saveEmailQueue();
+  await saveEmailAutoRefillConfig();
+  return emails.length;
+}
+
 /** Tự động nạp thêm email từ file nguồn khi hàng đợi cạn. Gọi bất đồng bộ, không block. */
 export async function autoRefillEmailIfNeeded() {
   if (!emailAutoRefill.enabled || !emailAutoRefill.sourcePath) return;
   if (emailQueue.available.length > 0) return;
   try {
-    const { emails, newByteOffset } = await readEmailBatchFromSource(
-      emailAutoRefill.sourcePath, emailAutoRefill.byteOffset, emailAutoRefill.batchSize
-    );
-    if (emails.length === 0) {
+    const added = await refillEmailBatchFromSource();
+    if (added === 0) {
       console.log('[EmailAutoRefill] Đã đọc hết file nguồn.');
       return;
     }
-    emailQueue.available.push(...emails);
-    emailAutoRefill.byteOffset = newByteOffset;
-    await saveEmailQueue();
-    await saveEmailAutoRefillConfig();
-    console.log(`[EmailAutoRefill] Đã nạp thêm ${emails.length} email từ file nguồn.`);
+    console.log(`[EmailAutoRefill] Đã nạp thêm ${added} email từ file nguồn.`);
   } catch (e) {
     console.log('[EmailAutoRefill] Lỗi đọc file nguồn:', e.message);
   }
@@ -8675,8 +8711,18 @@ async function startLocalInterface() {
 
     if (request.method === 'POST' && request.url === '/711proxy/update-whitelist') {
       try {
-        const ipRes = await fetch('https://api.ipify.org?format=json');
-        const { ip } = await ipRes.json();
+        let ip = null;
+        try {
+          const body = JSON.parse(await readRequestBody(request));
+          if (body?.ip) ip = String(body.ip).trim();
+        } catch {}
+        if (!ip) {
+          const ipRes = await fetch('https://api.ipify.org?format=json');
+          const data = await ipRes.json();
+          ip = data?.ip;
+        }
+        if (!ip) throw new Error('Không thể xác định địa chỉ IP máy.');
+
         const token = await ensure711Token();
         if (!token) {
           respondWithJson(response, 401, {
@@ -8715,7 +8761,7 @@ async function startLocalInterface() {
         const res = await fetch(genUrl.toString());
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
         const text = await res.text();
-        if (!text.trim() || text.includes('"code"')) throw new Error(text.slice(0, 300));
+        if (!text.trim() || text.includes('"code"') || text.toLowerCase().includes('whitelist')) throw new Error(text.slice(0, 300));
         return text;
       }
 
@@ -9050,6 +9096,31 @@ async function startLocalInterface() {
       if (body.resetCursor) emailAutoRefill.byteOffset = 0;
       await saveEmailAutoRefillConfig();
       respondWithJson(response, 200, { ...emailAutoRefill, message: 'Đã lưu cấu hình tự động nạp email.' });
+      return;
+    }
+
+    // Nạp ngay một lô email từ path đang cấu hình (cộng thêm, không xóa hàng đợi). Đổi path thì đọc lại từ đầu file.
+    if (request.method === 'POST' && request.url === '/email-queue/load-from-path') {
+      const body = JSON.parse(await readRequestBody(request));
+      const sourcePath = String(body.sourcePath ?? emailAutoRefill.sourcePath).trim();
+      try {
+        await access(sourcePath);
+      } catch {
+        respondWithJson(response, 400, { error: `Không đọc được file: ${sourcePath || '(chưa nhập path)'}` });
+        return;
+      }
+      if (sourcePath !== emailAutoRefill.sourcePath) emailAutoRefill.byteOffset = 0;
+      emailAutoRefill.sourcePath = sourcePath;
+      if (typeof body.batchSize === 'number' && body.batchSize > 0) emailAutoRefill.batchSize = body.batchSize;
+      const added = await refillEmailBatchFromSource();
+      await saveEmailAutoRefillConfig();
+      respondWithJson(response, 200, {
+        added,
+        available: emailQueue.available.length,
+        message: added > 0
+          ? `Đã nạp ${added} email từ file (tổng sẵn sàng: ${emailQueue.available.length}).`
+          : 'Không có email mới: đã đọc hết file (bấm "Reset vị trí" để đọc lại từ đầu).',
+      });
       return;
     }
 
