@@ -426,16 +426,30 @@ export function stealthInitScript(cfg) {
     }
   }
 
-  // ── Client Hints giá trị cao: tab popup tải trang đầu trước khi CDP kịp áp, lúc đó Chrome trả
-  // platformVersion/architecture do Playwright tự đoán từ UA (macOS ra "10_15_7" và "x86").
+  // ── Client Hints: platform, mobile và Client Hints giá trị cao (platformVersion, architecture...) ──
   if (cfg.uaData && typeof G.NavigatorUAData === 'function') {
+    if (cfg.uaData.platform) {
+      replaceGetter(G.NavigatorUAData.prototype, 'platform', () => cfg.uaData.platform);
+    }
+    if (typeof cfg.isMobile === 'boolean') {
+      replaceGetter(G.NavigatorUAData.prototype, 'mobile', () => cfg.isMobile);
+    }
     replaceMethod(G.NavigatorUAData.prototype, 'getHighEntropyValues', (original) => function (hints) {
-      return original.call(this, hints).then((values) => {
-        for (const key of ['platformVersion', 'architecture', 'bitness', 'model']) {
-          if (key in values && cfg.uaData[key] !== undefined) values[key] = cfg.uaData[key];
+      const populate = (dict) => {
+        const res = dict ? { ...dict } : {};
+        const hintList = Array.isArray(hints) ? hints : [];
+        for (const key of ['platform', 'platformVersion', 'architecture', 'bitness', 'model']) {
+          if (hintList.includes(key) && cfg.uaData[key] !== undefined) {
+            res[key] = cfg.uaData[key];
+          }
         }
-        return values;
-      });
+        return res;
+      };
+      try {
+        return original.call(this, hints).then(populate).catch(() => populate({}));
+      } catch {
+        return Promise.resolve(populate({}));
+      }
     });
   }
 

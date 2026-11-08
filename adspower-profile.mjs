@@ -92,15 +92,20 @@ export function buildAdsPowerProfileRequest({ slot, proxy = null, exitIp = '', w
     device_memory: '8',
     hardware_concurrency: '8',
   };
-  if (userAgent) {
-    fingerprint.ua = userAgent;
-  } else {
-    fingerprint.random_ua = {
-      ua_browser: ['chrome'],
-      ua_version: [String(browserVersion)],
-      ua_system_version: [osLabel],
-    };
-  }
+  const defaultUa = (
+    deviceProfile === 'windows'
+      ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browserVersion}.0.0.0 Safari/537.36`
+      : (deviceProfile === 'macos'
+        ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browserVersion}.0.0.0 Safari/537.36`
+        : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browserVersion}.0.0.0 Safari/537.36`)
+  );
+  const targetUa = userAgent || defaultUa;
+  fingerprint.ua = targetUa;
+  fingerprint.random_ua = {
+    ua_browser: ['chrome'],
+    ua_version: [String(browserVersion)],
+    ua_system_version: deviceProfile === 'windows' ? ['Windows 10', 'Windows 11'] : [osLabel],
+  };
 
   const userProxyConfig = { proxy_soft: 'no_proxy' };
   let proxyHost = '';

@@ -170,6 +170,25 @@ import {
  * @author coder-nguoi-tay
  * @since 2026-10-26
  */
+/**
+ * Bản sao record đã bỏ email mà phiên trước gắn vào (assignedEmail và các ô email trùng nó).
+ * Dữ liệu cũ trong danh sách đã dùng còn mang email phiên; tái dùng nguyên thì phiên mới điền lại email đó.
+ *
+ * @param {object} record Record trong hàng đợi.
+ * @return {object|null} Bản sao sạch email phiên.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-08
+ */
+export function withoutSessionEmail(record) {
+  const copy = safeCloneRecord(record);
+  if (!copy || typeof copy !== 'object' || !copy.assignedEmail) return copy;
+  for (const key of ['email', 'emailaddress', 'mail']) {
+    if (copy[key] === copy.assignedEmail) delete copy[key];
+  }
+  delete copy.assignedEmail;
+  return copy;
+}
+
 function safeCloneRecord(record) {
   if (!record || typeof record !== 'object') return record ?? null;
   try {
@@ -2368,15 +2387,32 @@ async function readUserAgents() {
  * @since 2026-10-19
  */
 async function readConfiguredUserAgents(deviceProfile) {
-  // Cùng tên file với tab Useragent trong Settings (index-pc.html → /pc/browser-config/save).
-  const fileName = ({ windows: 'useragents.txt', macos: 'useragentMac.txt', linux: 'useragentLinux.txt', android: 'useragentAndroid.txt', ios: 'useragentIphone.txt', ipad: 'useragentIpad.txt' })[deviceProfile];
-  // Chỉ nhận UA đúng hệ điều hành của profile, tránh UA Windows chạy với Client Hints macOS.
+  const candidateNames = ({
+    windows: ['useragents.txt', 'useragent.txt'],
+    macos: ['useragentMac.txt', 'useragent Mac.txt', 'useragentsMac.txt'],
+    linux: ['useragentLinux.txt', 'useragent Linux.txt'],
+    android: ['useragentAndroid.txt', 'useragent Android.txt'],
+    ios: ['useragentIphone.txt', 'useragent Iphone.txt'],
+    ipad: ['useragentIpad.txt', 'useragent Ipad.txt'],
+  })[deviceProfile] || [];
   const osToken = ({ windows: /Windows NT/, macos: /Macintosh/, linux: /X11; Linux/, android: /Android/, ios: /iPhone/, ipad: /iPad/ })[deviceProfile];
-  if (!fileName) return [];
-  try {
-    const content = await readFile(join(getAutoLeadPCDir(), 'Config', 'Browser', fileName), 'utf8');
-    return content.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('Mozilla/') && osToken.test(line));
-  } catch {}
+  if (!osToken || candidateNames.length === 0) return [];
+
+  const candidateDirs = [
+    join(getAutoLeadPCDir(), 'Config', 'Browser'),
+    join(process.cwd(), 'Config', 'Browser'),
+    process.cwd(),
+  ];
+
+  for (const dir of candidateDirs) {
+    for (const name of candidateNames) {
+      try {
+        const content = await readFile(join(dir, name), 'utf8');
+        const lines = content.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('Mozilla/') && osToken.test(line));
+        if (lines.length > 0) return lines;
+      } catch {}
+    }
+  }
   return [];
 }
 
@@ -2910,14 +2946,14 @@ function takeNextRecord(pool, fallback = []) {
       autofillQueue.used.push(record);
       void saveAutofillQueue();
       void markAutofillRecordUsed(record);
-      return safeCloneRecord(record);
+      return withoutSessionEmail(record);
     }
   }
   const list = (pool && pool.length > 0) ? pool : fallback;
   if (!list || list.length === 0) return {};
   const record = list[recordRotationCounter % list.length];
   recordRotationCounter += 1;
-  return safeCloneRecord(record);
+  return withoutSessionEmail(record);
 }
 
 /**
@@ -2932,7 +2968,7 @@ function takeNextRecord(pool, fallback = []) {
 async function handleFormRejected(session, { kind, record = {} }) {
   if (kind === 'email') {
     rejectEmail(session.assignedEmail || record.email);
-    const next = dequeueNextEmail();
+    const next = await takeNextEmail();
     if (!next) return null;
     session.assignedEmail = next;
     return { email: next };
@@ -2944,7 +2980,8 @@ async function handleFormRejected(session, { kind, record = {} }) {
   autofillQueue.used.push(next);
   void saveAutofillQueue();
   void markAutofillRecordUsed(next);
-  session.currentRecord = next;
+  // Bản sao: currentRecord sẽ bị gắn email phiên, không được ghi lên object nằm trong danh sách đã dùng.
+  session.currentRecord = safeCloneRecord(next);
   return { ...next };
 }
 
@@ -3177,7 +3214,15 @@ async function readEmailBatchFromSource(filePath, byteOffset, batchSize) {
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-08
  */
-export async function refillEmailBatchFromSource() {
+export function refillEmailBatchFromSource() {
+  // Một lần nạp mỗi lúc: hai lần chạy song song đọc cùng byteOffset sẽ đẩy trùng một lô email vào hàng đợi.
+  emailRefillInFlight ??= readNextEmailBatch().finally(() => { emailRefillInFlight = null; });
+  return emailRefillInFlight;
+}
+
+let emailRefillInFlight = null;
+
+async function readNextEmailBatch() {
   const { emails, newByteOffset } = await readEmailBatchFromSource(
     emailAutoRefill.sourcePath, emailAutoRefill.byteOffset, emailAutoRefill.batchSize
   );
@@ -3288,6 +3333,21 @@ export function rejectEmail(email) {
   emailQueue.used = emailQueue.used.filter((e) => String(e).toLowerCase() !== key);
   if (!emailQueue.rejected.some((e) => String(e).toLowerCase() === key)) emailQueue.rejected.push(email);
   void saveEmailQueue();
+}
+
+/**
+ * Lấy email cho phiên; khi hàng đợi cạn và đang bật tự nạp thì chờ nạp xong lô mới rồi lấy,
+ * thay vì trả null (phiên chạy không có email riêng, rơi về email cũ trong record).
+ *
+ * @return {Promise<string|null>} Email được gán hoặc null khi thật sự hết.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-08
+ */
+export async function takeNextEmail() {
+  const email = dequeueNextEmail();
+  if (email || !emailAutoRefill.enabled || !emailAutoRefill.sourcePath) return email;
+  await autoRefillEmailIfNeeded();
+  return dequeueNextEmail();
 }
 
 export function dequeueNextEmail() {
@@ -4201,6 +4261,28 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     const dp = DEVICE_PROFILES[deviceProfile] || DEVICE_PROFILES.windows;
     const stealthConfig = buildStealthConfig(dp, antiFingerprint, assignedSlot);
     await context.addInitScript(stealthInitScript, stealthConfig);
+
+    // Đồng bộ UA, Client Hints (Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version) tận gốc qua CDP cho AdsPower
+    const effectiveBuild = { version: String(browserVersion || '130'), channel: 'stable' };
+    const nativeOverrides = {
+      userAgentOverride: buildUserAgentOverride(dp, effectiveBuild, ['en-US', 'en']),
+      hardwareConcurrency: dp.spoof?.hardwareConcurrency || 8,
+      deviceProfile: dp,
+      timezoneId: null,
+    };
+    const applyOverridesSafely = async (targetPage) => {
+      try {
+        if (!targetPage.isClosed()) {
+          await applyNativeOverrides(context, targetPage, nativeOverrides);
+        }
+      } catch {}
+    };
+    context.on('page', (newPage) => {
+      void applyOverridesSafely(newPage);
+    });
+    for (const existing of context.pages()) {
+      void applyOverridesSafely(existing);
+    }
   } catch (err) {
     console.warn('[AdsPower] Lỗi gắn stealth script:', err.message);
   }
@@ -4292,7 +4374,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     }
   };
 
-  const assignedEmail = dequeueNextEmail();
+  const assignedEmail = await takeNextEmail();
   if (assignedEmail) session.assignedEmail = assignedEmail;
 
   session.runHidden = Boolean(screenPreviewOnly || hideUntilTarget || hideUntilLead);
@@ -4504,13 +4586,15 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
           record.assignedEmail = session.assignedEmail;
         }
         session.currentRecord = record;
+        // Đưa record GỐC (chưa gắn email phiên) vào danh sách đã dùng: trước đây đẩy bản đã gắn email,
+        // nên khi tái dùng danh sách đã dùng, phiên khác nhận luôn email của phiên này.
         const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordIdentity(r) === autofillRecordIdentity(record));
-        if (idx !== -1) {
-          autofillQueue.available.splice(idx, 1);
-          autofillQueue.used.push(record);
+        const original = idx !== -1 ? autofillQueue.available.splice(idx, 1)[0] : null;
+        if (original) {
+          autofillQueue.used.push(original);
           void saveAutofillQueue();
         }
-        void markAutofillRecordUsed(record);
+        void markAutofillRecordUsed(original ?? withoutSessionEmail(record));
       },
       onScreen5Reached: (sess, p) => {
         if (sess?.emailFilled) void startLeadVerification(sess, leadConfig);
@@ -4553,7 +4637,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
         if (p._lastAiUrl === currentUrl && (now - (p._lastAiTime || 0) < 4000)) return;
         p._lastAiUrl = currentUrl;
         p._lastAiTime = now;
-        const currentRecord = p._assignedRecord ?? session.currentRecord ?? autofillRecords[0] ?? {};
+        const currentRecord = p._assignedRecord ?? session.currentRecord ?? safeCloneRecord(autofillRecords[0]) ?? {};
         if (session.assignedEmail && currentRecord) {
           currentRecord.email = session.assignedEmail;
           currentRecord.emailaddress = session.assignedEmail;
@@ -6437,7 +6521,7 @@ async function openBrowserWithInstalledChrome({
       }
     },
   };
-  const assignedEmail = dequeueNextEmail();
+  const assignedEmail = await takeNextEmail();
   if (assignedEmail) {
     session.assignedEmail = assignedEmail;
   }
@@ -6537,14 +6621,14 @@ async function openBrowserWithInstalledChrome({
         record.assignedEmail = session.assignedEmail;
       }
       session.currentRecord = record; // lưu để AI assist dùng khi cần
-      // Dequeue ngay khi chọn
+      // Dequeue ngay khi chọn; đưa record GỐC (chưa gắn email phiên) vào danh sách đã dùng.
       const idx = autofillQueue.available.findIndex((r) => r === record || autofillRecordIdentity(r) === autofillRecordIdentity(record));
-      if (idx !== -1) {
-        autofillQueue.available.splice(idx, 1);
-        autofillQueue.used.push(record);
+      const original = idx !== -1 ? autofillQueue.available.splice(idx, 1)[0] : null;
+      if (original) {
+        autofillQueue.used.push(original);
         void saveAutofillQueue();
       }
-      void markAutofillRecordUsed(record);
+      void markAutofillRecordUsed(original ?? withoutSessionEmail(record));
     },
     onScreen5Reached: (sess, page) => {
       if (sess?.emailFilled) void startLeadVerification(sess, leadConfig);
@@ -6594,7 +6678,7 @@ async function openBrowserWithInstalledChrome({
       page._lastAiUrl = currentUrl;
       page._lastAiTime = now;
 
-      const currentRecord = page._assignedRecord || session.currentRecord || (recordPool[session.recordIndex] ?? recordPool[0]);
+      const currentRecord = page._assignedRecord || session.currentRecord || safeCloneRecord(recordPool[session.recordIndex] ?? recordPool[0]);
       if (session.assignedEmail && currentRecord) {
         currentRecord.email = session.assignedEmail;
         currentRecord.emailaddress = session.assignedEmail;

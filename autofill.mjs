@@ -4733,7 +4733,21 @@ export async function naturalMouseDrift(page, count = 1) {
  * @author coder-nguoi-tay
  * @since 2026-10-27
  */
-export async function humanType(field, text, page = null, options = {}) {
+export function humanType(field, text, page = null, options = {}) {
+  // keyboard.type gõ vào ô đang focus của cả trang: hai lần gõ cùng lúc (lượt quét + AI Assist...) sẽ trộn chữ
+  // vào một ô. Xếp hàng theo trang để gõ xong ô này mới click sang ô kia.
+  const owner = page || (typeof field?.page === 'function' ? field.page() : null);
+  if (!owner || typeof owner !== 'object') return humanTypeMarked(field, text, page, options);
+  const previous = pageTypingChains.get(owner) ?? Promise.resolve();
+  const current = previous.then(() => humanTypeMarked(field, text, page, options));
+  pageTypingChains.set(owner, current.catch(() => {}));
+  return current;
+}
+
+/** Hàng đợi gõ phím theo từng trang (xem humanType). */
+const pageTypingChains = new WeakMap();
+
+async function humanTypeMarked(field, text, page = null, options = {}) {
   let marked = false;
   try {
     await field?.evaluate?.((el) => { el.dataset.uxTyping = String(Date.now()); });
@@ -5822,6 +5836,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
   }
   session.autofillRecord = session.recordIndex + 1;
   options.onRecordPicked?.(record);
+  // Bản sao riêng của phiên, dùng khi tab chưa có record riêng (fillVisibleForms che tên `record` bằng biến cục bộ).
+  const sessionRecord = record;
 
   /**
    * Bật check lead cho phiên (dùng chung mọi tab): đặt cờ tạm dừng autofill rồi gọi app chờ lead.
@@ -5897,7 +5913,8 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
    */
   async function fillVisibleForms(page) {
     if (page.isClosed()) return;
-    const record = page._assignedRecord || session.currentRecord || effectiveRecords[session.recordIndex];
+    // Không lấy effectiveRecords[...] (mảng dùng chung giữa các slot): dòng dưới gắn email phiên vào record.
+    const record = page._assignedRecord || session.currentRecord || sessionRecord;
     // Record của tab lấy riêng từ hàng đợi nên chưa có email của phiên: gắn vào để mọi nhánh điền (kể cả điền cứu trợ, AI) dùng đúng email.
     if (record && session.assignedEmail && record.assignedEmail !== session.assignedEmail) {
       Object.assign(record, { email: session.assignedEmail, emailaddress: session.assignedEmail, mail: session.assignedEmail, assignedEmail: session.assignedEmail });
@@ -7975,8 +7992,19 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
      * @author ductv <ductv@getflycrm.com>
      * @since 2026-10-21
      */
+    // Khóa `filling` phải bật ngay khi kiểm tra, trước mọi `await`: trước đây bật sau lệnh kiểm tra Cloudflare
+    // (tối đa 4s), nên timer 250ms / load / triggerAutofillScan chen vào được và chạy nhiều lượt điền song song —
+    // hai lần keyboard.type cùng lúc trộn ký tự vào một ô (vd "addoanr1sh4d3@ognm1a4i3@l.gmcaoiml").
     const scan = async () => {
       if (filling || page.isClosed() || page._aiFormFixing || page._aiAssistRunning) return;
+      filling = true;
+      try {
+        await scanOnce();
+      } finally {
+        filling = false;
+      }
+    };
+    const scanOnce = async () => {
       const u = typeof page.url === 'function' ? page.url() : '';
       if (!u || u.startsWith('chrome-error:') || u.startsWith('about:') || u.startsWith('chrome:') || /toffers\.top\/error\.php/i.test(u) || /error\.php\?.*error=.*ip_/i.test(u) || /clicked_offer_/i.test(u)) {
         return;
@@ -8015,7 +8043,6 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         page._aiFormRepairRetry = null;
         page._lastAutofillUnresolvedField = null;
       }
-      filling = true;
       const fieldsBefore = (session.autofillFields ?? 0) + (session.autofillActions ?? 0);
       // Một lượt quét bình thường xong trong vài giây; quá 20s là đang kẹt ở một lệnh không trả về, ghi lại chỗ kẹt.
       const stuckTimer = setTimeout(() => {
@@ -8030,7 +8057,6 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
         // Trang có thể điều hướng hoặc đóng giữa hai lần quét.
       } finally {
         clearTimeout(stuckTimer);
-        filling = false;
       }
       const filled = ((session.autofillFields ?? 0) + (session.autofillActions ?? 0)) - fieldsBefore;
       if (filled > 0) {

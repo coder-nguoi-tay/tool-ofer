@@ -59,6 +59,8 @@ import {
   dequeueNextEmail,
   emailAutoRefill,
   refillEmailBatchFromSource,
+  takeNextEmail,
+  withoutSessionEmail,
   DEVICE_PROFILES,
   autoRefill,
   getNextDeviceProfile,
@@ -680,6 +682,26 @@ assert.equal(pageTypedChars.map((t) => t.char).join(''), 'Jane Doe');
 assert.equal(pageTypedChars.length, 8);
 assert.ok(pageTypedChars.every((t) => typeof t.delay === 'number' && t.delay >= 30), 'Độ trễ mỗi phím trên page.keyboard phải >= 30ms');
 
+// Hai lần humanType cùng lúc trên cùng trang (lượt quét + AI Assist): keyboard.type gõ vào ô đang focus,
+// nên phải gõ xong ô này mới sang ô kia — nếu không chữ của hai ô trộn vào nhau.
+{
+  let focused = null;
+  const typedInto = { email: '', name: '' };
+  const sharedPage = {
+    keyboard: {
+      press: async () => {},
+      type: async (char) => { await new Promise((r) => setTimeout(r, 1)); typedInto[focused] += char; },
+    },
+    waitForTimeout: async () => {},
+  };
+  const makeField = (id) => ({ click: async () => { focused = id; }, focus: async () => { focused = id; }, page: () => sharedPage });
+  await Promise.all([
+    humanType(makeField('email'), 'adoanr1sh4d3@gmail.com', sharedPage),
+    humanType(makeField('name'), 'Jane Doe', sharedPage),
+  ]);
+  assert.deepEqual(typedInto, { email: 'adoanr1sh4d3@gmail.com', name: 'Jane Doe' }, 'humanType trên cùng trang phải gõ tuần tự từng ô');
+}
+
 // Test findSubmitButton nhận diện nút data-vector-submit="true" và data-tf-element-role="submit"
 const mockVectorSubmitBtn = {
   isVisible: async () => true,
@@ -1188,6 +1210,34 @@ mockSessionStuck.triggerAutofillScan?.();
 await new Promise((r) => setTimeout(r, 20));
 assert.equal(stuckTriggered, true, 'Sau 3 vòng scan không có tiến triển phải kích hoạt callback onStuck');
 
+// Test attachAutofill: nhiều lần kích hoạt scan khi lượt trước còn đang chờ (page.evaluate chậm do máy tải nặng)
+// không được chạy hai lượt điền song song trên cùng trang — nếu không hai lần gõ phím trộn ký tự vào cùng một ô.
+{
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let closed = false;
+  const slowPage = {
+    isClosed: () => closed,
+    url: () => 'https://example.com/form',
+    on: () => {},
+    evaluate: async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 40));
+      inFlight -= 1;
+      return true;
+    },
+    frames: () => [{ locator: () => ({ all: async () => [] }), evaluateAll: async () => ({}), evaluate: async () => [] }],
+  };
+  const slowSession = { autofillFields: 0, leadCheckStatus: null };
+  attachAutofill({ on: () => {}, pages: () => [slowPage] }, [{ firstname: 'Jeremy' }], 'https://example.com', slowSession, {});
+  for (let i = 0; i < 5; i++) slowSession.triggerAutofillScan?.();
+  await new Promise((r) => setTimeout(r, 120));
+  closed = true;
+  for (const t of slowSession._autofillTimers || []) clearInterval(t);
+  assert.equal(maxInFlight, 1, 'Các lượt scan trên cùng trang phải chạy tuần tự, không chồng lên nhau');
+}
+
 // Test attachAutofill khi trang trống hoặc cảm ơn (hasInteractable = false) thì KHÔNG trigger onStuck
 let stuckTriggeredBlank = false;
 const mockBlankPage = {
@@ -1473,8 +1523,26 @@ assert.equal(emailQueue.used.length, 1);
   assert.equal(await refillEmailBatchFromSource(), 1);
   assert.equal(emailQueue.available.at(-1), 'cccccc.three@gmail.com');
   assert.equal(await refillEmailBatchFromSource(), 0);
+
+  // takeNextEmail: hàng đợi cạn + bật tự nạp → chờ nạp lô mới rồi cấp email (trước đây trả null).
+  // Nhiều phiên khởi động cùng lúc không được nạp trùng một lô (cùng byteOffset).
+  const src2 = join(await mkdtemp(join(tmpdir(), 'email-src-')), 'emails.txt');
+  await writeTmp(src2, 'dddddd.four@gmail.com\neeeeee.five@gmail.com\nffffff.six@gmail.com\n');
+  Object.assign(emailAutoRefill, { enabled: true, sourcePath: src2, byteOffset: 0, batchSize: 1 });
+  emailQueue.available = [];
+  const [e1, e2] = await Promise.all([takeNextEmail(), takeNextEmail()]);
+  assert.equal(e1, 'dddddd.four@gmail.com');
+  assert.ok(e2 === null || e2 === 'eeeeee.five@gmail.com', `email thứ hai không được trùng: ${e2}`);
+  assert.equal(new Set(emailQueue.used).size, emailQueue.used.length, 'Không được cấp trùng email');
   Object.assign(emailAutoRefill, savedRefill);
 }
+
+// withoutSessionEmail: record tái dùng không được mang email của phiên trước
+assert.deepEqual(
+  withoutSessionEmail({ firstname: 'Ann', email: 'old.session@gmail.com', mail: 'old.session@gmail.com', assignedEmail: 'old.session@gmail.com' }),
+  { firstname: 'Ann' },
+);
+assert.deepEqual(withoutSessionEmail({ firstname: 'Ann', email: 'own@gmail.com' }), { firstname: 'Ann', email: 'own@gmail.com' });
 
 // 9.4 matchFieldValue ưu tiên tuyệt đối assignedEmail khi điền ô email
 const sampleUserEmail = 'daj.gomezramirez@gmail.com';
