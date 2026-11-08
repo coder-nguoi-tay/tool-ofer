@@ -1038,6 +1038,8 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
       margin-bottom: 6px;
       padding: 2px 0;
     }
@@ -1045,6 +1047,7 @@
     .proxy-stats-group {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 6px;
     }
 
@@ -1867,14 +1870,14 @@
                   <label class="option-pill is-checked active"
                     title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
                     <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
-                    <span class="option-pill-text"><span class="option-pill-icon">📺</span> Chạy trong app</span>
+                    <span class="option-pill-text"><span class="option-pill-icon">💻</span> Chạy trong app</span>
                   </label>
 
                   <label class="option-pill"
                     title="Chạy ngầm ẩn trình duyệt trong lúc kiểm tra IP và chuyển hướng; chỉ hiển thị lên màn hình khi đã vào trang đích thành công.">
                     <input type="checkbox" id="cbxHideUntilTarget"
                       onchange="if(this.checked){const el=document.getElementById('cbxHideUntilLead');if(el)el.checked=false;} syncOptionPills();">
-                    <span class="option-pill-text"><span class="option-pill-icon">🌐</span> Ẩn đến trang đích</span>
+                    <span class="option-pill-text"><span class="option-pill-icon">🏁</span> Ẩn đến trang đích</span>
                   </label>
 
                   <label class="option-pill option-pill-hidelead"
@@ -1888,7 +1891,7 @@
 
               <!-- Cụm 2: Mạng & Tiết kiệm tài nguyên -->
               <div class="options-group-block">
-                <div class="options-group-label">⚡ Mạng &amp; Tối ưu:</div>
+                <div class="options-group-label">🌐 Mạng &amp; Tối ưu:</div>
                 <div class="options-group-pills">
                   <label class="option-pill active" id="pillMultiTab"
                     title="Chạy đa luồng dạng đa tab trong cùng trình duyệt (tiết kiệm tài nguyên và không bị giới hạn số profile AdsPower).">
@@ -1899,7 +1902,7 @@
                   <label class="option-pill is-checked" id="pillDataSaver"
                     title="Tiết kiệm băng thông proxy: Tự động chặn Video quảng cáo, Media nặng và mạng Ads rác (vẫn giữ nguyên 100% hình ảnh Captcha và câu hỏi khảo sát).">
                     <input type="checkbox" id="cbxDataSaver" checked onchange="syncOptionPills()">
-                    <span class="option-pill-text"><span class="option-pill-icon">⚡</span> Tiết kiệm data (Chặn Ads/Video)</span>
+                    <span class="option-pill-text"><span class="option-pill-icon">📉</span> Tiết kiệm data (Chặn Ads/Video)</span>
                   </label>
 
                   <label class="option-pill option-pill-dup"
@@ -1912,13 +1915,13 @@
 
               <!-- Cụm 3: Tự động hoá & Khảo sát -->
               <div class="options-group-block">
-                <div class="options-group-label">🤖 Tự động thông minh:</div>
+                <div class="options-group-label">✨ Tự động thông minh:</div>
                 <div class="options-group-pills">
                   <label class="option-pill option-pill-ai"
                     title="AI tự động nhận diện câu hỏi / khảo sát khi bị kẹt và hỗ trợ hoàn tất form.">
                     <input type="checkbox" id="cbxAiAssist" checked
                       onchange="toggleAiAssistDashboard(this.checked); syncOptionPills();">
-                    <span class="option-pill-text"><span class="option-pill-icon">🤖</span> AI Assist</span>
+                    <span class="option-pill-text"><span class="option-pill-icon">✨</span> AI Assist</span>
                   </label>
 
                   <label class="option-pill" id="pillCloakBrowser"
