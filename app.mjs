@@ -94,6 +94,7 @@ import { buildAdsPowerProfileRequest, createAdsPowerProfile, getOrCreateAdsPower
 import {
   applyNativeOverrides,
   attachGuardedWorkerInjection,
+  buildBrandLists,
   buildProfileCoherenceExpected,
   collectProfileCoherenceSnapshot,
   analyzeProfileCoherence,
@@ -112,7 +113,8 @@ import {
 } from './cloakbrowser-engine.mjs';
 import { attachAutofill, parseAutofillRecords } from './autofill.mjs';
 import { runAiAssist, pageHasWork, globalAiConfig, setGlobalAiConfig, callAgt } from './ai-assist.mjs';
-import { startTelegramBot, reloadTelegramBot, stopTelegramBot, tgNotify } from './tgbot.mjs';
+import { startTelegramBot, reloadTelegramBot, stopTelegramBot, tgNotify, registerBotCommands } from './tgbot.mjs';
+import { startTunnel, stopTunnel, getTunnelUrl } from './tunnel.mjs';
 
 export function getAiConfigFilePath() {
   return join(getAutoLeadPCDir(), 'Config', 'ai-config.json');
@@ -312,11 +314,11 @@ export const DEVICE_PROFILES = {
 };
 
 export const autoRefill = {
-  enabled: true,
+  enabled: false,
   settings: null,
   targetCount: 0,
   queued: false,
-  message: 'Tự bù đang bật; mở profile để bắt đầu.',
+  message: 'Sẵn sàng. Bấm Start để bắt đầu.',
   sequential: false, // Chế độ tuần tự: 1 tab, delay 5s giữa các phiên
   deviceProfiles: ['windows'], // Danh sách profile thiết bị đang được dùng
   stopRequested: false, // Cờ yêu cầu dừng hẳn toàn bộ luồng, không mở hay bù thêm slot nào
@@ -566,6 +568,29 @@ export function isExitIpCurrentlyInUse(exitIp) {
 }
 
 /**
+ * Nhận diện duy nhất của một proxy kết hợp cả server và username (dành cho proxy xoay sticky session).
+ *
+ * @param {object|null} proxy Đối tượng proxy.
+ * @return {string} Chuỗi JSON định danh.
+ */
+export function proxyIdentity(proxy) {
+  return JSON.stringify([proxy?.server ?? '', proxy?.username ?? '']);
+}
+
+/**
+ * Khóa duy nhất đại diện cho proxy trong hàng đợi và lịch sử dùng:
+ * Ưu tiên _queueLine gốc (chứa đầy đủ session, pass, port), fallback về proxyIdentity.
+ *
+ * @param {object|null} proxy Đối tượng proxy.
+ * @return {string} Khóa định danh duy nhất.
+ */
+export function getProxyUniqueKey(proxy) {
+  if (!proxy) return '';
+  if (proxy._queueLine) return proxy._queueLine;
+  return proxyIdentity(proxy);
+}
+
+/**
  * Đặt khóa độc quyền cho proxy trước khi khởi chạy trình duyệt.
  *
  * @param {object|null} proxy Đối tượng proxy.
@@ -726,7 +751,7 @@ export function initMultiOfferCursors(offerCount, totalProxies) {
  */
 export function isProxyUsedByAllOffers(proxy, offerCount = 1) {
   if (!proxy) return false;
-  const pKey = proxy.server || proxy._queueLine;
+  const pKey = getProxyUniqueKey(proxy);
   if (!pKey) return false;
   const count = Math.max(1, offerCount);
   for (let k = 1; k <= count; k++) {
@@ -807,7 +832,7 @@ export function getNextCollisionFreeProxy(offerNumber = 1, proxies = [], offerCo
     const candidate = proxies[idx];
     if (!candidate) continue;
 
-    const pKey = candidate.server || candidate._queueLine || String(idx);
+    const pKey = getProxyUniqueKey(candidate);
 
     // 1. Offer này đã dùng proxy này chưa?
     if (usedSet.has(pKey)) {
@@ -846,7 +871,7 @@ export function getNextCollisionFreeProxy(offerNumber = 1, proxies = [], offerCo
         continue;
       }
 
-      const pKey = candidate.server || candidate._queueLine || String(idx);
+      const pKey = getProxyUniqueKey(candidate);
       acquireProxyLock(candidate);
       usedSet.add(pKey);
 
@@ -992,6 +1017,7 @@ const remoteAgents = new Map();
 const pendingAgentTasks = [];
 const userInterfacePath = new URL('./index.html', import.meta.url);
 const userInterfacePcPath = new URL('./index-pc.html', import.meta.url);
+const userInterfaceMiniPath = new URL('./screen-mini.html', import.meta.url);
 const userAgentListPath = new URL('./useragents.txt', import.meta.url);
 export const interactionLogDirectory = join(appDataDirectory, 'logs');
 export const interactionHtmlDirectory = join(interactionLogDirectory, 'html');
@@ -1358,6 +1384,183 @@ export function attachBandwidthTracker(context, session) {
   context.on('requestfailed', handleRequestFinishedOrFailed);
 }
 
+/**
+ * Danh sách domain chuyên phân phối video quảng cáo, banner quảng cáo video nặng
+ * và các dịch vụ quay lén thao tác màn hình (session replay) gây ngốn băng thông proxy.
+ * Tuyệt đối KHÔNG chứa domain của Captcha, Cloudflare, hay tracking affiliate.
+ */
+export const HEAVY_AD_AND_TRACKER_HOSTS = [
+  // Video Ad Networks & Outstream Video Players
+  'vidoomy.com',
+  'connatix.com',
+  'anyclip.com',
+  'playwire.com',
+  'aniview.com',
+  'primis.tech',
+  'teads.tv',
+  'spotxchange.com',
+  'spotx.tv',
+  'outbrain.com',
+  'taboola.com',
+  'adnxs.com',
+  'criteo.com',
+  'criteo.net',
+  'pubmatic.com',
+  'rubiconproject.com',
+  'openx.net',
+  'smartadserver.com',
+  'adroll.com',
+  'moatads.com',
+  'scorecardresearch.com',
+  'yieldmo.com',
+  'adcolony.com',
+  'inmobi.com',
+  'undertone.com',
+  'gumgum.com',
+  'triplelift.com',
+  'serving-sys.com',
+  'flashtalking.com',
+
+  // Google Heavy Video Ad Subdomains (chỉ chặn endpoint quảng cáo video/banner của google, không chặn recaptcha/auth)
+  'pubads.g.doubleclick.net',
+  'securepubads.g.doubleclick.net',
+  'pagead2.googlesyndication.com',
+  'adservice.google.com',
+
+  // Heavy Session Replay & Screen Recording (truyền stream thao tác màn hình về server)
+  'hotjar.com',
+  'clarity.ms',
+  'fullstory.com',
+  'mouseflow.com',
+  'crazyegg.com',
+  'smartlook.com',
+  'luckyorange.com',
+];
+
+/**
+ * Kiểm tra xem URL có phải là hình ảnh không.
+ * Cần giữ lại 100% hình ảnh (trắc nghiệm bằng hình ảnh, logo, ảnh captcha, ảnh minh họa).
+ *
+ * @param {string} url
+ * @return {boolean}
+ */
+export function isImageUrl(url) {
+  if (!url) return false;
+  return /\.(png|jpe?g|gif|webp|svg|ico|bmp|avif)($|\?)/i.test(url);
+}
+
+/**
+ * Kiểm tra xem URL có phải là tài nguyên bảo mật / captcha / lead tracker thiết yếu không.
+ *
+ * @param {string} url
+ * @return {boolean}
+ */
+export function isEssentialOfferUrl(url) {
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('recaptcha') ||
+    lower.includes('hcaptcha') ||
+    lower.includes('challenges.cloudflare.com') ||
+    lower.includes('turnstile') ||
+    lower.includes('arkoselabs') ||
+    lower.includes('funcaptcha') ||
+    lower.includes('geetest') ||
+    lower.includes('google.com/recaptcha') ||
+    lower.includes('gstatic.com/recaptcha') ||
+    lower.includes('/cdn-cgi/challenge-platform') ||
+    lower.includes('/cdn-cgi/trace')
+  );
+}
+
+/**
+ * Kiểm tra xem URL có phải là file media nặng (video, audio, streaming video) không.
+ *
+ * @param {string} url
+ * @return {boolean}
+ */
+export function isMediaUrl(url) {
+  if (!url) return false;
+  return /\.(mp4|webm|m3u8|ts|ogg|mp3|wav|flv|avi|mkv|m4s|mov)($|\?)/i.test(url);
+}
+
+/**
+ * Kiểm tra xem URL có thuộc danh sách mạng quảng cáo video/tracker nặng không.
+ *
+ * @param {string} url
+ * @return {boolean}
+ */
+export function isHeavyAdOrTrackerUrl(url) {
+  if (!url || isEssentialOfferUrl(url)) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return HEAVY_AD_AND_TRACKER_HOSTS.some((badHost) => host === badHost || host.endsWith('.' + badHost));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Gắn bộ lọc Data Saver để tiết kiệm băng thông proxy cho phiên duyệt web.
+ * QUY TẮC CỐT LÕI:
+ * - TUYỆT ĐỐI KHÔNG CHẶN ẢNH (image) theo đúng yêu cầu người dùng.
+ * - Chặn toàn bộ video, audio, media streaming (thủ phạm ngốn hàng trăm MB).
+ * - Chặn các mạng video ad và session replay tracker ngoài.
+ *
+ * @param {object} context BrowserContext của Playwright.
+ * @param {object} session Phiên duyệt web.
+ * @return {Promise<void>}
+ */
+export async function attachDataSaver(context, session) {
+  if (!context || !session) return;
+  if (session._dataSaverAttached) return;
+  session._dataSaverAttached = true;
+
+  try {
+    await context.route('**/*', async (route) => {
+      try {
+        const req = route.request();
+        const type = req.resourceType();
+        const url = req.url() || '';
+
+        // 1. TUYỆT ĐỐI KHÔNG CHẶN ẢNH (Ảnh logo câu hỏi, Captcha, minh hoạ...)
+        if (type === 'image' || isImageUrl(url)) {
+          return route.continue().catch(() => {});
+        }
+
+        // 2. Không chặn tài nguyên thiết yếu (Captcha, Cloudflare Turnstile, Auth)
+        if (isEssentialOfferUrl(url)) {
+          return route.continue().catch(() => {});
+        }
+
+        // 3. Chặn media (video / audio / m3u8 stream)
+        if (type === 'media' || isMediaUrl(url)) {
+          session.blockedMediaCount = (session.blockedMediaCount || 0) + 1;
+          return route.abort('blockedbyclient').catch(() => {});
+        }
+
+        // 4. Chặn các server phân phối video ad và session replay rác bên thứ 3
+        if (isHeavyAdOrTrackerUrl(url)) {
+          session.blockedAdsCount = (session.blockedAdsCount || 0) + 1;
+          return route.abort('blockedbyclient').catch(() => {});
+        }
+
+        return route.continue().catch(() => {});
+      } catch {
+        return route.continue().catch(() => {});
+      }
+    });
+
+    session.addBrowserLog?.({
+      type: 'data_saver_active',
+      detail: 'Đã kích hoạt Chế độ Tiết Kiệm Băng Thông: Tự động chặn Video/Audio & Ad network rác (giữ nguyên hình ảnh).',
+    });
+    console.log(`[DataSaver] Slot ${session.slot || '?'}: Đã kích hoạt Chế độ Tiết Kiệm Băng Thông.`);
+  } catch (err) {
+    console.warn(`[DataSaver] Slot ${session.slot || '?'}: Lỗi gắn route:`, err.message);
+  }
+}
+
 export function getBandwidthSummary() {
   const todayKey = getLocalDateKey();
   const todayStats = bandwidthDailyStats.daily[todayKey] || {
@@ -1516,6 +1719,8 @@ export const proxy711 = {
   passwd: '',
   token: '',
   tokenExpiry: 0,
+  wapiToken: '',
+  wapiTokenExpiry: 0,
   packageGb: 0,
   subuser: '',
   subpass: '',
@@ -1669,6 +1874,8 @@ async function loadProxy711Config() {
     if (d.passwd) proxy711.passwd = d.passwd;
     if (d.token) proxy711.token = d.token;
     if (d.tokenExpiry) proxy711.tokenExpiry = Number(d.tokenExpiry);
+    if (d.wapiToken) proxy711.wapiToken = d.wapiToken;
+    if (d.wapiTokenExpiry) proxy711.wapiTokenExpiry = Number(d.wapiTokenExpiry);
     if (d.packageGb) proxy711.packageGb = Number(d.packageGb);
     if (d.authMode) proxy711.authMode = d.authMode;
     if (d.subuser) proxy711.subuser = d.subuser;
@@ -1712,6 +1919,8 @@ async function saveProxy711Config() {
     passwd: proxy711.passwd || '',
     token: proxy711.token,
     tokenExpiry: proxy711.tokenExpiry,
+    wapiToken: proxy711.wapiToken || '',
+    wapiTokenExpiry: proxy711.wapiTokenExpiry || 0,
     packageGb: proxy711.packageGb || 0,
     authMode: proxy711.authMode || 'subuser',
     subuser: proxy711.subuser || '',
@@ -1754,6 +1963,150 @@ async function ensure711Token() {
     } catch {}
   }
   return null;
+}
+
+export async function fetch711WapiToken(username, passwd) {
+  try {
+    const res = await fetch('https://server.711proxy.com/wapi/token/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, passwd }),
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch {}
+    const rawToken = data?.results?.token || (typeof data?.results === 'string' ? data.results : null) || data?.data?.token;
+    if (typeof rawToken === 'string' && rawToken.length > 0) {
+      proxy711.wapiToken = rawToken;
+      proxy711.wapiTokenExpiry = Date.now() + 3_600_000;
+      await saveProxy711Config();
+      return proxy711.wapiToken;
+    }
+  } catch (err) {
+    console.warn('[711WapiToken] Lỗi lấy WAPI token:', err.message);
+  }
+  return null;
+}
+
+export async function ensure711WapiToken() {
+  if (proxy711.wapiToken && Date.now() < (proxy711.wapiTokenExpiry || 0)) {
+    return proxy711.wapiToken;
+  }
+  if (!proxy711.username || !proxy711.passwd) {
+    await loadProxy711Config();
+  }
+  if (proxy711.username && proxy711.passwd) {
+    return await fetch711WapiToken(proxy711.username, proxy711.passwd);
+  }
+  return null;
+}
+
+/**
+ * Lấy lịch sử tiêu thụ lưu lượng thực tế theo giờ từ API chính thức của 711Proxy (/wapi/consume/chart/).
+ *
+ * @param {object} [options]
+ * @param {number} [options.from] Thời điểm bắt đầu (Unix timestamp, giây)
+ * @param {number} [options.to] Thời điểm kết thúc (Unix timestamp, giây)
+ * @param {string} [options.subuser] Tên sub-user (tuỳ chọn)
+ * @param {number} [options.days=1] Số ngày nếu không truyền from/to
+ * @return {Promise<object>} Dữ liệu chi tiết tiêu hao theo giờ
+ */
+export async function get711ConsumptionChart({ from = null, to = null, subuser = '', days = 1 } = {}) {
+  const wapiToken = await ensure711WapiToken();
+  if (!wapiToken) {
+    throw new Error('Chưa đăng nhập 711proxy hoặc chưa có thông tin tài khoản.');
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  let startSec = from ? Number(from) : (nowSec - Math.max(1, Number(days) || 1) * 86400);
+  let endSec = to ? Number(to) : nowSec;
+
+  const url = new URL('https://server.711proxy.com/wapi/consume/chart/');
+  url.searchParams.set('from', String(startSec));
+  url.searchParams.set('to', String(endSec));
+  if (subuser) {
+    url.searchParams.set('subuser', String(subuser).trim());
+  }
+
+  let res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${wapiToken}` },
+  });
+
+  if (res.status === 401 || res.status === 403) {
+    proxy711.wapiToken = '';
+    proxy711.wapiTokenExpiry = 0;
+    await saveProxy711Config();
+    const freshToken = await ensure711WapiToken();
+    if (freshToken) {
+      res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${freshToken}` },
+      });
+    }
+  }
+
+  const text = await res.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch {}
+
+  if (!res.ok || (data?.code !== 200 && data?.code !== 0)) {
+    throw new Error(data?.message || data?.msg || data?.error || `Lỗi API 711: ${text.slice(0, 120)}`);
+  }
+
+  const rawList = Array.isArray(data.results) ? data.results : [];
+  let totalBytes = 0;
+  let peakBytes = 0;
+  let peakHour = null;
+  let peakPeriod = null;
+
+  const items = rawList.map((entry) => {
+    const bytes = Number(entry.total_traffic_count) || 0;
+    totalBytes += bytes;
+
+    let localTime = entry.period;
+    if (entry.timestamp) {
+      const d = new Date(entry.timestamp * 1000);
+      const nextD = new Date((entry.timestamp + 3600) * 1000);
+      const pad = (n) => String(n).padStart(2, '0');
+      localTime = `${pad(d.getHours())}:00 - ${pad(nextD.getHours())}:00 (${pad(d.getDate())}/${pad(d.getMonth() + 1)})`;
+    }
+
+    if (bytes > peakBytes) {
+      peakBytes = bytes;
+      peakHour = localTime;
+      peakPeriod = entry.period;
+    }
+    const mb = Number((bytes / (1024 ** 2)).toFixed(2));
+    const gb = Number((bytes / (1024 ** 3)).toFixed(3));
+
+    return {
+      period: entry.period,
+      timestamp: entry.timestamp,
+      localTime,
+      bytes,
+      formatted: formatBytes(bytes),
+      mb,
+      gb,
+    };
+  });
+
+  for (const item of items) {
+    item.percent = totalBytes > 0 ? Number(((item.bytes / totalBytes) * 100).toFixed(1)) : 0;
+  }
+
+  items.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  return {
+    ok: true,
+    totalBytes,
+    totalFormatted: formatBytes(totalBytes),
+    totalGb: Number((totalBytes / (1024 ** 3)).toFixed(3)),
+    peakBytes,
+    peakFormatted: formatBytes(peakBytes),
+    peakHour,
+    peakPeriod,
+    activeHoursCount: items.filter((i) => i.bytes > 0).length,
+    items,
+  };
 }
 
 export async function add711IpWhitelist(ip, token = null, retry = true) {
@@ -1959,6 +2312,7 @@ async function autoRefillProxyIfNeeded() {
 }
 
 export async function fetch711Token(username, passwd) {
+  void fetch711WapiToken(username, passwd).catch(() => {});
   for (const endpoint of [
     'https://server.711proxy.com/eapi/token/',
     'https://server.711proxy.com/wapi/token/',
@@ -2770,19 +3124,7 @@ export function buildUsedExitIpList(usageHistory) {
   return [...byIp.values()].sort((left, right) => right.usedAt.localeCompare(left.usedAt));
 }
 
-/**
- * Danh tính ổn định của proxy để tra lịch sử sử dụng.
- *
- * Không tính password vì một số provider xoay password theo phiên.
- *
- * @param {object} proxy Cấu hình proxy đã phân tích.
- * @return {string} Chuỗi danh tính ổn định giữa các lần chạy.
- * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
- * @since 2026-10-15
- */
-function proxyIdentity(proxy) {
-  return JSON.stringify([proxy.server, proxy.username ?? '']);
-}
+
 
 /**
  * Đọc lịch sử proxy đã thử để không dùng lại proxy thành công hoặc thất bại.
@@ -3605,14 +3947,16 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
 
   // Proxy đã dùng không được dùng lại — bấm "Đặt lại hàng đợi" để dùng lại thủ công.
 
-  // Queue là nguồn chính — parse available thành proxy objects, dedup theo server
-  const seenServers = new Set();
+  // Queue là nguồn chính — parse available thành proxy objects, dedup theo identity (server + username/session)
+  const seenProxyKeys = new Set();
   const availableProxies = proxyQueue.available.map((line) => {
     try { return { ...parseProxyLine(line.trim(), 1, proxyType), _queueLine: line }; }
     catch { return null; }
   }).filter((proxy) => {
-    if (!proxy || seenServers.has(proxy.server)) return false;
-    seenServers.add(proxy.server);
+    if (!proxy) return false;
+    const key = getProxyUniqueKey(proxy);
+    if (seenProxyKeys.has(key)) return false;
+    seenProxyKeys.add(key);
     return true;
   });
 
@@ -3733,6 +4077,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
       antiFpCanvas: antiFingerprint.canvas, antiFpClientRects: antiFingerprint.clientRects,
       antiFpWebgl: antiFingerprint.webgl, antiFpWebrtc: antiFingerprint.webrtc,
       useCloakBrowser,
+      dataSaver: Boolean(body.dataSaver !== false),
     };
     if (autoRefill.targetCount < 1) autoRefill.targetCount = targetSuccessCount;
   }
@@ -3857,6 +4202,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
           hideUntilLead,
           screenPreviewOnly,
           useCloakBrowser,
+          dataSaver: body.dataSaver !== false,
         });
         activeSession = openedBrowser.session;
         successfulBrowsers += 1;
@@ -3895,7 +4241,7 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
         return;
       } catch (error) {
         releaseProxyLock(proxy, exitIp);
-        const pKey = proxy?.server || proxy?._queueLine;
+        const pKey = getProxyUniqueKey(proxy);
         if (pKey) {
           multiOfferState.offerUsed.get(offerNumber)?.delete(pKey);
         }
@@ -4037,7 +4383,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
   hideUntilTarget = false, hideUntilLead = false, totalCount = 10, screenPreviewOnly = false,
   deviceProfile = 'windows', browserVersion = '155', antiFingerprint = {}, deleteProfile = null, startProfile, stopProfile,
-  offerUrls = [], threadCount = 1, multiTab = true, useCloakBrowser = false }) {
+  offerUrls = [], threadCount = 1, multiTab = true, useCloakBrowser = false, dataSaver = true }) {
 
   const assignedSlot = slot ?? (tileIndex + 1);
   const screen = await readScreenSize();
@@ -4057,8 +4403,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   const browserWebSocketUrl = await startProfile({
     headless: trueHeadless,
     launchArgs: hideInitialWindow
-      ? ['--window-position=-20000,-20000', '--start-minimized']
-      : ['--window-position=40,60', `--window-size=${tile.width},${tile.height + 100}`],
+      ? ['--window-position=-20000,-20000', '--start-minimized', '--autoplay-policy=user-gesture-required']
+      : ['--window-position=40,60', `--window-size=${tile.width},${tile.height + 100}`, '--autoplay-policy=user-gesture-required'],
   });
   if (!browserWebSocketUrl) throw new Error('AdsPower không trả CDP URL.');
 
@@ -4176,10 +4522,14 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     bytesReceived: 0,
     requestCount: 0,
     bandwidthFormatted: '0 B',
+    dataSaver: Boolean(dataSaver),
     updateBadge: (text) => { session.badgeText = text; },
   };
   activeBrowsers.add(session);
   attachBandwidthTracker(context, session);
+  if (session.dataSaver !== false) {
+    void attachDataSaver(context, session);
+  }
   try { if (session.browser) attachFullHtmlLoggerToContext(session.browser); } catch {}
   try { if (session._cdpBrowser) attachFullHtmlLoggerToBrowser(session._cdpBrowser); } catch {}
 
@@ -4383,6 +4733,9 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   limitOfferTabs(context, session);
   attachBrowserLogger(context, session);
   attachBandwidthTracker(context, session);
+  if (session.dataSaver !== false) {
+    void attachDataSaver(context, session);
+  }
   if (useCloakBrowser) {
     // AdsPower chạy SunBrowser (Chromium thường) — chỉ có lớp Humanize (JS) được gắn,
     // KHÔNG phải nhân Chromium vá C++ của CloakBrowser. Không được ghi "C++ Patched".
@@ -4955,6 +5308,7 @@ async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, as
         totalCount: concurrency,
         screenPreviewOnly,
         useCloakBrowser,
+        dataSaver: body.dataSaver !== false,
       });
 
       results.push({
@@ -5037,49 +5391,51 @@ async function launchUserRequestedBrowsers(requestBody) {
     ? Math.min(maxAliveBrowsers, selectProxies(body.proxyList, body.proxyType ?? 'socks5', '').length)
     : Number(countParam);
 
-  if (activeBrowsers.size > 0) {
-    autoRefill.settings = {
-      proxyList: body.proxyList,
-      proxyType: body.proxyType ?? 'socks5',
-      websiteUrl: body.websiteUrl,
-      websiteUrl2: body.websiteUrl2,
-      websiteUrl3: body.websiteUrl3,
-      websiteUrl4: body.websiteUrl4,
-      offerUrls: body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : undefined),
-      checkDuplicate: body.checkDuplicate !== false,
-      autofillData: body.autofillData,
-      autoSubmitForm: body.autoSubmitForm !== false,
-      enableLeadCheck: body.enableLeadCheck === true,
-      leadCheckApiUrl: body.leadCheckApiUrl,
-      leadCheckCookie: body.leadCheckCookie,
-      leadCheckDatas: body.leadCheckDatas,
-      leadCheckInterval: body.leadCheckInterval,
-      leadCheckMaxAttempts: body.leadCheckMaxAttempts,
-      scriptPath: body.scriptPath ?? '',
-      captchaApiKey: body.captchaApiKey ?? '',
-      completeText: body.completeText ?? '',
-      timeLimit: Math.max(0, Number(body.timeLimit) || 0),
-      delayStart: Math.max(0, Number(body.delayStart) || 0),
-      delayStop: Math.max(0, Number(body.delayStop) || 0),
-      limitRun: Math.max(0, Number(body.limitRun) || 0),
-      antiFpCanvas: Boolean(body.antiFpCanvas),
-      antiFpClientRects: Boolean(body.antiFpClientRects),
-      antiFpWebgl: Boolean(body.antiFpWebgl),
-      antiFpWebrtc: Boolean(body.antiFpWebrtc),
-      hideUntilTarget: Boolean(body.hideUntilTarget ?? body.hideBrowser),
-      hideBrowser: Boolean(body.hideUntilTarget ?? body.hideBrowser),
-      hideUntilLead: Boolean(body.hideUntilLead),
-      runInApp: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
-      screenPreviewOnly: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
-      useCloakBrowser: Boolean(body.useCloakBrowser ?? body.cloakBrowser),
-    };
-    autoRefill.targetCount = Math.min(
-      maxAliveBrowsers,
-      Math.max(autoRefill.targetCount, activeBeforeLaunch + requestedCount, activeBrowsers.size),
-    );
-    autoRefill.message = `Tự bù ${autoRefill.enabled ? 'đang bật' : 'đang tắt'}: ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`;
-    void saveAutoRefillSettings();
-    if (autoRefill.enabled) queueAutomaticRefill();
+  // Luôn lưu cấu hình tự bù khi người dùng bấm Start (kể cả lượt đầu đang thử hoặc chưa kịp mở cửa sổ nào)
+  autoRefill.settings = {
+    proxyList: body.proxyList,
+    proxyType: body.proxyType ?? 'socks5',
+    websiteUrl: body.websiteUrl,
+    websiteUrl2: body.websiteUrl2,
+    websiteUrl3: body.websiteUrl3,
+    websiteUrl4: body.websiteUrl4,
+    offerUrls: body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : undefined),
+    checkDuplicate: body.checkDuplicate !== false,
+    autofillData: body.autofillData,
+    autoSubmitForm: body.autoSubmitForm !== false,
+    enableLeadCheck: body.enableLeadCheck === true,
+    leadCheckApiUrl: body.leadCheckApiUrl,
+    leadCheckCookie: body.leadCheckCookie,
+    leadCheckDatas: body.leadCheckDatas,
+    leadCheckInterval: body.leadCheckInterval,
+    leadCheckMaxAttempts: body.leadCheckMaxAttempts,
+    scriptPath: body.scriptPath ?? '',
+    captchaApiKey: body.captchaApiKey ?? '',
+    completeText: body.completeText ?? '',
+    timeLimit: Math.max(0, Number(body.timeLimit) || 0),
+    delayStart: Math.max(0, Number(body.delayStart) || 0),
+    delayStop: Math.max(0, Number(body.delayStop) || 0),
+    limitRun: Math.max(0, Number(body.limitRun) || 0),
+    antiFpCanvas: Boolean(body.antiFpCanvas),
+    antiFpClientRects: Boolean(body.antiFpClientRects),
+    antiFpWebgl: Boolean(body.antiFpWebgl),
+    antiFpWebrtc: Boolean(body.antiFpWebrtc),
+    hideUntilTarget: Boolean(body.hideUntilTarget ?? body.hideBrowser),
+    hideBrowser: Boolean(body.hideUntilTarget ?? body.hideBrowser),
+    hideUntilLead: Boolean(body.hideUntilLead),
+    runInApp: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
+    screenPreviewOnly: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
+    useCloakBrowser: Boolean(body.useCloakBrowser ?? body.cloakBrowser),
+    dataSaver: Boolean(body.dataSaver !== false),
+  };
+  autoRefill.targetCount = Math.min(
+    maxAliveBrowsers,
+    Math.max(autoRefill.targetCount, activeBeforeLaunch + requestedCount, activeBrowsers.size),
+  );
+  autoRefill.message = `Tự bù ${autoRefill.enabled ? 'đang bật' : 'đang tắt'}: ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`;
+  void saveAutoRefillSettings();
+  if (autoRefill.enabled && activeBrowsers.size < autoRefill.targetCount) {
+    queueAutomaticRefill(2000);
   }
 
   return { ...result, autoRefillEnabled: autoRefill.enabled };
@@ -6296,6 +6652,7 @@ async function openBrowserWithInstalledChrome({
   scriptSteps = null, captchaApiKey = '', completeText = '', timeLimit = 0, delayStop = 0, scriptPath = '',
   antiFingerprint = {}, checkDuplicate = true, hideUntilTarget = false, hideUntilLead = false,
   offerUrls = [], threadCount = 1, multiTab = true, useCloakBrowser = false, screenPreviewOnly = true,
+  dataSaver = true,
 }) {
   // Chromium không mở an toàn profile đã được Chrome phiên bản mới hơn khởi tạo.
   // CloakBrowser có engine riêng; không dùng chung profile Chrome hay seed từ template Chrome.
@@ -6360,9 +6717,26 @@ async function openBrowserWithInstalledChrome({
     : null;
   const effectiveProxyUrl = relay?.proxy?.server || proxy?.server || '';
   const protectWebRtc = Boolean(antiFingerprint?.webrtc);
-  const webrtcPolicy = protectWebRtc
-    ? (effectiveProxyUrl ? 'disable_non_proxied_udp' : 'default_public_interface_only')
+  const webrtcPolicy = (protectWebRtc || effectiveProxyUrl)
+    ? 'disable_non_proxied_udp'
     : 'default';
+  const brandLists = buildBrandLists(effectiveBuild.version, 'Google Chrome');
+  const secChUaHeader = brandLists.brands.map(b => `"${b.brand}";v="${b.version}"`).join(', ');
+  if (dp.uaData) {
+    dp.uaData.brands = brandLists.brands;
+    dp.uaData.fullVersionList = brandLists.fullVersionList;
+  }
+  const clientHintHeaders = {
+    'Sec-CH-UA': secChUaHeader,
+    'Sec-CH-UA-Platform': `"${dp.uaData?.platform || 'Windows'}"`,
+    'Sec-CH-UA-Platform-Version': `"${dp.uaData?.platformVersion || '15.0.0'}"`,
+    'Sec-CH-UA-Mobile': dp.isMobile ? '?1' : '?0',
+    'Sec-CH-UA-Model': `"${dp.uaData?.model || ''}"`,
+    'Sec-CH-UA-Arch': `"${dp.uaData?.architecture || 'x86'}"`,
+    'Sec-CH-UA-Bitness': `"${dp.uaData?.bitness || '64'}"`,
+    'Sec-CH-UA-WoW64': '?0',
+  };
+
   let context;
   let verifiedExitIp = null;
   // Chạy có cửa sổ hay không: "Chạy trong app" BẬT (hoặc ẩn-tới-target/lead) = headless ẩn hoàn toàn,
@@ -6418,6 +6792,7 @@ async function openBrowserWithInstalledChrome({
         ],
         contextOptions: {
           ignoreHTTPSErrors: true,
+          extraHTTPHeaders: clientHintHeaders,
           ...(geolocation && { geolocation, permissions: ['geolocation'] }),
           ...(dp.screen && { screen: { width: dp.screen.width, height: dp.screen.height } }),
           ...(runHeadless && { deviceScaleFactor: dp.deviceScaleFactor ?? 1 }),
@@ -6450,6 +6825,7 @@ async function openBrowserWithInstalledChrome({
         ...(timezoneId && { timezoneId }),
         // Toạ độ theo IP proxy qua API của Playwright: quyền geolocation và vị trí trả về khớp nhau.
         ...(geolocation && { geolocation, permissions: ['geolocation'] }),
+        extraHTTPHeaders: clientHintHeaders,
         args: [
           '--no-first-run',
           '--no-default-browser-check',
@@ -6466,6 +6842,8 @@ async function openBrowserWithInstalledChrome({
           '--disable-ipc-flooding-protection',
           '--disable-breakpad',
           '--disable-component-update',
+          '--disable-background-networking',
+          '--autoplay-policy=user-gesture-required',
           '--disable-domain-reliability',
           '--js-flags=--max-old-space-size=512',
           '--disk-cache-size=1',
@@ -6483,6 +6861,7 @@ async function openBrowserWithInstalledChrome({
     browser: context,
     tileIndex,
     slot: (tileIndex ?? 0) + 1,
+    dataSaver: Boolean(dataSaver),
     chromeVersion: useCloakBrowser ? `CloakBrowser ${effectiveBuild.version}` : build.version,
     // Nhánh CloakBrowser phải lưu profile đã chuẩn hoá (macos/windows) cho khớp engine;
     // nhánh Chrome thường giữ nguyên giá trị thô như trước đây để không đổi hành vi.
@@ -6531,6 +6910,9 @@ async function openBrowserWithInstalledChrome({
   limitOfferTabs(context, session);
   attachBrowserLogger(context, session);
   attachBandwidthTracker(context, session);
+  if (session.dataSaver !== false) {
+    void attachDataSaver(context, session);
+  }
   if (useCloakBrowser) {
     session.addLog({
       type: 'cloakbrowser_active',
@@ -6910,6 +7292,7 @@ async function openBrowserWithInstalledChrome({
           extraPage._offerNumber = (t % (offerUrls.length || 1)) + 1;
           extraPage._assignedRecord = takeNextRecord(recordPool, autofillRecords); // mỗi tab một record riêng
           extraPage._uxOriginTab = true;
+          await applyDeviceOverrides(extraPage).catch(() => {});
           if (tabUrl) {
             void extraPage.goto(tabUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {});
           }
@@ -7055,7 +7438,12 @@ export function closeChromeWhenLastTabCloses(session) {
         if (!page.isClosed()) return;
       }
       // Cửa sổ đang ẩn/headless thì người dùng không bấm X được; tab do app đóng cũng không tính là người dùng đóng.
-      const closedByUser = session.isWindowVisible !== false && !session.trueHeadless && !closedPage?._uxClosedByApp;
+      // Nếu tab đang bị lỗi mạng trình duyệt (chrome-error): coi là lỗi tự động để bù slot mới.
+      const isChromeError = Boolean(
+        closedPage?.url?.()?.startsWith('chrome-error://') ||
+        session.mainPage?.url?.()?.startsWith('chrome-error://')
+      );
+      const closedByUser = session.isWindowVisible !== false && !session.trueHeadless && !closedPage?._uxClosedByApp && !isChromeError;
       if (!closedByUser) {
         const reason = closedPage?._uxClosedByApp || (session.isWindowVisible !== false ? 'trang tự đóng (window.close)' : 'trang tự đóng khi đang chạy ngầm');
         console.log(`[LastTab] Slot ${session.slot ?? '?'}: tab cuối bị đóng tự động (${reason}); tắt trình duyệt và bù slot mới.`);
@@ -8177,11 +8565,14 @@ async function startLocalInterface() {
   await loadProxy711Config();
   await loadProxy711AutoRefillConfig();
   await loadOfferStrategies();
-  await loadAutoRefillSettings();
-  if (autoRefill.settings) {
-    console.log('[AutoRefill] Khôi phục settings sau restart, bắt đầu bù slot...');
-    void queueAutomaticRefill();
-  }
+  // Khi khởi động app: luôn reset về 0 (idle/stopped), không tự động chạy lại
+  autoRefill.enabled = false;
+  autoRefill.settings = null;
+  autoRefill.targetCount = 0;
+  autoRefill.queued = false;
+  autoRefill.stopRequested = false;
+  autoRefill.message = 'Sẵn sàng. Bấm Start để bắt đầu.';
+  void writeFile(autoRefillSettingsPath, '{}', 'utf8').catch(() => {});
   await loadSavedDeviceProfiles();
   await loadPersistedBrowserLogs();
   loadAiConfig();
@@ -8235,6 +8626,47 @@ async function startLocalInterface() {
     if (request.method === 'GET' && request.url === '/favicon.ico') {
       response.writeHead(204);
       response.end();
+      return;
+    }
+
+    if ((request.method === 'GET' || request.method === 'HEAD') && (request.url === '/screen-mini' || request.url === '/mini')) {
+      if (existsSync(userInterfaceMiniPath)) {
+        const miniContent = readFileSync(userInterfaceMiniPath, 'utf8');
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        response.end(request.method === 'HEAD' ? undefined : miniContent);
+        return;
+      }
+      response.writeHead(404); response.end();
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/tunnel') {
+      const url = getTunnelUrl();
+      respondWithJson(response, 200, { ok: true, active: Boolean(url), url: url || null });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/tunnel/start') {
+      const res = await startTunnel(port);
+      respondWithJson(response, res.ok ? 200 : 500, res);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/tunnel/stop') {
+      stopTunnel();
+      respondWithJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/launch-settings') {
+      try {
+        if (existsSync(lastLaunchSettingsPath)) {
+          const raw = JSON.parse(readFileSync(lastLaunchSettingsPath, 'utf8'));
+          respondWithJson(response, 200, { ok: true, settings: raw.settings, savedAt: raw.savedAt });
+          return;
+        }
+      } catch {}
+      respondWithJson(response, 200, { ok: true, settings: null });
       return;
     }
 
@@ -8889,6 +9321,21 @@ async function startLocalInterface() {
       return;
     }
 
+    if (request.method === 'GET' && (request.url === '/711proxy/consumption' || request.url.startsWith('/711proxy/consumption?'))) {
+      const urlObj = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+      const from = urlObj.searchParams.get('from');
+      const to = urlObj.searchParams.get('to');
+      const subuser = urlObj.searchParams.get('subuser') || '';
+      const days = urlObj.searchParams.get('days') || 1;
+      try {
+        const chartData = await get711ConsumptionChart({ from, to, subuser, days });
+        respondWithJson(response, 200, chartData);
+      } catch (err) {
+        respondWithJson(response, 500, { ok: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.method === 'POST' && request.url === '/711proxy/package') {
       try {
         const body = JSON.parse(await readRequestBody(request));
@@ -8952,7 +9399,7 @@ async function startLocalInterface() {
 
     if (request.method === 'POST' && request.url === '/711proxy/generate') {
       const body = JSON.parse(await readRequestBody(request));
-      const authMode = body.authMode || proxy711.authMode || ((body.subuser || proxy711.subuser) ? 'subuser' : 'api');
+      const authMode = body.authMode || proxy711.authMode || ((body.subuser || (proxy711.subuser && !proxy711.subuser.includes('='))) ? 'subuser' : 'api');
       const count = Math.min(Math.max(parseInt(body.count) || 50, 1), 200);
       const region = String(body.region || proxy711AutoRefill.region || 'US').trim().toUpperCase();
       const sessTime = Math.max(parseInt(body.sessTime) || 20, 1);
@@ -8960,7 +9407,8 @@ async function startLocalInterface() {
 
       try {
         let proxyLines = [];
-        if (authMode === 'subuser' || body.subuser || proxy711.subuser) {
+        const isSubuserMode = authMode === 'subuser' || (authMode !== 'api' && Boolean(body.subuser || (proxy711.subuser && !proxy711.subuser.includes('='))));
+        if (isSubuserMode) {
           const subuser = String(body.subuser || proxy711.subuser || '').trim();
           const subpass = String(body.subpass || proxy711.subpass || '').trim();
           const gateway = String(body.gateway || `${proxy711.gatewayHost}:${proxy711.gatewayPort}`).trim();
@@ -10393,6 +10841,12 @@ async function startLocalInterface() {
     const interfaceUrl = `http://127.0.0.1:${port}`;
     console.log(`AutoLeadPC Mac [Bản ${instanceId}] đang chạy tại ${interfaceUrl}`);
     if (listenHost === '0.0.0.0') console.log(`[Hub] Lắng nghe trên tất cả giao diện mạng — agent có thể kết nối qua IP LAN:${port}`);
+    startTunnel(port).then((res) => {
+      if (res?.ok && res.url) {
+        console.log(`[Hub] Tunnel đã sẵn sàng (${res.url}), đồng bộ menu bot Telegram...`);
+        registerBotCommands().catch(() => {});
+      }
+    }).catch(() => {});
     void startTelegramBot();
     // Tự xoá log mỗi 10 phút (log trình duyệt, file HTML, file chụp HTML offer-html-full).
     setInterval(() => void purgeLogsPeriodically(), LOG_PURGE_INTERVAL_MS);

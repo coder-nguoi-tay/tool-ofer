@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         webView.uiDelegate = self
         self.webView = webView
 
-        let windowWidth: CGFloat = 980
+        let windowWidth: CGFloat = 1240
         let windowHeight: CGFloat = 740
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight),

@@ -40,6 +40,10 @@ const TEST_FILES = [
   'toffers-lead.test.mjs',
   'toffers-duplicate-close.test.mjs',
   'proxy711-balance.test.mjs',
+  'data-saver.test.mjs',
+  'tgbot-features.test.mjs',
+  'auto-refill-proxy-fix.test.mjs',
+  'tg-miniapp.test.mjs',
 ];
 
 const rootDir = dirname(fileURLToPath(import.meta.url));

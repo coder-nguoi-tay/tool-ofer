@@ -1,0 +1,2251 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>AutoLeadPC Control Mini</title>
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #131d31;
+      --card-border: #22324e;
+      --primary: #38bdf8;
+      --primary-hover: #0ea5e9;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-family);
+      font-size: 13px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Top App Bar */
+    .top-bar {
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 14px;
+      color: #fff;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: var(--success);
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 6px var(--success);
+    }
+
+    .status-dot.stopped { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+    .status-dot.paused { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+
+    /* Main Tab Content Container */
+    .tab-content {
+      flex: 1;
+      overflow: hidden;
+      display: none;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    /* Scrollable page content for Run, Resources, Stats */
+    .scroll-page {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    }
+
+    .card-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #1e293b;
+      padding-bottom: 6px;
+      margin-bottom: 2px;
+    }
+
+    /* Form Inputs */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .form-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .input-text, .input-select, .input-textarea {
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      padding: 7px 10px;
+      outline: none;
+      user-select: text;
+      width: 100%;
+    }
+
+    .input-text:focus, .input-select:focus, .input-textarea:focus {
+      border-color: var(--primary);
+    }
+
+    .input-textarea {
+      font-family: monospace;
+      font-size: 11px;
+      resize: vertical;
+      min-height: 70px;
+    }
+
+    .pills-row {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+    .pills-row::-webkit-scrollbar { display: none; }
+
+    .pill-btn {
+      flex-shrink: 0;
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .pill-btn.active {
+      background: var(--primary);
+      color: #000;
+      border-color: var(--primary);
+      font-weight: 700;
+    }
+
+    /* Option Pills Grid for Execution Options & Modes */
+    .option-pills-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .option-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 7px 9px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .option-pill input[type="checkbox"], .option-pill input[type="radio"] {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--primary);
+      flex-shrink: 0;
+      margin: 0;
+    }
+
+    .option-pill.active {
+      background: rgba(56, 189, 248, 0.12);
+      border-color: #38bdf8;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .option-pill-icon {
+      font-size: 13px;
+    }
+
+    /* Action Buttons */
+    .btn {
+      background: #1e293b;
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 9px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn:active { transform: scale(0.98); }
+
+    .btn-primary { background: var(--primary); color: #000; border-color: var(--primary); }
+    .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+    .btn-warning { background: var(--warning); color: #000; border-color: var(--warning); }
+    .btn-danger  { background: var(--danger);  color: #fff; border-color: var(--danger); }
+    .btn:disabled, .btn[disabled] {
+      opacity: 0.45 !important;
+      cursor: not-allowed !important;
+      filter: grayscale(40%) !important;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+
+    /* TAB 1: SCREEN VIEW & CONTROLS */
+    .slot-bar {
+      display: flex;
+      gap: 6px;
+      padding: 6px 8px;
+      background: #090d16;
+      border-bottom: 1px solid var(--card-border);
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+    .slot-bar::-webkit-scrollbar { display: none; }
+
+    /* Browser Tabs Bar inside Slot */
+    .browser-tabs-bar {
+      display: flex;
+      gap: 4px;
+      padding: 4px 8px;
+      background: #060910;
+      border-bottom: 1px solid #1e293b;
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+    .browser-tabs-bar::-webkit-scrollbar { display: none; }
+
+    .browser-tab-chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .browser-tab-chip.active {
+      background: #0284c7;
+      color: #fff;
+      border-color: #38bdf8;
+    }
+    .browser-tab-close {
+      color: rgba(255,255,255,0.6);
+      font-weight: bold;
+      margin-left: 2px;
+      font-size: 11px;
+    }
+    .browser-tab-close:hover { color: #f87171; }
+    .browser-tab-new {
+      background: #1e293b;
+      border: 1px dashed #475569;
+      color: #38bdf8;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .info-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 10px;
+      background: #111827;
+      font-size: 11px;
+      color: var(--text-muted);
+      border-bottom: 1px solid #1f2937;
+      flex-shrink: 0;
+    }
+
+    .url-text {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 65%;
+      color: #38bdf8;
+    }
+
+    .viewport-area {
+      flex: 1;
+      position: relative;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    #streamCanvas {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .canvas-overlay-msg {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(15, 23, 42, 0.9);
+      padding: 12px 20px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .touch-ripple {
+      position: absolute;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.5);
+      border: 2px solid #38bdf8;
+      transform: translate(-50%, -50%) scale(0.2);
+      animation: ripple 0.35s cubic-bezier(0, 0, 0.2, 1) forwards;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    @keyframes ripple {
+      to { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
+    }
+
+    .screen-controls {
+      background: var(--card-bg);
+      border-top: 1px solid var(--card-border);
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .key-quick-row {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .key-quick-row::-webkit-scrollbar { display: none; }
+
+    .key-btn {
+      flex: 1;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      border-radius: 5px;
+      padding: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-align: center;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .key-btn:active { background: var(--primary); color: #000; }
+
+    /* Select Modal Bottom Sheet */
+    .select-modal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 999;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+    .select-modal-backdrop {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+    }
+    .select-modal-content {
+      position: relative;
+      background: #0f172a;
+      border-top: 1px solid #334155;
+      border-radius: 14px 14px 0 0;
+      max-height: 50vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+      animation: slideUp 0.2s ease-out;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+    .select-modal-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .select-modal-options {
+      overflow-y: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .select-opt-item {
+      padding: 10px 12px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #f1f5f9;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .select-opt-item.selected {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      font-weight: 700;
+    }
+
+    /* Bottom Navigation Bar */
+    .bottom-nav {
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      height: 52px;
+      flex-shrink: 0;
+      z-index: 40;
+    }
+
+    .nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 600;
+      gap: 2px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .nav-item.active {
+      color: var(--primary);
+      text-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+    }
+
+    .nav-icon {
+      font-size: 17px;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .stat-card {
+      background: #131d31;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .stat-val {
+      font-size: 15px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-top: 3px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Log Box */
+    .log-box {
+      background: #000;
+      border: 1px solid #1e293b;
+      border-radius: 6px;
+      padding: 8px;
+      font-family: monospace;
+      font-size: 10.5px;
+      max-height: 180px;
+      overflow-y: auto;
+      color: #38bdf8;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      user-select: text;
+    }
+
+    /* Toast Notification */
+    .toast-msg {
+      position: fixed;
+      top: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid var(--primary);
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      z-index: 1000;
+      pointer-events: none;
+      animation: fadeInOut 2.5s ease forwards;
+    }
+
+    @keyframes fadeInOut {
+      0% { opacity: 0; transform: translate(-50%, -10px); }
+      15% { opacity: 1; transform: translate(-50%, 0); }
+      80% { opacity: 1; transform: translate(-50%, 0); }
+      100% { opacity: 0; transform: translate(-50%, -10px); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top App Bar -->
+  <div class="top-bar">
+    <div class="brand">
+      <span>⚡ AutoLeadPC</span>
+      <span id="topStatusBadge" class="status-badge"><span id="topStatusDot" class="status-dot"></span> <span id="topStatusText">0/0 Luồng</span></span>
+    </div>
+    <div style="display:flex; align-items:center; gap:6px;">
+      <span id="topPointBadge" class="status-badge" style="background:rgba(56, 189, 248, 0.15); border-color:rgba(56, 189, 248, 0.4); color:#38bdf8; font-weight:700;">💎 <span id="topPointVal">-- pt</span></span>
+      <span id="fpsBadge" class="status-badge" style="background:#1e293b; border-color:#334155;">0 FPS</span>
+      <button id="btnTopReload" class="btn" style="padding:4px 8px; font-size:11px;">🔄</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- TAB 1: 📺 MÀN HÌNH LIVE (Screen View & Interaction)                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-screen" class="tab-content active">
+    <!-- Slot Selector Strip -->
+    <div id="slotBar" class="slot-bar">
+      <div class="pill-btn active">Đang tìm slot...</div>
+    </div>
+
+    <!-- Browser Tabs Strip for Current Slot -->
+    <div id="browserTabsBar" class="browser-tabs-bar" style="display:none;"></div>
+
+    <!-- URL & IP Info Strip -->
+    <div class="info-strip">
+      <span id="urlDisplay" class="url-text">Đang kết nối...</span>
+      <span id="ipDisplay" style="color:#a78bfa; font-weight:600;">IP: ...</span>
+    </div>
+
+    <!-- Screen Canvas Viewport -->
+    <div id="viewport" class="viewport-area">
+      <canvas id="streamCanvas"></canvas>
+      <div id="canvasMsg" class="canvas-overlay-msg">
+        <span>🟢 Đang tải luồng màn hình...</span>
+      </div>
+    </div>
+
+    <!-- Typing & Virtual Controls -->
+    <div class="screen-controls">
+      <div style="display:flex; gap:6px;">
+        <input id="textInput" class="input-text" type="text" placeholder="Nhập chữ để gõ vào Chrome..." autocomplete="off">
+        <button id="btnSendText" class="btn btn-primary" style="padding:6px 12px;">Gửi</button>
+      </div>
+
+      <div class="key-quick-row">
+        <button class="key-btn" data-key="Enter">⏎ Enter</button>
+        <button class="key-btn" data-key="Tab">⇥ Tab</button>
+        <button class="key-btn" data-key="Backspace">⌫ Xóa</button>
+        <button class="key-btn" data-key="Space">␣ Cách</button>
+        <button class="key-btn" id="btnScrollDown" style="background:#0f172a; border-color:#38bdf8; color:#38bdf8;">📜 Cuộn</button>
+        <button class="key-btn" id="btnPasteText">📋 Dán</button>
+        <button class="key-btn" id="btnSelectAll">🔤 Chọn hết</button>
+        <button class="key-btn" id="btnBack">⬅ Back</button>
+        <button class="key-btn" id="btnReloadSlot">🔄 Reload</button>
+        <button class="key-btn" id="btnCloseSlot" style="background:#450a0a; color:#f87171;">🛑 Tắt</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Picker cho thẻ <select> trên màn hình -->
+  <div id="selectModal" class="select-modal" style="display:none;">
+    <div class="select-modal-backdrop" onclick="closeSelectModal()"></div>
+    <div class="select-modal-content">
+      <div class="select-modal-header">
+        <span style="font-weight:700; color:#f8fafc; font-size:13px;">📋 Chọn mục:</span>
+        <button class="btn" style="padding:2px 8px; font-size:11px;" onclick="closeSelectModal()">✕ Đóng</button>
+      </div>
+      <div id="selectModalOptions" class="select-modal-options"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- TAB 2: 🚀 VẬN HÀNH (Cấu hình & Bắt đầu / Tạm dừng / Dừng)                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-run" class="tab-content">
+    <div class="scroll-page">
+      <!-- Top Action Controls (Start / Stop) -->
+      <div class="card" style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1px solid #334155;">
+        <button id="btnStartLaunch" class="btn btn-success" style="padding:12px; font-size:14px; font-weight:700; box-shadow:0 2px 8px rgba(34,197,94,0.3);">
+          ▶ BẮT ĐẦU CHẠY (START)
+        </button>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button id="btnPauseRefill" class="btn btn-warning" style="flex:1; font-weight:600;">
+            ⏸ Tạm dừng bù
+          </button>
+          <button id="btnStopAll" class="btn btn-danger" style="flex:1; font-weight:600;">
+            🛑 Dừng tất cả
+          </button>
+        </div>
+      </div>
+
+      <!-- Card: Chọn Trình duyệt (AdsPower SunBrowser / Chrome) -->
+      <div class="card">
+        <div class="card-title">
+          <span>🌐 Trình duyệt thực thi</span>
+          <span id="badgeBrowserMode" style="color:#22c55e; font-weight:700; font-size:11px;">🛡️ AdsPower SunBrowser</span>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+          <label class="option-pill active" id="pillBrowserAdsPower" onclick="setBrowserMode('AdsPower')">
+            <input type="radio" name="miniBrowserChoice" id="radioAdsPower" value="AdsPower" checked style="display:none;">
+            <span>🛡️ AdsPower SunBrowser</span>
+          </label>
+          <label class="option-pill" id="pillBrowserChrome" onclick="setBrowserMode('Chrome')">
+            <input type="radio" name="miniBrowserChoice" id="radioChrome" value="Chrome" style="display:none;">
+            <span>🌐 Google Chrome</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Card: Cấu hình Offer & Website -->
+      <div class="card">
+        <div class="card-title">
+          <span>🎯 Cấu hình Chiến dịch / Offer</span>
+          <span style="font-size:11px; color:var(--text-muted);">Đồng bộ máy Mac</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Chọn nhanh Offer đã lưu:</label>
+          <select id="selSavedOffer" class="input-select">
+            <option value="">-- Chọn Offer mẫu --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tên Offer (dùng khi lưu):</label>
+          <input id="inputOfferName" class="input-text" type="text" placeholder="Tên chiến dịch / Offer...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Link Offer 1 (chính):</label>
+          <input id="inputWebsiteUrl" class="input-text" type="url" placeholder="https://..." value="https://toffers.top/click/?key=33335&offer_id=2539&aff_id=qg39v">
+        </div>
+
+        <!-- Mở rộng: Đa Link Offer 2, 3, 4 cho Multi-tab -->
+        <details id="detailsMultiLinks" style="background:#0f172a; border:1px solid #334155; border-radius:6px; padding:6px 8px; margin-top:4px;">
+          <summary style="font-size:11px; font-weight:600; color:#38bdf8; cursor:pointer;">
+            ➕ Link Offer 2, 3, 4 (chạy đa tab song song)
+          </summary>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+            <div>
+              <span style="font-size:10px; color:var(--text-muted);">Link Offer 2:</span>
+              <input id="inputWebsiteUrl2" class="input-text" type="url" placeholder="https://...">
+            </div>
+            <div>
+              <span style="font-size:10px; color:var(--text-muted);">Link Offer 3:</span>
+              <input id="inputWebsiteUrl3" class="input-text" type="url" placeholder="https://...">
+            </div>
+            <div>
+              <span style="font-size:10px; color:var(--text-muted);">Link Offer 4:</span>
+              <input id="inputWebsiteUrl4" class="input-text" type="url" placeholder="https://...">
+            </div>
+          </div>
+        </details>
+
+        <!-- Nút quản lý Offer: Lưu / Thêm mới / Xoá -->
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button id="btnSaveOffer" class="btn btn-primary" style="flex:2; font-size:11px;">💾 Lưu Offer vào máy</button>
+          <button id="btnNewOffer" class="btn" style="flex:1; font-size:11px;">➕ Mới</button>
+          <button id="btnDeleteOffer" class="btn btn-danger" style="flex:1; font-size:11px;">🗑️ Xóa</button>
+        </div>
+      </div>
+
+      <!-- Card: Số luồng & Giới hạn -->
+      <div class="card">
+        <div class="card-title">
+          <span>⚡ Số luồng & Giới hạn</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Chọn số luồng chạy cùng lúc:</label>
+          <div id="threadsPills" class="pills-row">
+            <button class="pill-btn" data-thread="1">1</button>
+            <button class="pill-btn" data-thread="2">2</button>
+            <button class="pill-btn active" data-thread="3">3</button>
+            <button class="pill-btn" data-thread="5">5</button>
+            <button class="pill-btn" data-thread="8">8</button>
+            <button class="pill-btn" data-thread="10">10</button>
+            <button class="pill-btn" data-thread="15">15</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+            <span style="font-size:11px; color:var(--text-muted);">Tùy chỉnh:</span>
+            <input id="inputThreadCount" class="input-text" type="number" min="1" max="30" value="3" style="width:80px; text-align:center;">
+            <span style="font-size:11px; color:var(--text-muted);">luồng</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Giới hạn số Leads hoàn thành (0 = Không giới hạn):</label>
+          <input id="inputLimitRun" class="input-text" type="number" min="0" value="0">
+        </div>
+      </div>
+
+      <!-- Card: Cài đặt Thời gian & Delay nâng cao -->
+      <details style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; margin-bottom:2px;">
+        <summary style="font-size:12px; font-weight:700; color:#f8fafc; cursor:pointer;">
+          ⚙️ Thời gian, Delay & Nhận diện Lead (Tùy chọn)
+        </summary>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+            <div>
+              <label class="form-label">Thời gian tối đa (giây):</label>
+              <input id="inputTimeLimit" class="input-text" type="number" min="0" value="30">
+            </div>
+            <div>
+              <label class="form-label">Complete Text:</label>
+              <input id="inputCompleteText" class="input-text" type="text" placeholder="Text hoàn thành...">
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+            <div>
+              <label class="form-label">Delay Bắt đầu (s):</label>
+              <input id="inputDelayStart" class="input-text" type="number" min="0" value="1">
+            </div>
+            <div>
+              <label class="form-label">Delay Kết thúc (s):</label>
+              <input id="inputDelayStop" class="input-text" type="number" min="0" value="1">
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Card: Tuỳ chọn thực thi & Chế độ chạy ngầm -->
+      <div class="card">
+        <div class="card-title">
+          <span>⚡ Tuỳ chọn thực thi & Chế độ ngầm</span>
+          <span style="font-size:10.5px; color:var(--text-muted);">Bấm để bật/tắt</span>
+        </div>
+
+        <div class="option-pills-grid">
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">📺</span> Chạy trong app</span>
+          </label>
+
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxMultiTab" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">📑</span> Đa luồng đa tab</span>
+          </label>
+
+          <label class="option-pill">
+            <input type="checkbox" id="cbxCloakBrowser" onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">🥷</span> CloakBrowser</span>
+          </label>
+
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxDataSaver" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">⚡</span> Tiết kiệm data</span>
+          </label>
+
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxCheckDuplicateIP" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">🛡️</span> Check trùng IP</span>
+          </label>
+
+          <label class="option-pill">
+            <input type="checkbox" id="cbxHideUntilTarget" onchange="if(this.checked){document.getElementById('cbxHideUntilLead').checked=false;} syncOptionPills()">
+            <span><span class="option-pill-icon">🌐</span> Ẩn đến trang đích</span>
+          </label>
+
+          <label class="option-pill">
+            <input type="checkbox" id="cbxHideUntilLead" onchange="if(this.checked){document.getElementById('cbxHideUntilTarget').checked=false; document.getElementById('cbxCheckLead').checked=true;} syncOptionPills()">
+            <span><span class="option-pill-icon">🎯</span> Chỉ hiện có Lead</span>
+          </label>
+
+          <label class="option-pill">
+            <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">⏱️</span> Check Lead (20s)</span>
+          </label>
+
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxAiAssist" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">🤖</span> AI Assist</span>
+          </label>
+
+          <label class="option-pill" style="display:none;">
+            <input type="checkbox" id="cbxRRS" onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">💾</span> Save RRS</span>
+          </label>
+
+          <label class="option-pill active">
+            <input id="chkAutoRefill" type="checkbox" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">🔄</span> Tự bù luồng</span>
+          </label>
+
+          <label class="option-pill active">
+            <input id="cbxAutoSubmit" type="checkbox" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">📝</span> Tự submit form</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Card: Hệ điều hành giả lập (Platforms) -->
+      <details style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; margin-bottom:12px;">
+        <summary style="font-size:12px; font-weight:700; color:#f8fafc; cursor:pointer;">
+          💻 Hệ điều hành giả lập (Windows, macOS, Linux...)
+        </summary>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-top:8px;">
+          <label class="option-pill active">
+            <input type="checkbox" id="chkWindows" checked onchange="syncOptionPills()">
+            <span>🪟 Windows</span>
+          </label>
+          <label class="option-pill active">
+            <input type="checkbox" id="chkMac" checked onchange="syncOptionPills()">
+            <span>🍎 macOS</span>
+          </label>
+          <label class="option-pill active">
+            <input type="checkbox" id="chkLinux" checked onchange="syncOptionPills()">
+            <span>🐧 Linux</span>
+          </label>
+          <label class="option-pill">
+            <input type="checkbox" id="chkAndroid" onchange="syncOptionPills()">
+            <span>🤖 Android</span>
+          </label>
+          <label class="option-pill">
+            <input type="checkbox" id="chkIphone" onchange="syncOptionPills()">
+            <span>📱 iPhone</span>
+          </label>
+          <label class="option-pill">
+            <input type="checkbox" id="chkIpad" onchange="syncOptionPills()">
+            <span>📟 iPad</span>
+          </label>
+        </div>
+      </details>
+
+      <!-- Bottom Utilities -->
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+        <button id="btnResetLeadCount" class="btn" style="color:#38bdf8; font-size:11.5px;">
+          🔄 Reset bộ đếm Leads về 0
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- TAB 3: 📦 TÀI NGUYÊN (711Proxy, Autofill, Proxy Queue, Email Queue)        -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-resources" class="tab-content">
+    <div class="scroll-page">
+      <!-- 711Proxy Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🌐 711Proxy (Web API)</span>
+          <span id="badge711Balance" style="color:#22c55e; font-weight:700;">-- GB</span>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between;">
+          <span>Gói: <b id="text711Package" style="color:#fff;">--</b></span>
+          <span>Đã dùng: <b id="text711Used" style="color:#f59e0b;">--</b></span>
+          <span>Còn lại: <b id="text711Remaining" style="color:#22c55e;">--</b></span>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:4px;">
+          <button class="btn btn-primary" style="flex:1; font-size:12px;" onclick="buy711Proxies(20)">🛒 Mua 20</button>
+          <button class="btn btn-primary" style="flex:1; font-size:12px;" onclick="buy711Proxies(50)">🛒 Mua 50</button>
+          <button class="btn btn-primary" style="flex:1; font-size:12px;" onclick="buy711Proxies(100)">🛒 Mua 100</button>
+        </div>
+      </div>
+
+      <!-- Autofill Queue Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>📝 Hồ sơ Autofill (Tên, Địa chỉ, SĐT)</span>
+          <span id="badgeAutofillCount" style="color:#38bdf8; font-weight:700;">--</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+          <span>Khả dụng: <b id="textAutofillAvail" style="color:#22c55e;">--</b></span>
+          <span>Đã dùng: <b id="textAutofillUsed" style="color:#f59e0b;">--</b></span>
+        </div>
+        <button id="btnResetAutofill" class="btn" style="width:100%; font-size:11px; color:#38bdf8;">
+          🔄 Đặt lại hồ sơ đã dùng về hàng đợi
+        </button>
+      </div>
+
+      <!-- Proxy Queue Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🔀 Hàng đợi Proxy</span>
+          <span style="font-size:11px; color:var(--text-muted);">
+            Sẵn sàng: <b id="textProxyAvail" style="color:#38bdf8;">0</b> | Đã dùng: <b id="textProxyUsed" style="color:#94a3b8;">0</b>
+          </span>
+        </div>
+        <textarea id="taProxyInput" class="input-textarea" placeholder="Nhập proxy (mỗi dòng 1 proxy):&#10;ip:port:user:pass hoặc socks5://..."></textarea>
+        <div style="display:flex; gap:6px;">
+          <button id="btnImportProxy" class="btn btn-primary" style="flex:2; font-size:12px;">📥 Nạp thêm Proxy</button>
+          <button id="btnClearProxy" class="btn btn-danger" style="flex:1; font-size:12px;">🗑️ Xóa</button>
+        </div>
+      </div>
+
+      <!-- Email Queue Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>📧 Hàng đợi Email & Form</span>
+          <span style="font-size:11px; color:var(--text-muted);">
+            Sẵn sàng: <b id="textEmailAvail" style="color:#22c55e;">0</b> | Đã dùng: <b id="textEmailUsed" style="color:#94a3b8;">0</b>
+          </span>
+        </div>
+        <textarea id="taEmailInput" class="input-textarea" placeholder="Nhập danh sách email (mỗi dòng 1 email)..."></textarea>
+        <div style="display:flex; gap:6px;">
+          <button id="btnImportEmail" class="btn btn-primary" style="flex:2; font-size:12px;">📥 Nạp Email</button>
+          <button id="btnResetEmail" class="btn" style="flex:1; font-size:12px;">🔄 Đặt lại</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- TAB 4: 📊 THỐNG KÊ & LOGS (Stats, Active Slots, Console)                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-stats" class="tab-content">
+    <div class="scroll-page">
+      <!-- Toffers Point Highlight Card -->
+      <div class="card" style="background: linear-gradient(135deg, rgba(2, 132, 199, 0.25) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1px solid #0284c7; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.15);">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <div>
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px;">💎 Tổng Point Toffers.top</div>
+            <div id="statTotalPointBig" style="font-size:26px; font-weight:800; color:#fff; margin-top:2px;">-- pt</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:11px; font-weight:600; color:#94a3b8;">🎯 Leads ghi nhận</div>
+            <div id="statToffersLeadsCount" style="font-size:20px; font-weight:700; color:#22c55e; margin-top:2px;">-- leads</div>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:10px; color:#64748b; border-top:1px solid rgba(56, 189, 248, 0.2); padding-top:6px;">
+          <span id="textToffersUpdated">Cập nhật: --</span>
+          <button id="btnRefreshToffers" class="btn" style="padding:2px 8px; font-size:10px; background:#0284c7; color:#fff; border:none;" onclick="pollToffersOverview(true)">🔄 Làm mới Point</button>
+        </div>
+      </div>
+
+      <!-- Stats Summary -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Số luồng hoạt động</div>
+          <div id="statThreads" class="stat-val" style="color:#38bdf8;">0 / 0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Leads hoàn thành</div>
+          <div id="statLeads" class="stat-val" style="color:#22c55e;">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Băng thông hôm nay</div>
+          <div id="statBw" class="stat-val" style="color:#f59e0b;">0 B</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tỷ lệ Lead (CR)</div>
+          <div id="statLeadRate" class="stat-val" style="color:#a78bfa;">0%</div>
+        </div>
+      </div>
+
+      <!-- Window Controls Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🪟 Điều khiển Cửa sổ trên Mac</span>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button id="btnHideAllBrowsers" class="btn" style="flex:1; font-size:11px;">👁️ Thu nhỏ / Ẩn ngầm</button>
+          <button id="btnShowAllBrowsers" class="btn" style="flex:1; font-size:11px;">🪟 Hiện cửa sổ lên</button>
+        </div>
+      </div>
+
+      <!-- Active Slots Breakdown -->
+      <div class="card">
+        <div class="card-title">
+          <span>🟢 Luồng trình duyệt đang chạy</span>
+          <span id="textSlotCount" style="color:#38bdf8;">0 slot</span>
+        </div>
+        <div id="activeSlotsList" style="display:flex; flex-direction:column; gap:6px;">
+          <span style="font-size:12px; color:var(--text-muted);">Hiện không có slot nào đang chạy.</span>
+        </div>
+      </div>
+
+      <!-- Recent Toffers Leads Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🎯 Danh sách Leads Toffers gần nhất</span>
+          <span id="badgeLeadListCount" style="color:#22c55e; font-weight:700; font-size:11px;">0 lead</span>
+        </div>
+        <div id="toffersLeadsContainer" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;">
+          <div style="color:#64748b; font-size:11px;">Đang tải danh sách leads...</div>
+        </div>
+      </div>
+
+      <!-- Live Log Terminal -->
+      <div class="card">
+        <div class="card-title">
+          <span>📜 Nhật ký hoạt động (Logs)</span>
+          <button id="btnClearLogs" class="btn" style="padding:2px 8px; font-size:10px;">Xóa log</button>
+        </div>
+        <div id="logBox" class="log-box">
+          <div style="color:#64748b;">Đang tải nhật ký...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- BOTTOM NAVIGATION (4 TABS)                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div class="bottom-nav">
+    <div class="nav-item active" data-tab="tab-screen">
+      <span class="nav-icon">📺</span>
+      <span>Màn hình</span>
+    </div>
+    <div class="nav-item" data-tab="tab-run">
+      <span class="nav-icon">🚀</span>
+      <span>Vận hành</span>
+    </div>
+    <div class="nav-item" data-tab="tab-resources">
+      <span class="nav-icon">📦</span>
+      <span>Tài nguyên</span>
+    </div>
+    <div class="nav-item" data-tab="tab-stats">
+      <span class="nav-icon">📊</span>
+      <span>Thống kê</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- JAVASCRIPT LOGIC                                                            -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <script>
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      try { tg.setHeaderColor('#0f172a'); } catch (e) {}
+      try { tg.setBackgroundColor('#0b0f19'); } catch (e) {}
+    }
+
+    // Biến trạng thái toàn cục
+    let currentSlot = 1;
+    let eventSource = null;
+    let canvasNaturalWidth = 1280;
+    let canvasNaturalHeight = 800;
+    let fpsCount = 0;
+    let activeSessions = [];
+    let savedOffers = [];
+    let isRendering = false;
+    let pendingFrame = null;
+    let currentBrowserMode = 'AdsPower'; // 'AdsPower' hoặc 'Chrome'
+    let currentSlotTabs = [];
+
+    // DOM Elements
+    const canvas = document.getElementById('streamCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const viewport = document.getElementById('viewport');
+    const canvasMsg = document.getElementById('canvasMsg');
+    const slotBar = document.getElementById('slotBar');
+    const browserTabsBar = document.getElementById('browserTabsBar');
+    const urlDisplay = document.getElementById('urlDisplay');
+    const ipDisplay = document.getElementById('ipDisplay');
+    const fpsBadge = document.getElementById('fpsBadge');
+    const textInput = document.getElementById('textInput');
+    const inputThreadCount = document.getElementById('inputThreadCount');
+    const selectModal = document.getElementById('selectModal');
+    const selectModalOptions = document.getElementById('selectModalOptions');
+
+    // Chuyển đổi tab Bottom Navigation
+    document.querySelectorAll('.nav-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const tabId = item.dataset.tab;
+        document.querySelectorAll('.nav-item').forEach((i) => i.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach((t) => t.classList.remove('active'));
+        item.classList.add('active');
+        document.getElementById(tabId).classList.add('active');
+        try { tg?.HapticFeedback?.selectionChanged(); } catch (e) {}
+
+        if (tabId === 'tab-screen') {
+          if (!eventSource && activeSessions.length > 0) startStream(currentSlot);
+        } else if (tabId === 'tab-resources') {
+          pollResources();
+        } else if (tabId === 'tab-stats') {
+          pollLogs();
+          pollToffersOverview();
+        }
+      });
+    });
+
+    // Toast message helper
+    function showToast(msg) {
+      const existing = document.querySelector('.toast-msg');
+      if (existing) existing.remove();
+      const el = document.createElement('div');
+      el.className = 'toast-msg';
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 2600);
+    }
+
+    // ─── TAB 1: STREAM & SCREEN CONTROL ─────────────────────────────────────────
+    function startStream(slot) {
+      currentSlot = slot;
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+
+      canvasMsg.style.display = 'flex';
+      canvasMsg.innerHTML = `<span>🟢 Đang kết nối Slot ${slot}...</span>`;
+      urlDisplay.textContent = 'Đang tải stream...';
+
+      const streamUrl = `/screen/stream/${slot}?t=${Date.now()}`;
+      eventSource = new EventSource(streamUrl);
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.frame) {
+            canvasMsg.style.display = 'none';
+            pendingFrame = data.frame;
+            if (!isRendering) requestAnimationFrame(renderNextFrame);
+          }
+          if (data.metadata) {
+            if (data.metadata.deviceWidth) canvasNaturalWidth = data.metadata.deviceWidth;
+            if (data.metadata.deviceHeight) canvasNaturalHeight = data.metadata.deviceHeight;
+          }
+        } catch (err) {}
+      };
+
+      eventSource.onerror = () => {
+        canvasMsg.style.display = 'flex';
+        canvasMsg.innerHTML = `<span>⚠️ Mất kết nối Slot ${slot}. Đang thử lại...</span>`;
+      };
+
+      const btnClose = document.getElementById('btnCloseSlot');
+      if (btnClose) btnClose.textContent = `🛑 Tắt S${slot}`;
+
+      renderSlotPills();
+      pollSlotTabs(slot);
+    }
+
+    // Render SSE JPEG frames via createImageBitmap
+    async function renderNextFrame() {
+      if (!pendingFrame) return;
+      isRendering = true;
+      const raw = pendingFrame;
+      pendingFrame = null;
+
+      try {
+        const resp = await fetch(`data:image/jpeg;base64,${raw.replace(/[\r\n]/g, '')}`);
+        const blob = await resp.blob();
+        const bmp = await createImageBitmap(blob);
+        if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+          canvas.width = bmp.width;
+          canvas.height = bmp.height;
+          canvasNaturalWidth = bmp.width;
+          canvasNaturalHeight = bmp.height;
+        }
+        ctx.drawImage(bmp, 0, 0);
+        bmp.close();
+        fpsCount++;
+      } catch (err) {
+        const img = new Image();
+        img.onload = () => {
+          if (canvas.width !== img.width || canvas.height !== img.height) {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            canvasNaturalWidth = img.width;
+            canvasNaturalHeight = img.height;
+          }
+          ctx.drawImage(img, 0, 0);
+          fpsCount++;
+        };
+        img.src = `data:image/jpeg;base64,${raw.replace(/[\r\n]/g, '')}`;
+      } finally {
+        isRendering = false;
+        if (pendingFrame) requestAnimationFrame(renderNextFrame);
+      }
+    }
+
+    // ─── Input Dispatching ─────────────────────────────────────────────────────
+    async function sendInput(body) {
+      try {
+        const res = await fetch(`/screen/input/${currentSlot}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        return await res.json().catch(() => null);
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function showTouchRipple(x, y) {
+      const ripple = document.createElement('div');
+      ripple.className = 'touch-ripple';
+      ripple.style.left = `${x}px`;
+      ripple.style.top = `${y}px`;
+      viewport.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 400);
+      try { tg?.HapticFeedback?.impactOccurred('light'); } catch (e) {}
+    }
+
+    // Touch events for Canvas
+    let touchStartX = 0, touchStartY = 0, touchStartTime = 0, isDragging = false, lastWheelTime = 0;
+    viewport.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+        isDragging = false;
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1) {
+        const currentY = e.touches[0].clientY;
+        const currentX = e.touches[0].clientX;
+        const deltaY = touchStartY - currentY;
+        const deltaX = touchStartX - currentX;
+        if (Math.abs(deltaY) > 8 || Math.abs(deltaX) > 8) {
+          isDragging = true;
+          const now = Date.now();
+          if (now - lastWheelTime > 35) {
+            lastWheelTime = now;
+            sendInput({
+              type: 'wheel',
+              x: canvasNaturalWidth / 2,
+              y: canvasNaturalHeight / 2,
+              deltaX: deltaX * 2,
+              deltaY: deltaY * 2.5,
+              clientWidth: canvasNaturalWidth,
+              clientHeight: canvasNaturalHeight,
+            });
+            touchStartX = currentX;
+            touchStartY = currentY;
+          }
+        }
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchend', async (e) => {
+      const elapsed = Date.now() - touchStartTime;
+      if (!isDragging && elapsed < 400) {
+        const changeTouch = e.changedTouches[0];
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvasNaturalWidth / rect.width;
+        const scaleY = canvasNaturalHeight / rect.height;
+        const x = Math.round((changeTouch.clientX - rect.left) * scaleX);
+        const y = Math.round((changeTouch.clientY - rect.top) * scaleY);
+
+        showTouchRipple(changeTouch.clientX, changeTouch.clientY);
+        const res = await sendInput({ type: 'mousedown', x, y, button: 'left', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+        if (res?.select && Array.isArray(res.select.options)) {
+          openSelectPicker(res.select.options, res.select.selectedIndex);
+        } else {
+          setTimeout(() => {
+            sendInput({ type: 'mouseup', x, y, button: 'left', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+          }, 30);
+        }
+      }
+    }, { passive: true });
+
+    // Select Dropdown Sheet Modal
+    function openSelectPicker(options, selectedIndex) {
+      selectModalOptions.innerHTML = options.map((opt, idx) => `
+        <div class="select-opt-item ${idx === selectedIndex ? 'selected' : ''}" onclick="selectPickerOption(${idx})">
+          <span>${opt.label || opt.text || opt.value || `Mục ${idx + 1}`}</span>
+          ${idx === selectedIndex ? '<span>✓</span>' : ''}
+        </div>
+      `).join('');
+      selectModal.style.display = 'flex';
+      try { tg?.HapticFeedback?.impactOccurred('medium'); } catch (e) {}
+    }
+
+    window.closeSelectModal = () => {
+      selectModal.style.display = 'none';
+    };
+
+    window.selectPickerOption = async (idx) => {
+      await sendInput({ type: 'select', index: idx });
+      closeSelectModal();
+      showToast('Đã chọn mục');
+    };
+
+    // Virtual Keyboard & Quick Action Keys
+    document.getElementById('btnSendText').addEventListener('click', async () => {
+      const text = textInput.value;
+      if (!text) return;
+      await sendInput({ type: 'insertText', text });
+      textInput.value = '';
+      showToast(`Đã gõ: "${text}"`);
+      try { tg?.HapticFeedback?.notificationOccurred('success'); } catch (e) {}
+    });
+
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('btnSendText').click();
+      }
+    });
+
+    document.querySelectorAll('.key-btn[data-key]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        sendInput({ type: 'keydown', key });
+        setTimeout(() => sendInput({ type: 'keyup', key }), 30);
+        try { tg?.HapticFeedback?.impactOccurred('light'); } catch (e) {}
+      });
+    });
+
+    document.getElementById('btnScrollDown').addEventListener('click', () => {
+      sendInput({
+        type: 'wheel',
+        x: canvasNaturalWidth / 2,
+        y: canvasNaturalHeight / 2,
+        deltaX: 0,
+        deltaY: 500,
+        clientWidth: canvasNaturalWidth,
+        clientHeight: canvasNaturalHeight,
+      });
+    });
+
+    document.getElementById('btnPasteText').addEventListener('click', async () => {
+      await sendInput({ type: 'shortcut', command: 'paste' });
+      showToast('Đã gửi phím dán');
+    });
+
+    document.getElementById('btnSelectAll').addEventListener('click', async () => {
+      await sendInput({ type: 'shortcut', command: 'selectAll' });
+      showToast('Đã chọn tất cả');
+    });
+
+    document.getElementById('btnBack').addEventListener('click', () => {
+      sendInput({ type: 'back' });
+      showToast('Đã lùi trang');
+    });
+
+    document.getElementById('btnReloadSlot').addEventListener('click', () => {
+      sendInput({ type: 'reload' });
+      showToast('Đang tải lại trang');
+    });
+
+    document.getElementById('btnCloseSlot').addEventListener('click', async () => {
+      if (!currentSlot) return;
+      showToast(`🛑 Đang tắt Slot ${currentSlot}...`);
+      try {
+        await fetch(`/browser/close/${currentSlot}`, { method: 'POST' });
+        showToast(`✓ Đã tắt Slot ${currentSlot}`);
+      } catch (err) {
+        showToast(`Lỗi tắt Slot ${currentSlot}: ` + err.message);
+      } finally {
+        await pollState();
+      }
+    });
+
+    // Quản lý Tab của Slot (Multi-tab)
+    async function pollSlotTabs(slot) {
+      try {
+        const res = await fetch(`/screen/tabs/${slot}`);
+        if (!res.ok) {
+          browserTabsBar.style.display = 'none';
+          return;
+        }
+        const data = await res.json();
+        currentSlotTabs = data.tabs || [];
+        if (currentSlotTabs.length > 0) {
+          browserTabsBar.style.display = 'flex';
+          browserTabsBar.innerHTML = currentSlotTabs.map((t, idx) => `
+            <div class="browser-tab-chip ${t.active ? 'active' : ''}" onclick="switchSlotTab(${slot}, ${idx})">
+              <span>🌐 ${t.title ? t.title.slice(0, 18) : 'Tab ' + (idx + 1)}</span>
+              ${currentSlotTabs.length > 1 ? `<span class="browser-tab-close" onclick="event.stopPropagation(); closeSlotTab(${slot}, ${idx})">✕</span>` : ''}
+            </div>
+          `).join('') + `<button class="browser-tab-new" onclick="newSlotTab(${slot})">➕ Tab</button>`;
+        } else {
+          browserTabsBar.style.display = 'none';
+        }
+      } catch (err) {
+        browserTabsBar.style.display = 'none';
+      }
+    }
+
+    window.switchSlotTab = async (slot, idx) => {
+      await fetch(`/screen/tabs/${slot}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index: idx }),
+      });
+      pollSlotTabs(slot);
+    };
+
+    window.closeSlotTab = async (slot, idx) => {
+      await fetch(`/screen/tabs/close/${slot}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index: idx }),
+      });
+      pollSlotTabs(slot);
+    };
+
+    window.newSlotTab = async (slot) => {
+      await fetch(`/screen/tabs/new/${slot}`, { method: 'POST' });
+      showToast('Đã mở tab mới');
+      pollSlotTabs(slot);
+    };
+
+    // ─── TAB 2: VẬN HÀNH & CẤU HÌNH ─────────────────────────────────────────────
+    window.setBrowserMode = (mode) => {
+      currentBrowserMode = mode;
+      const isAdsPower = mode === 'AdsPower';
+      document.getElementById('pillBrowserAdsPower').classList.toggle('active', isAdsPower);
+      document.getElementById('pillBrowserChrome').classList.toggle('active', !isAdsPower);
+      document.getElementById('radioAdsPower').checked = isAdsPower;
+      document.getElementById('radioChrome').checked = !isAdsPower;
+      const badge = document.getElementById('badgeBrowserMode');
+      badge.textContent = isAdsPower ? '🛡️ AdsPower SunBrowser' : '🌐 Google Chrome';
+      badge.style.color = isAdsPower ? '#22c55e' : '#38bdf8';
+      try { tg?.HapticFeedback?.selectionChanged(); } catch (e) {}
+    };
+
+    // Thread count pills
+    document.querySelectorAll('#threadsPills .pill-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#threadsPills .pill-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        inputThreadCount.value = btn.dataset.thread;
+        try { tg?.HapticFeedback?.selectionChanged(); } catch (e) {}
+      });
+    });
+
+    inputThreadCount.addEventListener('input', () => {
+      const val = inputThreadCount.value;
+      document.querySelectorAll('#threadsPills .pill-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.thread === val);
+      });
+    });
+
+    // Đọc danh sách Offer đã lưu
+    async function loadSavedOffers() {
+      try {
+        const res = await fetch('/pc/offer/read');
+        if (!res.ok) return;
+        const data = await res.json();
+        savedOffers = data.savedList || [];
+        const sel = document.getElementById('selSavedOffer');
+        sel.innerHTML = '<option value="">-- Chọn Offer mẫu đã lưu --</option>';
+        savedOffers.forEach((o, idx) => {
+          const opt = document.createElement('option');
+          opt.value = idx;
+          opt.textContent = `${o.NameOffer || 'Offer #' + (idx + 1)} (${(o.LinkOffer || '').slice(0, 30)}...)`;
+          sel.appendChild(opt);
+        });
+
+        sel.addEventListener('change', () => {
+          const chosen = savedOffers[sel.value];
+          if (chosen) {
+            document.getElementById('inputOfferName').value = chosen.NameOffer || '';
+            document.getElementById('inputWebsiteUrl').value = chosen.LinkOffer || '';
+            document.getElementById('inputWebsiteUrl2').value = chosen.LinkOffer2 || '';
+            document.getElementById('inputWebsiteUrl3').value = chosen.LinkOffer3 || '';
+            document.getElementById('inputWebsiteUrl4').value = chosen.LinkOffer4 || '';
+
+            if (chosen.LinkOffer2 || chosen.LinkOffer3 || chosen.LinkOffer4) {
+              document.getElementById('detailsMultiLinks').open = true;
+            }
+
+            if (chosen.Thread) {
+              inputThreadCount.value = chosen.Thread;
+              document.querySelectorAll('#threadsPills .pill-btn').forEach((b) => {
+                b.classList.toggle('active', b.dataset.thread === chosen.Thread);
+              });
+            }
+            if (chosen.LimitRun !== undefined) {
+              document.getElementById('inputLimitRun').value = chosen.LimitRun;
+            }
+            if (chosen.TimeLimit) {
+              document.getElementById('inputTimeLimit').value = chosen.TimeLimit;
+            }
+            if (chosen.Complete) {
+              document.getElementById('inputCompleteText').value = chosen.Complete;
+            }
+            if (chosen.delayStart) {
+              document.getElementById('inputDelayStart').value = chosen.delayStart;
+            }
+            if (chosen.delayStop) {
+              document.getElementById('inputDelayStop').value = chosen.delayStop;
+            }
+            showToast(`Đã chọn: ${chosen.NameOffer}`);
+          }
+        });
+      } catch (err) {}
+    }
+
+    // Quản lý Offer: Lưu / Mới / Xoá
+    document.getElementById('btnSaveOffer').addEventListener('click', async () => {
+      const name = document.getElementById('inputOfferName').value.trim();
+      const link1 = document.getElementById('inputWebsiteUrl').value.trim();
+      const link2 = document.getElementById('inputWebsiteUrl2').value.trim();
+      const link3 = document.getElementById('inputWebsiteUrl3').value.trim();
+      const link4 = document.getElementById('inputWebsiteUrl4').value.trim();
+
+      if (!link1) {
+        alert('Vui lòng nhập Link Offer 1!');
+        return;
+      }
+
+      const payload = {
+        NameOffer: name || link1.split('\n')[0].slice(0, 30),
+        LinkOffer: link1,
+        LinkOffer2: link2,
+        LinkOffer3: link3,
+        LinkOffer4: link4,
+        TimeLimit: document.getElementById('inputTimeLimit').value || '30',
+        Complete: document.getElementById('inputCompleteText').value || '',
+        delayStart: document.getElementById('inputDelayStart').value || '1',
+        delayStop: document.getElementById('inputDelayStop').value || '1',
+        Thread: inputThreadCount.value || '1',
+        LimitRun: document.getElementById('inputLimitRun').value || '0',
+      };
+
+      try {
+        const res = await fetch('/pc/offer/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Đã lưu "${payload.NameOffer}" vào máy!`);
+          await loadSavedOffers();
+        } else {
+          alert('Lỗi lưu: ' + (data.error || 'Không xác định'));
+        }
+      } catch (e) {
+        alert('Lỗi kết nối: ' + e.message);
+      }
+    });
+
+    document.getElementById('btnNewOffer').addEventListener('click', () => {
+      document.getElementById('selSavedOffer').value = '';
+      document.getElementById('inputOfferName').value = '';
+      document.getElementById('inputWebsiteUrl').value = '';
+      document.getElementById('inputWebsiteUrl2').value = '';
+      document.getElementById('inputWebsiteUrl3').value = '';
+      document.getElementById('inputWebsiteUrl4').value = '';
+      showToast('Đã xóa trắng form Offer');
+    });
+
+    document.getElementById('btnDeleteOffer').addEventListener('click', async () => {
+      const sel = document.getElementById('selSavedOffer');
+      const chosen = savedOffers[sel.value];
+      if (!chosen) {
+        alert('Vui lòng chọn một Offer đã lưu trong danh sách để xoá!');
+        return;
+      }
+      if (confirm(`Xoá Offer "${chosen.NameOffer}" khỏi máy?`)) {
+        await fetch('/pc/offer/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: chosen.id, NameOffer: chosen.NameOffer }),
+        });
+        showToast('Đã xoá Offer');
+        await loadSavedOffers();
+      }
+    });
+
+    // Đồng bộ class .active cho các option pills khi checkbox thay đổi
+    function syncOptionPills() {
+      document.querySelectorAll('.option-pill').forEach((pill) => {
+        const cb = pill.querySelector('input[type="checkbox"]');
+        if (cb) pill.classList.toggle('active', cb.checked);
+      });
+    }
+
+    // Đọc cấu hình gần nhất
+    async function loadLastLaunchSettings() {
+      try {
+        const res = await fetch('/launch-settings');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.settings) {
+          const s = data.settings;
+          if (s.browserMode) setBrowserMode(s.browserMode);
+          if (s.websiteUrl) document.getElementById('inputWebsiteUrl').value = s.websiteUrl;
+          if (s.websiteUrl2) document.getElementById('inputWebsiteUrl2').value = s.websiteUrl2;
+          if (s.websiteUrl3) document.getElementById('inputWebsiteUrl3').value = s.websiteUrl3;
+          if (s.websiteUrl4) document.getElementById('inputWebsiteUrl4').value = s.websiteUrl4;
+
+          if (s.websiteUrl2 || s.websiteUrl3 || s.websiteUrl4) {
+            document.getElementById('detailsMultiLinks').open = true;
+          }
+
+          if (s.timeLimit) document.getElementById('inputTimeLimit').value = s.timeLimit;
+          if (s.completeText) document.getElementById('inputCompleteText').value = s.completeText;
+          if (s.delayStart) document.getElementById('inputDelayStart').value = s.delayStart;
+          if (s.delayStop) document.getElementById('inputDelayStop').value = s.delayStop;
+
+          if (s.requestedCount || s.concurrency) {
+            const count = String(s.requestedCount || s.concurrency);
+            inputThreadCount.value = count;
+            document.querySelectorAll('#threadsPills .pill-btn').forEach((b) => {
+              b.classList.toggle('active', b.dataset.thread === count);
+            });
+          }
+          if (s.limitRun !== undefined) document.getElementById('inputLimitRun').value = s.limitRun;
+
+          // Đồng bộ các checkbox tuỳ chọn thực thi & chế độ ngầm
+          if (s.runInApp !== undefined) document.getElementById('cbxRunInApp').checked = Boolean(s.runInApp);
+          if (s.multiTab !== undefined) document.getElementById('cbxMultiTab').checked = Boolean(s.multiTab);
+          if (s.useCloakBrowser !== undefined) document.getElementById('cbxCloakBrowser').checked = Boolean(s.useCloakBrowser);
+          if (s.dataSaver !== undefined) document.getElementById('cbxDataSaver').checked = Boolean(s.dataSaver);
+          if (s.checkDuplicate !== undefined) document.getElementById('cbxCheckDuplicateIP').checked = Boolean(s.checkDuplicate);
+          if (s.hideUntilTarget !== undefined) document.getElementById('cbxHideUntilTarget').checked = Boolean(s.hideUntilTarget);
+          if (s.hideUntilLead !== undefined) document.getElementById('cbxHideUntilLead').checked = Boolean(s.hideUntilLead);
+          if (s.enableLeadCheck !== undefined) document.getElementById('cbxCheckLead').checked = Boolean(s.enableLeadCheck);
+          if (s.aiAssist !== undefined) document.getElementById('cbxAiAssist').checked = Boolean(s.aiAssist);
+          if (s.saveRRS !== undefined) document.getElementById('cbxRRS').checked = Boolean(s.saveRRS);
+          if (s.autoSubmitForm !== undefined) document.getElementById('cbxAutoSubmit').checked = Boolean(s.autoSubmitForm);
+
+          // Đồng bộ các hệ điều hành giả lập
+          if (s.Windows !== undefined) document.getElementById('chkWindows').checked = Boolean(s.Windows);
+          if (s.Mac !== undefined) document.getElementById('chkMac').checked = Boolean(s.Mac);
+          if (s.Linux !== undefined) document.getElementById('chkLinux').checked = Boolean(s.Linux);
+          if (s.Android !== undefined) document.getElementById('chkAndroid').checked = Boolean(s.Android);
+          if (s.iPhone !== undefined) document.getElementById('chkIphone').checked = Boolean(s.iPhone);
+          if (s.iPad !== undefined) document.getElementById('chkIpad').checked = Boolean(s.iPad);
+
+          syncOptionPills();
+        }
+      } catch (err) {}
+    }
+
+    // Nút BẮT ĐẦU CHẠY (START)
+    document.getElementById('btnStartLaunch').addEventListener('click', async () => {
+      const btnStart = document.getElementById('btnStartLaunch');
+      if (btnStart && (btnStart.disabled || (activeSessions && activeSessions.length > 0))) {
+        showToast('⚠️ Đang có luồng chạy! Vui lòng dừng luồng trước khi bắt đầu lại.', 'warning');
+        return;
+      }
+
+      const websiteUrl = document.getElementById('inputWebsiteUrl').value.trim();
+      if (!websiteUrl) {
+        alert('Vui lòng nhập Link Offer / Website!');
+        return;
+      }
+      const websiteUrl2 = document.getElementById('inputWebsiteUrl2').value.trim();
+      const websiteUrl3 = document.getElementById('inputWebsiteUrl3').value.trim();
+      const websiteUrl4 = document.getElementById('inputWebsiteUrl4').value.trim();
+
+      const offerUrls = [websiteUrl];
+      if (websiteUrl2) offerUrls.push(websiteUrl2);
+      if (websiteUrl3) offerUrls.push(websiteUrl3);
+      if (websiteUrl4) offerUrls.push(websiteUrl4);
+
+      const concurrency = parseInt(inputThreadCount.value, 10) || 1;
+      const limitRun = parseInt(document.getElementById('inputLimitRun').value, 10) || 0;
+      const timeLimit = parseInt(document.getElementById('inputTimeLimit').value, 10) || 30;
+      const delayStart = parseInt(document.getElementById('inputDelayStart').value, 10) || 1;
+      const delayStop = parseInt(document.getElementById('inputDelayStop').value, 10) || 1;
+      const completeText = document.getElementById('inputCompleteText').value.trim();
+
+      const runInApp = document.getElementById('cbxRunInApp').checked;
+      const multiTab = document.getElementById('cbxMultiTab').checked;
+      const useCloakBrowser = document.getElementById('cbxCloakBrowser').checked;
+      const dataSaver = document.getElementById('cbxDataSaver').checked;
+      const checkDuplicate = document.getElementById('cbxCheckDuplicateIP').checked;
+      const hideUntilTarget = document.getElementById('cbxHideUntilTarget').checked;
+      const hideUntilLead = document.getElementById('cbxHideUntilLead').checked;
+      const enableLeadCheck = document.getElementById('cbxCheckLead').checked;
+      const aiAssist = document.getElementById('cbxAiAssist').checked;
+      const saveRRS = document.getElementById('cbxRRS').checked;
+      const autoSubmitForm = document.getElementById('cbxAutoSubmit').checked;
+
+      const Windows = document.getElementById('chkWindows').checked;
+      const Mac = document.getElementById('chkMac').checked;
+      const Linux = document.getElementById('chkLinux').checked;
+      const Android = document.getElementById('chkAndroid').checked;
+      const iPhone = document.getElementById('chkIphone').checked;
+      const iPad = document.getElementById('chkIpad').checked;
+
+      // Khóa và làm mờ nút Start ngay khi bắt đầu bấm
+      if (btnStart) {
+        btnStart.disabled = true;
+        btnStart.textContent = '⏳ ĐANG KHỞI CHẠY...';
+      }
+
+      showToast(`Đang khởi động ${concurrency} luồng (${currentBrowserMode})...`);
+      try {
+        const res = await fetch('/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            browserMode: currentBrowserMode,
+            useAdsPower: currentBrowserMode === 'AdsPower',
+            websiteUrl,
+            websiteUrl2,
+            websiteUrl3,
+            websiteUrl4,
+            offerUrls,
+            offerList: offerUrls,
+            requestedCount: concurrency,
+            concurrency,
+            limitRun,
+            timeLimit,
+            delayStart,
+            delayStop,
+            completeText,
+            autoSubmitForm,
+            checkDuplicate,
+            dataSaver,
+            runInApp,
+            screenPreviewOnly: runInApp,
+            multiTab,
+            useCloakBrowser,
+            hideUntilTarget,
+            hideBrowser: hideUntilTarget,
+            hideUntilLead,
+            enableLeadCheck,
+            autoCloseNoLead: enableLeadCheck,
+            leadCheckInterval: 20,
+            leadCheckMaxAttempts: 1,
+            leadCheckScreen: 4,
+            aiAssist,
+            saveRRS,
+            Windows,
+            Mac,
+            Linux,
+            Android,
+            iPhone,
+            iPad,
+            antiFpCanvas: true,
+            antiFpClientRects: true,
+            antiFpWebgl: true,
+            antiFpFonts: true,
+            antiFpApiFakeIP: true,
+            antiFpWebrtc: true,
+          }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          alert('Lỗi: ' + data.error);
+        } else {
+          showToast(`Khởi động thành công!`);
+        }
+      } catch (err) {
+        alert('Lỗi gửi lệnh: ' + err.message);
+      } finally {
+        await pollState();
+      }
+    });
+
+    document.getElementById('btnPauseRefill').addEventListener('click', async () => {
+      await fetch('/auto-refill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) });
+      showToast('Đã tạm dừng mở slot mới');
+      pollState();
+    });
+
+    document.getElementById('btnStopAll').addEventListener('click', async () => {
+      const btnStart = document.getElementById('btnStartLaunch');
+      if (btnStart) {
+        btnStart.disabled = true;
+        btnStart.textContent = '🛑 ĐANG DỪNG CÁC LUỒNG...';
+      }
+      showToast('🛑 Đang dừng toàn bộ luồng...');
+      try {
+        await fetch('/stop', { method: 'POST' });
+        showToast('✓ Đã dừng tất cả luồng');
+      } catch (err) {
+        showToast('Lỗi dừng luồng: ' + err.message);
+      } finally {
+        await pollState();
+      }
+    });
+
+    document.getElementById('btnResetLeadCount').addEventListener('click', async () => {
+      await fetch('/limit-run/reset', { method: 'POST' });
+      showToast('Đã reset bộ đếm Leads');
+      pollState();
+    });
+
+    // ─── TAB 3: TÀI NGUYÊN (RESOURCES) ──────────────────────────────────────────
+    async function buy711Proxies(count) {
+      showToast(`Đang mua ${count} proxy từ 711...`);
+      try {
+        const res = await fetch('/711proxy/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ count }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Đã lấy ${data.count || count} proxy vào hàng đợi!`);
+          pollResources();
+        } else {
+          alert('Lỗi mua: ' + (data.error || 'Thử lại sau'));
+        }
+      } catch (err) {
+        alert('Lỗi: ' + err.message);
+      }
+    }
+
+    document.getElementById('btnResetAutofill').addEventListener('click', async () => {
+      const res = await fetch('/autofill-queue/reset', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      showToast(d.message || 'Đã reset hàng đợi Autofill');
+      pollResources();
+    });
+
+    document.getElementById('btnImportProxy').addEventListener('click', async () => {
+      const text = document.getElementById('taProxyInput').value.trim();
+      if (!text) { alert('Vui lòng dán danh sách proxy!'); return; }
+      const res = await fetch('/proxy-queue/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proxyList: text }),
+      });
+      const d = await res.json();
+      showToast(d.message || 'Đã nạp proxy thành công');
+      document.getElementById('taProxyInput').value = '';
+      pollResources();
+    });
+
+    document.getElementById('btnClearProxy').addEventListener('click', async () => {
+      if (confirm('Xóa sạch hàng đợi proxy?')) {
+        await fetch('/proxy-queue/clear', { method: 'POST' });
+        showToast('Đã xóa sạch hàng đợi proxy');
+        pollResources();
+      }
+    });
+
+    document.getElementById('btnImportEmail').addEventListener('click', async () => {
+      const text = document.getElementById('taEmailInput').value.trim();
+      if (!text) { alert('Vui lòng dán danh sách email!'); return; }
+      const res = await fetch('/email-queue/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailList: text }),
+      });
+      const d = await res.json();
+      showToast(d.message || 'Đã nạp email thành công');
+      document.getElementById('taEmailInput').value = '';
+      pollResources();
+    });
+
+    document.getElementById('btnResetEmail').addEventListener('click', async () => {
+      await fetch('/email-queue/reset', { method: 'POST' });
+      showToast('Đã đặt lại email mẫu');
+      pollResources();
+    });
+
+    async function pollResources() {
+      try {
+        const [pq, eq, afq, state] = await Promise.all([
+          fetch('/proxy-queue').then((r) => r.json()).catch(() => ({})),
+          fetch('/email-queue').then((r) => r.json()).catch(() => ({})),
+          fetch('/autofill-queue').then((r) => r.json()).catch(() => ({})),
+          fetch('/state').then((r) => r.json()).catch(() => ({})),
+        ]);
+        document.getElementById('textProxyAvail').textContent = pq.available ?? 0;
+        document.getElementById('textProxyUsed').textContent = pq.used ?? 0;
+        document.getElementById('textEmailAvail').textContent = eq.available ?? 0;
+        document.getElementById('textEmailUsed').textContent = eq.used ?? 0;
+
+        const afAvail = afq.available ?? 0;
+        const afUsed = afq.used ?? 0;
+        document.getElementById('badgeAutofillCount').textContent = afAvail + afUsed;
+        document.getElementById('textAutofillAvail').textContent = afAvail;
+        document.getElementById('textAutofillUsed').textContent = afUsed;
+
+        const p711 = state?.bandwidth?.proxy711 || {};
+        document.getElementById('badge711Balance').textContent = p711.remainingFormatted || (p711.remainingGb ? p711.remainingGb + ' GB' : '-- GB');
+        document.getElementById('text711Package').textContent = p711.packageFormatted || '--';
+        document.getElementById('text711Used').textContent = p711.usedFormatted || '--';
+        document.getElementById('text711Remaining').textContent = p711.remainingFormatted || '--';
+      } catch (e) {}
+    }
+
+    // ─── TAB 4: THỐNG KÊ & LOGS ────────────────────────────────────────────────
+    document.getElementById('btnHideAllBrowsers').addEventListener('click', async () => {
+      const res = await fetch('/browser/hide-all', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      showToast(`Đã thu nhỏ ẩn ngầm ${d.count || 0} cửa sổ`);
+    });
+
+    document.getElementById('btnShowAllBrowsers').addEventListener('click', async () => {
+      const res = await fetch('/browser/show-all', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      showToast(`Đã hiện ${d.count || 0} cửa sổ lên màn hình Mac`);
+    });
+
+    document.getElementById('btnClearLogs').addEventListener('click', async () => {
+      await fetch('/browser-logs/clear', { method: 'POST' });
+      pollLogs();
+      showToast('Đã xóa nhật ký');
+    });
+
+    async function pollLogs() {
+      try {
+        const res = await fetch('/browser-logs');
+        if (!res.ok) return;
+        const data = await res.json();
+        const box = document.getElementById('logBox');
+        const sessions = data.sessions || [];
+        const lines = [];
+        sessions.slice(0, 5).forEach((s) => {
+          (s.logs || []).slice(-4).forEach((l) => {
+            const time = (l.time || '').slice(11, 19);
+            lines.push(`<div><span style="color:#64748b;">${time}</span> [${s.ip || 'Local'}] <b style="color:#38bdf8;">${l.type}</b>: ${String(l.detail || l.url || '').slice(0, 80)}</div>`);
+          });
+        });
+        box.innerHTML = lines.length ? lines.join('') : '<div style="color:#64748b;">Chưa có log mới.</div>';
+      } catch (e) {}
+    }
+
+    // ─── ĐỒNG BỘ TOÀN BỘ TRẠNG THÁI (POLL STATE) ──────────────────────────────
+    async function pollState() {
+      try {
+        const res = await fetch('/state');
+        if (!res.ok) return;
+        const state = await res.json();
+
+        const running = state.enabled && !state.stopRequested;
+        activeSessions = (state.chromeSessions || []).filter((s) => !s.isClosed);
+        const isRunning = running || activeSessions.length > 0 || ((state.activeCount || 0) > 0);
+        const activeCount = activeSessions.length || state.activeCount || 0;
+
+        // Cập nhật trạng thái nút START (Làm mờ & khóa nút khi đang có offer/luồng chạy)
+        const btnStart = document.getElementById('btnStartLaunch');
+        if (btnStart) {
+          if (isRunning) {
+            btnStart.disabled = true;
+            if (state.stopRequested) {
+              btnStart.textContent = '🛑 ĐANG DỪNG CÁC LUỒNG...';
+            } else {
+              btnStart.textContent = `⏳ ĐANG CHẠY (${activeCount} luồng)...`;
+            }
+          } else {
+            btnStart.disabled = false;
+            btnStart.textContent = '▶ BẮT ĐẦU CHẠY (START)';
+          }
+        }
+
+        // Header status
+        const dot = document.getElementById('topStatusDot');
+        dot.className = 'status-dot' + (running ? '' : state.enabled ? ' paused' : ' stopped');
+        document.getElementById('topStatusText').textContent = `${state.activeCount || 0}/${state.targetCount || 0} Luồng`;
+
+        // Stats tab
+        document.getElementById('statThreads').textContent = `${state.activeCount || 0} / ${state.targetCount || 0}`;
+        const leads = state.limitRun?.count || 0;
+        const maxLeads = state.limitRun?.max || 0;
+        document.getElementById('statLeads').textContent = `${leads}${maxLeads > 0 ? '/' + maxLeads : ''}`;
+        document.getElementById('statBw').textContent = state.bandwidth?.today?.formatted || '0 B';
+
+        const totalRuns = state.totalRuns || (state.activeCount + leads) || 1;
+        const leadRate = totalRuns > 0 ? Math.round((leads / totalRuns) * 100) : 0;
+        document.getElementById('statLeadRate').textContent = `${leadRate}%`;
+
+        // Toffers Points & Leads
+        if (state.toffers && (state.toffers.point !== null && state.toffers.point !== undefined)) {
+          const pt = state.toffers.point;
+          const elTopPt = document.getElementById('topPointVal');
+          if (elTopPt) elTopPt.textContent = `${pt} pt`;
+          const elBigPt = document.getElementById('statTotalPointBig');
+          if (elBigPt) elBigPt.textContent = `${pt} pt`;
+          const elLdCnt = document.getElementById('statToffersLeadsCount');
+          if (elLdCnt && state.toffers.leadCount !== undefined) elLdCnt.textContent = `${state.toffers.leadCount} leads`;
+          const elUp = document.getElementById('textToffersUpdated');
+          if (elUp && state.toffers.updatedAt) {
+            elUp.textContent = `Cập nhật: ${new Date(state.toffers.updatedAt).toLocaleTimeString('vi-VN')}`;
+          }
+        }
+
+        // Slot pills
+        renderSlotPills();
+
+        // Active slots breakdown
+        renderActiveSlotsList();
+
+        // Current Slot Info on Screen Tab
+        const cur = activeSessions.find((s) => s.slot === currentSlot);
+        if (cur) {
+          urlDisplay.textContent = cur.websiteUrl || cur.tabs?.[0]?.url || 'Đang mở trang...';
+          ipDisplay.textContent = `IP: ${cur.exitIp || 'Local'}`;
+        } else if (activeSessions.length > 0) {
+          startStream(activeSessions[0].slot);
+        } else {
+          urlDisplay.textContent = 'Không có slot nào đang chạy';
+          ipDisplay.textContent = 'IP: --';
+          browserTabsBar.style.display = 'none';
+          canvasMsg.style.display = 'flex';
+          canvasMsg.innerHTML = '<span>⏸ Không có slot nào đang chạy.<br>Chuyển sang tab <b>🚀 Vận hành</b> để Bắt đầu.</span>';
+          if (eventSource) {
+            try { eventSource.close(); } catch {}
+            eventSource = null;
+          }
+          currentSlot = null;
+          if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      } catch (e) {}
+    }
+
+    function renderSlotPills() {
+      if (!activeSessions.length) {
+        slotBar.innerHTML = '<div class="pill-btn active">Chưa có slot</div>';
+        return;
+      }
+      slotBar.innerHTML = activeSessions.map((s) => `
+        <div class="pill-btn ${s.slot === currentSlot ? 'active' : ''}" data-slot="${s.slot}">
+          <span class="status-dot"></span> S${s.slot} (${s.exitIp || 'Local'})
+        </div>
+      `).join('');
+
+      slotBar.querySelectorAll('.pill-btn').forEach((p) => {
+        p.addEventListener('click', () => {
+          const slot = parseInt(p.dataset.slot, 10);
+          if (slot && slot !== currentSlot) {
+            startStream(slot);
+            renderSlotPills();
+          }
+        });
+      });
+    }
+
+    function renderActiveSlotsList() {
+      const container = document.getElementById('activeSlotsList');
+      document.getElementById('textSlotCount').textContent = `${activeSessions.length} slot`;
+      if (!activeSessions.length) {
+        container.innerHTML = '<span style="font-size:12px; color:var(--text-muted);">Hiện không có slot nào đang chạy.</span>';
+        return;
+      }
+      container.innerHTML = activeSessions.map((s) => `
+        <div style="background:#1e293b; border:1px solid #334155; padding:8px 10px; border-radius:6px; display:flex; align-items:center; justify-content:space-between;">
+          <div style="max-width:70%;">
+            <div style="font-size:12px; font-weight:700; color:#38bdf8;">Slot ${s.slot} [${s.exitIp || 'Local'}]</div>
+            <div style="font-size:11px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.websiteUrl || 'N/A'}</div>
+            <div style="font-size:10px; color:#64748b;">Trang ${s.currentScreen || 1} • Băng thông: ${s.bandwidthFormatted || '0 B'}</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-primary" style="padding:4px 8px; font-size:11px;" onclick="switchAndStream(${s.slot})">📺 Xem</button>
+            <button class="btn btn-danger" style="padding:4px 8px; font-size:11px;" onclick="closeSlotDirect(${s.slot})">🛑</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    window.switchAndStream = (slot) => {
+      document.querySelectorAll('.nav-item').forEach((i) => i.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach((t) => t.classList.remove('active'));
+      document.querySelector('.nav-item[data-tab="tab-screen"]').classList.add('active');
+      document.getElementById('tab-screen').classList.add('active');
+      startStream(slot);
+    };
+
+    window.closeSlotDirect = (slot) => {
+      if (confirm(`Tắt Slot ${slot}?`)) {
+        fetch(`/browser/close/${slot}`, { method: 'POST' }).then(() => pollState());
+      }
+    };
+
+    // Toffers Leads & Points Polling
+    async function pollToffersOverview(isManual = false) {
+      const btn = document.getElementById('btnRefreshToffers');
+      if (btn && isManual) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Đang tải...';
+      }
+      try {
+        const res = await fetch('/toffers/overview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ datas: '1504', forceRefresh: isManual }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.success) {
+          const pt = (data.point !== null && data.point !== undefined) ? data.point : '--';
+          const elTopPt = document.getElementById('topPointVal');
+          if (elTopPt) elTopPt.textContent = `${pt} pt`;
+          const elBigPt = document.getElementById('statTotalPointBig');
+          if (elBigPt) elBigPt.textContent = `${pt} pt`;
+
+          const results = data.results || [];
+          const elLdCnt = document.getElementById('statToffersLeadsCount');
+          if (elLdCnt) elLdCnt.textContent = `${results.length} leads`;
+          const elBadge = document.getElementById('badgeLeadListCount');
+          if (elBadge) elBadge.textContent = `${results.length} lead`;
+
+          const container = document.getElementById('toffersLeadsContainer');
+          if (container) {
+            if (!results.length) {
+              container.innerHTML = '<div style="color:#64748b; font-size:11px;">Chưa ghi nhận lead nào.</div>';
+            } else {
+              container.innerHTML = results.slice(0, 10).map((item) => {
+                const timeStr = item.timelead ? new Date(Number(item.timelead) * 1000).toLocaleTimeString('vi-VN') : '--';
+                const flag = item.geo === 'US' ? '🇺🇸' : (item.geo === 'GB' ? '🇬🇧' : '🌐');
+                return `
+                  <div style="background:#1e293b; border:1px solid #334155; border-radius:6px; padding:6px 8px; display:flex; align-items:center; justify-content:space-between; font-size:11px;">
+                    <div style="max-width:70%;">
+                      <div style="font-weight:700; color:#f1f5f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                        ${flag} ${item.nameoff || 'Offer'}
+                      </div>
+                      <div style="font-size:10px; color:#94a3b8; font-family:monospace;">
+                        IP: ${item.ip || '--'} • #${item.id || ''} • ${timeStr}
+                      </div>
+                    </div>
+                    <div style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#22c55e; font-weight:800; font-size:12px; padding:2px 8px; border-radius:4px;">
+                      +${item.point || '0'} pt
+                    </div>
+                  </div>
+                `;
+              }).join('');
+            }
+          }
+          if (isManual) showToast(`Đã làm mới: ${pt} point (${results.length} leads)`);
+        }
+      } catch (err) {
+      } finally {
+        if (btn && isManual) {
+          btn.disabled = false;
+          btn.textContent = '🔄 Làm mới Point';
+        }
+      }
+    }
+    window.pollToffersOverview = pollToffersOverview;
+
+    document.getElementById('btnTopReload').addEventListener('click', () => {
+      pollState();
+      pollResources();
+      pollToffersOverview();
+      showToast('Đã làm mới dữ liệu');
+    });
+
+    // FPS Counter Timer
+    setInterval(() => {
+      fpsBadge.textContent = `${fpsCount} FPS`;
+      fpsCount = 0;
+    }, 1000);
+
+    // Initial boot sequences
+    loadSavedOffers();
+    loadLastLaunchSettings();
+    pollState();
+    pollResources();
+    pollToffersOverview();
+
+    // Auto polling intervals
+    setInterval(pollState, 3000);
+    setInterval(pollResources, 15000);
+    setInterval(pollToffersOverview, 20000);
+  </script>
+</body>
+</html>

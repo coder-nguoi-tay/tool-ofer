@@ -370,6 +370,24 @@ export function stealthInitScript(cfg) {
     });
   }
 
+  // ── SpeechSynthesis: Giả lập danh sách voices Windows/Chrome khi profile là Windows (tránh rò rỉ giọng Apple trên Mac) ──
+  const isWindowsProfile = cfg.platform === 'Win32' || cfg.uaData?.platform === 'Windows';
+  if (isWindowsProfile && typeof G.SpeechSynthesis === 'function' && typeof G.SpeechSynthesis.prototype?.getVoices === 'function') {
+    const windowsVoices = [
+      { name: 'Microsoft David - English (United States)', lang: 'en-US', default: true, localService: true, voiceURI: 'Microsoft David - English (United States)' },
+      { name: 'Microsoft Mark - English (United States)', lang: 'en-US', default: false, localService: true, voiceURI: 'Microsoft Mark - English (United States)' },
+      { name: 'Microsoft Zira - English (United States)', lang: 'en-US', default: false, localService: true, voiceURI: 'Microsoft Zira - English (United States)' },
+      { name: 'Google US English', lang: 'en-US', default: false, localService: false, voiceURI: 'Google US English' },
+      { name: 'Google UK English Female', lang: 'en-GB', default: false, localService: false, voiceURI: 'Google UK English Female' },
+      { name: 'Google UK English Male', lang: 'en-GB', default: false, localService: false, voiceURI: 'Google UK English Male' },
+    ];
+    const Proto = G.SpeechSynthesisVoice && G.SpeechSynthesisVoice.prototype;
+    const mockVoices = windowsVoices.map((v) => (Proto ? Object.assign(Object.create(Proto), v) : v));
+    replaceMethod(G.SpeechSynthesis.prototype, 'getVoices', () => function () {
+      return mockVoices;
+    });
+  }
+
   // ── window.chrome: Đảm bảo app, csi, loadTimes trên môi trường Chromium ──
   if (!cfg.webkitOnly && typeof G.window !== 'undefined') {
     if (!G.chrome || typeof G.chrome !== 'object') {
@@ -426,7 +444,7 @@ export function stealthInitScript(cfg) {
     }
   }
 
-  // ── Client Hints: platform, mobile và Client Hints giá trị cao (platformVersion, architecture...) ──
+  // ── Client Hints: platform, mobile, brands và Client Hints giá trị cao (platformVersion, architecture...) ──
   if (cfg.uaData && typeof G.NavigatorUAData === 'function') {
     if (cfg.uaData.platform) {
       replaceGetter(G.NavigatorUAData.prototype, 'platform', () => cfg.uaData.platform);
@@ -434,14 +452,20 @@ export function stealthInitScript(cfg) {
     if (typeof cfg.isMobile === 'boolean') {
       replaceGetter(G.NavigatorUAData.prototype, 'mobile', () => cfg.isMobile);
     }
+    if (cfg.uaData.brands && Array.isArray(cfg.uaData.brands)) {
+      replaceGetter(G.NavigatorUAData.prototype, 'brands', () => cfg.uaData.brands);
+    }
     replaceMethod(G.NavigatorUAData.prototype, 'getHighEntropyValues', (original) => function (hints) {
       const populate = (dict) => {
         const res = dict ? { ...dict } : {};
         const hintList = Array.isArray(hints) ? hints : [];
-        for (const key of ['platform', 'platformVersion', 'architecture', 'bitness', 'model']) {
+        for (const key of ['platform', 'platformVersion', 'architecture', 'bitness', 'model', 'brands', 'fullVersionList']) {
           if (hintList.includes(key) && cfg.uaData[key] !== undefined) {
             res[key] = cfg.uaData[key];
           }
+        }
+        if (hintList.includes('wow64')) {
+          res.wow64 = cfg.uaData.wow64 !== undefined ? cfg.uaData.wow64 : false;
         }
         return res;
       };

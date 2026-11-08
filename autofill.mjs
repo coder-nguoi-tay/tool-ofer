@@ -7966,7 +7966,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
   }
 
   const isSpamAdUrl = (url = '') => {
-    return /galaxystore\.samsung\.com|play\.google\.com\/store|apps\.apple\.com|popads|propellerads|clickadu|trafficjunky|zeroredirect|doubleclick\.net|syndication\.exoclick/i.test(url);
+    return /galaxystore\.samsung\.com|play\.google\.com\/store|apps\.apple\.com|popads|propellerads|clickadu|trafficjunky|zeroredirect|doubleclick\.net|syndication\.exoclick|vidoomy\.com|outbrain\.com|taboola\.com|connatix\.com|anyclip\.com/i.test(url);
   };
 
   /**

@@ -101,7 +101,7 @@ EOF
   # run-tests.mjs có liệt kê test trong mock-pages/; test đó còn gọi test-offline-screens.mjs.
   cp -R mock-pages "$LAUNCHER_DIR/"
   cp -p test-offline-screens.mjs "$LAUNCHER_DIR/"
-  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs cloakbrowser-engine.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs codex-form-agent.mjs local-profile-engine.mjs playwright-mcp-human.cjs index.html index-pc.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs run-tests.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs cloakbrowser-engine.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs codex-form-agent.mjs local-profile-engine.mjs playwright-mcp-human.cjs index.html index-pc.html screen-mini.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs run-tests.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs tunnel.mjs mcp-server.mjs "$LAUNCHER_DIR/"
   # Chỉ chép Config/Browser: Config/Settings có thể chứa token, không được vào bundle.
   mkdir -p "$LAUNCHER_DIR/Config"
   cp -R Config/Browser "$LAUNCHER_DIR/Config/"
@@ -154,6 +154,13 @@ if [ -w "/Applications" ] || [ -d "/Applications/AutoLeadPC Mac 2 AdsPower.app" 
   cp -R "AutoLeadPC Mac 2 AdsPower.app" "/Applications/AutoLeadPC Mac 2 AdsPower.app"
   xattr -dr com.apple.quarantine "/Applications/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
 fi
+
+# Reset trạng thái chạy tự động về 0 khi build mới (không tự mở profile sau khi mở app)
+for d in "AutoLeadPC" "AutoLeadPC-2"; do
+  if [ -d "$HOME/Library/Application Support/$d" ]; then
+    echo "{}" > "$HOME/Library/Application Support/$d/autorefill-settings.json" 2>/dev/null || true
+  fi
+done
 
 echo "=========================================="
 echo "Build thành công bản duy nhất:"

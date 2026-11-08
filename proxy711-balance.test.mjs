@@ -5,6 +5,8 @@ import {
   getBandwidthSummary,
   add711IpWhitelist,
   fetch711Token,
+  fetch711WapiToken,
+  get711ConsumptionChart,
   generate711SubuserProxies,
   parseProxyLine,
 } from './app.mjs';
@@ -87,4 +89,9 @@ test('generate711SubuserProxies throws when subuser or subpass is missing', () =
     () => generate711SubuserProxies({ subuser: '', subpass: '' }),
     { message: /Chưa nhập Sub-user/ }
   );
+});
+
+test('fetch711WapiToken returns null on invalid credentials', async () => {
+  const token = await fetch711WapiToken('invalid_user_test_xyz', 'invalid_pwd_test_xyz');
+  assert.equal(token, null);
 });

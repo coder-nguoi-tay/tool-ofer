@@ -23,6 +23,7 @@ let lastActiveCount = 0;
 let lastLimitRunCount = 0;
 let stuckSince = null;
 let lowProxyNotified = false;
+let low711BalanceNotified = false;
 let sessionLeadsAtBotStart = 0;
 let botStartTime = Date.now();
 
@@ -40,18 +41,49 @@ async function tgPost(method, body = {}) {
   return r.json();
 }
 
+// Chuyển đổi mảng nút hỗ trợ cả callback_data, web_app và url
+function formatInlineButtons(buttons) {
+  if (!buttons?.length) return null;
+  return buttons.map((row) =>
+    row.map((b) => {
+      if (b.web_app) return { text: b.text, web_app: b.web_app };
+      if (b.url) return { text: b.text, url: b.url };
+      return { text: b.text, callback_data: b.cb };
+    })
+  );
+}
+
 // Gửi tin + nút inline tùy chọn
-// buttons: [[{ text, cb }]] — mảng hàng, mỗi hàng là mảng nút
+// buttons: [[{ text, cb, web_app, url }]] — mảng hàng, mỗi hàng là mảng nút
 async function send(chatId, text, buttons = null) {
   const body = { chat_id: chatId, text, parse_mode: 'HTML' };
-  if (buttons?.length) {
-    body.reply_markup = {
-      inline_keyboard: buttons.map((row) =>
-        row.map((b) => ({ text: b.text, callback_data: b.cb }))
-      ),
-    };
+  const formatted = formatInlineButtons(buttons);
+  if (formatted?.length) {
+    body.reply_markup = { inline_keyboard: formatted };
   }
   return tgPost('sendMessage', body).catch(() => {});
+}
+
+// Gửi ảnh chụp màn hình + chú thích & nút inline
+async function sendPhoto(chatId, imageBuffer, caption = '', buttons = null) {
+  if (!cfg?.botToken) return null;
+  const formData = new FormData();
+  formData.append('chat_id', String(chatId));
+  const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
+  formData.append('photo', blob, 'screenshot.jpg');
+  if (caption) {
+    formData.append('caption', caption);
+    formData.append('parse_mode', 'HTML');
+  }
+  const formatted = formatInlineButtons(buttons);
+  if (formatted?.length) {
+    formData.append('reply_markup', JSON.stringify({ inline_keyboard: formatted }));
+  }
+  const r = await fetch(`https://api.telegram.org/bot${cfg.botToken}/sendPhoto`, {
+    method: 'POST',
+    body: formData,
+  });
+  return r.json().catch(() => ({}));
 }
 
 async function answerCallback(id, text = '') {
@@ -63,6 +95,11 @@ async function answerCallback(id, text = '') {
 export async function tgNotify(text, buttons = null) {
   if (!cfg || !notifyChatId) return;
   await send(notifyChatId, text, buttons);
+}
+
+export async function tgNotifyPhoto(imageBuffer, caption = '', buttons = null) {
+  if (!cfg || !notifyChatId) return;
+  await sendPhoto(notifyChatId, imageBuffer, caption, buttons);
 }
 
 // ─── Local app API ────────────────────────────────────────────────────────────
@@ -98,19 +135,24 @@ async function appPost(path, body = {}) {
 
 const BTN_MAIN = [
   [{ text: '📊 Status', cb: 'status' }, { text: '▶ Run', cb: 'run' }],
+  [{ text: '📱 Mini App', cb: 'app' }, { text: '📺 Màn hình', cb: 'screen' }],
+  [{ text: '📶 Băng thông', cb: 'bw' }, { text: '🌐 DS Slot', cb: 'slots' }],
   [{ text: '⏸ Pause', cb: 'pause' }, { text: '🛑 Stop', cb: 'stop' }],
   [{ text: '📦 Proxy', cb: 'proxy' }, { text: '🛒 Mua Proxy', cb: 'buy' }],
   [{ text: '🗑 Xóa tất cả proxy', cb: 'clear_proxy' }],
 ];
 
 const BTN_RUNNING = [
-  [{ text: '📊 Status', cb: 'status' }, { text: '⏸ Pause', cb: 'pause' }],
-  [{ text: '🛑 Stop', cb: 'stop' }, { text: '📦 Proxy', cb: 'proxy' }],
+  [{ text: '📊 Status', cb: 'status' }, { text: '📱 Mini App', cb: 'app' }],
+  [{ text: '📺 Màn hình', cb: 'screen' }, { text: '🌐 DS Slot', cb: 'slots' }],
+  [{ text: '📶 Băng thông', cb: 'bw' }, { text: '⏸ Pause', cb: 'pause' }],
+  [{ text: '📦 Proxy', cb: 'proxy' }, { text: '🛑 Stop', cb: 'stop' }],
 ];
 
 const BTN_STOPPED = [
   [{ text: '▶ Run lại', cb: 'run' }, { text: '📊 Status', cb: 'status' }],
-  [{ text: '🛒 Mua Proxy', cb: 'buy' }, { text: '📦 Proxy', cb: 'proxy' }],
+  [{ text: '📶 Băng thông', cb: 'bw' }, { text: '🛒 Mua Proxy', cb: 'buy' }],
+  [{ text: '📦 Proxy', cb: 'proxy' }],
 ];
 
 // ─── AI Agent ─────────────────────────────────────────────────────────────────
@@ -119,6 +161,10 @@ const AI_SYSTEM = `Bạn là trợ lý AI quản lý app AutoLeadPC qua Telegram
 
 Bạn có thể thực hiện các hành động sau:
 - status: xem trạng thái đầy đủ
+- bw: xem thống kê băng thông hôm nay, data 711Proxy còn lại và chi tiết tiêu hao theo slot
+- screen: chụp ảnh màn hình slot trình duyệt đang chạy (nếu có số slot thì chỉ định slot, vd param count = 1)
+- slots: xem danh sách các slot/trình duyệt đang chạy
+- close_slot: tắt riêng 1 slot trình duyệt (param count = số slot)
 - run [n]: bật tự bù (n = số luồng, mặc định giữ nguyên)
 - stop: dừng tất cả
 - pause: tạm dừng mở slot mới (không kill session đang chạy)
@@ -130,6 +176,7 @@ Bạn có thể thực hiện các hành động sau:
 - reset: reset bộ đếm leads
 - clear_proxy: xóa TOÀN BỘ proxy trong hàng đợi (dùng khi cần nạp danh sách proxy mới)
 - log: log session gần nhất
+- clear_log: xóa toàn bộ log
 - reply: chỉ trả lời bằng text, không thực hiện hành động
 
 Trả về JSON duy nhất theo format:
@@ -185,6 +232,15 @@ async function aiChat(userText, appState) {
 function suggestionsToButtons(suggestions = []) {
   const MAP = {
     'status': { text: '📊 Status', cb: 'status' },
+    'app': { text: '📱 Mini App', cb: 'app' },
+    'mini': { text: '📱 Mini App', cb: 'app' },
+    'live': { text: '📱 Mini App', cb: 'app' },
+    'bw': { text: '📶 Băng thông', cb: 'bw' },
+    'bandwidth': { text: '📶 Băng thông', cb: 'bw' },
+    'screen': { text: '📺 Màn hình', cb: 'screen' },
+    'snap': { text: '📺 Màn hình', cb: 'screen' },
+    'slots': { text: '🌐 DS Slot', cb: 'slots' },
+    'browsers': { text: '🌐 DS Slot', cb: 'slots' },
     'run': { text: '▶ Run', cb: 'run' },
     'stop': { text: '🛑 Stop', cb: 'stop' },
     'pause': { text: '⏸ Pause', cb: 'pause' },
@@ -201,9 +257,9 @@ function suggestionsToButtons(suggestions = []) {
   };
   const btns = suggestions.map((s) => MAP[s] || MAP[s.toLowerCase()]).filter(Boolean);
   if (!btns.length) return null;
-  // Chia thành hàng 3
+  // Chia thành hàng 2 để dễ bấm trên điện thoại
   const rows = [];
-  for (let i = 0; i < btns.length; i += 3) rows.push(btns.slice(i, i + 3));
+  for (let i = 0; i < btns.length; i += 2) rows.push(btns.slice(i, i + 2));
   return rows;
 }
 
@@ -224,12 +280,15 @@ async function execCommand(chatId, userId, cmdText) {
     const elapsed = Math.max(1, Math.round((Date.now() - botStartTime) / 60000));
     const leads = state.limitRun?.count ?? 0;
     const speed = Math.round(((leads - sessionLeadsAtBotStart) / elapsed) * 60);
+    const toffersPoint = state.toffers?.point ?? '--';
+    const toffersLeads = state.toffers?.leadCount ?? 0;
     await send(chatId,
       `<b>📊 Trạng thái</b>\n` +
+      `💎 <b>Tổng Point: ${toffersPoint} pt</b> (${toffersLeads} leads)\n` +
       `▶ Luồng: ${state.activeCount}/${state.targetCount} ${running ? '🟢' : '🔴'}\n` +
       `📦 Proxy: ${pq.available} còn / ${pq.used} dùng\n` +
       `📧 Email: ${eq.available} còn / ${eq.used} dùng\n` +
-      `✅ Leads: ${leads}${state.limitRun?.max > 0 ? '/' + state.limitRun.max : ''}\n` +
+      `✅ Leads máy: ${leads}${state.limitRun?.max > 0 ? '/' + state.limitRun.max : ''}\n` +
       `⚡ Tốc độ: ~${speed} leads/giờ\n` +
       `💬 ${state.message || ''}`,
       running ? BTN_RUNNING : BTN_STOPPED,
@@ -390,14 +449,291 @@ async function execCommand(chatId, userId, cmdText) {
       [[{ text: '📋 Log', cb: 'log' }, { text: '📊 Status', cb: 'status' }]],
     );
 
+  } else if (name === '/bw' || name === '/bandwidth' || name === 'bw' || name === 'bandwidth') {
+    const [state, cons] = await Promise.all([
+      appGet('/state').catch(() => ({})),
+      appGet('/711proxy/consumption?days=1').catch(() => ({})),
+    ]);
+    const bw = state.bandwidth || {};
+    const today = bw.today || {};
+    const p711 = bw.proxy711 || {};
+    const sessions = (state.chromeSessions || []).filter((s) => !s.isClosed);
+
+    let text = `<b>📶 Thống kê Băng thông & 711Proxy</b>\n\n`;
+
+    // 1. Thống kê app đo hôm nay
+    text += `<b>📊 Hôm nay (App đo):</b>\n`;
+    text += `• Tổng tiêu hao: <b>${today.formatted || '0 B'}</b> (${today.requestCount?.toLocaleString('vi-VN') || 0} reqs)\n`;
+    text += `• Tải về: ⬇️ <b>${today.receivedFormatted || '0 B'}</b> | Tải lên: ⬆️ <b>${today.sentFormatted || '0 B'}</b>\n\n`;
+
+    // 2. Data 711Proxy từ Web API
+    text += `<b>🌐 711Proxy (Web API):</b>\n`;
+    if (p711.ok) {
+      text += `• Gói dung lượng: <b>${p711.packageFormatted || (p711.packageGb + ' GB')}</b>\n`;
+      text += `• Còn lại: <b>${p711.remainingFormatted || (p711.remainingGb + ' GB')}</b> (${p711.remainingPercent ?? 0}%)\n`;
+      text += `• Đã dùng: <b>${p711.usedFormatted || (p711.usedGb + ' GB')}</b> (${p711.usedPercent ?? 0}%)\n`;
+    } else {
+      text += `• Số dư: <i>${p711.error || 'Chưa đồng bộ số dư'}</i>\n`;
+    }
+
+    if (cons?.ok) {
+      text += `• Web ghi nhận tiêu hao hôm nay: <b>${cons.totalFormatted || '0 B'}</b> (${cons.activeHoursCount || 0} giờ chạy)\n`;
+      if (cons.peakHour) {
+        text += `• Giờ cao điểm: <b>${cons.peakHour}</b> (${cons.peakFormatted})\n`;
+      }
+    }
+    text += `\n`;
+
+    // 3. Tiêu hao theo các slot đang chạy
+    if (sessions.length > 0) {
+      text += `<b>🖥 Tiêu hao theo Slot đang chạy:</b>\n`;
+      for (const s of sessions) {
+        text += `• <b>Slot ${s.slot}</b> [<code>${s.exitIp || 'Local'}</code>]: <b>${s.bandwidthFormatted || '0 B'}</b> (${s.requestCount || 0} reqs)\n`;
+      }
+    } else {
+      text += `<i>(Hiện không có slot nào đang chạy)</i>\n`;
+    }
+
+    const buttons = [
+      [{ text: '📱 Mini App', cb: 'app' }, { text: '🔄 Làm mới', cb: 'bw' }],
+      [{ text: '📺 Màn hình', cb: 'screen' }, { text: '🌐 DS Slot', cb: 'slots' }],
+      [{ text: '📊 Status', cb: 'status' }],
+    ];
+    await send(chatId, text, buttons);
+
+  } else if (name === '/point' || name === '/points' || name === 'point' || name === 'points') {
+    const state = await appGet('/state').catch(() => ({}));
+    const toffers = state.toffers || {};
+    const pt = toffers.point ?? '--';
+    const leads = toffers.leadCount ?? 0;
+    const tunnel = await appGet('/tunnel').catch(() => null);
+    const miniUrl = `${tunnel?.url || 'https://duc.taile3f032.ts.net'}/screen-mini`;
+    await send(chatId,
+      `💎 <b>TỔNG POINT TOFFERS: ${pt} pt</b>\n` +
+      `🎯 Tổng Leads ghi nhận: <b>${leads} leads</b>\n` +
+      `🕒 Cập nhật: ${toffers.updatedAt ? new Date(toffers.updatedAt).toLocaleTimeString('vi-VN') : 'vừa xong'}\n\n` +
+      `Bấm nút bên dưới để mở Mini App xem danh sách chi tiết:`,
+      [[{ text: '📱 Xem Chi Tiết Mini App', web_app: { url: miniUrl } }]],
+    );
+
+  } else if (name === '/app' || name === '/mini' || name === '/live' || name === 'app' || name === 'mini' || name === 'live') {
+    let tunnel = await appGet('/tunnel').catch(() => null);
+    if (!tunnel?.url) {
+      await send(chatId, '⏳ Đang khởi tạo kết nối Cloudflare Tunnel HTTPS cho Telegram Mini App...');
+      tunnel = await appPost('/tunnel/start').catch(() => null);
+    }
+
+    if (tunnel?.url) {
+      const miniUrl = `${tunnel.url}/screen-mini`;
+      void tgPost('setChatMenuButton', { chat_id: chatId, menu_button: { type: 'web_app', text: '📺 Màn hình', web_app: { url: miniUrl } } }).catch(() => {});
+      await send(chatId,
+        `📱 <b>AutoLeadPC - Điều Khiển Trực Tiếp</b>\n\n` +
+        `Nhấn nút bên dưới để mở giao diện Mini App ngay trong Telegram:\n` +
+        `• <b>Chạm màn hình</b> để click chuột thực tế.\n` +
+        `• <b>Vuốt lên / xuống</b> để cuộn trang.\n` +
+        `• <b>Gõ bàn phím</b> để điền chữ vào Chrome.\n` +
+        `• Xem Live Stream thời gian thực (60fps) của từng slot.\n\n` +
+        `🔗 <i>Link web:</i> <a href="${miniUrl}">${miniUrl}</a>`,
+        [
+          [{ text: '📺 Mở Trực Tiếp Chrome (Live)', web_app: { url: miniUrl } }],
+          [{ text: '📊 Status', cb: 'status' }, { text: '🌐 DS Slot', cb: 'slots' }],
+        ],
+      );
+    } else {
+      await send(chatId,
+        `⚠️ Chưa thể tạo đường truyền HTTPS tự động (${tunnel?.error || 'timeout'}).\nBạn có thể dùng lệnh /screen để xem ảnh chụp màn hình Chrome.`,
+        [[{ text: '📺 Chụp ảnh /screen', cb: 'screen' }, { text: '📊 Status', cb: 'status' }]],
+      );
+    }
+
+  } else if (name === '/screen' || name === '/snap' || name === 'screen' || name === 'snap') {
+    const state = await appGet('/state').catch(() => ({}));
+    const sessions = (state.chromeSessions || []).filter((s) => !s.isClosed);
+
+    if (!sessions.length) {
+      await send(chatId,
+        '⚠️ <b>Hiện không có slot nào đang chạy</b> để chụp màn hình.\nNhấn ▶ <b>Run</b> để khởi động slot.',
+        [[{ text: '▶ Run', cb: 'run' }, { text: '📊 Status', cb: 'status' }]],
+      );
+      return;
+    }
+
+    let targetSlot = parseInt(cmd[1], 10);
+    if (!targetSlot) {
+      if (sessions.length === 1) {
+        targetSlot = sessions[0].slot;
+      } else {
+        const rows = [];
+        const slotButtons = sessions.map((s) => ({
+          text: `📺 Slot ${s.slot} (${s.exitIp || 'Local'})`,
+          cb: `screen_${s.slot}`,
+        }));
+        for (let i = 0; i < slotButtons.length; i += 2) {
+          rows.push(slotButtons.slice(i, i + 2));
+        }
+        rows.push([{ text: '📊 Status', cb: 'status' }, { text: '📶 Băng thông', cb: 'bw' }]);
+        await send(chatId, `📺 <b>Chọn slot muốn chụp màn hình:</b>`, rows);
+        return;
+      }
+    }
+
+    const session = sessions.find((s) => s.slot === targetSlot);
+    if (!session) {
+      const liveList = sessions.map((s) => s.slot).join(', ');
+      await send(chatId,
+        `❌ Không tìm thấy <b>Slot ${targetSlot}</b> đang chạy.\nCác slot hiện tại: <b>${liveList}</b>`,
+        [[{ text: '📺 Chọn Slot khác', cb: 'screen' }, { text: '📊 Status', cb: 'status' }]],
+      );
+      return;
+    }
+
+    try {
+      const snapRes = await fetch(`${APP_BASE}/screen/snapshot/${targetSlot}`);
+      if (!snapRes.ok) throw new Error(`HTTP ${snapRes.status}`);
+      const arrayBuf = await snapRes.arrayBuffer();
+      const imgBuffer = Buffer.from(arrayBuf);
+
+      const urlDisplay = (session.websiteUrl || session.tabs?.[0]?.url || 'Chưa mở URL').slice(0, 70);
+      const caption =
+        `📺 <b>Màn hình Slot ${targetSlot}</b> (${session.deviceVersion || session.deviceProfile || 'Chrome'})\n` +
+        `🌐 IP: <code>${session.exitIp || 'Local'}</code>\n` +
+        `🔗 URL: <i>${urlDisplay}</i>\n` +
+        `⚡ Trạng thái: ${session.action || 'Running'}\n` +
+        `📶 Tiêu hao: <b>${session.bandwidthFormatted || '0 B'}</b> (${session.requestCount || 0} reqs)\n` +
+        `📄 Trang: ${session.currentScreen ?? 1} | Điền: ${session.autofillFields || 0} ô`;
+
+      const tunnel = await appGet('/tunnel').catch(() => null);
+      const screenButtons = [];
+      if (tunnel?.url) {
+        screenButtons.push([
+          { text: `📱 Xem Live Slot ${targetSlot} (Chạm & Gõ)`, web_app: { url: `${tunnel.url}/screen-mini` } },
+        ]);
+      }
+      screenButtons.push([
+        { text: `🔄 Chụp lại Slot ${targetSlot}`, cb: `screen_${targetSlot}` },
+        { text: `🛑 Tắt Slot ${targetSlot}`, cb: `close_slot_${targetSlot}` },
+      ]);
+
+      const otherSlots = sessions.filter((s) => s.slot !== targetSlot);
+      if (otherSlots.length > 0) {
+        const otherBtns = otherSlots.slice(0, 3).map((s) => ({
+          text: `📺 Slot ${s.slot}`,
+          cb: `screen_${s.slot}`,
+        }));
+        screenButtons.push(otherBtns);
+      }
+      screenButtons.push([
+        { text: '📶 Băng thông', cb: 'bw' },
+        { text: '🌐 DS Slot', cb: 'slots' },
+        { text: '📊 Status', cb: 'status' },
+      ]);
+
+      await sendPhoto(chatId, imgBuffer, caption, screenButtons);
+    } catch (snapErr) {
+      await send(chatId,
+        `⚠️ Không thể chụp ảnh màn hình Slot ${targetSlot}: ${snapErr.message || 'Lỗi kết nối'}\n(Trình duyệt có thể đang bận chuyển trang hoặc vừa đóng).`,
+        [[{ text: '🔄 Thử lại', cb: `screen_${targetSlot}` }, { text: '🌐 DS Slot', cb: 'slots' }]],
+      );
+    }
+
+  } else if (name === '/slots' || name === '/browsers' || name === 'slots' || name === 'browsers') {
+    const state = await appGet('/state').catch(() => ({}));
+    const sessions = (state.chromeSessions || []).filter((s) => !s.isClosed);
+
+    if (!sessions.length) {
+      await send(chatId,
+        '🌐 <b>Danh sách Slot</b>: Hiện không có trình duyệt nào đang chạy.',
+        [[{ text: '▶ Run', cb: 'run' }, { text: '📊 Status', cb: 'status' }]],
+      );
+      return;
+    }
+
+    let text = `🌐 <b>Danh sách Trình duyệt đang chạy (${sessions.length}/${state.targetCount || sessions.length}):</b>\n\n`;
+    for (const s of sessions) {
+      const urlText = (s.websiteUrl || s.tabs?.[0]?.url || 'N/A').slice(0, 50);
+      text += `• <b>Slot ${s.slot}</b> [<code>${s.exitIp || 'Local'}</code>] (${s.deviceVersion || s.deviceProfile || 'Chrome'})\n`;
+      text += `  ├ 🔗 <i>${urlText}</i>\n`;
+      text += `  ├ 📶 Băng thông: <b>${s.bandwidthFormatted || '0 B'}</b> (${s.requestCount || 0} reqs)\n`;
+      text += `  └ ⚡ ${s.action || 'Running'} (Trang ${s.currentScreen ?? 1})\n\n`;
+    }
+
+    const rows = [];
+    const snapBtns = sessions.map((s) => ({ text: `📺 Chụp S${s.slot}`, cb: `screen_${s.slot}` }));
+    for (let i = 0; i < snapBtns.length; i += 3) rows.push(snapBtns.slice(i, i + 3));
+
+    const killBtns = sessions.map((s) => ({ text: `🛑 Tắt S${s.slot}`, cb: `close_slot_${s.slot}` }));
+    for (let i = 0; i < killBtns.length; i += 3) rows.push(killBtns.slice(i, i + 3));
+
+    rows.push([
+      { text: '📶 Băng thông', cb: 'bw' },
+      { text: '📊 Status', cb: 'status' },
+      { text: '🛑 Dừng tất cả', cb: 'stop' },
+    ]);
+
+    await send(chatId, text, rows);
+
+  } else if (name === '/close' || name === '/kill' || name === 'close' || name === 'kill') {
+    const slot = parseInt(cmd[1], 10);
+    if (!slot) {
+      const state = await appGet('/state').catch(() => ({}));
+      const sessions = (state.chromeSessions || []).filter((s) => !s.isClosed);
+      if (!sessions.length) {
+        await send(chatId, '⚠️ Hiện không có slot nào đang chạy để tắt.', BTN_MAIN);
+        return;
+      }
+      const rows = [];
+      const killBtns = sessions.map((s) => ({ text: `🛑 Tắt Slot ${s.slot}`, cb: `close_slot_${s.slot}` }));
+      for (let i = 0; i < killBtns.length; i += 2) rows.push(killBtns.slice(i, i + 2));
+      rows.push([{ text: '🌐 DS Slot', cb: 'slots' }, { text: '📊 Status', cb: 'status' }]);
+      await send(chatId, '🛑 <b>Chọn slot muốn tắt:</b>', rows);
+      return;
+    }
+
+    const res = await appPost(`/browser/close/${slot}`).catch((e) => ({ error: e.message }));
+    if (res?.ok) {
+      await send(chatId,
+        `🛑 Đã tắt riêng <b>Slot ${slot}</b> thành công (không tự bù slot mới).`,
+        [[{ text: '🌐 DS Slot', cb: 'slots' }, { text: '📊 Status', cb: 'status' }]],
+      );
+    } else {
+      await send(chatId,
+        `❌ Tắt Slot ${slot} thất bại: ${res?.error || 'Không tìm thấy slot'}`,
+        [[{ text: '🌐 DS Slot', cb: 'slots' }, { text: '📊 Status', cb: 'status' }]],
+      );
+    }
+
   } else if (name === '/help' || name === '/start' || name === 'help') {
+    void registerBotCommands();
     const hasAi = !!process.env.ANTHROPIC_API_KEY;
     await send(chatId,
       `<b>🤖 AutoLeadPC Bot</b>${hasAi ? ' <i>+ AI</i>' : ''}\n\n` +
       (hasAi
-        ? '💬 Chat tự nhiên — AI hiểu và thực hiện.\nHoặc dùng các lệnh:\n\n'
-        : 'Các lệnh:\n\n') +
-      `/status /run [n] /pause /stop\n/proxy /email /buy\n/done /speed /reset /log\n/clearproxy — xóa tất cả proxy trong hàng đợi`,
+        ? '💬 Chat tự nhiên — AI hiểu và thực hiện.\nHoặc dùng các lệnh quản lý:\n\n'
+        : 'Các lệnh quản lý:\n\n') +
+      `<b>Điều khiển:</b>\n` +
+      `/status — Trạng thái tổng thể\n` +
+      `/run [n] — Bật tự bù n luồng\n` +
+      `/pause — Tạm dừng mở slot mới\n` +
+      `/stop — Dừng toàn bộ luồng\n\n` +
+      `<b>Giám sát & Slot:</b>\n` +
+      `/bw — Băng thông hôm nay & số dư 711Proxy\n` +
+      `/screen [slot] — Chụp màn hình trực tiếp slot\n` +
+      `/slots — Danh sách các slot đang chạy\n` +
+      `/close [slot] — Tắt riêng 1 slot (không bù lại)\n\n` +
+      `<b>Proxy & Email:</b>\n` +
+      `/proxy — Hàng đợi proxy\n` +
+      `/buy — Mua proxy từ 711proxy\n` +
+      `/clearproxy — Xóa tất cả proxy trong hàng đợi\n` +
+      `/email — Hàng đợi email\n\n` +
+      `<b>Thống kê:</b>\n` +
+      `/done /speed /reset /log /clear-log`,
+      BTN_MAIN,
+    );
+
+  } else if (name === '/menu' || name === 'menu') {
+    void registerBotCommands();
+    await send(chatId,
+      '📋 <b>Menu lệnh điều khiển:</b>\nBạn có thể gõ <code>/</code> trên bàn phím hoặc nhấn nút <b>Menu</b> ở góc dưới bên trái để chọn nhanh các lệnh.',
       BTN_MAIN,
     );
 
@@ -407,9 +743,16 @@ async function execCommand(chatId, userId, cmdText) {
 
     // Keyword matching tiếng Việt (không cần API key)
     const KW = [
+      { pat: /\b(app|mini|mini app|live|trực tiếp|live stream|điều khiển)\b/, action: () => '/app' },
       { pat: /\b(chạy|run|bật|start|khởi động|mở)\b.*(\d+)/, action: (m) => `/run ${m[2]}` },
-      { pat: /\b(chạy|run|bật|start|mở)\b(?!.*\d)/, action: () => '/run' },
-      { pat: /\b(dừng|stop|tắt|kết thúc|ngừng)\b/, action: () => '/stop' },
+      { pat: /\b(chạy|run|bật|start|mở)\b(?!.*\d)(?!.*(màn hình|screen|slot|proxy|log))/, action: () => '/run' },
+      { pat: /\b(băng thông|dung lượng|tiêu hao|data|bw|bandwidth)\b/, action: () => '/bw' },
+      { pat: /\b(chụp|screen|màn hình|snapshot|snap)\b.*(\d+)/, action: (m) => `/screen ${m[2]}` },
+      { pat: /\b(chụp|screen|màn hình|snapshot|snap)\b/, action: () => '/screen' },
+      { pat: /\b(tắt|đóng|kill|close)\b.*(slot|luồng|trình duyệt|browser)\s*(\d+)/, action: (m) => `/close ${m[3]}` },
+      { pat: /\b(slot|luồng|trình duyệt|browser)\s*(\d+).*(tắt|đóng|kill|close)/, action: (m) => `/close ${m[2]}` },
+      { pat: /\b(danh sách|ds|xem|kiểm tra)\b.*(slot|luồng|trình duyệt|browser)\b|\b(slot|luồng|trình duyệt|browser)\b.*(đang chạy|hoạt động)/, action: () => '/slots' },
+      { pat: /\b(dừng|stop|tắt|kết thúc|ngừng)\b(?!.*(slot|luồng|trình duyệt))/, action: () => '/stop' },
       { pat: /\b(tạm dừng|pause|nghỉ)\b/, action: () => '/pause' },
       { pat: /\b(xóa|xoá|clear)\b.*\b(proxy|proxies)\b|\b(proxy|proxies)\b.*\b(xóa|xoá|clear)\b/, action: () => '/clearproxy' },
       { pat: /\b(proxy|proxies)\b.*\b(còn|bao nhiêu|status|xem)\b|\b(xem|bao nhiêu)\b.*\bproxy\b/, action: () => '/proxy' },
@@ -451,9 +794,26 @@ async function execCommand(chatId, userId, cmdText) {
 
     // Thực hiện action
     const actionMap = {
-      status: '/status', run: decision.params?.count ? `/run ${decision.params.count}` : '/run',
-      stop: '/stop', pause: '/pause', proxy: '/proxy', email: '/email',
-      buy_proxy: '/buy', done: '/done', speed: '/speed', reset: '/reset', log: '/log', clear_log: '/clear-log',
+      status: '/status',
+      app: '/app',
+      mini: '/app',
+      live: '/app',
+      bw: '/bw',
+      bandwidth: '/bw',
+      screen: decision.params?.count ? `/screen ${decision.params.count}` : '/screen',
+      slots: '/slots',
+      close_slot: decision.params?.count ? `/close ${decision.params.count}` : '/close',
+      run: decision.params?.count ? `/run ${decision.params.count}` : '/run',
+      stop: '/stop',
+      pause: '/pause',
+      proxy: '/proxy',
+      email: '/email',
+      buy_proxy: '/buy',
+      done: '/done',
+      speed: '/speed',
+      reset: '/reset',
+      log: '/log',
+      clear_log: '/clear-log',
       clear_proxy: '/clearproxy',
     };
     if (decision.action !== 'reply' && actionMap[decision.action]) {
@@ -479,6 +839,12 @@ async function handleCallback(chatId, userId, callbackId, data) {
   if (data.startsWith('run_')) {
     const n = parseInt(data.slice(4), 10);
     await execCommand(chatId, userId, n > 0 ? `/run ${n}` : '/run_keep');
+  } else if (data.startsWith('screen_')) {
+    const slot = parseInt(data.slice(7), 10);
+    await execCommand(chatId, userId, slot ? `/screen ${slot}` : '/screen');
+  } else if (data.startsWith('close_slot_')) {
+    const slot = parseInt(data.slice(11), 10);
+    await execCommand(chatId, userId, slot ? `/close ${slot}` : '/close');
   } else {
     await execCommand(chatId, userId, data);
   }
@@ -495,6 +861,22 @@ async function checkAndNotify() {
     const proxyAvail = pq.available ?? 0;
     const limitCount = state.limitRun?.count ?? 0;
     const limitMax = state.limitRun?.max ?? 0;
+
+    // Cảnh báo số dư dung lượng 711Proxy thấp (< 1.0 GB)
+    const p711 = state.bandwidth?.proxy711;
+    if (p711?.ok && typeof p711.remainingGb === 'number') {
+      if (p711.remainingGb <= 1.0 && !low711BalanceNotified) {
+        low711BalanceNotified = true;
+        await tgNotify(
+          `⚠️ <b>Cảnh báo Dung lượng 711Proxy!</b>\n` +
+          `Dung lượng còn lại: <b>${p711.remainingFormatted || (p711.remainingGb.toFixed(2) + ' GB')}</b> (${p711.remainingPercent ?? 0}%)\n` +
+          `Vui lòng nạp thêm data để tránh gián đoạn tiến trình.`,
+          [[{ text: '📶 Băng thông', cb: 'bw' }, { text: '📊 Status', cb: 'status' }]],
+        );
+      } else if (p711.remainingGb > 2.0) {
+        low711BalanceNotified = false;
+      }
+    }
 
     if (proxyAvail < 10 && proxyAvail > 0 && !lowProxyNotified) {
       lowProxyNotified = true;
@@ -616,6 +998,80 @@ export async function reloadTelegramBot() {
   return { running: Boolean(started) };
 }
 
+// ─── Danh sách lệnh gợi ý hiển thị khi gõ "/" trên Telegram ──────────────────
+
+export const BOT_COMMANDS = [
+  { command: 'app', description: '📱 Mở Mini App xem Live Chrome & điều khiển (chạm/gõ)' },
+  { command: 'status', description: '📊 Xem trạng thái hoạt động & luồng' },
+  { command: 'point', description: '💎 Xem tổng Point và số Leads Toffers' },
+  { command: 'bw', description: '📶 Băng thông hôm nay & số dư 711Proxy' },
+  { command: 'screen', description: '📺 Chụp ảnh màn hình live của slot' },
+  { command: 'slots', description: '🌐 Danh sách các slot đang chạy' },
+  { command: 'close', description: '🛑 Tắt riêng 1 slot (không tự bù)' },
+  { command: 'run', description: '▶ Khởi động luồng (chọn số luồng)' },
+  { command: 'pause', description: '⏸ Tạm dừng mở slot mới' },
+  { command: 'stop', description: '🛑 Dừng toàn bộ hệ thống' },
+  { command: 'proxy', description: '📦 Xem hàng đợi proxy' },
+  { command: 'buy', description: '🛒 Mua proxy từ 711Proxy' },
+  { command: 'clearproxy', description: '🗑 Xóa tất cả proxy trong hàng đợi' },
+  { command: 'email', description: '📧 Xem hàng đợi email' },
+  { command: 'done', description: '✅ Xem số leads hoàn thành' },
+  { command: 'speed', description: '⚡ Xem tốc độ leads/giờ' },
+  { command: 'log', description: '📋 Xem nhật ký session gần nhất' },
+  { command: 'clearlog', description: '🗑 Xóa toàn bộ log' },
+  { command: 'reset', description: '🔄 Đặt lại bộ đếm leads về 0' },
+  { command: 'help', description: 'ℹ️ Hướng dẫn sử dụng chi tiết' },
+];
+
+/**
+ * Đăng ký danh sách commands và nút Menu với Telegram API
+ * Giúp người dùng khi gõ "/" sẽ tự động hiện danh sách gợi ý kèm mô tả tiếng Việt.
+ */
+export async function registerBotCommands(maxRetries = 3) {
+  if (!cfg?.botToken) return false;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      let tunnel = await appGet('/tunnel').catch(() => null);
+      if (!tunnel?.url) {
+        tunnel = await appPost('/tunnel/start').catch(() => null);
+      }
+
+      const menuButton = tunnel?.url
+        ? { type: 'web_app', text: '📺 Màn hình', web_app: { url: `${tunnel.url}/screen-mini` } }
+        : { type: 'commands' };
+
+      const promises = [
+        tgPost('setMyCommands', { commands: BOT_COMMANDS }),
+        tgPost('setChatMenuButton', { menu_button: menuButton }),
+      ];
+      if (cfg.allowedUserId) {
+        promises.push(tgPost('setChatMenuButton', { chat_id: cfg.allowedUserId, menu_button: menuButton }));
+      }
+      if (cfg.notifyChatId && cfg.notifyChatId !== cfg.allowedUserId) {
+        promises.push(tgPost('setChatMenuButton', { chat_id: cfg.notifyChatId, menu_button: menuButton }));
+      }
+
+      const results = await Promise.all(promises);
+      const cmdRes = results[0];
+      const btnRes = results[1];
+      if (cmdRes?.ok) {
+        console.log('[TGBot] Đã đăng ký gợi ý lệnh Telegram (setMyCommands) thành công');
+      }
+      if (btnRes?.ok && tunnel?.url) {
+        console.log('[TGBot] Đã kích hoạt Menu WebApp:', `${tunnel.url}/screen-mini`);
+      }
+      if (cmdRes?.ok) return true;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        console.warn('[TGBot] Lỗi gọi setMyCommands:', err.message);
+        return false;
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  return false;
+}
+
 /**
  * Khởi động bot Telegram: đọc config, chạy vòng poll update và timer thông báo.
  *
@@ -632,6 +1088,9 @@ export async function startTelegramBot() {
     notifyChatId = raw.notifyChatId ?? null;
     console.log('[TGBot] Đã khởi động, allowedUserId:', cfg.allowedUserId);
   } catch { return false; }
+
+  // Đăng ký menu gợi ý lệnh khi gõ "/"
+  void registerBotCommands();
 
   const generation = ++botGeneration;
 
