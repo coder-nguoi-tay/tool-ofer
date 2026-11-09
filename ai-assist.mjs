@@ -475,6 +475,20 @@ export async function pageHasWork(page) {
         '.choice-container [role="button"]:not(.active)',
         '.options-container a:not(.active)',
         '.creative-survey-answer:not(.selected)',
+        '#ct-creative-submit-yes',
+        '#ct-creative-submit-no',
+        'a[id^="ct-creative-submit-"]',
+        'button[id^="ct-creative-submit-"]',
+        '.ct-creative-submit',
+        '[data-mock-secondary-offer-action]',
+        'button.btn-yes',
+        'button.btn-no',
+        'a.btn-yes',
+        'a.btn-no',
+        '.yes-btn',
+        '.no-btn',
+        'button.ai-submit-button',
+        'a.ai-submit-button',
       ].join(', '))).filter((el) => !el.disabled && isVisible(el));
 
       if (surveyCandidates.length > 0) return true;
@@ -521,6 +535,16 @@ export async function pageHasWork(page) {
         '.btn-option',
         'div[class*="btn-option"]',
         'div[class*="button"]',
+        '#ct-creative-submit-yes',
+        '#ct-creative-submit-no',
+        'a[id^="ct-creative-submit-"]',
+        'button[id^="ct-creative-submit-"]',
+        '.ct-creative-submit',
+        '[data-mock-secondary-offer-action]',
+        'button.btn-yes',
+        'button.btn-no',
+        'a.btn-yes',
+        'a.btn-no',
       ].join(', '))).some((el) => {
         if (el.disabled) return false;
         if (!isVisible(el)) return false;
@@ -531,7 +555,7 @@ export async function pageHasWork(page) {
         }
 
         const text = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
-        return /^(continue|next|submit|proceed|start|get\s*quote|see\s*my\s*options|view\s*results|get\s*my\s*reward|claim\s*reward|claim\s*my\s*reward|get\s*reward|view\s*deals|unlock|tiếp\s*tục|xem\s*kết\s*quả|bước\s*tiếp|gửi)/i.test(text);
+        return /^(continue|next|submit|proceed|start|get\s*quote|see\s*my\s*options|view\s*results|get\s*my\s*reward|claim\s*reward|claim\s*my\s*reward|get\s*reward|view\s*deals|unlock|tiếp\s*tục|xem\s*kết\s*quả|bước\s*tiếp|gửi|yes\b|no\b|no\s*thanks|claim|claim\s*what's\s*mine|có|đồng\s*ý|không)/i.test(text);
       });
 
       if (submitCandidates) return true;
@@ -901,7 +925,7 @@ export async function detectSmartFallbackAction(page, config = null) {
       }
 
       // 2. Câu hỏi khảo sát / quiz buttons / link thẻ a phương án trả lời (btn-option, choice-btn, option-btn, quiz-cards, pills)
-      if (opts.solveSurveyCards !== false && opts.pickRandom === true) {
+      if (opts.solveSurveyCards !== false && opts.pickRandom !== false) {
         const surveyOptions = Array.from(document.querySelectorAll([
           'button[id^="answer-"]',
           'button.question-answer-button',
@@ -940,6 +964,20 @@ export async function detectSmartFallbackAction(page, config = null) {
           '[role="radio"]:not([aria-checked="true"])',
           'div[class*="button" i]:not(.active):not(.selected)',
           'div[class*="btn-option" i]:not(.active):not(.selected)',
+          '#ct-creative-submit-yes',
+          '#ct-creative-submit-no',
+          'a[id^="ct-creative-submit-"]',
+          'button[id^="ct-creative-submit-"]',
+          '.ct-creative-submit',
+          '[data-mock-secondary-offer-action]',
+          'button.btn-yes',
+          'button.btn-no',
+          'a.btn-yes',
+          'a.btn-no',
+          '.yes-btn',
+          '.no-btn',
+          'button.ai-submit-button',
+          'a.ai-submit-button',
         ].join(', '))).filter((el) => isVisible(el) && !el.closest('form[role="search"], form:has(input[type="search"][name="q"])') &&
           (el.matches('button, a, [role="button"], [role="radio"]')));
 
@@ -1050,6 +1088,7 @@ export async function detectSmartFallbackAction(page, config = null) {
       solveSurveyCards: cfg.solveSurveyCards !== false,
       clickJumpPage: cfg.clickJumpPage !== false,
       multiStepSubmit: cfg.multiStepSubmit !== false,
+      pickRandom: cfg.pickRandom !== false,
     });
   } catch {
     return null;

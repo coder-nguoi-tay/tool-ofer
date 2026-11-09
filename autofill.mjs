@@ -1614,6 +1614,8 @@ export async function findSubmitButton(frame) {
     'button:has-text("Continue"), button:has-text("Submit"), button:has-text("Next"), button:has-text("Agree & Submit"), button:has-text("AGREE & CONTINUE"), button:has-text("Agree & Continue"), button:has-text("Tiếp tục"), button:has-text("Get Quote"), button:has-text("Get My Quote"), button:has-text("Agree"), button:has-text("Tiếp theo"), button:has-text("Xác nhận"), button:has-text("Get Started"), button:has-text("See My Results"), button:has-text("View My Results"), button:has-text("Check My Rate"), button:has-text("Claim Now"), button:has-text("Proceed"), button:has-text("Finish"), button:has-text("Complete"), button:has-text("Explore Plans"), button:has-text("Check Options"), button:has-text("Hoàn thành"), button:has-text("Get My Reward"), button:has-text("Claim Reward"), button:has-text("Claim My Reward"), button:has-text("Get Reward"), button:has-text("Unlock Reward"), button:has-text("View Deals"), button:has-text("Continue to Deals"), button:has-text("View Offers"), button:has-text("See Offers"), button:has-text("Check Eligibility"), button:has-text("See Matches"), button:has-text("Show Matches"), button:has-text("Send"), button:has-text("Sign Up"), button:has-text("Sign-Up"), button:has-text("Sign Up Now"), button:has-text("Register"), button:has-text("Register Now"), button:has-text("Join Now"), button:has-text("Join Free"), button:has-text("Enter Now"), button:has-text("Enter to Win"), button:has-text("Start Now"), button:has-text("Apply Now"), button:has-text("Start"), button:has-text("Free Quote"), button:has-text("Request Quote"), button:has-text("Next Step"), button:has-text("Take Survey"), button:has-text("Confirm"), button:has-text("Get Free Guide"), button:has-text("Get My Free Guide"), button:has-text("Get Guide"), button:has-text("Get Guide Now"), button:has-text("Get Cash Assistance"), button:has-text("Free Guide")',
     'a:has-text("Continue"), a:has-text("Submit"), a:has-text("Next"), a:has-text("Agree & Submit"), a:has-text("AGREE & CONTINUE"), a:has-text("Tiếp tục"), a:has-text("Get Quote"), a:has-text("Agree"), a:has-text("Get Started"), a:has-text("See My Results"), a:has-text("Claim Now"), a:has-text("Proceed"), a:has-text("Complete"), a:has-text("Explore Plans"), a:has-text("Get My Reward"), a:has-text("Claim Reward"), a:has-text("Claim My Reward"), a:has-text("Get Reward"), a:has-text("Unlock Reward"), a:has-text("View Deals"), a:has-text("Continue to Deals"), a:has-text("View Offers"), a:has-text("See Offers"), a:has-text("Check Eligibility"), a:has-text("See Matches"), a:has-text("Sign Up"), a:has-text("Sign-Up"), a:has-text("Sign Up Now"), a:has-text("Register"), a:has-text("Register Now"), a:has-text("Join Now"), a:has-text("Enter Now"), a:has-text("Apply Now"), a:has-text("Start"), a:has-text("Take Survey"), a:has-text("Get Free Guide"), a:has-text("Get My Free Guide"), a:has-text("Get Guide"), a:has-text("Get Guide Now"), a:has-text("Get Cash Assistance"), a:has-text("Free Guide")',
     '[role="button"]:has-text("Continue"), [role="button"]:has-text("Submit"), [role="button"]:has-text("Next"), [role="button"]:has-text("Agree & Submit"), [role="button"]:has-text("Agree"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Get Started"), [role="button"]:has-text("See My Results"), [role="button"]:has-text("Get My Reward"), [role="button"]:has-text("Claim Reward"), [role="button"]:has-text("Get Reward"), [role="button"]:has-text("Check Eligibility"), [role="button"]:has-text("Sign Up"), [role="button"]:has-text("Register"), [role="button"]:has-text("Join Now"), [role="button"]:has-text("Get Free Guide"), [role="button"]:has-text("Get Guide")',
+    'button:has-text("Yes"), button:has-text("No"), a:has-text("Yes"), a:has-text("No"), a:has-text("No Thanks"), button:has-text("CLAIM WHAT\'S MINE"), a:has-text("CLAIM WHAT\'S MINE")',
+    'a[id^="ct-creative-submit-"], button[id^="ct-creative-submit-"], .ct-creative-submit, [data-mock-secondary-offer-action]',
     'button[id*="submit" i], button[id*="continue" i], button[id*="next" i], a[id*="submit" i], a[id*="continue" i], a[id*="next" i]',
     'button[class*="submit" i], button[class*="continue" i], button[class*="next" i], a[class*="submit" i], a[class*="continue" i], a[class*="next" i]',
     'div[class*="btn"]:has-text("Continue"), div[class*="button"]:has-text("Continue"), div[class*="btn"]:has-text("Next"), div[class*="button"]:has-text("Next"), span[class*="btn"]:has-text("Continue")',
@@ -1692,7 +1694,7 @@ export async function findSubmitButton(frame) {
             return { valid: false, reason: 'contact_link' };
           }
 
-          if (/cancel|back|previous|prev|quay lại|hủy|close|đóng|skip|bỏ qua/i.test(text)) {
+          if (/cancel|back|previous|prev|quay lại|hủy|close|đóng/i.test(text)) {
             return { valid: false, reason: 'cancel_text' };
           }
 
@@ -2221,60 +2223,180 @@ export async function handleAlphaIntentSoiCards(page, frame, options = {}) {
   frame._uxSoiHandledAt = now;
 
   let done = 0;
-  // Bước 1: tick consent TCPA hiển thị (cần thiết cho nhánh Yes của SOI)
-  try {
-    const consentLoc = frame.locator('[data-object-creative-type="soiyesno"] label:has(input[data-tf-element-role="consent-opt-in"])').first();
-    if (await consentLoc.count().catch(() => 0) > 0) {
-      const unchecked = await consentLoc.evaluate((label) => {
-        const box = label.querySelector('input[data-tf-element-role="consent-opt-in"]');
-        return box && !box.checked;
-      }).catch(() => false);
-      if (unchecked) {
-        await consentLoc.click({ force: true, timeout: 3000 }).catch(() => {});
-        done += 1;
-        options.onLog?.({ type: 'soi_consent', detail: '[Alpha SOI] Đã tick consent TCPA của thẻ offer.' });
-      }
-    }
-  } catch {}
 
-  // Bước 2: chọn Yes/No (1 thẻ, 1 lần). Thẻ chưa xử lý được đánh dấu data-ux-soi-done.
-  let choice = null;
+  // Bước 1 & 2: Quét thẻ SOI / secondary co-reg offer chưa xử lý và xác định nút Yes/No
+  let pickedInfo = null;
   try {
-    const pick = await frame.evaluate(() => {
-      const card = document.querySelector('[data-object-creative-type="soiyesno"]');
-      if (!card) return null;
-      if (card.getAttribute('data-ux-soi-done') === '1') return null;
-      if (Math.random() < 0.3) {
-        const no = card.querySelector('#ct-creative-submit-no');
-        if (no) { card.setAttribute('data-ux-soi-done', '1'); return 'no'; }
+    pickedInfo = await frame.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el || el.disabled) return false;
+        const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+
+      // Các selector định danh container thẻ offer / câu hỏi Yes-No
+      const cardSelectors = [
+        '[data-object-creative-type="soiyesno"]',
+        'form[data-tf-element-role="offer"]',
+        '[data-tf-element-role="offer"]',
+        '.ct-creative-path-theme',
+        '#ct-creatives-container',
+        '[ct-creatives-container]',
+        '.mock-secondary-offer-card',
+        '.ai-content--offer',
+        '[id^="offers_list-"]',
+        '.soi-card',
+        '.soi-container',
+        'div:has(> #actions .ct-creative-submit)',
+        'div:has(.ct-creative-actions)',
+        'div:has(#ct-creative-submit-yes, #ct-creative-submit-no)',
+        'div:has(a[id^="ct-creative-submit-"])',
+      ];
+
+      let candidateCards = Array.from(document.querySelectorAll(cardSelectors.join(', ')))
+        .filter((c) => isVisible(c) && c.getAttribute('data-ux-soi-done') !== '1');
+
+      // Nếu không có card theo selector riêng, kiểm tra xem toàn trang / container câu hỏi có nút Yes/No SOI không
+      if (!candidateCards.length) {
+        const hasSoiButtons = Boolean(document.querySelector(
+          '#ct-creative-submit-yes, #ct-creative-submit-no, [id^="ct-creative-submit-"], [data-mock-secondary-offer-action], .ct-creative-submit'
+        ));
+        if (hasSoiButtons) {
+          const mainArea = document.querySelector('main, .main, #main, section, .content, form, .survey-container, .question-container') || document.body;
+          if (mainArea && mainArea.getAttribute('data-ux-soi-done') !== '1') {
+            candidateCards = [mainArea];
+          }
+        }
       }
-      const yes = card.querySelector('#ct-creative-submit-yes');
-      if (yes) { card.setAttribute('data-ux-soi-done', '1'); return 'yes'; }
+
+      if (!candidateCards.length) return null;
+
+      for (const card of candidateCards) {
+        // Tìm các nút hoặc link bấm bên trong thẻ
+        const clickables = Array.from(card.querySelectorAll([
+          '#ct-creative-submit-yes',
+          '#ct-creative-submit-no',
+          'a[id^="ct-creative-submit-"]',
+          'button[id^="ct-creative-submit-"]',
+          '.ct-creative-submit',
+          '[data-mock-secondary-offer-action]',
+          'button.btn-yes', 'button.btn-no', 'a.btn-yes', 'a.btn-no',
+          '.yes-btn', '.no-btn',
+          'button.ai-submit-button', 'a.ai-submit-button',
+          'button.ai-skip', 'a.ai-skip',
+          'button', 'a[role="button"]', 'a.btn', 'a.button', '[role="button"]'
+        ].join(', '))).filter(isVisible);
+
+        let yesBtn = null;
+        let noBtn = null;
+
+        for (const el of clickables) {
+          const id = (el.id || '').toLowerCase();
+          const className = (el.className || '').toLowerCase();
+          const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+          const action = (el.getAttribute('data-mock-secondary-offer-action') || '').toLowerCase();
+          const role = (el.getAttribute('data-tf-element-role') || '').toLowerCase();
+
+          const isYes = id === 'ct-creative-submit-yes' ||
+            action === 'accept' ||
+            className.includes('btn-yes') || className.includes('yes-btn') ||
+            /^(yes|yes\b|claim|claim\s*what's\s*mine|claim\s*now|có|đồng ý)$/i.test(text);
+
+          const isNo = id === 'ct-creative-submit-no' ||
+            action === 'decline' ||
+            className.includes('ai-skip') || className.includes('btn-no') || className.includes('no-btn') ||
+            /^(no|no thanks|no, thanks|decline|pass|skip|not now|bỏ qua|không)$/i.test(text);
+
+          if (isYes && !yesBtn) yesBtn = el;
+          if (isNo && !noBtn) noBtn = el;
+        }
+
+        if (!yesBtn && !noBtn) continue;
+
+        // Quyết định chọn Yes hay No:
+        // Nếu có cả 2: chọn ngẫu nhiên (70% No / 30% Yes) để ưu tiên vượt qua co-reg offer nhanh chóng mà không bị kẹt form phụ
+        let choice = 'yes';
+        if (yesBtn && noBtn) {
+          choice = Math.random() < 0.7 ? 'no' : 'yes';
+        } else if (noBtn) {
+          choice = 'no';
+        } else {
+          choice = 'yes';
+        }
+
+        const chosenEl = choice === 'yes' ? yesBtn : noBtn;
+        if (!chosenEl) continue;
+
+        // Nếu chọn Yes, kiểm tra và tick consent TCPA nếu có trong thẻ
+        let tickedConsent = false;
+        if (choice === 'yes') {
+          const consentInput = card.querySelector('input[data-tf-element-role="consent-opt-in"], input[type="checkbox"]:not(:checked)');
+          if (consentInput && !consentInput.checked) {
+            consentInput.checked = true;
+            consentInput.dispatchEvent(new Event('input', { bubbles: true }));
+            consentInput.dispatchEvent(new Event('change', { bubbles: true }));
+            tickedConsent = true;
+          }
+        }
+
+        const uid = `soi_btn_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        chosenEl.setAttribute('data-ux-soi-btn-id', uid);
+        card.setAttribute('data-ux-soi-done', '1');
+        card.setAttribute('data-ux-opened', '1');
+
+        return {
+          choice,
+          uid,
+          tickedConsent,
+          text: (chosenEl.innerText || chosenEl.textContent || '').trim().slice(0, 40),
+          tag: chosenEl.tagName.toLowerCase(),
+          id: chosenEl.id || null,
+        };
+      }
       return null;
     }).catch(() => null);
-    choice = pick;
   } catch {}
 
-  if (choice) {
+  if (pickedInfo) {
+    if (pickedInfo.tickedConsent) {
+      done += 1;
+      options.onLog?.({ type: 'soi_consent', detail: '[Alpha SOI] Đã tick consent TCPA của thẻ offer.' });
+    }
+
     try {
-      const btnLoc = frame.locator(choice === 'yes' ? '#ct-creative-submit-yes' : '#ct-creative-submit-no').first();
-      if (await btnLoc.count().catch(() => 0) > 0) {
-        const clicked = await btnLoc.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
-        if (!clicked) {
-          // Fallback JS click (alpha-intent onclick vẫn chạy được)
-          await frame.evaluate((c) => {
-            const el = document.querySelector(c === 'yes' ? '#ct-creative-submit-yes' : '#ct-creative-submit-no');
-            if (el) el.click();
-          }, choice).catch(() => {});
+      const loc = frame.locator(`[data-ux-soi-btn-id="${pickedInfo.uid}"]`);
+      const btnLoc = typeof loc?.first === 'function' ? loc.first() : loc;
+      let clicked = false;
+      if (btnLoc && typeof btnLoc.count === 'function' && (await btnLoc.count().catch(() => 0) > 0)) {
+        if (typeof btnLoc.click === 'function') {
+          clicked = await btnLoc.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
         }
-        done += 1;
-        options.onLog?.({
-          type: 'soi_answered',
-          detail: `[Alpha SOI] Đã trả lời thẻ SOI: chọn "${choice === 'yes' ? 'Yes' : 'No'}" (random 70% Yes / 30% No).`,
-        });
       }
-    } catch {}
+
+      if (!clicked) {
+        // Fallback evaluate click
+        await frame.evaluate((uid) => {
+          const el = document.querySelector(`[data-ux-soi-btn-id="${uid}"]`);
+          if (el) {
+            el.click();
+            return true;
+          }
+          return false;
+        }, pickedInfo.uid).catch(() => {});
+      }
+
+      done += 1;
+      options.onLog?.({
+        type: 'soi_answered',
+        detail: `[Alpha SOI] Đã trả lời thẻ SOI: chọn "${pickedInfo.choice === 'yes' ? 'Yes' : 'No'}" ("${pickedInfo.text || pickedInfo.choice}").`,
+      });
+    } catch (clickErr) {
+      console.warn('[Alpha SOI] Lỗi khi bấm nút SOI:', clickErr.message);
+    }
   }
+
   return done;
 }
 
@@ -3342,6 +3464,14 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         '[class*="btn-no" i]',
         '[class*="yes-btn" i]',
         '[class*="no-btn" i]',
+        '#ct-creative-submit-yes',
+        '#ct-creative-submit-no',
+        'a[id^="ct-creative-submit-"]',
+        'button[id^="ct-creative-submit-"]',
+        '.ct-creative-submit',
+        '[data-mock-secondary-offer-action]',
+        'button.ai-submit-button',
+        'a.ai-submit-button',
         '[data-btn-option]',
         'button.btn-option',
         'a.btn-option',
@@ -3579,8 +3709,13 @@ export async function handleRadioAndSurveyOptions(frame, record = {}, session = 
         const hasRecentlyClicked = items.some((it) => it.recentlyClicked);
         const hasSelected = items.some((it) => it.isSelected);
         // QUAN TRỌNG: Chỉ chọn khi nhóm này CHƯA có đáp án nào được chọn (isSelected)
-        // và CHƯA từng được click gần đây, tránh click đi click lại 1 nút mở nhiều link
-        if (!hasRecentlyClicked && !hasSelected && items.length > 1) {
+        // và CHƯA từng được click gần đây, tránh click đi click lại 1 nút mở nhiều link.
+        // Cho phép cả nhóm nhiều đáp án (>1) và nút lựa chọn đơn chiếc Yes/No/CTA/tiếp tục.
+        const isSingleChoiceBtn = items.length === 1 && (
+          /^(yes|no|no thanks|agree|continue|claim|tiếp tục|đồng ý)$/i.test(items[0].text) ||
+          /yes|no|choice|answer|option|soi|submit/i.test(`${items[0].id} ${items[0].className}`)
+        );
+        if (!hasRecentlyClicked && !hasSelected && (items.length > 1 || isSingleChoiceBtn)) {
           // Kèm tiêu đề câu hỏi để signature phân biệt được các bước Yes/No liên tiếp
           // trên cùng một URL (cùng câu hỏi rebuild DOM → chặn, câu khác → cho phép).
           const headingEl = container.querySelector('h1, h2, h3, h4, legend, .question-title, .main-question, p');
@@ -4369,7 +4504,12 @@ export async function handleOfferwallCards(frame, page = null, options = {}) {
         // theo tỉ lệ Yes/No riêng (bấm .first() ở đây sẽ luôn trúng Yes, sai tỉ lệ).
         const soiCard = card.getAttribute?.('data-object-creative-type') === 'soiyesno'
           || card.querySelector?.('[data-object-creative-type="soiyesno"]');
-        if (soiCard) { card.setAttribute('data-ux-opened', '1'); return; }
+        if (soiCard) {
+          if (card.getAttribute('data-ux-soi-done') === '1') {
+            card.setAttribute('data-ux-opened', '1');
+          }
+          return;
+        }
 
         const uid = `offerwall_card_${idx}_${Date.now()}`;
         card.setAttribute('data-ux-card-id', uid);
@@ -8094,7 +8234,7 @@ export function attachAutofill(context, records, allowedOrigin, session = {}, op
               if (inputs.some((el) => isVisible(el) && !el.disabled)) return true;
 
               // 2. Kiểm tra có nút bấm, button submit, hoặc nút chuyển bước nào đang hiển thị không
-              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a.btn, a.button, a.cta-button, a.rjp-cta-button, a.sjp-cta-button, .cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], a[aria-label*="Reward" i]'));
+              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a.btn, a.button, a.cta-button, a.rjp-cta-button, a.sjp-cta-button, .cta-button, .rjp-cta-button, .sjp-cta-button, a[href*="/next"], a[aria-label*="Reward" i], a[id^="ct-creative-submit-"], button[id^="ct-creative-submit-"], .ct-creative-submit, [data-mock-secondary-offer-action]'));
               if (buttons.some((el) => isVisible(el) && !el.disabled)) return true;
 
               // 3. Kiểm tra có radio group hoặc câu hỏi khảo sát/quiz nào đang hiển thị không

@@ -44,6 +44,7 @@ const TEST_FILES = [
   'tgbot-features.test.mjs',
   'auto-refill-proxy-fix.test.mjs',
   'tg-miniapp.test.mjs',
+  'soi-coreg-freeze.test.mjs',
 ];
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
