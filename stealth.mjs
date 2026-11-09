@@ -695,7 +695,7 @@ export function stealthInitScript(cfg) {
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-19
  */
-export async function applyNativeOverrides(context, page, { userAgentOverride, hardwareConcurrency, deviceProfile, timezoneId }) {
+export async function applyNativeOverrides(context, page, { userAgentOverride, hardwareConcurrency, deviceProfile, timezoneId, clientHintHeaders }) {
   const session = await context.newCDPSession(page);
   try {
     await session.send('Emulation.setUserAgentOverride', userAgentOverride);
@@ -706,6 +706,53 @@ export async function applyNativeOverrides(context, page, { userAgentOverride, h
     const { fullVersion, ...rest } = metadata;
     await session.send('Emulation.setUserAgentOverride', { ...userAgentOverride, userAgentMetadata: rest });
   }
+
+  // Đồng bộ qua Network domain để network stack áp dụng nhất quán cho toàn bộ HTTP request
+  try {
+    await session.send('Network.enable');
+    await session.send('Network.setUserAgentOverride', userAgentOverride);
+  } catch {}
+
+  // Bù Client Hints cho mọi HTTP request và đặc biệt là navigation redirects (301/302/307).
+  // Chromium trên macOS theo chuẩn W3C mặc định xoá Sec-CH-UA-Platform-Version trên redirect,
+  // khiến hệ thống tracking affiliate ghi nhận "Window 0, Version click = 0" thay vì "10.0".
+  const metadata = userAgentOverride?.userAgentMetadata;
+  if (metadata && metadata.platform) {
+    const secChUa = metadata.brands?.map((b) => `"${b.brand}";v="${b.version}"`).join(', ') || '';
+    const hints = {
+      ...(secChUa ? { 'Sec-CH-UA': secChUa } : {}),
+      'Sec-CH-UA-Platform': `"${metadata.platform}"`,
+      'Sec-CH-UA-Platform-Version': `"${metadata.platformVersion || (metadata.platform === 'Windows' ? '10.0.0' : '')}"`,
+      'Sec-CH-UA-Mobile': metadata.mobile ? '?1' : '?0',
+      'Sec-CH-UA-Model': `"${metadata.model || ''}"`,
+      'Sec-CH-UA-Arch': `"${metadata.architecture || 'x86'}"`,
+      'Sec-CH-UA-Bitness': `"${metadata.bitness || '64'}"`,
+      'Sec-CH-UA-WoW64': '?0',
+      ...(clientHintHeaders || {}),
+    };
+
+    try {
+      await session.send('Fetch.enable', { patterns: [{ urlPattern: '*' }] });
+      session.on('Fetch.requestPaused', async (event) => {
+        try {
+          const { requestId, request } = event;
+          const reqHeaders = request?.headers || {};
+          // Loại bỏ case-insensitive các header gốc bị trùng tên với Client Hints (tránh rò rỉ sec-ch-ua-platform: "macOS" của Chromium nhân Mac)
+          const lowerHintKeys = new Set(Object.keys(hints).map((k) => k.toLowerCase()));
+          const filtered = {};
+          for (const [k, v] of Object.entries(reqHeaders)) {
+            if (!lowerHintKeys.has(k.toLowerCase())) {
+              filtered[k] = v;
+            }
+          }
+          const merged = { ...filtered, ...hints };
+          const headerList = Object.entries(merged).map(([name, value]) => ({ name, value: String(value) }));
+          await session.send('Fetch.continueRequest', { requestId, headers: headerList }).catch(() => {});
+        } catch {}
+      });
+    } catch {}
+  }
+
   if (hardwareConcurrency) {
     await session.send('Emulation.setHardwareConcurrencyOverride', { hardwareConcurrency }).catch(() => {});
   }

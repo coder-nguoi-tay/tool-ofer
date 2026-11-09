@@ -1740,6 +1740,247 @@
       border-color: #38bdf8;
       transform: scale(1.08);
     }
+
+    /* ==========================================================================
+       MODERN UI ENHANCEMENTS: KPI, CHIPS, HEALTH BARS, TOASTS
+       ========================================================================== */
+    /* 1. Toffers Leads KPI Grid */
+    .leads-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .lead-kpi-card {
+      background: #131d31;
+      border: 1px solid #22324e;
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 64px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      transition: all 0.15s ease;
+    }
+
+    .lead-kpi-card:hover {
+      border-color: #38bdf8;
+      transform: translateY(-1px);
+    }
+
+    .lead-kpi-card.kpi-point {
+      background: rgba(2, 132, 199, 0.1);
+      border-color: rgba(56, 189, 248, 0.35);
+    }
+
+    .lead-kpi-card.kpi-leads {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+
+    .lead-kpi-card.kpi-ip {
+      background: rgba(245, 158, 11, 0.08);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #94a3b8;
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .lead-kpi-card.kpi-point .kpi-label { color: #38bdf8; }
+    .lead-kpi-card.kpi-leads .kpi-label { color: #34d399; }
+    .lead-kpi-card.kpi-ip .kpi-label { color: #fbbf24; }
+
+    .kpi-val {
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.5px;
+    }
+
+    .kpi-val-point { color: #38bdf8; text-shadow: 0 0 12px rgba(56, 189, 248, 0.3); }
+    .kpi-val-leads { color: #34d399; text-shadow: 0 0 12px rgba(52, 211, 153, 0.3); }
+
+    .kpi-val-sub {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f8fafc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 170px;
+    }
+
+    .kpi-val-ip { color: #fbbf24; font-family: monospace; }
+
+    .kpi-subtext {
+      font-size: 10.5px;
+      color: #64748b;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 170px;
+    }
+
+    .kpi-icon {
+      font-size: 28px;
+      opacity: 0.75;
+      flex-shrink: 0;
+      margin-left: 10px;
+    }
+
+    /* 2. Clickable IP & badges */
+    .clickable-ip {
+      font-weight: 600;
+      color: #38bdf8;
+      font-size: 11px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      padding: 1px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-block;
+    }
+
+    .clickable-ip:hover {
+      background: #1e293b;
+      border-color: #38bdf8;
+      color: #7dd3fc;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+    }
+
+    /* 3. Queue Health Ratio Bar */
+    .queue-health-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+      margin-bottom: 6px;
+      padding: 4px 8px;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .queue-health-bar {
+      flex: 1;
+      height: 6px;
+      background: #1e293b;
+      border-radius: 3px;
+      overflow: hidden;
+      display: flex;
+    }
+
+    .queue-health-ready {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #34d399);
+      transition: width 0.3s ease;
+    }
+
+    .queue-health-used {
+      height: 100%;
+      background: #475569;
+      transition: width 0.3s ease;
+    }
+
+    /* 4. OS Selector Chips in Settings */
+    .os-chips-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .os-selector-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      background: #0f172a;
+      border: 1px solid #22324e;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #cbd5e1;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease-in-out;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    }
+
+    .os-selector-chip:hover {
+      background: #1e293b;
+      border-color: #38bdf8;
+      color: #f8fafc;
+    }
+
+    .os-selector-chip input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      cursor: pointer;
+      accent-color: #0284c7;
+    }
+
+    .os-selector-chip:has(input:checked) {
+      background: rgba(2, 132, 199, 0.18);
+      border-color: #0284c7;
+      color: #38bdf8;
+      box-shadow: 0 1px 4px rgba(2, 132, 199, 0.25);
+    }
+
+    /* 5. Clean Tools Button */
+    .clean-tool-btn {
+      padding: 2px 8px;
+      font-size: 11px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .clean-tool-btn:hover {
+      background: #27354f;
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+
+    /* 6. Screen Live-View Modal Toolbar Buttons */
+    .screen-tool-btn {
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #94a3b8;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 5px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+
+    .screen-tool-btn:hover {
+      background: #334155;
+      color: #f8fafc;
+      border-color: #64748b;
+    }
   </style>
 </head>
 
@@ -1864,24 +2105,18 @@
             <div style="display:flex;align-items:center;gap:10px;">
               <span style="font-weight:700;color:#38bdf8;font-size:11.5px;letter-spacing:0.3px;">Trình duyệt:</span>
               <div
-                style="display:inline-flex;background:#1e293b;padding:2px;border-radius:5px;border:1px solid #334155;gap:2px;">
+                style="display:inline-flex;background:#1e293b;padding:2px 8px;border-radius:5px;border:1px solid #334155;gap:6px;align-items:center;">
                 <label id="lblBrowserChrome"
-                  style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:3px 12px;border-radius:4px;font-size:11.5px;font-weight:600;color:#94a3b8;transition:all 0.15s ease;">
-                  <input type="radio" name="dashBrowserRadio" id="dashRadioChrome" value="Chrome" style="display:none;"
+                  style="display:inline-flex;align-items:center;gap:5px;cursor:default;padding:3px 10px;border-radius:4px;font-size:11.5px;font-weight:600;color:#38bdf8;background:#0b1324;">
+                  <input type="radio" name="dashBrowserRadio" id="dashRadioChrome" value="Chrome" checked style="display:none;"
                     onchange="syncBrowserChoice('Chrome')">
-                  🌐 Google Chrome
-                </label>
-                <label id="lblBrowserAdsPower"
-                  style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:3px 12px;border-radius:4px;font-size:11.5px;font-weight:600;color:#38bdf8;background:#0b1324;box-shadow:0 1px 2px rgba(0,0,0,0.4);transition:all 0.15s ease;">
-                  <input type="radio" name="dashBrowserRadio" id="dashRadioAdsPower" value="AdsPower" checked
-                    style="display:none;" onchange="syncBrowserChoice('AdsPower')">
-                  🛡️ AdsPower SunBrowser
+                  🌐 Google Chrome (Bản chuẩn máy Mac)
                 </label>
               </div>
             </div>
             <div id="dashBrowserBadge"
-              style="font-size:11px;font-weight:600;padding:2px 10px;border-radius:4px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#10b981;">
-              🛡️ AdsPower SunBrowser (profile riêng)
+              style="font-size:11px;font-weight:600;padding:2px 10px;border-radius:4px;background:rgba(14,165,233,0.15);border:1px solid rgba(14,165,233,0.3);color:#38bdf8;">
+              🌐 Google Chrome (Tự động xoay vòng 150 - 156)
             </div>
           </div>
           <select id="cbbScript" style="display:none;">
@@ -1984,7 +2219,7 @@
                 <div class="options-group-label">🌐 Mạng &amp; Tối ưu:</div>
                 <div class="options-group-pills">
                   <label class="option-pill active" id="pillMultiTab"
-                    title="Chạy đa luồng dạng đa tab trong cùng trình duyệt (tiết kiệm tài nguyên và không bị giới hạn số profile AdsPower).">
+                    title="Chạy đa luồng dạng đa tab trong cùng trình duyệt (tiết kiệm CPU &amp; RAM tối đa).">
                     <input type="checkbox" id="cbxMultiTab" checked onchange="syncOptionPills()">
                     <span class="option-pill-text"><span class="option-pill-icon">📑</span> Đa luồng đa tab</span>
                   </label>
@@ -2015,7 +2250,7 @@
                   </label>
 
                   <label class="option-pill" id="pillCloakBrowser"
-                    title="Sử dụng CloakBrowser (Stealth Chromium chống bot Cloudflare Turnstile/FingerprintJS & mô phỏng thao tác người thật Humanize). Với AdsPower chỉ áp dụng lớp Humanize.">
+                    title="Sử dụng CloakBrowser (Stealth Chromium chống bot Cloudflare Turnstile/FingerprintJS & mô phỏng thao tác người thật Humanize).">
                     <input type="checkbox" id="cbxCloakBrowser"
                       onchange="syncCloakBrowserSetting(this.checked); syncOptionPills();">
                     <span class="option-pill-text"><span class="option-pill-icon">🥷</span> CloakBrowser Stealth</span>
@@ -2179,45 +2414,48 @@
 
       <!-- Screen Live-View Modal -->
       <div id="screenModal"
-        style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.94);z-index:9999;flex-direction:column;">
+        style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.96);z-index:9999;flex-direction:column;">
         <div
-          style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#0f172a;border-bottom:1px solid #1e293b;color:#fff;flex-shrink:0;">
+          style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#0d1527;border-bottom:1px solid #1e293b;color:#fff;flex-shrink:0;">
           <div style="display:flex;align-items:center;gap:12px;">
-            <span id="screenModalTitle" style="font-weight:bold;font-size:13px;color:#38bdf8;">Màn hình Slot 1</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:15px;">🖥️</span>
+              <span id="screenModalTitle" style="font-weight:700;font-size:13px;color:#38bdf8;">Màn hình Slot 1</span>
+            </div>
             <span id="screenModalFps"
-              style="font-size:11px;color:#38bdf8;background:#1e293b;padding:2px 8px;border-radius:4px;border:1px solid #334155;">🟢
+              style="font-size:11px;color:#38bdf8;background:#131f37;padding:2px 8px;border-radius:12px;border:1px solid rgba(56,189,248,0.3);font-family:monospace;font-weight:600;">🟢
               Đang kết nối...</span>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <button type="button" class="win-btn" onclick="_goBackScreen()" style="padding:2px 10px;font-size:11px;"
+          <div style="display:flex;gap:6px;align-items:center;">
+            <button type="button" class="screen-tool-btn" onclick="_goBackScreen()"
               title="Quay lại trang vừa rồi của tab đang xem">◀ Quay lại</button>
-            <button type="button" class="win-btn" onclick="_quickScroll(0, -500)"
-              style="padding:2px 10px;font-size:11px;"
+            <button type="button" class="screen-tool-btn" onclick="_quickScroll(0, -500)"
               title="Cuộn trang lên trên (hoặc dùng con lăn chuột / trackpad)">⬆ Cuộn lên</button>
-            <button type="button" class="win-btn" onclick="_quickScroll(0, 500)"
-              style="padding:2px 10px;font-size:11px;"
+            <button type="button" class="screen-tool-btn" onclick="_quickScroll(0, 500)"
               title="Cuộn trang xuống dưới (hoặc dùng con lăn chuột / trackpad)">⬇ Cuộn xuống</button>
-            <button type="button" class="win-btn" id="btnModalPopOutDesktop" onclick="popOutActiveScreenToDesktop()"
-              style="padding:4px 12px;font-size:11.5px;background:#0284c7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;"
+            <button type="button" class="screen-tool-btn" id="btnToggleScreenFit" onclick="_toggleCanvasFit()"
+              title="Chuyển chế độ Vừa khung (Fit) hoặc Kích thước thực (100%)">🔍 Vừa khung</button>
+            <button type="button" id="btnModalPopOutDesktop" onclick="popOutActiveScreenToDesktop()"
+              style="padding:4px 11px;font-size:11px;background:#0284c7;color:#fff;border:1px solid #38bdf8;border-radius:5px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:4px;transition:all 0.15s ease;"
               title="Bung cửa sổ trình duyệt thật ra màn hình Desktop">🖥️ Mở ra Desktop</button>
-            <button type="button" class="win-btn"
+            <button type="button"
               onclick="if(_screenActiveSlot){ closeSingleBrowser(_screenActiveSlot); closeScreenModal(); }"
-              style="padding:4px 12px;font-size:11.5px;background:#b91c1c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;"
+              style="padding:4px 11px;font-size:11px;background:rgba(220,38,38,0.2);color:#f87171;border:1px solid rgba(239,68,68,0.4);border-radius:5px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:4px;transition:all 0.15s ease;"
               title="Tắt và đóng hoàn toàn trình duyệt này">🛑 Đóng trình duyệt</button>
             <button type="button" onclick="closeScreenModal()"
-              style="background:#475569;color:#fff;border:none;padding:4px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;"
-              title="Đóng cửa sổ xem trực tiếp">✕ Đóng xem</button>
+              style="background:#1e293b;color:#cbd5e1;border:1px solid #334155;padding:4px 12px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600;display:inline-flex;align-items:center;gap:4px;transition:all 0.15s ease;"
+              title="Đóng cửa sổ xem trực tiếp (Phím Esc)">✕ Đóng (Esc)</button>
           </div>
         </div>
         <div id="screenTabBar"></div>
         <!-- Address Bar & Navigation Toolbar -->
         <div
-          style="display:flex;align-items:center;gap:6px;padding:4px 14px;background:#1e293b;border-bottom:1px solid #334155;color:#e2e8f0;font-size:12px;flex-shrink:0;">
-          <button type="button" class="win-btn" onclick="_reloadScreen()" style="padding:2px 8px;font-size:11px;"
+          style="display:flex;align-items:center;gap:6px;padding:4px 14px;background:#131f37;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:12px;flex-shrink:0;">
+          <button type="button" class="screen-tool-btn" onclick="_reloadScreen()"
             title="Tải lại trang này (Reload / F5)">🔄 Tải lại</button>
           <div
-            style="flex:1;display:flex;align-items:center;background:#0f172a;border:1px solid #475569;border-radius:4px;padding:2px 8px;gap:6px;">
-            <span style="font-size:11px;color:#94a3b8;">🔒</span>
+            style="flex:1;display:flex;align-items:center;background:#0b1324;border:1px solid #334155;border-radius:5px;padding:2px 8px;gap:6px;">
+            <span style="font-size:11px;color:#38bdf8;">🔒</span>
             <input type="text" id="screenUrlInput" placeholder="https://..."
               style="flex:1;background:transparent;border:none;color:#f8fafc;font-size:11.5px;outline:none;font-family:monospace;"
               onkeydown="if(event.key==='Enter') _navigateToUrl();">
@@ -2225,12 +2463,9 @@
               style="background:transparent;border:none;color:#38bdf8;cursor:pointer;font-size:11px;padding:1px 5px;"
               title="Sao chép URL">📋 Copy</button>
             <button type="button" onclick="_navigateToUrl()"
-              style="background:#0284c7;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:11px;padding:1px 8px;font-weight:600;"
+              style="background:#0284c7;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;padding:2px 9px;font-weight:600;"
               title="Đi tới URL (Enter)">➔ Đi</button>
           </div>
-          <button type="button" class="win-btn" id="btnToggleScreenFit" onclick="_toggleCanvasFit()"
-            style="padding:2px 8px;font-size:11px;" title="Chuyển chế độ Vừa khung (Fit) hoặc Kích thước thực (100%)">🔍
-            Vừa khung</button>
         </div>
         <div
           style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#090d16;position:relative;">
@@ -2592,6 +2827,10 @@
                 <span class="proxy-badge-dot"></span>
                 <span id="lbProxyUsed">0</span> used
               </span>
+              <button type="button" class="clean-tool-btn" onclick="deduplicateProxyInput()"
+                title="Loại bỏ các dòng proxy bị trùng lặp">🧹 Lọc trùng</button>
+              <button type="button" class="clean-tool-btn" onclick="shuffleProxyInput()"
+                title="Xáo trộn ngẫu nhiên thứ tự các proxy trong danh sách">🔀 Trộn thứ tự</button>
               <button type="button" class="win-btn"
                 style="padding:2px 10px;margin-left:4px;gap:4px;background:rgba(16, 185, 129, 0.15);color:#34d399;border:1px solid rgba(16, 185, 129, 0.3);font-weight:600;"
                 onclick="openBandwidthModal()"
@@ -2604,8 +2843,15 @@
                 Xóa hết proxy</button>
             </div>
           </div>
+          <div class="queue-health-container">
+            <span>Tỉ lệ hàng đợi proxy:</span>
+            <div class="queue-health-bar">
+              <div id="proxyHealthReady" class="queue-health-ready" style="width:100%;"></div>
+              <div id="proxyHealthUsed" class="queue-health-used" style="width:0%;"></div>
+            </div>
+          </div>
           <textarea id="txtDashboardProxy" class="win-textarea"
-            style="width:100%;height:calc(100% - 46px);min-height:380px;"
+            style="width:100%;height:calc(100% - 76px);min-height:360px;"
             placeholder="host:port, host:port:user:pass hoặc http://user:pass@host:port; mỗi dòng 1 proxy"></textarea>
         </div>
 
@@ -2742,7 +2988,11 @@
                 style="font-size:11px;color:#94a3b8;margin-left:6px;">(Sẵn sàng: <b id="lbAvailEmail"
                   style="color:#34d399;">0</b> | Đã dùng: <b id="lbUsedEmail"
                   style="color:#f87171;">0</b>)</span></span>
-            <div style="display:flex;gap:6px;">
+            <div style="display:flex;gap:5px;flex-wrap:wrap;">
+              <button type="button" class="clean-tool-btn" onclick="deduplicateEmailInput()"
+                title="Loại bỏ các email bị trùng lặp">🧹 Lọc trùng</button>
+              <button type="button" class="clean-tool-btn" onclick="shuffleEmailInput()"
+                title="Xáo trộn ngẫu nhiên thứ tự email">🔀 Trộn thứ tự</button>
               <button type="button" class="win-btn win-btn-primary" onclick="saveEmailList()">Lưu / Thêm Email</button>
               <button type="button" class="win-btn" onclick="document.getElementById('inputEmailFile').click()">Import
                 File</button>
@@ -2750,6 +3000,13 @@
                 onchange="importEmailFile(this)">
               <button type="button" class="win-btn" onclick="resetEmailQueue()">Reset Email</button>
               <button type="button" class="win-btn" style="color:#f87171;" onclick="clearAllEmail()">Xóa tất cả</button>
+            </div>
+          </div>
+          <div class="queue-health-container">
+            <span>Tỉ lệ hàng đợi email:</span>
+            <div class="queue-health-bar">
+              <div id="emailHealthReady" class="queue-health-ready" style="width:100%;"></div>
+              <div id="emailHealthUsed" class="queue-health-used" style="width:0%;"></div>
             </div>
           </div>
           <div id="emailAutoRefillBar"
@@ -2837,32 +3094,19 @@
         <!-- Subpanel 1: System Settings -->
         <div class="sub-panel active" id="settingpanel-system">
           <fieldset class="win-group">
-            <legend class="win-legend">Trình duyệt mặc định</legend>
+            <legend class="win-legend">Trình duyệt sử dụng</legend>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
               <div
-                style="display:inline-flex;background:#1e293b;padding:2px;border-radius:5px;border:1px solid #334155;gap:2px;">
+                style="display:inline-flex;background:#1e293b;padding:2px 8px;border-radius:5px;border:1px solid #334155;gap:6px;align-items:center;">
                 <label id="lblSettingChrome"
-                  style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:4px 14px;border-radius:4px;font-size:12px;font-weight:600;color:#94a3b8;transition:all 0.15s ease;">
-                  <input type="radio" name="browserRadio" id="RadioButtonChrome" style="display:none;"
+                  style="display:inline-flex;align-items:center;gap:6px;cursor:default;padding:4px 12px;border-radius:4px;font-size:12px;font-weight:600;color:#38bdf8;background:#0b1324;">
+                  <input type="radio" name="browserRadio" id="RadioButtonChrome" value="Chrome" checked style="display:none;"
                     onchange="syncBrowserChoice('Chrome')">
-                  🌐 Google Chrome
-                </label>
-                <label id="lblSettingAdsPower"
-                  style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:4px 14px;border-radius:4px;font-size:12px;font-weight:600;color:#38bdf8;background:#0b1324;box-shadow:0 1px 2px rgba(0,0,0,0.4);transition:all 0.15s ease;">
-                  <input type="radio" name="browserRadio" id="RadioButtonAdspower" style="display:none;"
-                    onchange="syncBrowserChoice('AdsPower')">
-                  🛡️ AdsPower SunBrowser
+                  🌐 Google Chrome (Tự động xoay vòng Chrome 150 - 156)
                 </label>
               </div>
-              <input type="radio" name="browserRadio" id="RadioButtonFirefox" style="display:none;"
-                onchange="syncBrowserChoice('Firefox')">
             </div>
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-top:6px;">AdsPower API key:
-              <input type="password" id="AdsPowerApiKey" autocomplete="off" class="win-input" style="flex:1;"
-                placeholder="AdsPower > Automation > API & MCP">
-            </label>
-            <div style="font-size:11px;color:#94a3b8;margin-top:4px;">AdsPower phải đang chạy và tài khoản cần quyền
-              Local API. Mỗi luồng tạo profile SunBrowser riêng, gắn proxy rồi mở bằng Playwright.</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Chạy trực tiếp qua các bản Google Chrome đã cài đặt trên Mac. Tự động xoay vòng phiên bản (Chrome 150 - 156) kèm giả lập thiết bị và Client Hints chuẩn.</div>
           </fieldset>
 
           <details
@@ -2883,27 +3127,21 @@
               <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox"
                   id="CheckBoxGetApiPake" checked> Api Fake IP</label>
             </div>
-            <div style="margin-top:5px;color:#64748b;font-size:10.5px;">AdsPower tự quản lý Canvas, ClientRects và
-              WebGLImage theo mặc định của từng profile.</div>
+            <div style="margin-top:5px;color:#64748b;font-size:10.5px;">Tự động quản lý Canvas, ClientRects và
+              WebGLImage theo từng profile Chrome.</div>
           </details>
 
           <fieldset class="win-group">
             <legend class="win-legend">Operating System (Hệ điều hành &amp; Phiên bản thiết bị)</legend>
-            <div style="display:flex;gap:14px;flex-wrap:wrap;">
-              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox"
-                  id="chkWindows" checked> 🪟 Windows (10, 11 22H2/24H2)</label>
-              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox"
-                  id="chkMac" checked> 🍎 macOS (14.x, 15.x, 26.x)</label>
-              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox"
-                  id="chkLinux" checked> 🐧 Linux (6.5 - 6.14)</label>
-              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox"
-                  id="chkAndroid"> 🤖 Android (13 - 16, Pixel/Galaxy)</label>
-              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox"
-                  id="chkIphone"> 📱 iPhone (iOS 17.6 - 18.6)</label>
-              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox"
-                  id="chkIpad"> 📟 iPad (iPadOS 17 - 18)</label>
+            <div class="os-chips-grid">
+              <label class="os-selector-chip"><input type="checkbox" id="chkWindows" checked> 🪟 Windows (10, 11 22H2/24H2)</label>
+              <label class="os-selector-chip"><input type="checkbox" id="chkMac" checked> 🍎 macOS (14.x, 15.x, 26.x)</label>
+              <label class="os-selector-chip"><input type="checkbox" id="chkLinux" checked> 🐧 Linux (6.5 - 6.14)</label>
+              <label class="os-selector-chip"><input type="checkbox" id="chkAndroid"> 🤖 Android (13 - 16, Pixel/Galaxy)</label>
+              <label class="os-selector-chip"><input type="checkbox" id="chkIphone"> 📱 iPhone (iOS 17.6 - 18.6)</label>
+              <label class="os-selector-chip"><input type="checkbox" id="chkIpad"> 📟 iPad (iPadOS 17 - 18)</label>
             </div>
-            <div style="margin-top:5px;color:#94a3b8;font-size:11px;">Mỗi phiên trình duyệt sẽ tự động giả lập một máy
+            <div style="margin-top:8px;color:#94a3b8;font-size:11px;">Mỗi phiên trình duyệt sẽ tự động giả lập một máy
               cụ thể với phiên bản OS, GPU, CPU, màn hình và phiên bản Chrome hoàn chỉnh.</div>
           </fieldset>
 
@@ -2917,8 +3155,6 @@
             <div style="font-size:11px;color:#94a3b8;margin-left:22px;margin-top:3px;">
               Vượt kiểm duyệt bot-detection sâu (Cloudflare Turnstile, Kasada, Akamai, FingerprintJS) bằng nhân Chromium
               Stealth của CloakBrowser và tự động mô phỏng chuột/phím mượt mà như người thật.
-              Lưu ý: nếu chạy qua AdsPower (SunBrowser) thì chỉ có lớp Humanize được áp dụng, không có nhân Chromium vá
-              C++.
             </div>
             <div id="cloakBrowserStatusNotice"
               style="font-size:11px;color:#10b981;margin-left:22px;margin-top:3px;font-weight:bold;">
@@ -3219,37 +3455,39 @@
       <!-- 10. TOFFERS LEADS & POINT -->
       <div class="tab-panel" id="panel-ToffersLeads">
         <!-- Top Summary KPI Cards -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:8px;margin-bottom:8px;">
-          <div
-            style="background:rgba(2, 132, 199, 0.12);border:1px solid rgba(56, 189, 248, 0.3);border-radius:6px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;">
+        <div class="leads-kpi-grid">
+          <div class="lead-kpi-card kpi-point">
             <div>
-              <div style="font-size:11px;color:#38bdf8;font-weight:600;">💎 Số Point hiện tại</div>
-              <div id="leadCardPoint" style="font-size:24px;font-weight:bold;color:#38bdf8;line-height:1.2;">--</div>
+              <span class="kpi-label">💎 Số Point hiện tại</span>
+              <div id="leadCardPoint" class="kpi-val kpi-val-point">--</div>
             </div>
-            <div style="font-size:28px;opacity:0.8;">💎</div>
+            <div class="kpi-icon">💎</div>
           </div>
 
-          <div
-            style="background:rgba(16, 185, 129, 0.12);border:1px solid rgba(16, 185, 129, 0.3);border-radius:6px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;">
+          <div class="lead-kpi-card kpi-leads">
             <div>
-              <div style="font-size:11px;color:#34d399;font-weight:600;">🎯 Tổng số Leads</div>
-              <div id="leadCardCount" style="font-size:24px;font-weight:bold;color:#34d399;line-height:1.2;">--</div>
+              <span class="kpi-label">🎯 Tổng số Leads</span>
+              <div id="leadCardCount" class="kpi-val kpi-val-leads">--</div>
             </div>
-            <div style="font-size:28px;opacity:0.8;">🎯</div>
+            <div class="kpi-icon">🎯</div>
           </div>
 
-          <div style="background:#131d31;border:1px solid #22324e;border-radius:6px;padding:8px 12px;">
-            <div style="font-size:11px;color:#94a3b8;font-weight:600;">⏱️ Lead gần nhất</div>
-            <div id="leadCardLatest" style="font-size:12px;font-weight:bold;color:#f8fafc;margin-top:2px;">--</div>
-            <div id="leadCardLatestOffer"
-              style="font-size:10px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">--</div>
+          <div class="lead-kpi-card">
+            <div>
+              <span class="kpi-label">⏱️ Lead gần nhất</span>
+              <div id="leadCardLatest" class="kpi-val-sub">--</div>
+              <div id="leadCardLatestOffer" class="kpi-subtext">--</div>
+            </div>
+            <div class="kpi-icon">⏱️</div>
           </div>
 
-          <div
-            style="background:rgba(245, 158, 11, 0.1);border:1px solid rgba(245, 158, 11, 0.3);border-radius:6px;padding:8px 12px;">
-            <div style="font-size:11px;color:#fbbf24;font-weight:600;">🌐 IP Lead gần nhất</div>
-            <div id="leadCardLatestIp" style="font-size:13px;font-weight:bold;color:#fbbf24;margin-top:2px;">--</div>
-            <div id="leadCardLatestUser" style="font-size:10px;color:#fbbf24;">--</div>
+          <div class="lead-kpi-card kpi-ip">
+            <div>
+              <span class="kpi-label">🌐 IP Lead gần nhất</span>
+              <div id="leadCardLatestIp" class="kpi-val-sub kpi-val-ip">--</div>
+              <div id="leadCardLatestUser" class="kpi-subtext">--</div>
+            </div>
+            <div class="kpi-icon">🌐</div>
           </div>
         </div>
 
@@ -3982,8 +4220,11 @@
     async function loadProxyQueue() {
       const data = await api('/proxy-queue');
       if (data && !data.error) {
-        document.getElementById('lbProxyCount').textContent = data.available ?? 0;
-        document.getElementById('lbProxyUsed').textContent = data.used ?? 0;
+        const avail = data.available ?? 0;
+        const used = data.used ?? 0;
+        document.getElementById('lbProxyCount').textContent = avail;
+        document.getElementById('lbProxyUsed').textContent = used;
+        if (typeof updateQueueHealth === 'function') updateQueueHealth('proxyHealth', avail, used);
         if (data.availableList) {
           document.getElementById('txtDashboardProxy').value = data.availableList.join('\n');
         }
@@ -4729,6 +4970,7 @@
         if (document.getElementById('lbTotalEmail')) document.getElementById('lbTotalEmail').textContent = avail + used;
         if (document.getElementById('lbAvailEmail')) document.getElementById('lbAvailEmail').textContent = avail;
         if (document.getElementById('lbUsedEmail')) document.getElementById('lbUsedEmail').textContent = used;
+        if (typeof updateQueueHealth === 'function') updateQueueHealth('emailHealth', avail, used);
         if (data.availableList) {
           document.getElementById('txtEmailList').value = data.availableList.join('\n');
         }
@@ -4915,81 +5157,47 @@
 
     // Browser Mode Synchronization (Dashboard <-> Settings Tab)
     /**
-     * Đồng bộ lựa chọn trình duyệt trên Dashboard và Settings rồi lưu cấu hình.
-     * @param {string} mode Chế độ Chrome, AdsPower hoặc Firefox.
-     * @param {boolean} shouldSave Có ghi lại Settings.ini ngay hay không.
-     * @return {void} Cập nhật radio và nhãn trình duyệt.
+     * Đồng bộ giao diện chỉ báo trình duyệt Google Chrome.
+     * @param {string} [mode='Chrome'] Chế độ trình duyệt.
+     * @param {boolean} [shouldSave=false] Có ghi lại Settings.ini ngay hay không.
+     * @return {void} Cập nhật trạng thái trình duyệt trên giao diện.
      * @author ductv <ductv@getflycrm.com>
      * @since 2026-10-20
      */
-    function syncBrowserChoice(mode, shouldSave = true) {
-      const isChrome = (mode === 'Chrome');
-      const isAdsPower = (mode === 'AdsPower');
-
-      // Update Dashboard radios & segmented buttons
+    function syncBrowserChoice(mode = 'Chrome', shouldSave = false) {
+      // Chrome is the sole standard browser engine
       const dashChrome = document.getElementById('dashRadioChrome');
-      const dashAdsPower = document.getElementById('dashRadioAdsPower');
-      if (dashChrome) dashChrome.checked = isChrome;
-      if (dashAdsPower) dashAdsPower.checked = isAdsPower;
+      if (dashChrome) dashChrome.checked = true;
 
       const lblChrome = document.getElementById('lblBrowserChrome');
-      const lblAdsPower = document.getElementById('lblBrowserAdsPower');
       if (lblChrome) {
-        lblChrome.style.color = isChrome ? '#38bdf8' : '#94a3b8';
-        lblChrome.style.background = isChrome ? '#0b1324' : 'transparent';
-        lblChrome.style.boxShadow = isChrome ? '0 1px 2px rgba(0,0,0,0.4)' : 'none';
-      }
-      if (lblAdsPower) {
-        lblAdsPower.style.color = isAdsPower ? '#38bdf8' : '#94a3b8';
-        lblAdsPower.style.background = isAdsPower ? '#0b1324' : 'transparent';
-        lblAdsPower.style.boxShadow = isAdsPower ? '0 1px 2px rgba(0,0,0,0.4)' : 'none';
+        lblChrome.style.color = '#38bdf8';
+        lblChrome.style.background = '#0b1324';
+        lblChrome.style.boxShadow = '0 1px 2px rgba(0,0,0,0.4)';
       }
 
-      // Update Settings radios & segmented buttons
+      // Update Settings radios if present
       const radChrome = document.getElementById('RadioButtonChrome');
-      const radFirefox = document.getElementById('RadioButtonFirefox');
-      const radAdspower = document.getElementById('RadioButtonAdspower');
-      if (radChrome) radChrome.checked = isChrome;
-      if (radFirefox) radFirefox.checked = (mode === 'Firefox');
-      if (radAdspower) radAdspower.checked = isAdsPower;
-
+      if (radChrome) radChrome.checked = true;
       const lblSetChrome = document.getElementById('lblSettingChrome');
-      const lblSetAdsPower = document.getElementById('lblSettingAdsPower');
       if (lblSetChrome) {
-        lblSetChrome.style.color = isChrome ? '#38bdf8' : '#94a3b8';
-        lblSetChrome.style.background = isChrome ? '#0b1324' : 'transparent';
-        lblSetChrome.style.boxShadow = isChrome ? '0 1px 2px rgba(0,0,0,0.4)' : 'none';
-      }
-      if (lblSetAdsPower) {
-        lblSetAdsPower.style.color = isAdsPower ? '#38bdf8' : '#94a3b8';
-        lblSetAdsPower.style.background = isAdsPower ? '#0b1324' : 'transparent';
-        lblSetAdsPower.style.boxShadow = isAdsPower ? '0 1px 2px rgba(0,0,0,0.4)' : 'none';
+        lblSetChrome.style.color = '#38bdf8';
+        lblSetChrome.style.background = '#0b1324';
+        lblSetChrome.style.boxShadow = '0 1px 2px rgba(0,0,0,0.4)';
       }
 
       // Update Dashboard badge
       const badge = document.getElementById('dashBrowserBadge');
       if (badge) {
-        if (isChrome) {
-          badge.style.background = 'rgba(14, 165, 233, 0.15)';
-          badge.style.borderColor = 'rgba(14, 165, 233, 0.35)';
-          badge.style.color = '#38bdf8';
-          badge.textContent = '🌐 Google Chrome (Mặc định)';
-        } else if (isAdsPower) {
-          badge.style.background = 'rgba(16, 185, 129, 0.15)';
-          badge.style.borderColor = 'rgba(16, 185, 129, 0.35)';
-          badge.style.color = '#10b981';
-          badge.textContent = '🛡️ AdsPower SunBrowser (profile riêng)';
-        } else {
-          badge.style.background = 'rgba(148, 163, 184, 0.15)';
-          badge.style.borderColor = 'rgba(148, 163, 184, 0.35)';
-          badge.style.color = '#94a3b8';
-          badge.textContent = `⚙️ Đang chọn: ${mode}`;
-        }
+        badge.style.background = 'rgba(14, 165, 233, 0.15)';
+        badge.style.borderColor = 'rgba(14, 165, 233, 0.35)';
+        badge.style.color = '#38bdf8';
+        badge.textContent = '🌐 Google Chrome (Mặc định - Chrome 150 - 156)';
       }
 
       // Persist to localStorage
       try {
-        localStorage.setItem('autoleadpc_browser_choice', mode);
+        localStorage.setItem('autoleadpc_browser_choice', 'Chrome');
       } catch { }
 
       if (shouldSave) {
@@ -4999,7 +5207,7 @@
 
     // Settings (Settings.ini)
     /**
-     * Nạp lựa chọn trình duyệt, API key và fingerprint từ cấu hình đã lưu.
+     * Nạp cấu hình trình duyệt và fingerprint từ Settings.ini.
      * @return {Promise<void>} Hoàn tất cập nhật các trường Settings.
      * @throws {Error} Khi giao diện không đọc được cấu hình cục bộ.
      * @author ductv <ductv@getflycrm.com>
@@ -5007,20 +5215,7 @@
      */
     async function loadWindowsSettings() {
       const data = await api('/pc/settings/read');
-      const localChoice = (() => {
-        try { return localStorage.getItem('autoleadpc_browser_choice'); } catch { return null; }
-      })();
-
-      let selectedMode = 'AdsPower';
-      if (['Chrome', 'AdsPower', 'Firefox'].includes(localChoice)) {
-        selectedMode = localChoice;
-      } else if (data) {
-        if (data.ChromeFirefox) selectedMode = 'Firefox';
-        else if (data.ChromeAdsPower) selectedMode = 'AdsPower';
-        else if (data.Chrome) selectedMode = 'Chrome';
-      }
-
-      syncBrowserChoice(selectedMode, false);
+      syncBrowserChoice('Chrome', false);
 
       const savedCloak = (() => {
         try { return localStorage.getItem('autolead_use_cloakbrowser'); } catch { return null; }
@@ -5042,7 +5237,6 @@
       }).catch(() => { });
 
       if (data) {
-        if (data.AdsPowerApiKey !== undefined) document.getElementById('AdsPowerApiKey').value = data.AdsPowerApiKey;
         if (data.Canvas !== undefined) document.getElementById('CheckBoxCanvas').checked = data.Canvas;
         if (data.ClientRects !== undefined) document.getElementById('CheckboxClientRects').checked = data.ClientRects;
         if (data.WebGLImage !== undefined) document.getElementById('CheckBoxWebGLImage').checked = data.WebGLImage;
@@ -5059,25 +5253,15 @@
     }
 
     /**
-     * Lưu chế độ trình duyệt cùng khóa AdsPower và tùy chọn fingerprint của AutoLeadPC.
-     * @return {Promise<void>} Hoàn tất ghi Settings.ini và khóa AdsPower.
+     * Lưu chế độ trình duyệt Google Chrome và tùy chọn fingerprint của AutoLeadPC.
+     * @return {Promise<void>} Hoàn tất ghi Settings.ini.
      * @throws {Error} Khi máy chủ cục bộ từ chối lưu cấu hình.
      * @author ductv <ductv@getflycrm.com>
      * @since 2026-10-20
      */
     async function saveWindowsSettings() {
-      let browserMode = 'AdsPower';
-      if (document.getElementById('dashRadioAdsPower')?.checked || document.getElementById('RadioButtonAdspower')?.checked) {
-        browserMode = 'AdsPower';
-      } else if (document.getElementById('dashRadioChrome')?.checked || document.getElementById('RadioButtonChrome')?.checked) {
-        browserMode = 'Chrome';
-      } else if (document.getElementById('RadioButtonFirefox')?.checked) {
-        browserMode = 'Firefox';
-      }
-
       const payload = {
-        browserMode,
-        AdsPowerApiKey: document.getElementById('AdsPowerApiKey')?.value ?? '',
+        browserMode: 'Chrome',
         CloakBrowser: document.getElementById('chkUseCloakBrowser')?.checked ?? document.getElementById('cbxCloakBrowser')?.checked ?? false,
         Canvas: document.getElementById('CheckBoxCanvas')?.checked ?? false,
         ClientRects: document.getElementById('CheckboxClientRects')?.checked ?? true,
@@ -5103,7 +5287,7 @@
 
     // Launch & Stop Engine
     /**
-     * Mở các luồng Chrome hoặc AdsPower theo cấu hình trên giao diện.
+     * Mở các luồng Google Chrome theo cấu hình trên giao diện.
      * @return {Promise<void>} Hoàn tất khi API khởi chạy trả kết quả.
      * @throws {Error} Khi giao diện không thể gửi yêu cầu mở trình duyệt.
      * @author ductv <ductv@getflycrm.com>
@@ -5186,79 +5370,6 @@
         const hideUntilLead = Boolean(document.getElementById('cbxHideUntilLead')?.checked);
         // "Chạy trong app": đọc trạng thái checkbox thật (bật = chạy ngầm thu nhỏ, tắt = mở cửa sổ Desktop thường)
         const runInApp = Boolean(document.getElementById('cbxRunInApp')?.checked);
-
-        // Dùng lựa chọn đang hiển thị trên Dashboard để gọi đúng trình duyệt.
-        const isAdsPower = Boolean(document.getElementById('dashRadioAdsPower')?.checked || document.getElementById('RadioButtonAdspower')?.checked);
-
-        if (isAdsPower) {
-          await saveWindowsSettings();
-          const browserName = 'AdsPower SunBrowser';
-          document.getElementById('lbStatus').textContent = `Đang tạo profile riêng và mở ${browserName}...`;
-          if (hideUntilTarget || hideUntilLead) {
-            switchTab('ScreenView');
-          } else {
-            switchTab('tabRunning');
-          }
-          fetchRunningState();
-
-          const res = await api('/launch-adspower', {
-            method: 'POST',
-            body: JSON.stringify({
-              websiteUrl,
-              websiteUrl2,
-              websiteUrl3,
-              websiteUrl4,
-              offerUrls,
-              offerList: offerUrls,
-              requestedCount: concurrency,
-              proxyList: proxyLines,
-              proxyType,
-              scriptPath,
-              timeLimit,
-              delayStart,
-              delayStop,
-              completeText,
-              limitRun,
-              antiFpCanvas,
-              antiFpClientRects,
-              antiFpWebgl,
-              antiFpWebrtc,
-              antiFpFonts,
-              antiFpApiFakeIP,
-              Windows: document.getElementById('chkWindows')?.checked ?? false,
-              Mac: document.getElementById('chkMac')?.checked ?? false,
-              Linux: document.getElementById('chkLinux')?.checked ?? false,
-              Android: document.getElementById('chkAndroid')?.checked ?? false,
-              iPhone: document.getElementById('chkIphone')?.checked ?? false,
-              iPad: document.getElementById('chkIpad')?.checked ?? false,
-              checkDuplicate,
-              autoSubmitForm: true,
-              enableLeadCheck,
-              autoCloseNoLead,
-              leadCheckInterval: 30,
-              leadCheckMaxAttempts: 2,
-              leadCheckScreen: 4,
-              hideUntilTarget,
-              hideUntilLead,
-              runInApp,
-              screenPreviewOnly: runInApp,
-              multiTab: document.getElementById('cbxMultiTab') ? document.getElementById('cbxMultiTab').checked : true,
-              useCloakBrowser: Boolean(document.getElementById('cbxCloakBrowser')?.checked || document.getElementById('chkUseCloakBrowser')?.checked),
-              dataSaver,
-            })
-          });
-          if (res.error) {
-            showWinAlert(`Lỗi ${browserName}: ` + res.error);
-            document.getElementById('lbStatus').textContent = `${browserName} error: ` + res.error;
-          } else if (res.warnings?.length > 0 && !res.results?.length) {
-            showWinAlert('Thông báo: ' + res.warnings.join('\n'));
-            document.getElementById('lbStatus').textContent = res.warnings[0];
-          } else {
-            document.getElementById('lbStatus').textContent = res.message || `${browserName}: mở ${res.results?.length || 0} profile thành công.`;
-          }
-          fetchRunningState();
-          return;
-        }
 
         document.getElementById('lbStatus').textContent = 'Starting Chrome...';
         if (hideUntilTarget || hideUntilLead) {
@@ -6976,14 +7087,7 @@
     function _copyScreenUrl() {
       const input = document.getElementById('screenUrlInput');
       if (!input || !input.value) return;
-      navigator.clipboard?.writeText(input.value).then(() => {
-        const orig = input.style.background;
-        input.style.background = '#065f46';
-        setTimeout(() => { input.style.background = orig; }, 600);
-      }).catch(() => {
-        input.select();
-        document.execCommand('copy');
-      });
+      copyToClipboard(input.value, 'Đã sao chép URL vào bộ nhớ tạm');
     }
     window._copyScreenUrl = _copyScreenUrl;
 
@@ -7235,8 +7339,15 @@
         if (elLatestOff) elLatestOff.textContent = first.nameoff || '--';
 
         const elLatestIp = document.getElementById('leadCardLatestIp');
-        if (elLatestIp) elLatestIp.textContent = first.ip || '--';
-
+        if (elLatestIp) {
+          elLatestIp.textContent = first.ip || '--';
+          if (first.ip) {
+            elLatestIp.style.cursor = 'pointer';
+            elLatestIp.title = 'Nhấn để sao chép IP';
+            elLatestIp.onclick = () => copyToClipboard(first.ip, `Đã sao chép IP: ${first.ip}`);
+          }
+        }
+ 
         const elLatestUsr = document.getElementById('leadCardLatestUser');
         if (elLatestUsr) elLatestUsr.textContent = `${first.fullname || ''} (${first.username || ''})`.trim() || '--';
       }
@@ -7250,6 +7361,140 @@
       filterToffersLeadsTable();
     }
     window.renderToffersLeads = renderToffersLeads;
+
+    // ── Global Toast & Utility Helpers ──────────────────────────────────────────
+    function showToast(message, type = 'info') {
+      let toastContainer = document.getElementById('globalToastContainer');
+      if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'globalToastContainer';
+        toastContainer.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
+        document.body.appendChild(toastContainer);
+      }
+      const toast = document.createElement('div');
+      const bg = type === 'success' ? '#065f46' : (type === 'error' ? '#991b1b' : '#1e293b');
+      const border = type === 'success' ? '#34d399' : (type === 'error' ? '#f87171' : '#38bdf8');
+      const icon = type === 'success' ? '✅' : (type === 'error' ? '⚠️' : 'ℹ️');
+      toast.style.cssText = `background:${bg};border:1px solid ${border};color:#fff;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.5);display:flex;align-items:center;gap:8px;pointer-events:auto;transition:all 0.25s ease;opacity:0;transform:translateY(10px);`;
+      toast.innerHTML = `<span>${icon}</span><span>${escHtml(message)}</span>`;
+      toastContainer.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+      });
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        setTimeout(() => toast.remove(), 250);
+      }, 2500);
+    }
+    window.showToast = showToast;
+
+    async function copyToClipboard(text, successMsg = 'Đã sao chép vào bộ nhớ tạm') {
+      if (!text) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        showToast(successMsg, 'success');
+      } catch (err) {
+        console.error('Clipboard copy error:', err);
+        showToast('Không thể sao chép: ' + (err.message || err), 'error');
+      }
+    }
+    window.copyToClipboard = copyToClipboard;
+
+    function getGeoFlag(geo) {
+      if (!geo || typeof geo !== 'string') return '🌐';
+      const code = geo.trim().toUpperCase();
+      if (code.length !== 2) return '🌐';
+      try {
+        const flag = String.fromCodePoint(...[...code].map(c => 0x1f1a5 + c.charCodeAt(0)));
+        return flag || '🌐';
+      } catch {
+        return '🌐';
+      }
+    }
+    window.getGeoFlag = getGeoFlag;
+
+    function updateQueueHealth(barId, ready, used) {
+      const readyEl = document.getElementById(`${barId}Ready`);
+      const usedEl = document.getElementById(`${barId}Used`);
+      const ratioEl = document.getElementById(`${barId}Ratio`);
+      const total = (Number(ready) || 0) + (Number(used) || 0);
+      if (total <= 0) {
+        if (readyEl) readyEl.style.width = '0%';
+        if (usedEl) usedEl.style.width = '0%';
+        if (ratioEl) ratioEl.textContent = '0% sẵn sàng';
+        return;
+      }
+      const readyPct = Math.round(((Number(ready) || 0) / total) * 100);
+      const usedPct = 100 - readyPct;
+      if (readyEl) readyEl.style.width = `${readyPct}%`;
+      if (usedEl) usedEl.style.width = `${usedPct}%`;
+      if (ratioEl) ratioEl.textContent = `${readyPct}% sẵn sàng (${ready}/${total})`;
+    }
+    window.updateQueueHealth = updateQueueHealth;
+
+    function deduplicateProxyInput() {
+      const el = document.getElementById('txtDashboardProxy');
+      if (!el) return;
+      const lines = el.value.split('\n').map(l => l.trim()).filter(Boolean);
+      const initialCount = lines.length;
+      const unique = Array.from(new Set(lines));
+      el.value = unique.join('\n');
+      const removed = initialCount - unique.length;
+      showToast(`Đã lọc trùng proxy: Đã xoá ${removed} dòng trùng, còn ${unique.length} proxy.`, 'success');
+    }
+    window.deduplicateProxyInput = deduplicateProxyInput;
+
+    function shuffleProxyInput() {
+      const el = document.getElementById('txtDashboardProxy');
+      if (!el) return;
+      const lines = el.value.split('\n').map(l => l.trim()).filter(Boolean);
+      for (let i = lines.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [lines[i], lines[j]] = [lines[j], lines[i]];
+      }
+      el.value = lines.join('\n');
+      showToast(`Đã trộn ngẫu nhiên thứ tự ${lines.length} proxy.`, 'success');
+    }
+    window.shuffleProxyInput = shuffleProxyInput;
+
+    function deduplicateEmailInput() {
+      const el = document.getElementById('txtEmailList');
+      if (!el) return;
+      const lines = el.value.split('\n').map(l => l.trim()).filter(Boolean);
+      const initialCount = lines.length;
+      const unique = Array.from(new Set(lines.map(l => l.toLowerCase())));
+      el.value = unique.join('\n');
+      const removed = initialCount - unique.length;
+      showToast(`Đã lọc trùng email: Đã xoá ${removed} dòng trùng, còn ${unique.length} email.`, 'success');
+    }
+    window.deduplicateEmailInput = deduplicateEmailInput;
+
+    function shuffleEmailInput() {
+      const el = document.getElementById('txtEmailList');
+      if (!el) return;
+      const lines = el.value.split('\n').map(l => l.trim()).filter(Boolean);
+      for (let i = lines.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [lines[i], lines[j]] = [lines[j], lines[i]];
+      }
+      el.value = lines.join('\n');
+      showToast(`Đã trộn ngẫu nhiên thứ tự ${lines.length} email.`, 'success');
+    }
+    window.shuffleEmailInput = shuffleEmailInput;
 
     function filterToffersLeadsTable() {
       const tbody = document.getElementById('dgvToffersLeadsBody');
@@ -7278,7 +7523,7 @@
 
       tbody.innerHTML = list.map((item, idx) => {
         const timeStr = item.timelead ? new Date(Number(item.timelead) * 1000).toLocaleString('vi-VN') : '--';
-        const flag = item.geo === 'US' ? '🇺🇸' : (item.geo === 'GB' ? '🇬🇧' : (item.geo === 'CA' ? '🇨🇦' : '🌐'));
+        const flag = getGeoFlag(item.geo);
         const member = [item.fullname, item.username ? `(${item.username})` : ''].filter(Boolean).join(' ') || '--';
         const pointVal = Number(item.point) || 0;
         const pointBadge = pointVal > 0
@@ -7304,7 +7549,7 @@
             <td style="font-weight:600;color:#38bdf8;font-size:11px;">#${escHtml(item.id || '')}</td>
             <td style="font-weight:600;color:#f8fafc;" title="${escHtml(item.nameoff || '')}">${escHtml(item.nameoff || '--')}</td>
             <td style="text-align:center;">${pointBadge}</td>
-            <td><code style="font-weight:600;color:#38bdf8;font-size:11px;background:#0f172a;border:1px solid #334155;padding:1px 5px;border-radius:3px;">${escHtml(item.ip || '')}</code></td>
+            <td><code class="clickable-ip" onclick="copyToClipboard('${escHtml(item.ip || '')}', 'Đã sao chép IP: ${escHtml(item.ip || '')}')" title="Nhấn để sao chép IP">${escHtml(item.ip || '')}</code></td>
             <td style="text-align:center;">${progressBadge}</td>
             <td style="text-align:center;font-size:11px;" title="${escHtml(item.geo || '')}">${flag} ${escHtml(item.geo || '')}</td>
             <td style="color:#cbd5e1;font-size:11px;">${timeStr}</td>
@@ -7453,6 +7698,10 @@
         const modal = document.getElementById('bandwidthModal');
         if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
           closeBandwidthModal();
+        }
+        const scrModal = document.getElementById('screenModal');
+        if (scrModal && scrModal.style.display !== 'none' && scrModal.style.display !== '') {
+          closeScreenModal();
         }
       }
     });

@@ -4625,11 +4625,24 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
 
     // Đồng bộ UA, Client Hints (Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version) tận gốc qua CDP cho AdsPower
     const effectiveBuild = { version: String(browserVersion || '130'), channel: 'stable' };
+    const brandLists = buildBrandLists(effectiveBuild.version, 'Google Chrome');
+    const secChUaHeader = brandLists.brands.map(b => `"${b.brand}";v="${b.version}"`).join(', ');
+    const clientHintHeaders = dp.uaData ? {
+      'Sec-CH-UA': secChUaHeader,
+      'Sec-CH-UA-Platform': `"${dp.uaData.platform || 'Windows'}"`,
+      'Sec-CH-UA-Platform-Version': `"${dp.uaData.platformVersion || (dp.uaData.platform === 'Windows' ? '10.0.0' : '')}"`,
+      'Sec-CH-UA-Mobile': dp.isMobile ? '?1' : '?0',
+      'Sec-CH-UA-Model': `"${dp.uaData.model || ''}"`,
+      'Sec-CH-UA-Arch': `"${dp.uaData.architecture || 'x86'}"`,
+      'Sec-CH-UA-Bitness': `"${dp.uaData.bitness || '64'}"`,
+      'Sec-CH-UA-WoW64': '?0',
+    } : {};
     const nativeOverrides = {
       userAgentOverride: buildUserAgentOverride(dp, effectiveBuild, ['en-US', 'en']),
       hardwareConcurrency: dp.spoof?.hardwareConcurrency || 8,
       deviceProfile: dp,
       timezoneId: null,
+      clientHintHeaders,
     };
     const applyOverridesSafely = async (targetPage) => {
       try {
@@ -4859,6 +4872,7 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
         extraPage._offerNumber = (t % (offerUrls.length || 1)) + 1;
         extraPage._assignedRecord = takeNextRecord(recordPool, autofillRecords); // mỗi tab một record riêng
         extraPage._uxOriginTab = true;
+        await applyOverridesSafely(extraPage);
         if (tabUrl) {
           void extraPage.goto(tabUrl, { timeout: navigationTimeout, waitUntil: 'domcontentloaded' }).catch(() => {});
         }
@@ -5387,12 +5401,11 @@ async function launchUserRequestedBrowsers(requestBody) {
   autoRefill.stopRequested = false;
   autoRefill.enabled = true;
   const body = JSON.parse(requestBody);
+  body.browserMode = 'Chrome';
+  delete body.useAdsPower;
   // Lưu cấu hình lần chạy gần nhất riêng (Stop không xoá file này) để /run trên Telegram chạy được ngay,
   // không phải mở app bấm Start lại sau mỗi lần Stop.
   void writeFile(lastLaunchSettingsPath, JSON.stringify({ settings: body, savedAt: new Date().toISOString() }), 'utf8').catch(() => {});
-  if (body.browserMode === 'AdsPower' || body.useAdsPower) {
-    return launchAdsPowerBrowsers(requestBody);
-  }
   const activeBeforeLaunch = activeBrowsers.size;
   const result = await launchRequestedBrowsers(requestBody);
   const countParam = (body.requestedCount !== undefined && body.requestedCount !== '')
@@ -5550,29 +5563,16 @@ export function queueAutomaticRefill(delayMs = 0) {
       }
     }
 
-    let result;
-    if (activeSettings.browserMode === 'AdsPower') {
-      const refillRequestBody = JSON.stringify({
-        ...activeSettings,
-        offerUrls: configuredOffers,
-        websiteUrl: configuredOffers[0] || activeSettings.websiteUrl,
-        websiteUrl2: configuredOffers[1] || activeSettings.websiteUrl2,
-        websiteUrl3: configuredOffers[2] || activeSettings.websiteUrl3,
-        websiteUrl4: configuredOffers[3] || activeSettings.websiteUrl4,
-        requestedCount: localNeeded,
-      });
-      result = await launchAdsPowerBrowsers(refillRequestBody, true, assignedStreamRoles);
-    } else {
-      result = await launchRequestedBrowsers(JSON.stringify({
-        ...activeSettings,
-        offerUrls: configuredOffers,
-        websiteUrl: configuredOffers[0] || activeSettings.websiteUrl,
-        websiteUrl2: configuredOffers[1] || activeSettings.websiteUrl2,
-        websiteUrl3: configuredOffers[2] || activeSettings.websiteUrl3,
-        websiteUrl4: configuredOffers[3] || activeSettings.websiteUrl4,
-        requestedCount: localNeeded,
-      }), { layoutTarget: seqTarget, assignedStreamRoles });
-    }
+    const result = await launchRequestedBrowsers(JSON.stringify({
+      ...activeSettings,
+      browserMode: 'Chrome',
+      offerUrls: configuredOffers,
+      websiteUrl: configuredOffers[0] || activeSettings.websiteUrl,
+      websiteUrl2: configuredOffers[1] || activeSettings.websiteUrl2,
+      websiteUrl3: configuredOffers[2] || activeSettings.websiteUrl3,
+      websiteUrl4: configuredOffers[3] || activeSettings.websiteUrl4,
+      requestedCount: localNeeded,
+    }), { layoutTarget: seqTarget, assignedStreamRoles });
     autoRefill.message = activeBrowsers.size >= seqTarget
       ? `Đã bù đủ ${activeBrowsers.size}/${seqTarget} trình duyệt.`
       : result.warnings.at(-1) ?? `Hiện mở ${activeBrowsers.size}/${seqTarget}; không còn proxy phù hợp để bù.`;
@@ -6729,6 +6729,7 @@ async function openBrowserWithInstalledChrome({
   const effectiveBuild = useCloakBrowser
     ? { ...build, version: cloakVersion, channel: 'cloakbrowser' }
     : build;
+  const effectiveUa = dp.ua(effectiveBuild.version);
   // Ngôn ngữ khớp quốc gia của IP, cùng nguồn với múi giờ.
   const { locale, languages } = localeForCountry(ipCountry);
   const geolocation = antiFingerprint.apiFakeIP && (ipLat || ipLng)
@@ -6745,16 +6746,16 @@ async function openBrowserWithInstalledChrome({
     dp.uaData.brands = brandLists.brands;
     dp.uaData.fullVersionList = brandLists.fullVersionList;
   }
-  const clientHintHeaders = {
+  const clientHintHeaders = dp.uaData ? {
     'Sec-CH-UA': secChUaHeader,
-    'Sec-CH-UA-Platform': `"${dp.uaData?.platform || 'Windows'}"`,
-    'Sec-CH-UA-Platform-Version': `"${dp.uaData?.platformVersion || '10.0.0'}"`,
+    'Sec-CH-UA-Platform': `"${dp.uaData.platform || 'Windows'}"`,
+    'Sec-CH-UA-Platform-Version': `"${dp.uaData.platformVersion || (dp.uaData.platform === 'Windows' ? '10.0.0' : '')}"`,
     'Sec-CH-UA-Mobile': dp.isMobile ? '?1' : '?0',
-    'Sec-CH-UA-Model': `"${dp.uaData?.model || ''}"`,
-    'Sec-CH-UA-Arch': `"${dp.uaData?.architecture || 'x86'}"`,
-    'Sec-CH-UA-Bitness': `"${dp.uaData?.bitness || '64'}"`,
+    'Sec-CH-UA-Model': `"${dp.uaData.model || ''}"`,
+    'Sec-CH-UA-Arch': `"${dp.uaData.architecture || 'x86'}"`,
+    'Sec-CH-UA-Bitness': `"${dp.uaData.bitness || '64'}"`,
     'Sec-CH-UA-WoW64': '?0',
-  };
+  } : {};
 
   let context;
   let verifiedExitIp = null;
@@ -6849,6 +6850,7 @@ async function openBrowserWithInstalledChrome({
           '--no-first-run',
           '--no-default-browser-check',
           '--disable-blink-features=AutomationControlled',
+          `--user-agent=${effectiveUa}`,
           // WebRTC policy theo cấu hình anti-fingerprint (nhất quán với UI/engine khác).
           `--webrtc-ip-handling-policy=${webrtcPolicy}`,
           // KHÔNG dùng --disable-gpu và --enable-unsafe-swiftshader:
@@ -6940,7 +6942,6 @@ async function openBrowserWithInstalledChrome({
   }
 
   // Giả lập thiết bị + chống fingerprint: một script duy nhất chạy trong mọi frame, hàm vá trông như native.
-  const effectiveUa = dp.ua(effectiveBuild.version);
   const stealthConfig = buildStealthConfig(dp, antiFingerprint, sessionSeed, effectiveUa);
   await context.addInitScript(stealthInitScript, stealthConfig);
   // UA, Client Hints, navigator.platform, số nhân CPU, ngôn ngữ: đổi tận gốc qua CDP cho từng tab và iframe khác site.
@@ -6949,6 +6950,7 @@ async function openBrowserWithInstalledChrome({
     hardwareConcurrency: dp.spoof.hardwareConcurrency,
     timezoneId,
     deviceProfile: dp,
+    clientHintHeaders,
   };
   const overrideTasks = new WeakMap();
   const applyDeviceOverrides = (targetPage) => {
@@ -8605,7 +8607,7 @@ async function startLocalInterface() {
   const interfacePcHtml = existsSync(userInterfacePcPath) ? readFileSync(userInterfacePcPath, 'utf8') : interfaceHtml;
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
-    '/launch-adspower': runExclusively(launchAdsPowerBrowsers),
+    '/launch-adspower': runExclusively(launchRequestedBrowsers),
     '/check': checkRequestedProxies,
     '/close': closeActiveBrowsers,
     '/stop': closeActiveBrowsers,
