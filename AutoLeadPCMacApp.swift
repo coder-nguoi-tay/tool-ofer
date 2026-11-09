@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var window: NSWindow?
     private var webView: WKWebView?
     private var nodeProcess: Process?
+    private var activityToken: NSObjectProtocol?
     private let keychainService = "com.autoleadpc.mac.preferences.v2"
     private let keychainAccount = "launcher-settings"
 
@@ -35,6 +36,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// - Author: ductv <ductv@getflycrm.com>
     /// - Since: 2026-10-10
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Ngăn chặn hoàn toàn macOS App Nap để đảm bảo luồng chạy nền, FPS video stream và Node.js luôn giữ trên 20 FPS
+        activityToken = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical, .idleSystemSleepDisabled],
+            reason: "AutoLeadPC High Performance Background Automation and Video Stream"
+        )
+        UserDefaults.standard.set(true, forKey: "NSAppSleepDisabled")
+
         setupMainMenu()
         let iconName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String) ?? "AutoLeadPC"
         if let iconURL = Bundle.main.url(forResource: iconName, withExtension: "icns"),
@@ -87,6 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// - Author: ductv <ductv@getflycrm.com>
     /// - Since: 2026-10-08
     func applicationWillTerminate(_ notification: Notification) {
+        if let token = activityToken {
+            ProcessInfo.processInfo.endActivity(token)
+            activityToken = nil
+        }
         if let nodeProcess, nodeProcess.isRunning {
             nodeProcess.terminate()
         }

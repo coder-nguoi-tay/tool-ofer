@@ -8,6 +8,7 @@ import {
   getBandwidthSummary,
   attachBandwidthTracker,
   bandwidthDailyStats,
+  record711BalanceSample,
 } from './app.mjs';
 
 test('formatBytes formats byte sizes accurately', () => {
@@ -90,4 +91,21 @@ test('attachBandwidthTracker hooks requestfinished and tracks per session and ta
   assert.equal(mockPage._bytesReceived, 2000);
   assert.equal(mockPage._requestCount, 1);
   assert.equal(mockPage._bandwidthFormatted, formatBytes(2500));
+});
+
+test('record711BalanceSample: số dư giảm = 711 thực trừ theo ngày/giờ, tăng = nạp gói', () => {
+  const now = new Date(2026, 10, 10, 9, 15);
+  const key = getLocalDateKey(now);
+  bandwidthDailyStats.last711Balance = null;
+  delete bandwidthDailyStats.daily[key];
+
+  assert.equal(record711BalanceSample(5_000_000_000, now), 0); // lần đầu chỉ lấy mốc
+  assert.equal(record711BalanceSample(4_900_000_000, now), 100_000_000);
+  assert.equal(record711BalanceSample(4_900_000_000, now), 0);
+  assert.equal(record711BalanceSample(4_850_000_000, now), 50_000_000);
+  assert.equal(record711BalanceSample(6_000_000_000, now), 0); // nạp thêm gói, không tính tiêu hao
+
+  assert.equal(bandwidthDailyStats.daily[key].proxy711Bytes, 150_000_000);
+  assert.equal(bandwidthDailyStats.daily[key].proxy711Hours['09'], 150_000_000);
+  assert.equal(bandwidthDailyStats.last711Balance, 6_000_000_000);
 });

@@ -68,6 +68,8 @@ build_app_bundle() {
 	<string>12.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSSupportsAppNap</key>
+	<false/>
 	<key>AutoLeadPCPort</key>
 	<integer>${PORT}</integer>
 	<key>AutoLeadPCInstance</key>

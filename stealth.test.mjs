@@ -10,7 +10,11 @@ import {
   buildProfileCoherenceExpected,
   analyzeProfileCoherence,
   attachGuardedWorkerInjection,
+  applyNativeOverrides,
+  buildClientHintHeaders,
+  mergeClientHintHeaders,
 } from './stealth.mjs';
+import { EventEmitter } from 'node:events';
 import { DEVICE_PROFILES } from './app.mjs';
 
 const toHeader = (brands) => brands.map(({ brand, version }) => `"${brand}";v="${version}"`).join(', ');
@@ -295,4 +299,100 @@ test('attachGuardedWorkerInjection: an toàn, opt-in và bỏ qua khi tắt', as
   assert.ok(resOn !== null);
   assert.ok(typeof resOn.cleanup === 'function');
   resOn.cleanup();
+});
+
+test('buildClientHintHeaders: Version click Windows 10 và Android giữ Arch/Bitness rỗng', () => {
+  const winOverride = buildUserAgentOverride(DEVICE_PROFILES.windows, { version: '150.0.7871.187', channel: 'stable' }, ['en-US']);
+  const win = buildClientHintHeaders(winOverride.userAgentMetadata);
+  assert.equal(win['Sec-CH-UA-Platform'], '"Windows"');
+  assert.equal(win['Sec-CH-UA-Platform-Version'], '"10.0.0"');
+  assert.equal(win['Sec-CH-UA-Arch'], '"x86"');
+  assert.equal(win['Sec-CH-UA-Bitness'], '"64"');
+
+  const androidOverride = buildUserAgentOverride(DEVICE_PROFILES.android, { version: '150.0.7871.187', channel: 'stable' }, ['en-US']);
+  const android = buildClientHintHeaders(androidOverride.userAgentMetadata);
+  assert.equal(android['Sec-CH-UA-Arch'], '""', 'Android thật gửi Arch rỗng, không phải x86');
+  assert.equal(android['Sec-CH-UA-Bitness'], '""');
+  assert.equal(android['Sec-CH-UA-Mobile'], '?1');
+
+  // Thiếu platformVersion trên Windows vẫn phải ra 10.0.0, không bao giờ "0"/rỗng.
+  assert.equal(buildClientHintHeaders({ platform: 'Windows' })['Sec-CH-UA-Platform-Version'], '"10.0.0"');
+  // Header của phiên được ưu tiên.
+  assert.equal(buildClientHintHeaders({ platform: 'Windows' }, { 'Sec-CH-UA': 'x' })['Sec-CH-UA'], 'x');
+});
+
+test('mergeClientHintHeaders: bỏ header trùng tên không phân biệt hoa thường, giữ header khác', () => {
+  const list = mergeClientHintHeaders(
+    { 'sec-ch-ua-platform': '"macOS"', Referer: 'https://a.test/', Accept: 'text/html' },
+    { 'Sec-CH-UA-Platform': '"Windows"' },
+  );
+  const lower = list.map((h) => h.name.toLowerCase());
+  assert.equal(lower.filter((n) => n === 'sec-ch-ua-platform').length, 1);
+  assert.deepEqual(list.find((h) => h.name.toLowerCase() === 'sec-ch-ua-platform'), { name: 'Sec-CH-UA-Platform', value: '"Windows"' });
+  assert.ok(list.some((h) => h.name === 'Referer' && h.value === 'https://a.test/'));
+  assert.deepEqual(mergeClientHintHeaders(undefined, { A: '1' }), [{ name: 'A', value: '1' }]);
+});
+
+test('applyNativeOverrides: chỉ chặn Document https và không để request treo khi header bị từ chối', async () => {
+  const session = new EventEmitter();
+  const calls = [];
+  let rejectHeaders = false;
+  session.send = async (method, params) => {
+    calls.push({ method, params });
+    if (method === 'Fetch.continueRequest' && params.headers && rejectHeaders) throw new Error('Invalid header');
+    return {};
+  };
+  const context = { newCDPSession: async () => session };
+  const userAgentOverride = buildUserAgentOverride(DEVICE_PROFILES.windows, { version: '150.0.7871.187', channel: 'stable' }, ['en-US']);
+  await applyNativeOverrides(context, {}, { userAgentOverride });
+
+  const enable = calls.find((c) => c.method === 'Fetch.enable');
+  assert.deepEqual(enable.params.patterns, [{ urlPattern: 'https://*', resourceType: 'Document', requestStage: 'Request' }]);
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  session.emit('Fetch.requestPaused', { requestId: 'r1', request: { headers: { 'sec-ch-ua-platform': '"macOS"' } } });
+  await flush();
+  const r1 = calls.filter((c) => c.method === 'Fetch.continueRequest' && c.params.requestId === 'r1');
+  assert.equal(r1.length, 1);
+  assert.ok(r1[0].params.headers.some((h) => h.name === 'Sec-CH-UA-Platform-Version' && h.value === '"10.0.0"'));
+  assert.ok(!r1[0].params.headers.some((h) => h.value === '"macOS"'));
+
+  rejectHeaders = true;
+  session.emit('Fetch.requestPaused', { requestId: 'r2', request: { headers: {} } });
+  await flush();
+  const r2 = calls.filter((c) => c.method === 'Fetch.continueRequest' && c.params.requestId === 'r2');
+  assert.equal(r2.length, 2, 'Bị từ chối header thì phải gọi lại continueRequest không kèm header');
+  assert.deepEqual(r2[1].params, { requestId: 'r2' });
+});
+
+test('stealthInitScript: không tạo NavigatorUAData.platformVersion, vẫn trả qua getHighEntropyValues', async () => {
+  function NavigatorUAData() {}
+  for (const [name, value] of [['platform', 'macOS'], ['mobile', false], ['brands', []]]) {
+    Object.defineProperty(NavigatorUAData.prototype, name, { get() { return value; }, configurable: true, enumerable: true });
+  }
+  NavigatorUAData.prototype.getHighEntropyValues = async function () { return { platform: 'macOS', platformVersion: '15.0.0' }; };
+  function Navigator() {}
+  const fakeGlobal = { navigator: Object.create(Navigator.prototype), NavigatorUAData, window: {} };
+
+  const cfg = buildStealthConfig(DEVICE_PROFILES.windows, {}, 4242);
+  new Function('cfg', 'G', `const globalThis = G; (${stealthInitScript.toString()})(cfg);`)(cfg, fakeGlobal);
+
+  const uaData = Object.create(NavigatorUAData.prototype);
+  assert.equal('platformVersion' in uaData, false, 'Chrome thật không có thuộc tính platformVersion trên userAgentData');
+  assert.equal(uaData.platform, 'Windows');
+  const high = await uaData.getHighEntropyValues(['platformVersion']);
+  assert.equal(high.platformVersion, '10.0.0');
+});
+
+test('Version click: mọi máy Windows/macOS/Linux đều gửi Sec-CH-UA-Platform-Version khác rỗng và khác 0', () => {
+  const expectPlatform = { windows: '"Windows"', macos: '"macOS"', linux: '"Linux"' };
+  for (const key of Object.keys(expectPlatform)) {
+    for (let seed = 1; seed <= 300; seed++) {
+      const variant = createDeviceVariant(key, DEVICE_PROFILES[key], seed);
+      const meta = buildUserAgentOverride(variant, { version: '150.0.7871.187', channel: 'stable' }, ['en-US']).userAgentMetadata;
+      const hints = buildClientHintHeaders(meta);
+      assert.equal(hints['Sec-CH-UA-Platform'], expectPlatform[key], `${key} seed ${seed}`);
+      assert.match(hints['Sec-CH-UA-Platform-Version'], /^"[1-9]\d*\.\d+\.\d+"$/, `${key} seed ${seed}: ${hints['Sec-CH-UA-Platform-Version']}`);
+    }
+  }
 });

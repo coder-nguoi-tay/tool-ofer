@@ -484,9 +484,8 @@ export function stealthInitScript(cfg) {
     if (cfg.uaData.platform) {
       replaceGetter(G.NavigatorUAData.prototype, 'platform', () => cfg.uaData.platform);
     }
-    if (cfg.uaData.platformVersion) {
-      replaceGetter(G.NavigatorUAData.prototype, 'platformVersion', () => cfg.uaData.platformVersion);
-    }
+    // platformVersion KHÔNG phải thuộc tính của NavigatorUAData (chỉ có qua getHighEntropyValues bên dưới);
+    // tạo getter mới sẽ lộ ngay qua `'platformVersion' in navigator.userAgentData`.
     if (typeof cfg.isMobile === 'boolean') {
       replaceGetter(G.NavigatorUAData.prototype, 'mobile', () => cfg.isMobile);
     }
@@ -695,6 +694,47 @@ export function stealthInitScript(cfg) {
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-19
  */
+/**
+ * Bộ header Client Hints khớp đúng userAgentMetadata (cùng giá trị JS getHighEntropyValues trả về).
+ * Arch/Bitness rỗng (Android) phải giữ rỗng, không tự điền "x86"/"64".
+ *
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-10
+ * @param {object} metadata userAgentMetadata của Emulation.setUserAgentOverride
+ * @param {Record<string, string>} [extra] Header ưu tiên ghi đè (clientHintHeaders của phiên)
+ * @return {Record<string, string>}
+ */
+export function buildClientHintHeaders(metadata, extra = {}) {
+  const secChUa = metadata.brands?.map((b) => `"${b.brand}";v="${b.version}"`).join(', ') || '';
+  return {
+    ...(secChUa ? { 'Sec-CH-UA': secChUa } : {}),
+    'Sec-CH-UA-Platform': `"${metadata.platform}"`,
+    'Sec-CH-UA-Platform-Version': `"${metadata.platformVersion || (metadata.platform === 'Windows' ? '10.0.0' : '')}"`,
+    'Sec-CH-UA-Mobile': metadata.mobile ? '?1' : '?0',
+    'Sec-CH-UA-Model': `"${metadata.model ?? ''}"`,
+    'Sec-CH-UA-Arch': `"${metadata.architecture ?? ''}"`,
+    'Sec-CH-UA-Bitness': `"${metadata.bitness ?? ''}"`,
+    'Sec-CH-UA-WoW64': '?0',
+    ...(extra || {}),
+  };
+}
+
+/**
+ * Gộp header gốc của request với Client Hints: bỏ header trùng tên (không phân biệt hoa thường,
+ * tránh lọt sec-ch-ua-platform: "macOS" của Chromium nhân Mac) rồi trả về dạng list cho Fetch.continueRequest.
+ *
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-10
+ * @param {Record<string, string>|undefined} requestHeaders
+ * @param {Record<string, string>} hints
+ * @return {{name: string, value: string}[]}
+ */
+export function mergeClientHintHeaders(requestHeaders, hints) {
+  const hintKeys = new Set(Object.keys(hints).map((k) => k.toLowerCase()));
+  const kept = Object.entries(requestHeaders || {}).filter(([k]) => !hintKeys.has(k.toLowerCase()));
+  return [...kept, ...Object.entries(hints)].map(([name, value]) => ({ name, value: String(value) }));
+}
+
 export async function applyNativeOverrides(context, page, { userAgentOverride, hardwareConcurrency, deviceProfile, timezoneId, clientHintHeaders }) {
   const session = await context.newCDPSession(page);
   try {
@@ -713,42 +753,23 @@ export async function applyNativeOverrides(context, page, { userAgentOverride, h
     await session.send('Network.setUserAgentOverride', userAgentOverride);
   } catch {}
 
-  // Bù Client Hints cho mọi HTTP request và đặc biệt là navigation redirects (301/302/307).
-  // Chromium trên macOS theo chuẩn W3C mặc định xoá Sec-CH-UA-Platform-Version trên redirect,
+  // Bù Client Hints cho request điều hướng, đặc biệt là các bước redirect (301/302/307).
+  // Chromium mặc định không gửi Sec-CH-UA-Platform-Version trên redirect tới origin chưa xin Accept-CH,
   // khiến hệ thống tracking affiliate ghi nhận "Window 0, Version click = 0" thay vì "10.0".
+  // Chỉ chặn Document qua https: Chrome thật không gửi hint giá trị cao cho ảnh/script/bên thứ ba hay http://,
+  // chèn vào mọi request vừa là dấu hiệu bot vừa bắt mọi request đi vòng qua Node.
   const metadata = userAgentOverride?.userAgentMetadata;
   if (metadata && metadata.platform) {
-    const secChUa = metadata.brands?.map((b) => `"${b.brand}";v="${b.version}"`).join(', ') || '';
-    const hints = {
-      ...(secChUa ? { 'Sec-CH-UA': secChUa } : {}),
-      'Sec-CH-UA-Platform': `"${metadata.platform}"`,
-      'Sec-CH-UA-Platform-Version': `"${metadata.platformVersion || (metadata.platform === 'Windows' ? '10.0.0' : '')}"`,
-      'Sec-CH-UA-Mobile': metadata.mobile ? '?1' : '?0',
-      'Sec-CH-UA-Model': `"${metadata.model || ''}"`,
-      'Sec-CH-UA-Arch': `"${metadata.architecture || 'x86'}"`,
-      'Sec-CH-UA-Bitness': `"${metadata.bitness || '64'}"`,
-      'Sec-CH-UA-WoW64': '?0',
-      ...(clientHintHeaders || {}),
-    };
-
+    const hints = buildClientHintHeaders(metadata, clientHintHeaders);
     try {
-      await session.send('Fetch.enable', { patterns: [{ urlPattern: '*' }] });
-      session.on('Fetch.requestPaused', async (event) => {
+      await session.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', resourceType: 'Document', requestStage: 'Request' }] });
+      session.on('Fetch.requestPaused', async ({ requestId, request }) => {
         try {
-          const { requestId, request } = event;
-          const reqHeaders = request?.headers || {};
-          // Loại bỏ case-insensitive các header gốc bị trùng tên với Client Hints (tránh rò rỉ sec-ch-ua-platform: "macOS" của Chromium nhân Mac)
-          const lowerHintKeys = new Set(Object.keys(hints).map((k) => k.toLowerCase()));
-          const filtered = {};
-          for (const [k, v] of Object.entries(reqHeaders)) {
-            if (!lowerHintKeys.has(k.toLowerCase())) {
-              filtered[k] = v;
-            }
-          }
-          const merged = { ...filtered, ...hints };
-          const headerList = Object.entries(merged).map(([name, value]) => ({ name, value: String(value) }));
-          await session.send('Fetch.continueRequest', { requestId, headers: headerList }).catch(() => {});
-        } catch {}
+          await session.send('Fetch.continueRequest', { requestId, headers: mergeClientHintHeaders(request?.headers, hints) });
+        } catch {
+          // Header bị từ chối thì vẫn cho request đi tiếp nguyên bản, không để trang treo ở trạng thái paused.
+          await session.send('Fetch.continueRequest', { requestId }).catch(() => {});
+        }
       });
     } catch {}
   }

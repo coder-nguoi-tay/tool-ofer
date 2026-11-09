@@ -5,6 +5,7 @@ import { access, appendFile, chmod, cp, mkdir, readFile, readdir, readlink, rena
 import { readFileSync, realpathSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { homedir, hostname as getHostname, cpus, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -213,7 +214,7 @@ process.on('unhandledRejection', (reason) => {
 
 const executeFile = promisify(execFile);
 const activeBrowsers = new Set();
-// slot → { cdpClient, sseResponse, intervalId }
+// slot → { cdpClient, page, sseResponse (createViewerHub: nhiều người xem chung 1 luồng hình), keepaliveTimer, cleanup }
 const screencastSessions = new Map();
 let chromeBuildRotationCounter = 0;
 let deviceProfileRotationCounter = 0;
@@ -516,7 +517,7 @@ function syncDeviceProfilesFromSettings(settings) {
     settings.iPhone && 'ios',
     settings.iPad && 'ipad',
   ].filter(Boolean);
-  autoRefill.deviceProfiles = selectedProfiles.length > 0 ? selectedProfiles : ['macos'];
+  autoRefill.deviceProfiles = selectedProfiles.length > 0 ? selectedProfiles : ['windows'];
   void saveSavedDeviceProfiles();
   return autoRefill.deviceProfiles;
 }
@@ -1258,6 +1259,8 @@ export const bandwidthDailyStats = {
   totalUploadAllTime: 0,
   totalDownloadAllTime: 0,
   totalRequestsAllTime: 0,
+  /** Số dư 711 (bytes) ở lần poll gần nhất, dùng để tính lượng 711 thực trừ giữa 2 lần poll. */
+  last711Balance: null,
   daily: {},
 };
 
@@ -1272,8 +1275,7 @@ export function formatBytes(bytes, decimals = 2) {
   return `${val} ${sizes[i]}`;
 }
 
-export function getLocalDateKey() {
-  const d = new Date();
+export function getLocalDateKey(d = new Date()) {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -1289,13 +1291,17 @@ export async function loadBandwidthStats() {
       bandwidthDailyStats.totalDownloadAllTime = Number(raw.totalDownloadAllTime) || 0;
       bandwidthDailyStats.totalRequestsAllTime = Number(raw.totalRequestsAllTime) || 0;
       bandwidthDailyStats.daily = (raw.daily && typeof raw.daily === 'object') ? raw.daily : {};
+      bandwidthDailyStats.last711Balance = typeof raw.last711Balance === 'number' ? raw.last711Balance : null;
     }
     console.log(`[Bandwidth] Đã tải thống kê băng thông (${Object.keys(bandwidthDailyStats.daily).length} ngày, tổng all-time: ${formatBytes(bandwidthDailyStats.totalBytesAllTime)})`);
   } catch {}
 }
 
+// node --test đặt NODE_TEST_CONTEXT: không ghi số liệu giả của test vào bandwidth-daily.json thật.
+const skipBandwidthPersist = Boolean(process.env.NODE_TEST_CONTEXT);
+
 export function queueSaveBandwidthStats() {
-  if (saveBandwidthTimer) return;
+  if (saveBandwidthTimer || skipBandwidthPersist) return;
   saveBandwidthTimer = setTimeout(async () => {
     saveBandwidthTimer = null;
     try {
@@ -1308,6 +1314,7 @@ export function queueSaveBandwidthStats() {
 }
 
 export function saveBandwidthStatsSync() {
+  if (skipBandwidthPersist) return;
   try {
     mkdirSync(appDataDirectory, { recursive: true });
     writeFileSync(bandwidthStatsPath, JSON.stringify(bandwidthDailyStats, null, 2), 'utf8');
@@ -1318,9 +1325,7 @@ process.on('exit', () => {
   saveBandwidthStatsSync();
 });
 
-export function recordBandwidthUsage(bytes, up = 0, down = 0) {
-  if (bytes <= 0 && up <= 0 && down <= 0) return;
-  const dateKey = getLocalDateKey();
+function getDayStats(dateKey) {
   if (!bandwidthDailyStats.daily[dateKey]) {
     bandwidthDailyStats.daily[dateKey] = {
       date: dateKey,
@@ -1330,7 +1335,12 @@ export function recordBandwidthUsage(bytes, up = 0, down = 0) {
       requestCount: 0,
     };
   }
-  const day = bandwidthDailyStats.daily[dateKey];
+  return bandwidthDailyStats.daily[dateKey];
+}
+
+export function recordBandwidthUsage(bytes, up = 0, down = 0) {
+  if (bytes <= 0 && up <= 0 && down <= 0) return;
+  const day = getDayStats(getLocalDateKey());
   day.bytesSent = (day.bytesSent || 0) + up;
   day.bytesReceived = (day.bytesReceived || 0) + down;
   day.totalBytes = (day.totalBytes || 0) + bytes;
@@ -1342,6 +1352,39 @@ export function recordBandwidthUsage(bytes, up = 0, down = 0) {
   bandwidthDailyStats.totalRequestsAllTime += 1;
 
   queueSaveBandwidthStats();
+}
+
+/**
+ * Ghi nhận lượng 711 thực trừ = phần số dư giảm giữa 2 lần poll số dư (đúng con số 711 tính tiền,
+ * gồm mọi máy/instance dùng chung tài khoản). Số dư tăng = vừa nạp gói → cộng vào packageGb, không tính là tiêu hao.
+ * ponytail: phần giảm trong lúc app tắt được dồn vào giờ của lần poll đầu tiên sau khi mở lại;
+ * cần chính xác hơn thì phải gọi API thống kê của dashboard 711 (bắt buộc ký request + đăng nhập web).
+ *
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-10
+ * @param {number} flowBytes Số dư hiện tại (bytes) từ /wapi/balance/
+ * @param {Date} [now]
+ * @return {number} Số bytes tiêu hao ghi nhận được ở lần này
+ */
+export function record711BalanceSample(flowBytes, now = new Date()) {
+  if (typeof flowBytes !== 'number' || !Number.isFinite(flowBytes) || flowBytes < 0) return 0;
+  const prev = bandwidthDailyStats.last711Balance;
+  bandwidthDailyStats.last711Balance = flowBytes;
+  queueSaveBandwidthStats();
+  if (typeof prev !== 'number') return 0;
+  const used = prev - flowBytes;
+  if (used < 0) {
+    proxy711.packageGb = Number(((Number(proxy711.packageGb) || 0) + (-used) / (1024 ** 3)).toFixed(3));
+    void saveProxy711Config();
+    return 0;
+  }
+  if (used === 0) return 0;
+  const day = getDayStats(getLocalDateKey(now));
+  const hour = String(now.getHours()).padStart(2, '0');
+  day.proxy711Bytes = (day.proxy711Bytes || 0) + used;
+  day.proxy711Hours = day.proxy711Hours || {};
+  day.proxy711Hours[hour] = (day.proxy711Hours[hour] || 0) + used;
+  return used;
 }
 
 export function attachBandwidthTracker(context, session) {
@@ -1609,6 +1652,8 @@ export function getBandwidthSummary() {
     formatted: formatBytes(d.totalBytes || 0),
     sentFormatted: formatBytes(d.bytesSent || 0),
     receivedFormatted: formatBytes(d.bytesReceived || 0),
+    proxy711Bytes: d.proxy711Bytes || 0,
+    proxy711Formatted: formatBytes(d.proxy711Bytes || 0),
   })).sort((a, b) => b.date.localeCompare(a.date));
 
   return {
@@ -1617,6 +1662,8 @@ export function getBandwidthSummary() {
       formatted: formatBytes(todayStats.totalBytes || 0),
       sentFormatted: formatBytes(todayStats.bytesSent || 0),
       receivedFormatted: formatBytes(todayStats.bytesReceived || 0),
+      proxy711Bytes: todayStats.proxy711Bytes || 0,
+      proxy711Formatted: formatBytes(todayStats.proxy711Bytes || 0),
     },
     allTime: {
       totalBytes: bandwidthDailyStats.totalBytesAllTime,
@@ -1789,7 +1836,10 @@ export async function get711Balance(force = false) {
     return cached711Balance;
   }
 
-  const token = await ensure711Token();
+  // Số dư thật của tài khoản (khớp dashboard 711) nằm ở /wapi/balance/ với WAPI token.
+  // /eapi/balance/ trả code 200 nhưng flow_balance = 0 với tài khoản web → không dùng, tránh báo "còn 0 GB".
+  // WAPI token tự lấy lại bằng username/passwd đã lưu → không cần đăng nhập web lại.
+  const token = await ensure711WapiToken();
   if (!token) {
     cached711Balance = {
       ...cached711Balance,
@@ -1800,50 +1850,26 @@ export async function get711Balance(force = false) {
   }
 
   try {
-    const candidateBalanceUrls = [
-      'https://server.711proxy.com/eapi/balance/',
-      'https://server.711proxy.com/wapi/balance/',
-    ];
-    let data = null;
-    let text = '';
-    for (const url of candidateBalanceUrls) {
-      try {
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        text = await res.text();
-        try { data = JSON.parse(text); } catch {}
-        if (data && (data.code === 200 || data.code === 0) && typeof data.flow_balance === 'number') {
-          break;
-        }
-      } catch {}
-    }
+    const balanceUrl = 'https://server.711proxy.com/wapi/balance/';
+    const fetchBalance = async (bearer) => {
+      const res = await fetch(balanceUrl, { headers: { Authorization: `Bearer ${bearer}` } });
+      const body = await res.text();
+      let json = null;
+      try { json = JSON.parse(body); } catch {}
+      return { res, body, json };
+    };
+    let { res, body: text, json: data } = await fetchBalance(token);
 
-    if (data?.code === 41010 || data?.error?.toLowerCase().includes('token')) {
-      proxy711.token = '';
-      proxy711.tokenExpiry = 0;
-      await saveProxy711Config();
-      if (proxy711.username && proxy711.passwd) {
-        const freshToken = await fetch711Token(proxy711.username, proxy711.passwd).catch(() => null);
-        if (freshToken) {
-          for (const url of candidateBalanceUrls) {
-            try {
-              const res = await fetch(url, {
-                headers: { Authorization: `Bearer ${freshToken}` },
-              });
-              text = await res.text();
-              try { data = JSON.parse(text); } catch {}
-              if (data && (data.code === 200 || data.code === 0) && typeof data.flow_balance === 'number') {
-                break;
-              }
-            } catch {}
-          }
-        }
-      }
+    if (res.status === 401 || res.status === 403 || data?.code === 41010) {
+      proxy711.wapiToken = '';
+      proxy711.wapiTokenExpiry = 0;
+      const freshToken = await ensure711WapiToken();
+      if (freshToken) ({ res, body: text, json: data } = await fetchBalance(freshToken));
     }
 
     if (data && (data.code === 200 || data.code === 0) && typeof data.flow_balance === 'number') {
       const flowBytes = data.flow_balance;
+      record711BalanceSample(flowBytes);
       const remainingGb = Number((flowBytes / (1024 ** 3)).toFixed(3));
 
       let packageGb = Number(proxy711.packageGb) || 0;
@@ -2035,57 +2061,30 @@ export async function ensure711WapiToken() {
 }
 
 /**
- * Lấy lịch sử tiêu thụ lưu lượng thực tế theo giờ từ API chính thức của 711Proxy (/wapi/consume/chart/).
+ * Lịch sử lượng 711 thực trừ theo giờ, dựng từ các lần poll số dư (record711BalanceSample).
+ * API /wapi/consume/chart/ của 711 bỏ qua from/to và chỉ trả giờ hiện tại (= 0), còn API thống kê
+ * của dashboard bắt buộc đăng nhập web + ký request → dùng dữ liệu tự ghi nhận, không cần đăng nhập web.
  *
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-10
  * @param {object} [options]
- * @param {number} [options.from] Thời điểm bắt đầu (Unix timestamp, giây)
- * @param {number} [options.to] Thời điểm kết thúc (Unix timestamp, giây)
- * @param {string} [options.subuser] Tên sub-user (tuỳ chọn)
- * @param {number} [options.days=1] Số ngày nếu không truyền from/to
- * @return {Promise<object>} Dữ liệu chi tiết tiêu hao theo giờ
+ * @param {number} [options.days=1] Số ngày lịch (tính cả hôm nay)
+ * @return {Promise<object>} Dữ liệu tiêu hao theo giờ
  */
-export async function get711ConsumptionChart({ from = null, to = null, subuser = '', days = 1 } = {}) {
-  const wapiToken = await ensure711WapiToken();
-  if (!wapiToken) {
-    throw new Error('Chưa đăng nhập 711proxy hoặc chưa có thông tin tài khoản.');
-  }
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  let startSec = from ? Number(from) : (nowSec - Math.max(1, Number(days) || 1) * 86400);
-  let endSec = to ? Number(to) : nowSec;
-
-  const url = new URL('https://server.711proxy.com/wapi/consume/chart/');
-  url.searchParams.set('from', String(startSec));
-  url.searchParams.set('to', String(endSec));
-  if (subuser) {
-    url.searchParams.set('subuser', String(subuser).trim());
-  }
-
-  let res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${wapiToken}` },
-  });
-
-  if (res.status === 401 || res.status === 403) {
-    proxy711.wapiToken = '';
-    proxy711.wapiTokenExpiry = 0;
-    await saveProxy711Config();
-    const freshToken = await ensure711WapiToken();
-    if (freshToken) {
-      res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${freshToken}` },
-      });
+export async function get711ConsumptionChart({ days = 1 } = {}) {
+  const rawList = [];
+  const dayCount = Math.min(60, Math.max(1, Number(days) || 1));
+  for (let i = 0; i < dayCount; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const hours = bandwidthDailyStats.daily[getLocalDateKey(d)]?.proxy711Hours || {};
+    for (const [hour, bytes] of Object.entries(hours)) {
+      d.setHours(Number(hour), 0, 0, 0);
+      const timestamp = Math.floor(d.getTime() / 1000);
+      rawList.push({ period: new Date(timestamp * 1000).toISOString(), timestamp, total_traffic_count: bytes });
     }
   }
 
-  const text = await res.text();
-  let data = null;
-  try { data = JSON.parse(text); } catch {}
-
-  if (!res.ok || (data?.code !== 200 && data?.code !== 0)) {
-    throw new Error(data?.message || data?.msg || data?.error || `Lỗi API 711: ${text.slice(0, 120)}`);
-  }
-
-  const rawList = Array.isArray(data.results) ? data.results : [];
   let totalBytes = 0;
   let peakBytes = 0;
   let peakHour = null;
@@ -4647,6 +4646,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
 
   // Gắn thêm lớp stealthInitScript để đảm bảo loại bỏ hoàn toàn dấu vết automation và thêm lớp nhiễu phụ trợ
   try {
+    // Giữ đúng thiết bị được tích (kể cả macOS/Linux): Version click đúng nhờ applyNativeOverrides bù
+    // Sec-CH-UA-Platform-Version cho mọi bước điều hướng, không cần ép Desktop về Windows.
     const dp = DEVICE_PROFILES[deviceProfile] || DEVICE_PROFILES.windows;
     const effectiveUa = dp.ua(String(browserVersion || '130'));
     const stealthConfig = buildStealthConfig(dp, antiFingerprint, assignedSlot, effectiveUa);
@@ -4662,8 +4663,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
       'Sec-CH-UA-Platform-Version': `"${dp.uaData.platformVersion || (dp.uaData.platform === 'Windows' ? '10.0.0' : '')}"`,
       'Sec-CH-UA-Mobile': dp.isMobile ? '?1' : '?0',
       'Sec-CH-UA-Model': `"${dp.uaData.model || ''}"`,
-      'Sec-CH-UA-Arch': `"${dp.uaData.architecture || 'x86'}"`,
-      'Sec-CH-UA-Bitness': `"${dp.uaData.bitness || '64'}"`,
+      'Sec-CH-UA-Arch': `"${dp.uaData.architecture ?? ''}"`,
+      'Sec-CH-UA-Bitness': `"${dp.uaData.bitness ?? ''}"`,
       'Sec-CH-UA-WoW64': '?0',
     } : {};
     const nativeOverrides = {
@@ -4822,8 +4823,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     void requestManagedProfileStop(session);
     const sc = screencastSessions.get(assignedSlot);
     if (sc) {
-      if (sc.keepaliveTimer) { clearInterval(sc.keepaliveTimer); sc.keepaliveTimer = null; }
-      sc.cdpClient.detach().catch(() => {});
+      sc.cleaned = true;
+      void releaseScreencast(sc);
       try { sc.sseResponse.end(); } catch {}
       screencastSessions.delete(assignedSlot);
     }
@@ -6735,13 +6736,16 @@ async function openBrowserWithInstalledChrome({
   // Mỗi phiên một seed: từ đó bốc ra một máy cụ thể (chip/GPU, nhân CPU, màn hình, bản OS) và nhiễu canvas/audio riêng.
   const sessionSeed = Math.floor(Math.random() * 0x7fffffff) || 1;
   const tileViewport = { width: tile.width, height: Math.max(600, tile.height - 85) };
-  // CloakBrowser tự đặt --fingerprint-platform theo OS của máy đang chạy (darwin -> macos).
-  // Profile thiết bị phải đi theo, nếu không UA/Client Hints nói Windows còn engine lại giả macOS
-  // thì navigator.platform, userAgentData.platform và UA tự mâu thuẫn nhau.
-  const cloakPlatform = process.platform === 'darwin' ? 'macos' : 'windows';
-  const profileKey = useCloakBrowser
-    ? cloakPlatform
-    : (DEVICE_PROFILES[deviceProfile] ? deviceProfile : 'windows');
+  // Chạy đúng thiết bị được tích (Windows, macOS, Linux, Android, iPhone, iPad).
+  // Toffers ghi "Version click = 0" khi thiếu Sec-CH-UA-Platform-Version trên redirect, không phải vì OS:
+  // applyNativeOverrides bù header này cho mọi bước điều hướng (Windows 10.0.0, macOS 14-26, Linux 6.x).
+  const requestedProfile = DEVICE_PROFILES[deviceProfile] ? deviceProfile : 'windows';
+  // CloakBrowser giả nền tảng ở tầng engine (--fingerprint-platform) cho windows/macos; profile khác đi theo
+  // OS máy đang chạy như trước, để UA/Client Hints và navigator.platform không mâu thuẫn.
+  const cloakPlatform = ['windows', 'macos'].includes(requestedProfile)
+    ? requestedProfile
+    : (process.platform === 'darwin' ? 'macos' : 'windows');
+  const profileKey = useCloakBrowser ? cloakPlatform : requestedProfile;
   const dp = createDeviceVariant(profileKey, DEVICE_PROFILES[profileKey], sessionSeed, { width: tileViewport.width, height: tileViewport.height + 90 });
   // UA trong tab Useragent (nếu có) thay mẫu cố định. CloakBrowser tự quản UA nên bỏ qua.
   const configuredUa = useCloakBrowser ? null : pickConfiguredUserAgent(await readConfiguredUserAgents(profileKey), sessionSeed);
@@ -6781,8 +6785,8 @@ async function openBrowserWithInstalledChrome({
     'Sec-CH-UA-Platform-Version': `"${dp.uaData.platformVersion || (dp.uaData.platform === 'Windows' ? '10.0.0' : '')}"`,
     'Sec-CH-UA-Mobile': dp.isMobile ? '?1' : '?0',
     'Sec-CH-UA-Model': `"${dp.uaData.model || ''}"`,
-    'Sec-CH-UA-Arch': `"${dp.uaData.architecture || 'x86'}"`,
-    'Sec-CH-UA-Bitness': `"${dp.uaData.bitness || '64'}"`,
+    'Sec-CH-UA-Arch': `"${dp.uaData.architecture ?? ''}"`,
+    'Sec-CH-UA-Bitness': `"${dp.uaData.bitness ?? ''}"`,
     'Sec-CH-UA-WoW64': '?0',
   } : {};
 
@@ -6885,6 +6889,8 @@ async function openBrowserWithInstalledChrome({
           // KHÔNG dùng --disable-gpu và --enable-unsafe-swiftshader:
           // Tránh lộ card ảo SwiftShader Device (dấu hiệu bot đỏ của Cloudflare/CreepJS).
           // Cho phép WebGL chạy trên GPU thật (ANGLE Metal trên Mac) — khớp 100% profile người dùng thật.
+          // KHÔNG dùng --disable-frame-rate-limit: bỏ giới hạn vẽ ở MỌI cửa sổ, 15+ luồng tranh nhau CPU/GPU
+          // làm cả máy lẫn luồng hình trong app kém mượt. gpu-rasterization/zero-copy trên Mac vốn đã bật sẵn.
           '--disable-dev-shm-usage',
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
@@ -7183,8 +7189,8 @@ async function openBrowserWithInstalledChrome({
     const _slot = session.slot ?? tileIndex + 1;
     const _sc = screencastSessions.get(_slot);
     if (_sc) {
-      if (_sc.keepaliveTimer) { clearInterval(_sc.keepaliveTimer); _sc.keepaliveTimer = null; }
-      _sc.cdpClient.detach().catch(() => {});
+      _sc.cleaned = true;
+      void releaseScreencast(_sc);
       try { _sc.sseResponse.end(); } catch {}
       screencastSessions.delete(_slot);
     }
@@ -8595,6 +8601,251 @@ async function releaseStalePortHolder(port) {
 }
 
 /**
+ * Bộ phát frame cho mọi người đang xem một slot (app PC, Telegram mini...), dùng thay cho một response SSE.
+ * Người xem mới không đá người cũ và nhận ngay frame gần nhất; người xem chậm chỉ bị bỏ frame của riêng họ.
+ * write() trả false khi MỌI người xem đều nghẽn → attachScreencastSession hoãn ack cho tới 'drain'.
+ *
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-10
+ * @return {EventEmitter & {add: Function, remove: Function, write: Function, end: Function, size: number}}
+ */
+export function createViewerHub() {
+  const hub = new EventEmitter();
+  const viewers = new Set();
+  let lastFrame = null;
+  const isOpen = (res) => !res.writableEnded && !res.destroyed;
+  Object.defineProperties(hub, {
+    size: { get: () => viewers.size },
+    writableEnded: { get: () => ![...viewers].some(isOpen) },
+    destroyed: { get: () => false },
+    writableNeedDrain: { get: () => viewers.size > 0 && [...viewers].every((res) => !isOpen(res) || res.writableNeedDrain) },
+  });
+  hub.add = (res) => {
+    viewers.add(res);
+    res.on('drain', () => hub.emit('drain'));
+    if (lastFrame) res.write(lastFrame);
+  };
+  hub.remove = (res) => viewers.delete(res);
+  hub.write = (chunk) => {
+    const isFrame = chunk.startsWith('data: ');
+    if (isFrame) lastFrame = chunk;
+    let flowing = false;
+    for (const res of viewers) {
+      if (!isOpen(res)) continue;
+      if (isFrame && res.writableNeedDrain) continue;
+      if (res.write(chunk)) flowing = true;
+    }
+    return flowing;
+  };
+  hub.end = () => {
+    for (const res of viewers) {
+      try { res.end(); } catch {}
+    }
+  };
+  return hub;
+}
+
+/**
+ * Tháo screencast hiện tại của slot: gỡ listener tự khôi phục TRƯỚC khi detach (detach phát 'close',
+ * nếu còn listener thì màn xem bị kéo về tab chính), tắt timer chụp bù, dừng screencast.
+ *
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-10
+ * @param {object} scObj
+ * @return {Promise<void>}
+ */
+export async function releaseScreencast(scObj) {
+  scObj.unbindListeners?.();
+  scObj.unbindListeners = null;
+  if (scObj.keepaliveTimer) { clearInterval(scObj.keepaliveTimer); scObj.keepaliveTimer = null; }
+  const cdp = scObj.cdpClient;
+  if (cdp) {
+    await cdp.send('Page.stopScreencast').catch(() => {});
+    await cdp.detach().catch(() => {});
+  }
+}
+
+/**
+ * Cửa sổ chứa tab có đang thu nhỏ không (chạy ẩn).
+ * Đo thực tế: captureScreenshot treo vĩnh viễn trên cửa sổ thu nhỏ VÀ chặn luôn screencast của tab
+ * (62.7 → 0.3 FPS), trong khi screencast tự nó vẫn ~60 FPS và vẫn gửi frame đầu cho trang tĩnh.
+ *
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-10
+ * @param {import('playwright').CDPSession} cdp
+ * @return {Promise<boolean>}
+ */
+export async function isWindowMinimized(cdp) {
+  try {
+    const { bounds } = await cdp.send('Browser.getWindowForTarget');
+    return bounds?.windowState === 'minimized';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Gắn screencast của một tab vào kết nối SSE của một slot. Mỗi slot có trạng thái, timer và
+ * cơ chế chống nghẽn riêng: một slot treo hoặc người xem chậm không làm ảnh hưởng slot khác.
+ *
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-10
+ * @param {object} scObj Trạng thái stream của slot ({ sseResponse, cleaned?, ... })
+ * @param {import('playwright').CDPSession} cdpSession
+ * @param {import('playwright').Page} targetPage
+ * @param {number|null} [slot]
+ * @param {object|null} [session]
+ * @return {Promise<void>}
+ */
+export async function attachScreencastSession(scObj, cdpSession, targetPage, slot = null, session = null) {
+  // Route đổi/mở/đóng tab gọi lại không kèm slot/session: giữ của lần gắn trước để còn tự khôi phục được.
+  slot = slot ?? scObj.slot ?? null;
+  session = session ?? scObj.session ?? null;
+  // Gỡ listener của tab/phiên CDP trước: tab cũ đóng sau này không được kéo màn xem đi.
+  scObj.unbindListeners?.();
+  scObj.unbindListeners = null;
+  if (scObj.keepaliveTimer) {
+    clearInterval(scObj.keepaliveTimer);
+    scObj.keepaliveTimer = null;
+  }
+  scObj.cdpClient = cdpSession;
+  scObj.page = targetPage;
+  scObj.slot = slot;
+  scObj.session = session;
+  scObj.lastFrameTime = Date.now();
+
+  // 1. Kích hoạt Page domain trên CDP để đảm bảo nhận event screencastFrame
+  await cdpSession.send('Page.enable').catch(() => {});
+
+  // Tự động khôi phục session khi tab chuyển trang (navigation) hoặc bị detach
+  const onDetachOrClose = async () => {
+    // Listener của tab/phiên CDP đã bị thay thế: bỏ qua, không kéo màn xem về tab khác.
+    if (scObj.cdpClient !== cdpSession) return;
+    if (scObj.cleaned || scObj.isReconnecting || scObj.sseResponse.writableEnded) return;
+    scObj.isReconnecting = true;
+    let recovered = false;
+    try {
+      if (scObj.keepaliveTimer) { clearInterval(scObj.keepaliveTimer); scObj.keepaliveTimer = null; }
+      const curSession = session || [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (curSession && !curSession.isClosed && curSession.browser) {
+        const pages = curSession.browser.pages().filter(p => !p.isClosed());
+        const newPage = (curSession.mainPage && !curSession.mainPage.isClosed()) ? curSession.mainPage : pages[0];
+        if (newPage) {
+          const newCdp = await curSession.browser.newCDPSession(newPage).catch(() => null);
+          if (newCdp && !scObj.cleaned) {
+            await attachScreencastSession(scObj, newCdp, newPage, slot, curSession);
+            recovered = true;
+          }
+        }
+      }
+    } catch {} finally {
+      scObj.isReconnecting = false;
+    }
+    // Không còn tab nào để nối lại: đóng kết nối để người xem thấy "đang kết nối lại" thay vì đứng hình im lặng.
+    if (!recovered && !scObj.cleaned) {
+      try { scObj.sseResponse.end(); } catch {}
+    }
+  };
+
+  // CDPSession của Playwright phát 'close' khi phiên bị detach/target mất (không có sự kiện 'disconnect').
+  cdpSession.on?.('close', onDetachOrClose);
+  targetPage.on?.('close', onDetachOrClose);
+  scObj.unbindListeners = () => {
+    cdpSession.off?.('close', onDetachOrClose);
+    targetPage.off?.('close', onDetachOrClose);
+  };
+
+  // 2. Gắn listener TRƯỚC KHI gọi startScreencast để không bao giờ bị lỡ frame đầu
+  cdpSession.on('Page.screencastFrame', (frame) => {
+    scObj.lastFrameTime = Date.now();
+    if (frame.metadata) {
+      scObj.deviceWidth = frame.metadata.deviceWidth;
+      scObj.deviceHeight = frame.metadata.deviceHeight;
+    }
+    const res = scObj.sseResponse;
+    if (scObj.cleaned || res.writableEnded || res.destroyed) return;
+    // Chống nghẽn riêng từng slot: chỉ báo Chrome "đã nhận" khi socket người xem đẩy xong frame.
+    // Người xem chậm (Telegram qua tunnel) thì Chrome tự giãn nhịp frame của slot đó,
+    // không dồn frame trong RAM Node và không làm trễ các slot khác.
+    const ack = () => cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+    if (res.write(`data: ${frame.data}\n\n`)) ack();
+    else res.once('drain', ack);
+  });
+
+  // 3. Bắt đầu screencast với độ phân giải theo viewport thực tế, chất lượng tối ưu 58 (giảm 50% kích thước frame base64, tăng vọt FPS)
+  const vp = typeof targetPage?.viewportSize === 'function' ? targetPage.viewportSize() : null;
+  const targetMaxWidth = Math.max(1280, vp?.width || 1280);
+  const targetMaxHeight = Math.max(800, vp?.height || 800);
+  await cdpSession.send('Page.startScreencast', {
+    format: 'jpeg',
+    quality: 58,
+    maxWidth: targetMaxWidth,
+    maxHeight: targetMaxHeight,
+    everyNthFrame: 1,
+  }).catch((err) => {
+    console.warn('[ScreenStream] Lỗi startScreencast:', err.message);
+  });
+
+  // 4. Frame ban đầu chụp NỀN, không await, và KHÔNG chụp khi cửa sổ đang thu nhỏ (xem isWindowMinimized):
+  // lệnh chụp treo sẽ chặn screencast của slot. Lúc đó screencast tự gửi frame đầu.
+  // Bỏ fallback page.screenshot: nó cũng gọi captureScreenshot nên treo y như vậy.
+  void isWindowMinimized(cdpSession).then((minimized) => (minimized ? null
+    : cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 58 }))).then((initShot) => {
+    const res = scObj.sseResponse;
+    if (initShot?.data && !scObj.cleaned && !res.writableEnded && !res.destroyed && scObj.cdpClient === cdpSession) {
+      scObj.lastFrameTime = Date.now();
+      res.write(`data: ${initShot.data}\n\n`);
+    }
+  }).catch(() => {});
+
+  // 5. Screencast Keepalive & Fallback Pumping:
+  // Page.startScreencast đã tự động đẩy frame khi trang có chuyển động với tốc độ 30-60 FPS.
+  // Timer kiểm tra mỗi 150ms và chỉ chụp bù khi trang tĩnh (idleTime >= 250ms),
+  // tránh quá tải CDP và CPU khi chạy đồng thời nhiều luồng (15+ luồng).
+  let pingCounter = 0;
+  scObj.keepaliveTimer = setInterval(async () => {
+    if (scObj.cleaned || scObj.sseResponse.writableEnded || !scObj.page || scObj.page.isClosed()) {
+      if (scObj.keepaliveTimer) { clearInterval(scObj.keepaliveTimer); scObj.keepaliveTimer = null; }
+      return;
+    }
+    // Socket người xem còn đang đẩy frame cũ thì không chụp bù thêm (chống nghẽn riêng slot này).
+    if (scObj.sseResponse.writableNeedDrain) return;
+
+    // Gửi SSE comment ping mỗi 3s để chống timeout kết nối mạng/proxy
+    pingCounter++;
+    if (pingCounter >= 20) {
+      pingCounter = 0;
+      try { scObj.sseResponse.write(': ping\n\n'); } catch {}
+    }
+
+    const now = Date.now();
+    const idleTime = now - (scObj.lastFrameTime || 0);
+
+    // Chỉ bù frame khi trang thực sự tĩnh quá 250ms
+    if (idleTime >= 250) {
+      if (scObj.captureInFlight) return;
+      scObj.captureInFlight = true;
+      try {
+        // Cửa sổ thu nhỏ: không chụp bù (lệnh chụp treo sẽ chặn screencast của slot này).
+        if (await isWindowMinimized(scObj.cdpClient)) return;
+        const shot = await scObj.cdpClient.send('Page.captureScreenshot', { format: 'jpeg', quality: 50 });
+        if (shot?.data && !scObj.sseResponse.writableEnded) {
+          scObj.lastFrameTime = Date.now();
+          scObj.sseResponse.write(`data: ${shot.data}\n\n`);
+        }
+      } catch (err) {
+        // Lỗi Playwright: "Target page, context or browser has been closed", "Session closed", "...detached".
+        if (err?.message && /closed|detached/i.test(err.message)) {
+          void onDetachOrClose();
+        }
+      } finally {
+        scObj.captureInFlight = false;
+      }
+    }
+  }, 150);
+}
+
+/**
  * Khởi động giao diện cục bộ và mở nó trong trình duyệt mặc định của macOS.
  *
  * @return {Promise<void>} Hoàn tất khi giao diện được mở.
@@ -9374,12 +9625,9 @@ async function startLocalInterface() {
 
     if (request.method === 'GET' && (request.url === '/711proxy/consumption' || request.url.startsWith('/711proxy/consumption?'))) {
       const urlObj = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
-      const from = urlObj.searchParams.get('from');
-      const to = urlObj.searchParams.get('to');
-      const subuser = urlObj.searchParams.get('subuser') || '';
       const days = urlObj.searchParams.get('days') || 1;
       try {
-        const chartData = await get711ConsumptionChart({ from, to, subuser, days });
+        const chartData = await get711ConsumptionChart({ days });
         respondWithJson(response, 200, chartData);
       } catch (err) {
         respondWithJson(response, 500, { ok: false, error: err.message });
@@ -10308,7 +10556,7 @@ async function startLocalInterface() {
         const snapshotFresh = session.lastSnapshot && Date.now() - (session.lastSnapshotAt || 0) < 3000;
         if (!session.snapshotInFlight && !snapshotFresh) {
           const captureStartedAt = Date.now();
-          session.snapshotInFlight = page.screenshot({ type: 'jpeg', quality: 45, scale: 'css', timeout: 5000 })
+          session.snapshotInFlight = page.screenshot({ type: 'jpeg', quality: 35, scale: 'css', timeout: 3000 })
             .then((buf) => {
               const captureDurationMs = Date.now() - captureStartedAt;
               diagnostics.captures += 1;
@@ -10333,86 +10581,6 @@ async function startLocalInterface() {
       return;
     }
 
-    // Quản lý và cấu hình luồng Screencast chuẩn mượt mà, không bao giờ bị đen hình hay đứng FPS
-    async function attachScreencastSession(scObj, cdpSession, targetPage) {
-      if (scObj.keepaliveTimer) {
-        clearInterval(scObj.keepaliveTimer);
-        scObj.keepaliveTimer = null;
-      }
-      scObj.cdpClient = cdpSession;
-      scObj.page = targetPage;
-      scObj.lastFrameTime = Date.now();
-
-      // 1. Kích hoạt Page domain trên CDP để đảm bảo nhận event screencastFrame
-      await cdpSession.send('Page.enable').catch(() => {});
-
-      // 2. Gắn listener TRƯỚC KHI gọi startScreencast để không bao giờ bị lỡ frame đầu
-      cdpSession.on('Page.screencastFrame', (frame) => {
-        scObj.lastFrameTime = Date.now();
-        if (frame.metadata) {
-          scObj.deviceWidth = frame.metadata.deviceWidth;
-          scObj.deviceHeight = frame.metadata.deviceHeight;
-        }
-        if (!scObj.sseResponse.writableEnded) {
-          scObj.sseResponse.write(`data: ${frame.data}\n\n`);
-        }
-        cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
-      });
-
-      // 3. Bắt đầu screencast với độ phân giải theo viewport thực tế, chất lượng sắc nét 75
-      const vp = typeof targetPage?.viewportSize === 'function' ? targetPage.viewportSize() : null;
-      const targetMaxWidth = Math.max(1280, vp?.width || 1280);
-      const targetMaxHeight = Math.max(800, vp?.height || 800);
-      await cdpSession.send('Page.startScreencast', {
-        format: 'jpeg',
-        quality: 75,
-        maxWidth: targetMaxWidth,
-        maxHeight: targetMaxHeight,
-        everyNthFrame: 1,
-      }).catch((err) => {
-        console.warn('[ScreenStream] Lỗi startScreencast:', err.message);
-      });
-
-      // 4. Gửi ngay lập tức 1 frame ban đầu bằng captureScreenshot hoặc page.screenshot để màn hình hiện ảnh trong 15ms
-      try {
-        const initShot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 75 }).catch(() => null);
-        if (initShot?.data && !scObj.sseResponse.writableEnded) {
-          scObj.lastFrameTime = Date.now();
-          scObj.sseResponse.write(`data: ${initShot.data}\n\n`);
-        } else if (targetPage && !targetPage.isClosed() && !scObj.sseResponse.writableEnded) {
-          const buf = await targetPage.screenshot({ type: 'jpeg', quality: 75 }).catch(() => null);
-          if (buf && !scObj.sseResponse.writableEnded) {
-            scObj.lastFrameTime = Date.now();
-            scObj.sseResponse.write(`data: ${buf.toString('base64')}\n\n`);
-          }
-        }
-      } catch {}
-
-      // 5. Keepalive & Fallback Heartbeat: quá 800ms không có frame (Chrome throttle khi ẩn/minimized, trang đứng yên
-      // hoặc lỗi driver) thì chủ động chụp screenshot và đẩy về SSE. Không sửa DOM trang đích để ép frame: script chống bot thấy được.
-      scObj.keepaliveTimer = setInterval(async () => {
-        if (scObj.sseResponse.writableEnded || !scObj.page || scObj.page.isClosed()) {
-          if (scObj.keepaliveTimer) { clearInterval(scObj.keepaliveTimer); scObj.keepaliveTimer = null; }
-          return;
-        }
-        const idleTime = Date.now() - (scObj.lastFrameTime || 0);
-        if (idleTime > 800) {
-          // Timer chạy mỗi 200ms: không gửi lệnh chụp mới khi lệnh trước chưa xong.
-          if (scObj.captureInFlight) return;
-          scObj.captureInFlight = true;
-          try {
-            const shot = await cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 75 }).catch(() => null);
-            if (shot?.data && !scObj.sseResponse.writableEnded) {
-              scObj.lastFrameTime = Date.now();
-              scObj.sseResponse.write(`data: ${shot.data}\n\n`);
-            }
-          } catch {} finally {
-            scObj.captureInFlight = false;
-          }
-        }
-      }, 200);
-    }
-
     if (request.method === 'GET' && request.url.startsWith('/screen/stream/')) {
       const slot = parseInt(request.url.split('/').pop(), 10);
       const session = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
@@ -10421,43 +10589,56 @@ async function startLocalInterface() {
       // Trình duyệt giữ nguyên trạng thái chạy ngầm, không tự bung cửa sổ ra Desktop khi xem trực tiếp trong app
       // Chỉ khi người dùng bấm nút hiện cửa sổ ngoài Desktop thì mới bung ra
 
-      // Nếu slot đang có SSE cũ → ngắt trước
-      const prev = screencastSessions.get(slot);
-      if (prev) {
-        if (prev.keepaliveTimer) { clearInterval(prev.keepaliveTimer); prev.keepaliveTimer = null; }
-        try { await prev.cdpClient.send('Page.stopScreencast').catch(() => {}); prev.cdpClient.detach().catch(() => {}); } catch {}
-        try { prev.sseResponse.end(); } catch {}
-        screencastSessions.delete(slot);
-      }
-
       response.writeHead(200, {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
       });
-      response.write('retry: 3000\n\n');
+      response.write('retry: 1500\n\n');
+
+      // Slot đã có người xem (vd app PC đang xem, mở thêm Telegram mini): xem chung, không đá nhau.
+      const existing = screencastSessions.get(slot);
+      if (existing && !existing.cleaned) {
+        existing.sseResponse.add(response);
+        const leaveExisting = () => {
+          existing.sseResponse.remove(response);
+          if (existing.sseResponse.size === 0) void existing.cleanup?.();
+        };
+        request.on('close', leaveExisting);
+        response.on('close', leaveExisting);
+        return;
+      }
 
       try {
         const pages = session.browser.pages().filter(p => !p.isClosed());
         const page = (session.mainPage && !session.mainPage.isClosed()) ? session.mainPage : pages[0];
         if (!page) { response.end(); return; }
-        const cdpClient = await session.browser.newCDPSession(page);
-        const scObj = { sseResponse: response };
+        const hub = createViewerHub();
+        hub.add(response);
+        const scObj = { sseResponse: hub };
         screencastSessions.set(slot, scObj);
-
-        await attachScreencastSession(scObj, cdpClient, page);
-
-        const cleanup = async () => {
-          const sc = screencastSessions.get(slot);
-          screencastSessions.delete(slot);
-          if (sc) {
-            if (sc.keepaliveTimer) { clearInterval(sc.keepaliveTimer); sc.keepaliveTimer = null; }
-            try { await sc.cdpClient.send('Page.stopScreencast'); } catch {}
-            try { sc.cdpClient.detach(); } catch {}
-          }
+        // Gắn dọn dẹp TRƯỚC mọi await: người xem cuối rời đi giữa chừng vẫn tắt được screencast của slot.
+        // Chỉ dọn đúng luồng của mình — luồng mới cùng slot không bị luồng cũ đóng nhầm.
+        scObj.cleanup = async () => {
+          if (scObj.cleaned) return;
+          scObj.cleaned = true;
+          if (screencastSessions.get(slot) === scObj) screencastSessions.delete(slot);
+          await releaseScreencast(scObj);
+          hub.end();
         };
-        request.on('close', cleanup);
-        response.on('close', cleanup);
+        const leave = () => {
+          hub.remove(response);
+          if (hub.size === 0) void scObj.cleanup();
+        };
+        request.on('close', leave);
+        response.on('close', leave);
+
+        const cdpClient = await session.browser.newCDPSession(page);
+        if (scObj.cleaned) { await cdpClient.detach().catch(() => {}); return; }
+        await attachScreencastSession(scObj, cdpClient, page, slot, session);
+        // Người xem cuối rời đi đúng lúc đang attach: cleanup đã chạy trước khi gắn xong → tháo nốt.
+        if (scObj.cleaned) await releaseScreencast(scObj);
       } catch (err) {
         console.error(`[ScreenStream] Lỗi khởi tạo SSE slot ${slot}:`, err.message);
         response.write(`data: error\n\n`);
@@ -10504,6 +10685,8 @@ async function startLocalInterface() {
         const targetPage = pages[targetIndex];
         if (!targetPage) { respondWithJson(response, 400, { error: 'invalid tab' }); return; }
 
+        // Gỡ listener tự khôi phục trước khi đóng tab: tránh tranh nhau gắn lại với đoạn chuyển tab bên dưới.
+        screencastSessions.get(slot)?.unbindListeners?.();
         await targetPage.close().catch(() => {});
 
         let remainingPages = session.browser.pages().filter(p => !p.isClosed());
@@ -10525,7 +10708,7 @@ async function startLocalInterface() {
 
         const sc = screencastSessions.get(slot);
         if (sc) {
-          try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
+          await releaseScreencast(sc);
           const newCdp = await session.browser.newCDPSession(nextActivePage);
           await attachScreencastSession(sc, newCdp, nextActivePage);
         }
@@ -10598,7 +10781,7 @@ async function startLocalInterface() {
 
         const sc = screencastSessions.get(slot);
         if (sc) {
-          try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
+          await releaseScreencast(sc);
           const newCdp = await session.browser.newCDPSession(newPage);
           await attachScreencastSession(sc, newCdp, newPage);
         }
@@ -10620,7 +10803,7 @@ async function startLocalInterface() {
         await targetPage.bringToFront();
         const sc = screencastSessions.get(slot);
         if (sc) {
-          try { await sc.cdpClient.send('Page.stopScreencast').catch(() => {}); sc.cdpClient.detach().catch(() => {}); } catch {}
+          await releaseScreencast(sc);
           const newCdp = await session.browser.newCDPSession(targetPage);
           await attachScreencastSession(sc, newCdp, targetPage);
         }

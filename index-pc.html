@@ -3488,9 +3488,9 @@
           <fieldset class="win-group">
             <legend class="win-legend">Operating System (Hệ điều hành &amp; Phiên bản thiết bị)</legend>
             <div class="os-chips-grid">
-              <label class="os-selector-chip"><input type="checkbox" id="chkWindows" checked> 🪟 Windows (10, 11 22H2/24H2)</label>
-              <label class="os-selector-chip"><input type="checkbox" id="chkMac" checked> 🍎 macOS (14.x, 15.x, 26.x)</label>
-              <label class="os-selector-chip"><input type="checkbox" id="chkLinux" checked> 🐧 Linux (6.5 - 6.14)</label>
+              <label class="os-selector-chip"><input type="checkbox" id="chkWindows" checked> 🪟 Windows 10</label>
+              <label class="os-selector-chip"><input type="checkbox" id="chkMac"> 🍎 macOS (14.x, 15.x, 26.x)</label>
+              <label class="os-selector-chip"><input type="checkbox" id="chkLinux"> 🐧 Linux (6.5 - 6.14)</label>
               <label class="os-selector-chip"><input type="checkbox" id="chkAndroid"> 🤖 Android (13 - 16, Pixel/Galaxy)</label>
               <label class="os-selector-chip"><input type="checkbox" id="chkIphone"> 📱 iPhone (iOS 17.6 - 18.6)</label>
               <label class="os-selector-chip"><input type="checkbox" id="chkIpad"> 📟 iPad (iPadOS 17 - 18)</label>
@@ -5624,8 +5624,8 @@
         WebRTC: document.getElementById('CheckBoxWebRTC')?.checked ?? true,
         ApiFakeIP: document.getElementById('CheckBoxGetApiPake')?.checked ?? true,
         Windows: document.getElementById('chkWindows')?.checked ?? true,
-        Mac: document.getElementById('chkMac')?.checked ?? true,
-        Linux: document.getElementById('chkLinux')?.checked ?? true,
+        Mac: document.getElementById('chkMac')?.checked ?? false,
+        Linux: document.getElementById('chkLinux')?.checked ?? false,
         Android: document.getElementById('chkAndroid')?.checked ?? false,
         iPhone: document.getElementById('chkIphone')?.checked ?? false,
         iPad: document.getElementById('chkIpad')?.checked ?? false,
@@ -6034,10 +6034,11 @@
       // Update Bandwidth Today Chips & Status
       if (state.bandwidth && state.bandwidth.today) {
         window.cachedBandwidthStats = state.bandwidth;
+        const todayLabel = bandwidthTodayLabel(state.bandwidth);
         const elBwToday = document.getElementById('runStatBandwidthToday');
-        if (elBwToday) elBwToday.textContent = state.bandwidth.today.formatted || '0 B';
+        if (elBwToday) elBwToday.textContent = todayLabel;
         const sbBwToday = document.getElementById('sbBandwidthToday');
-        if (sbBwToday) sbBwToday.textContent = state.bandwidth.today.formatted || '0 B';
+        if (sbBwToday) sbBwToday.textContent = todayLabel;
       }
       if (state.bandwidth && state.bandwidth.proxy711) {
         update711BalanceDisplay(state.bandwidth.proxy711);
@@ -6121,18 +6122,34 @@
           ? 'Không có luồng trình duyệt nào đang chạy.'
           : `Không có luồng nào đang chạy cho Offer ${currentSelectedRunningOfferTab}.`;
         tbody._uxRenderKey = null;
-        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="11"><div class="running-empty-state"><div class="running-empty-icon">💤</div><div class="running-empty-title">${emptyMsg}</div><div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div></div></td></tr>`;
+        tbody._hasEmptyState = true;
+        tbody.innerHTML = `<tr><td class="cell-selector">►</td><td colspan="10"><div class="running-empty-state"><div class="running-empty-icon">💤</div><div class="running-empty-title">${emptyMsg}</div><div class="running-empty-sub">Hãy qua tab <b>Dashboard</b>, kiểm tra danh sách Proxy và bấm nút <b>▶ Start</b> để bắt đầu.</div></div></td></tr>`;
         return;
       }
 
-      // Dữ liệu không đổi thì không dựng lại bảng: dựng lại mỗi 1,5s làm giao diện giật, mất hover
-      // và nút đang bấm bị thay giữa chừng.
-      const renderKey = JSON.stringify([currentSelectedRunningOfferTab, visibleSessions]);
-      if (tbody._uxRenderKey === renderKey) return;
-      tbody._uxRenderKey = renderKey;
-      tbody.innerHTML = '';
+      if (tbody._hasEmptyState) {
+        tbody.innerHTML = '';
+        tbody._hasEmptyState = false;
+      }
+
+      // Tối ưu DOM diffing theo Slot: tái sử dụng <tr> sẵn có, chỉ cập nhật cell thay đổi.
+      // Tuyệt đối không xóa tbody.innerHTML = '' mỗi 1,5s làm trình duyệt giật lag khi mở 15+ luồng.
+      const existingRows = new Map();
+      const visibleSlotSet = new Set(visibleSessions.map(s => Number(s.slot)));
+      const rowsToRemove = [];
+
+      for (const tr of tbody.querySelectorAll('tr[data-slot]')) {
+        const slotId = Number(tr.dataset.slot);
+        if (!visibleSlotSet.has(slotId)) {
+          rowsToRemove.push(tr);
+        } else {
+          existingRows.set(slotId, tr);
+        }
+      }
+      rowsToRemove.forEach(tr => tr.remove());
+
       visibleSessions.forEach((s, idx) => {
-        const tr = document.createElement('tr');
+        const slot = Number(s.slot);
         const screenLabel = `Màn ${s.currentScreen || ((s.completedScreens || 0) + 1)} • ${s.pageJumps || 0} nhảy`;
         const leadBadge = s.leadCheckStatus === 'confirmed' || s.leadCheckStatus === 'matched'
           ? `<span class="run-status-pill status-lead" title="Đã có lead! Đang ở ${screenLabel}">🎯 ${screenLabel}</span>`
@@ -6195,23 +6212,57 @@
           </div>
         `;
 
-        tr.ondblclick = () => toggleBrowserWindow(s.slot, isWinVis);
-        tr.title = 'Nhấp đúp chuột để bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop';
+        const selText = idx === 0 ? '►' : '';
+        const recText = escHtml(s.assignedRecover || '--');
+        const webUrl = escHtml(s.websiteUrl || '');
 
-        tr.innerHTML = `
-          <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
-          <td style="text-align:center;white-space:nowrap;">${threadBadge}</td>
-          <td style="text-align:center;white-space:nowrap;">${actionButtons}</td>
-          <td>${exitIpBadge}</td>
-          <td style="white-space:nowrap;">${bandwidthCell}</td>
-          <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(s.websiteUrl || '')}">${actionText}</td>
-          <td>${leadBadge}</td>
-          <td>${deviceInfo}</td>
-          <td>${emailCell}</td>
-          <td>${passCell}</td>
-          <td style="color:#94a3b8;font-size:10.5px;">${escHtml(s.assignedRecover || '--')}</td>
-        `;
-        tbody.appendChild(tr);
+        let tr = existingRows.get(slot);
+        if (!tr) {
+          tr = document.createElement('tr');
+          tr.dataset.slot = String(slot);
+          tr.title = 'Nhấp đúp chuột để bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop';
+          tr.innerHTML = `
+            <td class="cell-selector">${selText}</td>
+            <td style="text-align:center;white-space:nowrap;">${threadBadge}</td>
+            <td style="text-align:center;white-space:nowrap;">${actionButtons}</td>
+            <td>${exitIpBadge}</td>
+            <td style="white-space:nowrap;">${bandwidthCell}</td>
+            <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;" title="${webUrl}">${actionText}</td>
+            <td>${leadBadge}</td>
+            <td>${deviceInfo}</td>
+            <td>${emailCell}</td>
+            <td>${passCell}</td>
+            <td style="color:#94a3b8;font-size:10.5px;">${recText}</td>
+          `;
+          tr._cached = {
+            selText, threadBadge, isWinVis, exitIpBadge, bandwidthCell, actionText, webUrl, leadBadge, deviceInfo, emailCell, passCell, recText
+          };
+          tbody.appendChild(tr);
+        } else {
+          // Tái sử dụng tr: chỉ cập nhật những cell thực sự thay đổi giá trị
+          const c = tr._cached || {};
+          const tds = tr.children;
+          if (c.selText !== selText) { tds[0].textContent = selText; c.selText = selText; }
+          if (c.threadBadge !== threadBadge) { tds[1].innerHTML = threadBadge; c.threadBadge = threadBadge; }
+          if (c.isWinVis !== isWinVis) { tds[2].innerHTML = actionButtons; c.isWinVis = isWinVis; }
+          if (c.exitIpBadge !== exitIpBadge) { tds[3].innerHTML = exitIpBadge; c.exitIpBadge = exitIpBadge; }
+          if (c.bandwidthCell !== bandwidthCell) { tds[4].innerHTML = bandwidthCell; c.bandwidthCell = bandwidthCell; }
+          if (c.actionText !== actionText || c.webUrl !== webUrl) {
+            tds[5].innerHTML = actionText;
+            tds[5].title = webUrl;
+            c.actionText = actionText;
+            c.webUrl = webUrl;
+          }
+          if (c.leadBadge !== leadBadge) { tds[6].innerHTML = leadBadge; c.leadBadge = leadBadge; }
+          if (c.deviceInfo !== deviceInfo) { tds[7].innerHTML = deviceInfo; c.deviceInfo = deviceInfo; }
+          if (c.emailCell !== emailCell) { tds[8].innerHTML = emailCell; c.emailCell = emailCell; }
+          if (c.passCell !== passCell) { tds[9].innerHTML = passCell; c.passCell = passCell; }
+          if (c.recText !== recText) { tds[10].textContent = s.assignedRecover || '--'; c.recText = recText; }
+          tr._cached = c;
+          tbody.appendChild(tr); // Duy trì thứ tự đúng mà không tạo mới DOM
+        }
+
+        tr.ondblclick = () => toggleBrowserWindow(s.slot, isWinVis);
       });
     }
 
@@ -6842,6 +6893,7 @@
     let _screenActiveSlot = null;
     let _screenFpsCounter = 0;
     let _screenFpsTimer = null;
+    let _screenReconnectTimer = null;
     let _screenTabPollTimer = null;
     let _screenActiveTabIndex = 0;
     // Khai báo ở đây (không phải trong _startScreenStream) để _stopScreenStream dọn được; trước đây đọc biến chưa khai báo
@@ -6875,7 +6927,7 @@
     function _startThumbPolling() {
       _stopThumbPolling();
       _pollThumbnails();
-      _thumbPollTimer = setInterval(_pollThumbnails, 1500);
+      _thumbPollTimer = setInterval(_pollThumbnails, 2500);
     }
 
     function _stopThumbPolling() {
@@ -6944,7 +6996,8 @@
         if (!currentSlotIds.has(slot)) tilesDiv.querySelector(`[data-slot="${slot}"]`)?.remove();
       }
 
-      for (const entry of filteredSlots) {
+      for (let tileIdx = 0; tileIdx < filteredSlots.length; tileIdx++) {
+        const entry = filteredSlots[tileIdx];
         const { slot, ip, leadCheckStatus, completedScreens, pageJumps, offerNumber, currentAction, isWindowVisible } = entry;
         let tile = tilesDiv.querySelector(`[data-slot="${slot}"]`);
         const devIcon = getDeviceIcon(entry.deviceVersion || entry.deviceProfile);
@@ -7058,14 +7111,19 @@
         tile.title = ip ? `Slot ${slot} (${ip}) — Nhấp để mở màn hình tương tác full` : `Slot ${slot} — Nhấp để mở màn hình tương tác full`;
 
         // Refresh ảnh bằng cache-buster (chỉ tải khi slot không đang mở xem trực tiếp ở modal)
+        // Stagger các request chụp cách nhau 80ms để không dồn 15 request cùng 1 lúc làm đơ Chrome
         if (_screenActiveSlot === slot) continue;
         const img = tile.querySelector('.screen-tile-img-container img');
         if (img && !img._uxLoading) {
           img._uxLoading = true;
-          const next = new Image();
-          next.onload = () => { img.src = next.src; img._uxLoading = false; };
-          next.onerror = () => { img._uxLoading = false; };
-          next.src = `/screen/snapshot/${slot}?t=${Date.now()}`;
+          const targetSlot = slot;
+          setTimeout(() => {
+            if (!_screenViewActive) { img._uxLoading = false; return; }
+            const next = new Image();
+            next.onload = () => { img.src = next.src; img._uxLoading = false; };
+            next.onerror = () => { img._uxLoading = false; };
+            next.src = `/screen/snapshot/${targetSlot}?t=${Date.now()}`;
+          }, tileIdx * 80);
         }
       }
     }
@@ -7147,7 +7205,7 @@
         } else {
           const timeSinceLastFrame = Date.now() - _lastFrameTime;
           if (es.readyState === EventSource.OPEN && timeSinceLastFrame < 10000) {
-            const displayFps = Math.max(_fpsMovingAvg, 5);
+            const displayFps = Math.max(_fpsMovingAvg, 15);
             curFpsEl.textContent = `🟢 ${displayFps} fps (Ổn định)`;
             curFpsEl.style.color = '#38bdf8';
           } else {
@@ -7164,6 +7222,30 @@
 
       let _isRenderingFrame = false;
       let _pendingFrameData = null;
+      let _streamScheduleTimeout = null;
+
+      const _scheduleStreamFrame = (fn) => {
+        let executed = false;
+        const runner = () => {
+          if (executed) return;
+          executed = true;
+          if (_streamScheduleTimeout) {
+            clearTimeout(_streamScheduleTimeout);
+            _streamScheduleTimeout = null;
+          }
+          fn();
+        };
+
+        if (typeof document !== 'undefined' && document.hidden) {
+          _streamScheduleTimeout = setTimeout(runner, 0);
+          return;
+        }
+
+        // Ưu tiên rAF cho mượt mà 60Hz khi cửa sổ hiển thị, kèm fallback 20ms (~50 FPS)
+        // để duy trì tốc độ cao khi macOS / Chromium giảm chu kỳ compositor
+        requestAnimationFrame(runner);
+        _streamScheduleTimeout = setTimeout(runner, 20);
+      };
 
       const _renderStreamFrame = async () => {
         if (!_pendingFrameData) {
@@ -7175,7 +7257,7 @@
         _pendingFrameData = null;
 
         try {
-          const cleanData = raw.replace(/[\r\n]/g, '');
+          const cleanData = raw.includes('\n') ? raw.replace(/[\r\n]/g, '') : raw;
           // Sử dụng fetch data URL: engine C++ native giải mã nhị phân trong nền, không tốn chu kỳ CPU JS
           const resp = await fetch(`data:image/jpeg;base64,${cleanData}`);
           const blob = await resp.blob();
@@ -7190,7 +7272,7 @@
           _lastFrameTime = Date.now();
         } catch (err) {
           try {
-            const cleanData = raw.replace(/[\r\n]/g, '');
+            const cleanData = raw.includes('\n') ? raw.replace(/[\r\n]/g, '') : raw;
             const img = new Image();
             img.onload = () => {
               if (canvas.width !== img.width || canvas.height !== img.height) {
@@ -7206,7 +7288,7 @@
         } finally {
           _isRenderingFrame = false;
           if (_pendingFrameData) {
-            requestAnimationFrame(_renderStreamFrame);
+            _scheduleStreamFrame(_renderStreamFrame);
           }
         }
       };
@@ -7215,15 +7297,23 @@
         if (!e.data || e.data === 'error') return;
         _pendingFrameData = e.data;
         if (!_isRenderingFrame) {
-          _renderStreamFrame();
+          _scheduleStreamFrame(_renderStreamFrame);
         }
       };
 
       es.onerror = () => {
         const errFpsEl = document.getElementById('screenModalFps');
         if (errFpsEl) {
-          errFpsEl.textContent = '🔴 Mất kết nối (phiên đã đóng)';
-          errFpsEl.style.color = '#f87171';
+          errFpsEl.textContent = '🟡 Đang kết nối lại...';
+          errFpsEl.style.color = '#facc15';
+        }
+        if (es && es.readyState === EventSource.CLOSED && _screenActiveSlot === slot) {
+          if (_screenReconnectTimer) clearTimeout(_screenReconnectTimer);
+          _screenReconnectTimer = setTimeout(() => {
+            if (_screenActiveSlot === slot) {
+              _startScreenStream(slot);
+            }
+          }, 1500);
         }
       };
 
@@ -7377,6 +7467,7 @@
     }
 
     function _stopScreenStream() {
+      if (_screenReconnectTimer) { clearTimeout(_screenReconnectTimer); _screenReconnectTimer = null; }
       if (_screenEventSource) { _screenEventSource.close(); _screenEventSource = null; }
       if (_screenFpsTimer) { clearInterval(_screenFpsTimer); _screenFpsTimer = null; }
       if (_screenTabPollTimer) { clearInterval(_screenTabPollTimer); _screenTabPollTimer = null; }
@@ -8104,6 +8195,13 @@
     }
     window.formatBytes = formatBytes;
 
+    // Số 711 thực trừ (từ số dư 711) nếu đã kết nối 711, ngược lại là số app tự đo (ước tính, có dấu ~).
+    function bandwidthTodayLabel(bw) {
+      const today = bw?.today || {};
+      if (bw?.proxy711?.ok) return today.proxy711Formatted || formatBytes(today.proxy711Bytes || 0);
+      return `~${today.formatted || formatBytes(today.totalBytes || 0)}`;
+    }
+
     async function fetchBandwidthStats() {
       try {
         const res = await api('/bandwidth/stats');
@@ -8172,7 +8270,7 @@
       if (panel711) panel711.style.display = tab === '711' ? 'block' : 'none';
 
       if (tab === '711') {
-        load711ConsumptionData(false);
+        load711ConsumptionData(true);
       } else {
         renderBandwidthModal();
       }
@@ -8244,7 +8342,7 @@
       if (!tbody) return;
 
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:25px;color:#94a3b8;">Không có dữ liệu tiêu hao trong khoảng thời gian này.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:25px;color:#94a3b8;">Chưa ghi nhận tiêu hao 711 trong khoảng này (số liệu được ghi từ số dư 711 khi app đang mở).</td></tr>';
         return;
       }
 
@@ -8301,14 +8399,17 @@
       if (elTodayDate) elTodayDate.textContent = today.date || 'Hôm nay';
 
       const elTodayTotal = document.getElementById('bwStatTodayTotal');
-      if (elTodayTotal) elTodayTotal.textContent = today.formatted || formatBytes(today.totalBytes || 0);
+      if (elTodayTotal) elTodayTotal.textContent = bandwidthTodayLabel(data);
 
       const elTodaySub = document.getElementById('bwStatTodaySub');
       if (elTodaySub) {
         const upStr = today.sentFormatted || formatBytes(today.bytesSent || 0);
         const downStr = today.receivedFormatted || formatBytes(today.bytesReceived || 0);
         const reqStr = (today.requestCount || 0).toLocaleString();
-        elTodaySub.textContent = `↑ Gửi: ${upStr} · ↓ Tải: ${downStr} · ${reqStr} reqs`;
+        const estStr = today.formatted || formatBytes(today.totalBytes || 0);
+        elTodaySub.textContent = data.proxy711?.ok
+          ? `711 thực trừ · App đo ước tính: ${estStr} (↑${upStr} · ↓${downStr} · ${reqStr} reqs)`
+          : `Ước tính app đo (chưa kết nối 711) · ↑ ${upStr} · ↓ ${downStr} · ${reqStr} reqs`;
       }
 
       // Active Slots Card
@@ -8385,7 +8486,7 @@
       const dailyTbody = document.getElementById('bwTableDailyBody');
       if (dailyTbody) {
         if (dailyList.length === 0) {
-          dailyTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:25px;color:#94a3b8;">Chưa có dữ liệu lịch sử các ngày.</td></tr>';
+          dailyTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:25px;color:#94a3b8;">Chưa có dữ liệu lịch sử các ngày.</td></tr>';
         } else {
           const maxDayBytes = Math.max(...dailyList.map(d => d.totalBytes || 0), 1);
           const allBytes = allTime.totalBytes || 1;
@@ -8406,6 +8507,7 @@
                 <td style="text-align:right;font-size:11px;color:#94a3b8;">${upStr}</td>
                 <td style="text-align:right;font-size:11px;color:#94a3b8;">${downStr}</td>
                 <td style="text-align:right;font-weight:800;font-size:12px;color:#34d399;">${totalStr}</td>
+                <td style="text-align:right;font-weight:800;font-size:12px;color:#fb923c;">${d.proxy711Bytes ? (d.proxy711Formatted || formatBytes(d.proxy711Bytes)) : '--'}</td>
                 <td style="text-align:center;font-size:11px;font-weight:600;color:#cbd5e1;">${reqCount}</td>
                 <td>
                   <div style="display:flex;align-items:center;gap:8px;">
@@ -8625,14 +8727,15 @@
               <th style="width:130px;">Ngày</th>
               <th style="width:110px;text-align:right;">Upload (↑ Gửi)</th>
               <th style="width:110px;text-align:right;">Download (↓ Tải)</th>
-              <th style="width:120px;text-align:right;color:#34d399;font-weight:700;">Tổng băng thông</th>
+              <th style="width:120px;text-align:right;color:#34d399;font-weight:700;">Tổng (app đo, ước tính)</th>
+              <th style="width:120px;text-align:right;color:#fb923c;font-weight:700;">711 thực trừ</th>
               <th style="width:90px;text-align:center;">Số Requests</th>
               <th style="width:180px;">Tỷ trọng / Biểu đồ</th>
             </tr>
           </thead>
           <tbody id="bwTableDailyBody">
             <tr>
-              <td colspan="6" style="text-align:center;padding:25px;color:#94a3b8;">Chưa có dữ liệu lịch sử các ngày.
+              <td colspan="7" style="text-align:center;padding:25px;color:#94a3b8;">Chưa có dữ liệu lịch sử các ngày.
               </td>
             </tr>
           </tbody>
@@ -8654,7 +8757,8 @@
               <option value="7days">7 ngày qua</option>
             </select>
             <button type="button" class="win-btn win-btn-sm" onclick="load711ConsumptionData(true)"
-              style="font-size:11px;">🔄 Tải lại số liệu web</button>
+              style="font-size:11px;"
+              title="Ghi nhận từ số dư 711 (poll 30 giây/lần khi app mở) — không cần đăng nhập web 711">🔄 Tải lại</button>
             <span id="lbl711ChartLoading" style="font-size:11px;color:#38bdf8;display:none;">Đang tải từ server
               711proxy...</span>
           </div>
