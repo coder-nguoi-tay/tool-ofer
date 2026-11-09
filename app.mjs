@@ -232,10 +232,14 @@ const desktopWebglParams = { 3379: 16384, 34024: 16384, 3386: [32767, 32767] }; 
 export const DEVICE_PROFILES = {
   windows: {
     label: 'Windows Desktop',
-    ua: (v) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`,
+    ua: (v) => {
+      const ver = String(v || '130.0.0.0');
+      const safeVer = ver.includes('.') ? ver : `${ver}.0.0.0`;
+      return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${safeVer} Safari/537.36`;
+    },
     viewport: null, isMobile: false, hasTouch: false, deviceScaleFactor: 1,
     screen: { width: 1920, height: 1080, availHeight: 1032, frameHeight: 87 },
-    uaData: { platform: 'Windows', platformVersion: '15.0.0', architecture: 'x86', bitness: '64', model: '' },
+    uaData: { platform: 'Windows', platformVersion: '10.0.0', architecture: 'x86', bitness: '64', model: '' },
     spoof: {
       platform: 'Win32', maxTouchPoints: 0, mobile: false, uaPlatform: 'Windows', dpr: 1, vendor: 'Google Inc.',
       hardwareConcurrency: 8, deviceMemory: 8,
@@ -4076,6 +4080,12 @@ async function launchRequestedBrowsers(requestBody, { layoutTarget = null, assig
       scriptPath, captchaApiKey, completeText, timeLimit, delayStart, delayStop, limitRun: newLimitRun,
       antiFpCanvas: antiFingerprint.canvas, antiFpClientRects: antiFingerprint.clientRects,
       antiFpWebgl: antiFingerprint.webgl, antiFpWebrtc: antiFingerprint.webrtc,
+      Windows: Boolean(body.Windows),
+      Mac: Boolean(body.Mac),
+      Linux: Boolean(body.Linux),
+      Android: Boolean(body.Android),
+      iPhone: Boolean(body.iPhone),
+      iPad: Boolean(body.iPad),
       useCloakBrowser,
       dataSaver: Boolean(body.dataSaver !== false),
     };
@@ -4480,8 +4490,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
     await ipCheckPage?.close().catch(() => {});
   }
 
-  const osDisplay = ({ windows: 'Windows 11', macos: 'macOS 14', linux: 'Linux', android: 'Android 13', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Windows 11';
-  const osShort = ({ windows: 'Win 11', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Win 11';
+  const osDisplay = ({ windows: 'Windows 10', macos: 'macOS 14', linux: 'Linux', android: 'Android 13', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Windows 10';
+  const osShort = ({ windows: 'Win 10', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Win 10';
   const chromeVer = browserVersion ? `Chrome ${browserVersion}` : `Chrome ${cdpBrowser.version().replace(/^Chrome\//i, '')}`;
 
   const session = {
@@ -4609,7 +4619,8 @@ async function openAdsPowerBrowser({ tileIndex, slot, profileId, proxy, verified
   // Gắn thêm lớp stealthInitScript để đảm bảo loại bỏ hoàn toàn dấu vết automation và thêm lớp nhiễu phụ trợ
   try {
     const dp = DEVICE_PROFILES[deviceProfile] || DEVICE_PROFILES.windows;
-    const stealthConfig = buildStealthConfig(dp, antiFingerprint, assignedSlot);
+    const effectiveUa = dp.ua(String(browserVersion || '130'));
+    const stealthConfig = buildStealthConfig(dp, antiFingerprint, assignedSlot, effectiveUa);
     await context.addInitScript(stealthInitScript, stealthConfig);
 
     // Đồng bộ UA, Client Hints (Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version) tận gốc qua CDP cho AdsPower
@@ -5420,6 +5431,12 @@ async function launchUserRequestedBrowsers(requestBody) {
     antiFpClientRects: Boolean(body.antiFpClientRects),
     antiFpWebgl: Boolean(body.antiFpWebgl),
     antiFpWebrtc: Boolean(body.antiFpWebrtc),
+    Windows: Boolean(body.Windows),
+    Mac: Boolean(body.Mac),
+    Linux: Boolean(body.Linux),
+    Android: Boolean(body.Android),
+    iPhone: Boolean(body.iPhone),
+    iPad: Boolean(body.iPad),
     hideUntilTarget: Boolean(body.hideUntilTarget ?? body.hideBrowser),
     hideBrowser: Boolean(body.hideUntilTarget ?? body.hideBrowser),
     hideUntilLead: Boolean(body.hideUntilLead),
@@ -6422,8 +6439,8 @@ async function startLeadVerification(session, leadConfig) {
 
   const updateBadge = (text) => { session.updateBadge?.(text); };
 
-  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 20);
-  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 1);
+  const intervalSeconds = Math.max(1, Number(leadConfig.intervalSeconds) || DEFAULT_LEAD_CONFIG.intervalSeconds || 30);
+  const maxAttempts = Math.max(1, Number(leadConfig.maxAttempts) || DEFAULT_LEAD_CONFIG.maxAttempts || 2);
 
   const attemptText = maxAttempts > 1 ? `${maxAttempts} lần x ${intervalSeconds}s` : `1 lần ${intervalSeconds}s`;
   session.leadCheckMessage = `Đã nộp ${targetDesc}; bắt đầu chờ kiểm tra lead (${attemptText})...`;
@@ -6462,52 +6479,52 @@ async function startLeadVerification(session, leadConfig) {
   let lastApiErrorMessage = '';
   let latestLeadData = null;
 
-  // Tổng thời gian chờ giữ nguyên (intervalSeconds × maxAttempts) nhưng gọi API mỗi LEAD_POLL_SECONDS:
-  // lead về giữa chừng là làm tiếp ngay (trả lời câu hỏi / điền form), không phải đợi hết lượt 30s.
-  const totalWaitSeconds = intervalSeconds * maxAttempts;
-  const pollEverySeconds = Math.min(intervalSeconds, LEAD_POLL_SECONDS);
-  const totalPolls = Math.ceil(totalWaitSeconds / pollEverySeconds);
-  let waitedSeconds = 0;
-  while (waitedSeconds < totalWaitSeconds) {
-    attempt += 1;
-    const step = Math.min(pollEverySeconds, totalWaitSeconds - waitedSeconds);
-    for (let sec = step; sec > 0; sec--) {
+  // 2 lần x 30s: Mỗi lượt chờ 30s, gọi API kiểm tra lead (lead về giữa chừng ở các nhịp 10s là tiếp tục ngay)
+  const pollIntervalSec = 10;
+  for (attempt = 1; attempt <= maxAttempts && !leadFound; attempt++) {
+    console.log(`[LeadCheck] ${label}: Bắt đầu lượt kiểm tra lead ${attempt}/${maxAttempts} (${intervalSeconds}s)...`);
+    let attemptSecondsLeft = intervalSeconds;
+
+    while (attemptSecondsLeft > 0) {
       if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
         return; // Phiên đã bị đóng bởi người dùng
       }
-      const remaining = totalWaitSeconds - waitedSeconds - (step - sec);
-      session.leadCheckMessage = `Đang chờ có lead (kiểm tra ${attempt}/${totalPolls}), còn ${remaining}s...`;
-      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead còn ${remaining}s...</span>`);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-    waitedSeconds += step;
 
-    if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) {
-      return; // Phiên đã bị đóng bởi người dùng
-    }
+      session.leadCheckMessage = `Đang chờ có lead (lượt ${attempt}/${maxAttempts}), còn ${attemptSecondsLeft}s...`;
+      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead ${attempt}/${maxAttempts} (còn ${attemptSecondsLeft}s)...</span>`);
 
-    try {
-      console.log(`[LeadCheck] ${label}: Gọi API kiểm tra lead lần ${attempt}/${totalPolls}...`);
-      session.leadCheckMessage = `Đang gọi API kiểm tra lead lần ${attempt}/${totalPolls} (IP: ${exitIp})...`;
-
-      const leadData = await fetchLeadDatas(leadConfig);
-      latestLeadData = leadData;
-      latestAttemptHadApiError = false;
-      const isPresent = isLeadPresent(leadData, targetIps);
-
-      if (isPresent) {
-        leadFound = true;
-        console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead cho IP ${exitIp} ở lần ${attempt}! Tiếp tục làm tiếp.`);
-        break;
-      } else {
-        console.log(`[LeadCheck] ${label}: ⚠️ Chưa thấy IP ${exitIp} trong dữ liệu lead (lần ${attempt}/${totalPolls}).`);
+      const sleepTime = Math.min(attemptSecondsLeft, pollIntervalSec);
+      for (let s = sleepTime; s > 0; s--) {
+        if (!activeBrowsers.has(session) || session.browser?.isClosed?.()) return;
+        const curRemaining = attemptSecondsLeft - (sleepTime - s);
+        session.leadCheckMessage = `Đang chờ có lead (lượt ${attempt}/${maxAttempts}), còn ${curRemaining}s...`;
+        updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead ${attempt}/${maxAttempts} (còn ${curRemaining}s)...</span>`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-    } catch (err) {
-      latestAttemptHadApiError = true;
-      lastApiErrorMessage = err.message.split('\n')[0];
-      console.error(`[LeadCheck] ${label}: ⚠️ Lỗi khi gọi API kiểm tra lead: ${lastApiErrorMessage}`);
-      session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}`;
-      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#dc2626;">⚠️ Lỗi API (${err.code || 'ERR'})</span>`);
+      attemptSecondsLeft -= sleepTime;
+
+      // Kiểm tra API ở nhịp 10s hoặc cuối lượt 30s
+      try {
+        console.log(`[LeadCheck] ${label}: Gọi API kiểm tra lead (lượt ${attempt}/${maxAttempts}, còn ${attemptSecondsLeft}s)...`);
+        const leadData = await fetchLeadDatas(leadConfig);
+        latestLeadData = leadData;
+        latestAttemptHadApiError = false;
+        const isPresent = isLeadPresent(leadData, targetIps);
+
+        if (isPresent) {
+          leadFound = true;
+          console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead cho IP ${exitIp} ở lượt ${attempt}/${maxAttempts}! Tiếp tục làm tiếp.`);
+          break;
+        } else {
+          console.log(`[LeadCheck] ${label}: ⚠️ Chưa thấy IP ${exitIp} trong dữ liệu lead (lượt ${attempt}/${maxAttempts}, còn ${attemptSecondsLeft}s).`);
+        }
+      } catch (err) {
+        latestAttemptHadApiError = true;
+        lastApiErrorMessage = err.message.split('\n')[0];
+        console.error(`[LeadCheck] ${label}: ⚠️ Lỗi khi gọi API kiểm tra lead: ${lastApiErrorMessage}`);
+        session.leadCheckMessage = `⚠️ Lỗi API toffers.top: ${lastApiErrorMessage}`;
+        updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#dc2626;">⚠️ Lỗi API (${err.code || 'ERR'})</span>`);
+      }
     }
   }
 
@@ -6704,6 +6721,8 @@ async function openBrowserWithInstalledChrome({
     // Android: Client Hints phải cùng model/bản Android với UA, nếu không trang thấy hai thiết bị khác nhau.
     const android = /Android (\d+)[^;)]*; ([^;)]+)\)/.exec(configuredUa(''));
     if (android && dp.uaData) dp.uaData = { ...dp.uaData, platformVersion: `${android[1]}.0.0`, model: android[2].trim() };
+    const win = /Windows NT (\d+\.\d+)/.exec(configuredUa(''));
+    if (win && dp.uaData) dp.uaData = { ...dp.uaData, platformVersion: `${win[1]}.0`, platform: 'Windows' };
   }
   // Engine CloakBrowser có version riêng (vd 145.x), khác Chrome đã cài (154/155).
   // UA và Client Hints phải theo đúng version engine, nếu không site thấy UA 154 nhưng engine là 145.
@@ -6729,7 +6748,7 @@ async function openBrowserWithInstalledChrome({
   const clientHintHeaders = {
     'Sec-CH-UA': secChUaHeader,
     'Sec-CH-UA-Platform': `"${dp.uaData?.platform || 'Windows'}"`,
-    'Sec-CH-UA-Platform-Version': `"${dp.uaData?.platformVersion || '15.0.0'}"`,
+    'Sec-CH-UA-Platform-Version': `"${dp.uaData?.platformVersion || '10.0.0'}"`,
     'Sec-CH-UA-Mobile': dp.isMobile ? '?1' : '?0',
     'Sec-CH-UA-Model': `"${dp.uaData?.model || ''}"`,
     'Sec-CH-UA-Arch': `"${dp.uaData?.architecture || 'x86'}"`,
@@ -6921,7 +6940,8 @@ async function openBrowserWithInstalledChrome({
   }
 
   // Giả lập thiết bị + chống fingerprint: một script duy nhất chạy trong mọi frame, hàm vá trông như native.
-  const stealthConfig = buildStealthConfig(dp, antiFingerprint, sessionSeed);
+  const effectiveUa = dp.ua(effectiveBuild.version);
+  const stealthConfig = buildStealthConfig(dp, antiFingerprint, sessionSeed, effectiveUa);
   await context.addInitScript(stealthInitScript, stealthConfig);
   // UA, Client Hints, navigator.platform, số nhân CPU, ngôn ngữ: đổi tận gốc qua CDP cho từng tab và iframe khác site.
   const nativeOverrides = {

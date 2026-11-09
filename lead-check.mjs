@@ -13,8 +13,8 @@ export const DEFAULT_LEAD_CONFIG = {
   pointUrl: 'https://toffers.top/partner/get_data_not/get_current_point',
   cookie: 'qcodes_=7p0d1pg081d433i45giksp7k5fvm386o; qcodes_sound=1',
   datas: '1504',
-  intervalSeconds: 20,
-  maxAttempts: 1,
+  intervalSeconds: 30,
+  maxAttempts: 2,
 };
 
 /**

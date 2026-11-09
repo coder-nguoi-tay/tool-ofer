@@ -624,46 +624,65 @@
   <!-- TAB 1: 📺 MÀN HÌNH LIVE (Screen View & Interaction)                         -->
   <!-- ═══════════════════════════════════════════════════════════════════════════ -->
   <div id="tab-screen" class="tab-content active">
-    <!-- Slot Selector Strip -->
-    <div id="slotBar" class="slot-bar">
-      <div class="pill-btn active">Đang tìm slot...</div>
+    <!-- View Mode Switcher: Lưới tất cả IP vs Màn hình trực tiếp 1 IP -->
+    <div style="display:flex; padding:6px 10px; background:#090d16; border-bottom:1px solid var(--card-border); gap:6px; flex-shrink:0;">
+      <button id="btnViewGrid" class="btn btn-primary" style="flex:1; padding:6px 4px; font-size:11.5px; font-weight:700;" onclick="switchScreenViewMode('grid')">📱 Lưới màn hình (Tất cả IP)</button>
+      <button id="btnViewSingle" class="btn" style="flex:1; padding:6px 4px; font-size:11.5px; font-weight:700; background:#1e293b; color:#94a3b8;" onclick="switchScreenViewMode('single')">📺 Điều khiển 1 IP (Live)</button>
     </div>
 
-    <!-- Browser Tabs Strip for Current Slot -->
-    <div id="browserTabsBar" class="browser-tabs-bar" style="display:none;"></div>
-
-    <!-- URL & IP Info Strip -->
-    <div class="info-strip">
-      <span id="urlDisplay" class="url-text">Đang kết nối...</span>
-      <span id="ipDisplay" style="color:#a78bfa; font-weight:600;">IP: ...</span>
-    </div>
-
-    <!-- Screen Canvas Viewport -->
-    <div id="viewport" class="viewport-area">
-      <canvas id="streamCanvas"></canvas>
-      <div id="canvasMsg" class="canvas-overlay-msg">
-        <span>🟢 Đang tải luồng màn hình...</span>
+    <!-- VIEW 1: LƯỚI TẤT CẢ IP (Hiển thị giao diện màn hình của từng IP) -->
+    <div id="screenGridView" class="scroll-page" style="display:flex;">
+      <div id="screenGridCards" style="display:flex; flex-direction:column; gap:10px;"></div>
+      <div id="screenGridEmpty" style="display:none; text-align:center; padding:50px 20px; color:#94a3b8;">
+        <div style="font-size:36px; margin-bottom:10px;">⏸️</div>
+        <div style="font-size:14px; font-weight:700; color:#f8fafc;">Chưa có luồng IP nào đang chạy</div>
+        <div style="font-size:11.5px; margin-top:6px; color:#94a3b8;">Chuyển sang tab <b>🚀 Vận hành</b> để bấm Bắt đầu chạy.</div>
       </div>
     </div>
 
-    <!-- Typing & Virtual Controls -->
-    <div class="screen-controls">
-      <div style="display:flex; gap:6px;">
-        <input id="textInput" class="input-text" type="text" placeholder="Nhập chữ để gõ vào Chrome..." autocomplete="off">
-        <button id="btnSendText" class="btn btn-primary" style="padding:6px 12px;">Gửi</button>
+    <!-- VIEW 2: MÀN HÌNH TRỰC TIẾP 1 IP (Tương tác, Chạm & Gõ) -->
+    <div id="screenSingleView" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
+      <!-- Slot Selector Strip -->
+      <div id="slotBar" class="slot-bar">
+        <div class="pill-btn active">Đang tìm slot...</div>
       </div>
 
-      <div class="key-quick-row">
-        <button class="key-btn" data-key="Enter">⏎ Enter</button>
-        <button class="key-btn" data-key="Tab">⇥ Tab</button>
-        <button class="key-btn" data-key="Backspace">⌫ Xóa</button>
-        <button class="key-btn" data-key="Space">␣ Cách</button>
-        <button class="key-btn" id="btnScrollDown" style="background:#0f172a; border-color:#38bdf8; color:#38bdf8;">📜 Cuộn</button>
-        <button class="key-btn" id="btnPasteText">📋 Dán</button>
-        <button class="key-btn" id="btnSelectAll">🔤 Chọn hết</button>
-        <button class="key-btn" id="btnBack">⬅ Back</button>
-        <button class="key-btn" id="btnReloadSlot">🔄 Reload</button>
-        <button class="key-btn" id="btnCloseSlot" style="background:#450a0a; color:#f87171;">🛑 Tắt</button>
+      <!-- Browser Tabs Strip for Current Slot -->
+      <div id="browserTabsBar" class="browser-tabs-bar" style="display:none;"></div>
+
+      <!-- URL & IP Info Strip -->
+      <div class="info-strip">
+        <span id="urlDisplay" class="url-text">Đang kết nối...</span>
+        <span id="ipDisplay" style="color:#a78bfa; font-weight:600;">IP: ...</span>
+      </div>
+
+      <!-- Screen Canvas Viewport -->
+      <div id="viewport" class="viewport-area">
+        <canvas id="streamCanvas"></canvas>
+        <div id="canvasMsg" class="canvas-overlay-msg">
+          <span>🟢 Đang tải luồng màn hình...</span>
+        </div>
+      </div>
+
+      <!-- Typing & Virtual Controls -->
+      <div class="screen-controls">
+        <div style="display:flex; gap:6px;">
+          <input id="textInput" class="input-text" type="text" placeholder="Nhập chữ để gõ vào Chrome..." autocomplete="off">
+          <button id="btnSendText" class="btn btn-primary" style="padding:6px 12px;">Gửi</button>
+        </div>
+
+        <div class="key-quick-row">
+          <button class="key-btn" data-key="Enter">⏎ Enter</button>
+          <button class="key-btn" data-key="Tab">⇥ Tab</button>
+          <button class="key-btn" data-key="Backspace">⌫ Xóa</button>
+          <button class="key-btn" data-key="Space">␣ Cách</button>
+          <button class="key-btn" id="btnScrollDown" style="background:#0f172a; border-color:#38bdf8; color:#38bdf8;">📜 Cuộn</button>
+          <button class="key-btn" id="btnPasteText">📋 Dán</button>
+          <button class="key-btn" id="btnSelectAll">🔤 Chọn hết</button>
+          <button class="key-btn" id="btnBack">⬅ Back</button>
+          <button class="key-btn" id="btnReloadSlot">🔄 Reload</button>
+          <button class="key-btn" id="btnCloseSlot" style="background:#450a0a; color:#f87171;">🛑 Tắt</button>
+        </div>
       </div>
     </div>
   </div>
@@ -875,7 +894,7 @@
 
           <label class="option-pill">
             <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
-            <span><span class="option-pill-icon">⏱️</span> Check Lead (20s)</span>
+            <span><span class="option-pill-icon">⏱️</span> Check Lead (2×30s)</span>
           </label>
 
           <label class="option-pill active">
@@ -1137,6 +1156,7 @@
 
     // Biến trạng thái toàn cục
     let currentSlot = 1;
+    let screenViewMode = 'grid'; // 'grid' (Lưới tất cả IP) hoặc 'single' (Điều khiển 1 IP)
     let eventSource = null;
     let canvasNaturalWidth = 1280;
     let canvasNaturalHeight = 800;
@@ -1147,6 +1167,16 @@
     let pendingFrame = null;
     let currentBrowserMode = 'AdsPower'; // 'AdsPower' hoặc 'Chrome'
     let currentSlotTabs = [];
+
+    // Đọc URL query param nếu có slot cụ thể (VD: /screen-mini?slot=2)
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const initialSlot = parseInt(urlParams.get('slot'), 10);
+      if (initialSlot) {
+        currentSlot = initialSlot;
+        screenViewMode = 'single';
+      }
+    } catch {}
 
     // DOM Elements
     const canvas = document.getElementById('streamCanvas');
@@ -1163,6 +1193,57 @@
     const selectModal = document.getElementById('selectModal');
     const selectModalOptions = document.getElementById('selectModalOptions');
 
+    // Chuyển đổi giữa chế độ Lưới tất cả IP và Màn hình trực tiếp 1 IP
+    window.switchScreenViewMode = (mode) => {
+      screenViewMode = mode;
+      const btnGrid = document.getElementById('btnViewGrid');
+      const btnSingle = document.getElementById('btnViewSingle');
+      const viewGrid = document.getElementById('screenGridView');
+      const viewSingle = document.getElementById('screenSingleView');
+
+      if (mode === 'grid') {
+        if (btnGrid) {
+          btnGrid.classList.add('btn-primary');
+          btnGrid.style.background = '';
+          btnGrid.style.color = '';
+        }
+        if (btnSingle) {
+          btnSingle.classList.remove('btn-primary');
+          btnSingle.style.background = '#1e293b';
+          btnSingle.style.color = '#94a3b8';
+        }
+
+        if (viewGrid) viewGrid.style.display = 'flex';
+        if (viewSingle) viewSingle.style.display = 'none';
+
+        if (eventSource) {
+          try { eventSource.close(); } catch {}
+          eventSource = null;
+        }
+        renderScreenGridCards();
+      } else {
+        if (btnSingle) {
+          btnSingle.classList.add('btn-primary');
+          btnSingle.style.background = '';
+          btnSingle.style.color = '';
+        }
+        if (btnGrid) {
+          btnGrid.classList.remove('btn-primary');
+          btnGrid.style.background = '#1e293b';
+          btnGrid.style.color = '#94a3b8';
+        }
+
+        if (viewGrid) viewGrid.style.display = 'none';
+        if (viewSingle) viewSingle.style.display = 'flex';
+
+        if (activeSessions.length > 0) {
+          const slotToStream = currentSlot || activeSessions[0].slot;
+          startStream(slotToStream);
+        }
+      }
+      try { tg?.HapticFeedback?.selectionChanged(); } catch (e) {}
+    };
+
     // Chuyển đổi tab Bottom Navigation
     document.querySelectorAll('.nav-item').forEach((item) => {
       item.addEventListener('click', () => {
@@ -1174,7 +1255,11 @@
         try { tg?.HapticFeedback?.selectionChanged(); } catch (e) {}
 
         if (tabId === 'tab-screen') {
-          if (!eventSource && activeSessions.length > 0) startStream(currentSlot);
+          if (screenViewMode === 'grid') {
+            renderScreenGridCards();
+          } else if (!eventSource && activeSessions.length > 0) {
+            startStream(currentSlot || activeSessions[0].slot);
+          }
         } else if (tabId === 'tab-resources') {
           pollResources();
         } else if (tabId === 'tab-stats') {
@@ -1195,39 +1280,130 @@
       setTimeout(() => el.remove(), 2600);
     }
 
+    // ─── TAB 1: RENDER LƯỚI MÀN HÌNH TẤT CẢ IP ──────────────────────────────────
+    function renderScreenGridCards() {
+      const container = document.getElementById('screenGridCards');
+      const emptyEl = document.getElementById('screenGridEmpty');
+      if (!container) return;
+
+      if (!activeSessions.length) {
+        container.innerHTML = '';
+        if (emptyEl) emptyEl.style.display = 'block';
+        return;
+      }
+
+      if (emptyEl) emptyEl.style.display = 'none';
+
+      container.innerHTML = activeSessions.map((s) => {
+        let statusBadge = '';
+        if (s.leadCheckStatus === 'confirmed') {
+          statusBadge = '<span style="background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#22c55e; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;">✅ Có lead</span>';
+        } else if (s.leadCheckStatus === 'checking') {
+          statusBadge = '<span style="background:rgba(245,158,11,0.2); border:1px solid #f59e0b; color:#f59e0b; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;">⏳ Đang check lead</span>';
+        } else if (s.completedScreens > 0) {
+          statusBadge = `<span style="background:rgba(56,189,248,0.2); border:1px solid #38bdf8; color:#38bdf8; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;">📄 Màn ${s.completedScreens + 1}/4</span>`;
+        } else {
+          statusBadge = `<span style="background:#1e293b; color:#94a3b8; font-size:10px; padding:2px 6px; border-radius:4px;">Offer ${s.offerNumber || 1}</span>`;
+        }
+
+        return `
+          <div class="card" style="padding:10px; margin-bottom:0; display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="badge" style="background:#0284c7; color:#ffffff; font-weight:700;">Slot ${s.slot}</span>
+                <span style="font-size:12px; font-weight:700; color:#38bdf8;">🌐 ${s.exitIp || 'Local'}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                ${statusBadge}
+                <button class="btn btn-danger" style="padding:2px 6px; font-size:10px; font-weight:700;" onclick="closeSlotDirect(${s.slot})">✕</button>
+              </div>
+            </div>
+
+            <!-- Khung hình màn hình thực tế của IP -->
+            <div style="position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:6px; overflow:hidden; border:1px solid #22324e; cursor:pointer;" onclick="switchAndStream(${s.slot})">
+              <img class="ip-screen-thumb" data-slot="${s.slot}" src="/screen/snapshot/${s.slot}?t=${Date.now()}" style="width:100%; height:100%; object-fit:contain; display:block;" onerror="this.style.opacity='0.3'">
+              <div style="position:absolute; top:6px; right:6px; background:rgba(15,23,42,0.85); border:1px solid #334155; color:#22c55e; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; display:inline-flex; align-items:center; gap:4px;">
+                <span style="width:6px; height:6px; border-radius:50%; background:#22c55e;"></span> LIVE
+              </div>
+              <div style="position:absolute; bottom:6px; left:6px; right:6px; display:flex; justify-content:space-between; align-items:center; pointer-events:none;">
+                <span style="background:rgba(15,23,42,0.85); color:#cbd5e1; font-size:10px; padding:2px 6px; border-radius:4px; max-width:70%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                  ${s.websiteUrl || 'Đang mở trang...'}
+                </span>
+                <span style="background:rgba(6,78,59,0.85); color:#6ee7b7; font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px;">
+                  📶 ${s.bandwidthFormatted || '0 B'}
+                </span>
+              </div>
+            </div>
+
+            <!-- Nút bấm tương tác chi tiết -->
+            <button class="btn btn-primary" style="width:100%; padding:7px; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="switchAndStream(${s.slot})">
+              <span>📺 Mở Màn Hình Điều Khiển Slot ${s.slot} (Chạm &amp; Gõ)</span>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
     // ─── TAB 1: STREAM & SCREEN CONTROL ─────────────────────────────────────────
     function startStream(slot) {
       currentSlot = slot;
       if (eventSource) {
-        eventSource.close();
+        try { eventSource.close(); } catch {}
         eventSource = null;
       }
+
+      // Pre-load snapshot ngay lập tức để canvas có hình 0ms
+      const preImg = new Image();
+      preImg.onload = () => {
+        if (!isRendering) {
+          if (canvas.width !== preImg.width || canvas.height !== preImg.height) {
+            canvas.width = preImg.width;
+            canvas.height = preImg.height;
+            canvasNaturalWidth = preImg.width;
+            canvasNaturalHeight = preImg.height;
+          }
+          ctx.drawImage(preImg, 0, 0);
+          canvasMsg.style.display = 'none';
+        }
+      };
+      preImg.src = `/screen/snapshot/${slot}?t=${Date.now()}`;
 
       canvasMsg.style.display = 'flex';
       canvasMsg.innerHTML = `<span>🟢 Đang kết nối Slot ${slot}...</span>`;
       urlDisplay.textContent = 'Đang tải stream...';
 
+      const cur = activeSessions.find(s => s.slot === slot);
+      if (cur) {
+        urlDisplay.textContent = cur.websiteUrl || cur.tabs?.[0]?.url || 'Đang mở trang...';
+        ipDisplay.textContent = `IP: ${cur.exitIp || 'Local'}`;
+      }
+
       const streamUrl = `/screen/stream/${slot}?t=${Date.now()}`;
       eventSource = new EventSource(streamUrl);
 
       eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.frame) {
-            canvasMsg.style.display = 'none';
-            pendingFrame = data.frame;
-            if (!isRendering) requestAnimationFrame(renderNextFrame);
-          }
-          if (data.metadata) {
-            if (data.metadata.deviceWidth) canvasNaturalWidth = data.metadata.deviceWidth;
-            if (data.metadata.deviceHeight) canvasNaturalHeight = data.metadata.deviceHeight;
-          }
-        } catch (err) {}
+        if (!event.data || event.data === 'error') return;
+        let frameData = event.data;
+        if (frameData.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(frameData);
+            if (parsed.frame) frameData = parsed.frame;
+            if (parsed.metadata) {
+              if (parsed.metadata.deviceWidth) canvasNaturalWidth = parsed.metadata.deviceWidth;
+              if (parsed.metadata.deviceHeight) canvasNaturalHeight = parsed.metadata.deviceHeight;
+            }
+          } catch {}
+        }
+        canvasMsg.style.display = 'none';
+        pendingFrame = frameData;
+        if (!isRendering) requestAnimationFrame(renderNextFrame);
       };
 
       eventSource.onerror = () => {
-        canvasMsg.style.display = 'flex';
-        canvasMsg.innerHTML = `<span>⚠️ Mất kết nối Slot ${slot}. Đang thử lại...</span>`;
+        if (canvas.width <= 300) {
+          canvasMsg.style.display = 'flex';
+          canvasMsg.innerHTML = `<span>⚠️ Mất kết nối Slot ${slot}. Đang thử lại...</span>`;
+        }
       };
 
       const btnClose = document.getElementById('btnCloseSlot');
@@ -1243,9 +1419,10 @@
       isRendering = true;
       const raw = pendingFrame;
       pendingFrame = null;
+      const cleanData = raw.replace(/[\r\n]/g, '');
 
       try {
-        const resp = await fetch(`data:image/jpeg;base64,${raw.replace(/[\r\n]/g, '')}`);
+        const resp = await fetch(`data:image/jpeg;base64,${cleanData}`);
         const blob = await resp.blob();
         const bmp = await createImageBitmap(blob);
         if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
@@ -1258,18 +1435,20 @@
         bmp.close();
         fpsCount++;
       } catch (err) {
-        const img = new Image();
-        img.onload = () => {
-          if (canvas.width !== img.width || canvas.height !== img.height) {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            canvasNaturalWidth = img.width;
-            canvasNaturalHeight = img.height;
-          }
-          ctx.drawImage(img, 0, 0);
-          fpsCount++;
-        };
-        img.src = `data:image/jpeg;base64,${raw.replace(/[\r\n]/g, '')}`;
+        try {
+          const img = new Image();
+          img.onload = () => {
+            if (canvas.width !== img.width || canvas.height !== img.height) {
+              canvas.width = img.width;
+              canvas.height = img.height;
+              canvasNaturalWidth = img.width;
+              canvasNaturalHeight = img.height;
+            }
+            ctx.drawImage(img, 0, 0);
+            fpsCount++;
+          };
+          img.src = `data:image/jpeg;base64,${cleanData}`;
+        } catch {}
       } finally {
         isRendering = false;
         if (pendingFrame) requestAnimationFrame(renderNextFrame);
@@ -1359,6 +1538,27 @@
         }
       }
     }, { passive: true });
+
+    // Hỗ trợ chuột click cho người dùng mở Telegram Desktop / Web trên máy tính
+    viewport.addEventListener('click', async (e) => {
+      if (Date.now() - touchStartTime < 500) return;
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const scaleX = canvasNaturalWidth / rect.width;
+      const scaleY = canvasNaturalHeight / rect.height;
+      const x = Math.round((e.clientX - rect.left) * scaleX);
+      const y = Math.round((e.clientY - rect.top) * scaleY);
+
+      showTouchRipple(e.clientX, e.clientY);
+      const res = await sendInput({ type: 'mousedown', x, y, button: 'left', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+      if (res?.select && Array.isArray(res.select.options)) {
+        openSelectPicker(res.select.options, res.select.selectedIndex);
+      } else {
+        setTimeout(() => {
+          sendInput({ type: 'mouseup', x, y, button: 'left', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+        }, 30);
+      }
+    });
 
     // Select Dropdown Sheet Modal
     function openSelectPicker(options, selectedIndex) {
@@ -1815,8 +2015,8 @@
             hideUntilLead,
             enableLeadCheck,
             autoCloseNoLead: enableLeadCheck,
-            leadCheckInterval: 20,
-            leadCheckMaxAttempts: 1,
+            leadCheckInterval: 30,
+            leadCheckMaxAttempts: 2,
             leadCheckScreen: 4,
             aiAssist,
             saveRRS,
@@ -2072,6 +2272,9 @@
         // Slot pills
         renderSlotPills();
 
+        // Lưới màn hình tất cả IP
+        renderScreenGridCards();
+
         // Active slots breakdown
         renderActiveSlotsList();
 
@@ -2081,7 +2284,10 @@
           urlDisplay.textContent = cur.websiteUrl || cur.tabs?.[0]?.url || 'Đang mở trang...';
           ipDisplay.textContent = `IP: ${cur.exitIp || 'Local'}`;
         } else if (activeSessions.length > 0) {
-          startStream(activeSessions[0].slot);
+          currentSlot = activeSessions[0].slot;
+          if (screenViewMode === 'single' && !eventSource) {
+            startStream(currentSlot);
+          }
         } else {
           urlDisplay.textContent = 'Không có slot nào đang chạy';
           ipDisplay.textContent = 'IP: --';
@@ -2103,13 +2309,18 @@
         slotBar.innerHTML = '<div class="pill-btn active">Chưa có slot</div>';
         return;
       }
-      slotBar.innerHTML = activeSessions.map((s) => `
-        <div class="pill-btn ${s.slot === currentSlot ? 'active' : ''}" data-slot="${s.slot}">
-          <span class="status-dot"></span> S${s.slot} (${s.exitIp || 'Local'})
+      slotBar.innerHTML = `
+        <div class="pill-btn" onclick="switchScreenViewMode('grid')" style="background:#1e293b; color:#38bdf8; border-color:#38bdf8; font-weight:700;">
+          📱 Xem Lưới
         </div>
-      `).join('');
+        ${activeSessions.map((s) => `
+          <div class="pill-btn ${s.slot === currentSlot ? 'active' : ''}" data-slot="${s.slot}">
+            <span class="status-dot"></span> S${s.slot} (${s.exitIp || 'Local'})
+          </div>
+        `).join('')}
+      `;
 
-      slotBar.querySelectorAll('.pill-btn').forEach((p) => {
+      slotBar.querySelectorAll('.pill-btn[data-slot]').forEach((p) => {
         p.addEventListener('click', () => {
           const slot = parseInt(p.dataset.slot, 10);
           if (slot && slot !== currentSlot) {
@@ -2128,15 +2339,24 @@
         return;
       }
       container.innerHTML = activeSessions.map((s) => `
-        <div style="background:#1e293b; border:1px solid #334155; padding:8px 10px; border-radius:6px; display:flex; align-items:center; justify-content:space-between;">
-          <div style="max-width:70%;">
-            <div style="font-size:12px; font-weight:700; color:#38bdf8;">Slot ${s.slot} [${s.exitIp || 'Local'}]</div>
-            <div style="font-size:11px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.websiteUrl || 'N/A'}</div>
-            <div style="font-size:10px; color:#64748b;">Trang ${s.currentScreen || 1} • Băng thông: ${s.bandwidthFormatted || '0 B'}</div>
+        <div style="background:#1e293b; border:1px solid #334155; padding:8px 10px; border-radius:6px; display:flex; flex-direction:column; gap:6px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <div style="font-size:12px; font-weight:700; color:#38bdf8;">Slot ${s.slot} • <span style="color:#f8fafc;">🌐 ${s.exitIp || 'Local'}</span></div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-primary" style="padding:3px 8px; font-size:11px;" onclick="switchAndStream(${s.slot})">📺 Xem</button>
+              <button class="btn btn-danger" style="padding:3px 8px; font-size:11px;" onclick="closeSlotDirect(${s.slot})">🛑</button>
+            </div>
           </div>
-          <div style="display:flex; gap:6px;">
-            <button class="btn btn-primary" style="padding:4px 8px; font-size:11px;" onclick="switchAndStream(${s.slot})">📺 Xem</button>
-            <button class="btn btn-danger" style="padding:4px 8px; font-size:11px;" onclick="closeSlotDirect(${s.slot})">🛑</button>
+          <!-- Ảnh màn hình thực tế của IP -->
+          <div style="position:relative; width:100%; height:120px; background:#000; border-radius:4px; overflow:hidden; border:1px solid #22324e; cursor:pointer;" onclick="switchAndStream(${s.slot})">
+            <img class="ip-screen-thumb" data-slot="${s.slot}" src="/screen/snapshot/${s.slot}?t=${Date.now()}" style="width:100%; height:100%; object-fit:contain; display:block;" onerror="this.style.opacity='0.3'">
+            <div style="position:absolute; top:4px; right:4px; background:rgba(15,23,42,0.85); color:#22c55e; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px; display:inline-flex; align-items:center; gap:3px;">
+              <span style="width:5px; height:5px; border-radius:50%; background:#22c55e;"></span> LIVE
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#94a3b8;">
+            <span style="max-width:70%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.websiteUrl || 'N/A'}</span>
+            <span style="color:#6ee7b7; font-weight:600;">Trang ${s.currentScreen || 1} • 📶 ${s.bandwidthFormatted || '0 B'}</span>
           </div>
         </div>
       `).join('');
@@ -2147,6 +2367,7 @@
       document.querySelectorAll('.tab-content').forEach((t) => t.classList.remove('active'));
       document.querySelector('.nav-item[data-tab="tab-screen"]').classList.add('active');
       document.getElementById('tab-screen').classList.add('active');
+      switchScreenViewMode('single');
       startStream(slot);
     };
 
@@ -2246,6 +2467,21 @@
     setInterval(pollState, 3000);
     setInterval(pollResources, 15000);
     setInterval(pollToffersOverview, 20000);
+
+    // Auto refresh snapshot thumbnails in grid mode and active list every 2 seconds
+    setInterval(() => {
+      const thumbs = document.querySelectorAll('.ip-screen-thumb[data-slot]');
+      if (!thumbs.length) return;
+      thumbs.forEach((img) => {
+        if (img._uxLoading) return;
+        img._uxLoading = true;
+        const slot = img.dataset.slot;
+        const next = new Image();
+        next.onload = () => { img.src = next.src; img.style.opacity = '1'; img._uxLoading = false; };
+        next.onerror = () => { img._uxLoading = false; };
+        next.src = `/screen/snapshot/${slot}?t=${Date.now()}`;
+      });
+    }, 2000);
   </script>
 </body>
 </html>

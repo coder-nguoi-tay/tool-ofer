@@ -966,8 +966,8 @@ assert.equal(normalizeIpAddress('99.145.85.141'), '99.145.85.141');
 assert.equal(normalizeIpAddress(' 99.145.85.141:8080 '), '99.145.85.141');
 assert.equal(normalizeIpAddress('socks5://1.2.3.4:1080'), '1.2.3.4');
 assert.equal(normalizeIpAddress('http://5.6.7.8:8080'), '5.6.7.8');
-assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 20);
-assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 1);
+assert.equal(DEFAULT_LEAD_CONFIG.intervalSeconds, 30);
+assert.equal(DEFAULT_LEAD_CONFIG.maxAttempts, 2);
 assert.equal(DEFAULT_LEAD_CONFIG.checkScreen, 4);
 
 const sampleApiResponse = {

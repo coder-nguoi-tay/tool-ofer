@@ -109,9 +109,15 @@ export function buildUserAgentOverride(deviceProfile, build, languages) {
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-19
  */
-export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1) {
+export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1, userAgent = '') {
   const spoof = deviceProfile.spoof || {};
+  const ua = userAgent || (typeof deviceProfile.ua === 'function' ? deviceProfile.ua('130.0.0.0') : '');
+  const uaData = deviceProfile.uaData ? { ...deviceProfile.uaData } : null;
+  if (uaData && !uaData.uaFullVersion && uaData.fullVersion) {
+    uaData.uaFullVersion = uaData.fullVersion;
+  }
   return {
+    userAgent: ua,
     platform: spoof.platform || deviceProfile.platform,
     vendor: spoof.vendor,
     maxTouchPoints: spoof.maxTouchPoints,
@@ -119,7 +125,7 @@ export function buildStealthConfig(deviceProfile, antiFingerprint = {}, seed = 1
     deviceMemory: spoof.deviceMemory ?? null,
     webkitOnly: spoof.uaPlatform === 'iOS',
     isMobile: Boolean(deviceProfile.isMobile),
-    uaData: deviceProfile.uaData ? { ...deviceProfile.uaData } : null,
+    uaData,
     webglVendor: spoof.webglVendor,
     webglRenderer: spoof.webglRenderer,
     webglParams: spoof.webglParams ?? null,
@@ -178,8 +184,16 @@ export function stealthInitScript(cfg) {
 
   // Gọi getter gốc trước để giữ nguyên lỗi "Illegal invocation" khi gọi trên prototype.
   const replaceGetter = (proto, name, getValue) => {
-    const desc = proto && Object.getOwnPropertyDescriptor(proto, name);
-    if (!desc || typeof desc.get !== 'function') return;
+    if (!proto) return;
+    const desc = Object.getOwnPropertyDescriptor(proto, name);
+    if (!desc || typeof desc.get !== 'function') {
+      try {
+        const getter = { [name]() { return getValue.call(this); } }[name];
+        nativeSource.set(getter, `function get ${name}() { [native code] }`);
+        Object.defineProperty(proto, name, { get: getter, configurable: true, enumerable: true });
+      } catch {}
+      return;
+    }
     const originalGet = desc.get;
     const getter = Object.getOwnPropertyDescriptor({
       get [name]() {
@@ -236,6 +250,10 @@ export function stealthInitScript(cfg) {
     // Chỉ vá webdriver khi automation bị lộ (true); Chrome thật trả false. Tránh tạo khác biệt không cần thiết.
     if ('webdriver' in nav && nav.webdriver) replaceGetter(navProto, 'webdriver', () => false);
     if (cfg.platform && nav.platform !== cfg.platform) replaceGetter(navProto, 'platform', () => cfg.platform);
+    if (cfg.userAgent && nav.userAgent !== cfg.userAgent) {
+      replaceGetter(navProto, 'userAgent', () => cfg.userAgent);
+      replaceGetter(navProto, 'appVersion', () => cfg.userAgent.replace(/^Mozilla\//, ''));
+    }
     if (cfg.vendor && 'vendor' in nav && nav.vendor !== cfg.vendor) replaceGetter(navProto, 'vendor', () => cfg.vendor);
     if (typeof cfg.maxTouchPoints === 'number' && 'maxTouchPoints' in nav && nav.maxTouchPoints !== cfg.maxTouchPoints) {
       replaceGetter(navProto, 'maxTouchPoints', () => cfg.maxTouchPoints);
@@ -366,26 +384,43 @@ export function stealthInitScript(cfg) {
         { deviceId: genId(3, 89), kind: 'videoinput', label: '', groupId: genId(4, 97) },
       ];
       const Proto = G.MediaDeviceInfo && G.MediaDeviceInfo.prototype;
-      return mockList.map((d) => (Proto ? Object.assign(Object.create(Proto), d, { toJSON() { return d; } }) : d));
+      return mockList.map((d) => {
+        if (!Proto) return d;
+        const obj = Object.create(Proto);
+        for (const [key, val] of Object.entries(d)) {
+          Object.defineProperty(obj, key, { value: val, writable: false, enumerable: true, configurable: true });
+        }
+        Object.defineProperty(obj, 'toJSON', { value: () => d, writable: false, enumerable: false, configurable: true });
+        return obj;
+      });
     });
   }
 
   // ── SpeechSynthesis: Giả lập danh sách voices Windows/Chrome khi profile là Windows (tránh rò rỉ giọng Apple trên Mac) ──
   const isWindowsProfile = cfg.platform === 'Win32' || cfg.uaData?.platform === 'Windows';
   if (isWindowsProfile && typeof G.SpeechSynthesis === 'function' && typeof G.SpeechSynthesis.prototype?.getVoices === 'function') {
-    const windowsVoices = [
-      { name: 'Microsoft David - English (United States)', lang: 'en-US', default: true, localService: true, voiceURI: 'Microsoft David - English (United States)' },
-      { name: 'Microsoft Mark - English (United States)', lang: 'en-US', default: false, localService: true, voiceURI: 'Microsoft Mark - English (United States)' },
-      { name: 'Microsoft Zira - English (United States)', lang: 'en-US', default: false, localService: true, voiceURI: 'Microsoft Zira - English (United States)' },
-      { name: 'Google US English', lang: 'en-US', default: false, localService: false, voiceURI: 'Google US English' },
-      { name: 'Google UK English Female', lang: 'en-GB', default: false, localService: false, voiceURI: 'Google UK English Female' },
-      { name: 'Google UK English Male', lang: 'en-GB', default: false, localService: false, voiceURI: 'Google UK English Male' },
-    ];
-    const Proto = G.SpeechSynthesisVoice && G.SpeechSynthesisVoice.prototype;
-    const mockVoices = windowsVoices.map((v) => (Proto ? Object.assign(Object.create(Proto), v) : v));
-    replaceMethod(G.SpeechSynthesis.prototype, 'getVoices', () => function () {
-      return mockVoices;
-    });
+    try {
+      const windowsVoices = [
+        { name: 'Microsoft David - English (United States)', lang: 'en-US', default: true, localService: true, voiceURI: 'Microsoft David - English (United States)' },
+        { name: 'Microsoft Mark - English (United States)', lang: 'en-US', default: false, localService: true, voiceURI: 'Microsoft Mark - English (United States)' },
+        { name: 'Microsoft Zira - English (United States)', lang: 'en-US', default: false, localService: true, voiceURI: 'Microsoft Zira - English (United States)' },
+        { name: 'Google US English', lang: 'en-US', default: false, localService: false, voiceURI: 'Google US English' },
+        { name: 'Google UK English Female', lang: 'en-GB', default: false, localService: false, voiceURI: 'Google UK English Female' },
+        { name: 'Google UK English Male', lang: 'en-GB', default: false, localService: false, voiceURI: 'Google UK English Male' },
+      ];
+      const Proto = G.SpeechSynthesisVoice && G.SpeechSynthesisVoice.prototype;
+      const mockVoices = windowsVoices.map((v) => {
+        if (!Proto) return v;
+        const obj = Object.create(Proto);
+        for (const [key, val] of Object.entries(v)) {
+          Object.defineProperty(obj, key, { value: val, writable: false, enumerable: true, configurable: true });
+        }
+        return obj;
+      });
+      replaceMethod(G.SpeechSynthesis.prototype, 'getVoices', () => function () {
+        return mockVoices;
+      });
+    } catch {}
   }
 
   // ── window.chrome: Đảm bảo app, csi, loadTimes trên môi trường Chromium ──
@@ -449,6 +484,9 @@ export function stealthInitScript(cfg) {
     if (cfg.uaData.platform) {
       replaceGetter(G.NavigatorUAData.prototype, 'platform', () => cfg.uaData.platform);
     }
+    if (cfg.uaData.platformVersion) {
+      replaceGetter(G.NavigatorUAData.prototype, 'platformVersion', () => cfg.uaData.platformVersion);
+    }
     if (typeof cfg.isMobile === 'boolean') {
       replaceGetter(G.NavigatorUAData.prototype, 'mobile', () => cfg.isMobile);
     }
@@ -459,7 +497,7 @@ export function stealthInitScript(cfg) {
       const populate = (dict) => {
         const res = dict ? { ...dict } : {};
         const hintList = Array.isArray(hints) ? hints : [];
-        for (const key of ['platform', 'platformVersion', 'architecture', 'bitness', 'model', 'brands', 'fullVersionList']) {
+        for (const key of ['platform', 'platformVersion', 'architecture', 'bitness', 'model', 'brands', 'fullVersionList', 'uaFullVersion']) {
           if (hintList.includes(key) && cfg.uaData[key] !== undefined) {
             res[key] = cfg.uaData[key];
           }
@@ -728,7 +766,7 @@ const windowsScreens = [
   { width: 1280, height: 720, dpr: 1.5 }, { width: 2560, height: 1440, dpr: 1 }, { width: 1600, height: 900, dpr: 1 },
   { width: 1920, height: 1200, dpr: 1 }, { width: 2048, height: 1152, dpr: 1.25 },
 ];
-const windowsVersions = ['10.0.0', '15.0.0', '19.0.0'];
+const windowsVersions = ['10.0.0'];
 
 const linuxGpus = [
   { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)', cores: [8, 12] },
@@ -808,8 +846,8 @@ export function createDeviceVariant(profileKey, base, seed, minViewport = null) 
     const isWindows = profileKey === 'windows';
     const gpu = pick(isWindows ? windowsGpus : linuxGpus);
     const screen = pick(fits(isWindows ? windowsScreens : linuxScreens));
-    const osVersion = pick(isWindows ? windowsVersions : linuxVersions);
-    const taskbar = isWindows ? (osVersion === '10.0.0' ? 40 : 48) : 27;
+    const osVersion = isWindows ? '10.0.0' : pick(linuxVersions);
+    const taskbar = isWindows ? 40 : 27;
     variant.deviceScaleFactor = screen.dpr;
     variant.screen = { width: screen.width, height: screen.height, availHeight: screen.height - taskbar, frameHeight: isWindows ? 87 : 77 };
     variant.uaData.platformVersion = osVersion;
@@ -819,7 +857,7 @@ export function createDeviceVariant(profileKey, base, seed, minViewport = null) 
     });
     // Máy từ 12 luồng trở lên gần như luôn có ≥ 8 GB (Chrome làm tròn xuống và chặn trên ở 8).
     variant.spoof.deviceMemory = variant.spoof.hardwareConcurrency >= 12 ? 8 : pick([4, 8, 8]);
-    const osName = isWindows ? (osVersion === '10.0.0' ? 'Windows 10' : 'Windows 11') : `Linux ${osVersion}`;
+    const osName = isWindows ? 'Windows 10' : `Linux ${osVersion}`;
     variant.deviceVersion = isWindows ? `${osName} (${osVersion})` : `Linux ${osVersion}`;
     variant.summary = `${osName} · ${gpu.renderer.replace(/^ANGLE \([^,]+, /, '').replace(/ \(0x.*$| Direct3D.*$|,.*$/, '')} · ${variant.spoof.hardwareConcurrency} nhân · ${screen.width}x${screen.height}@${screen.dpr}x`;
   } else if (profileKey === 'android') {

@@ -71,8 +71,8 @@ export function selectAdsPowerKernelVersions(installedVersions, occupiedVersions
  */
 export function buildAdsPowerProfileRequest({ slot, proxy = null, exitIp = '', websiteUrl = '', antiFingerprint = {}, deviceProfile = 'windows', userAgent = '', browserVersion, resolution = '1920x1080' }) {
   if (!browserVersion) throw new Error('Thiếu phiên bản SunBrowser đã cài cho profile AdsPower.');
-  const osLabel = ({ windows: 'Windows 11', macos: 'Mac OS X 14', linux: 'Linux', android: 'Android 13', ios: 'iOS 17', ipad: 'iOS 17' })[deviceProfile] || 'Windows 11';
-  const osShort = ({ windows: 'Win 11', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Win 11';
+  const osLabel = ({ windows: 'Windows 10', macos: 'Mac OS X 14', linux: 'Linux', android: 'Android 13', ios: 'iOS 17', ipad: 'iOS 17' })[deviceProfile] || 'Windows 10';
+  const osShort = ({ windows: 'Win 10', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iPhone', ipad: 'iPad' })[deviceProfile] || 'Win 10';
 
   const fingerprint = {
     browser_kernel_config: { type: 'chrome', version: String(browserVersion) },
@@ -104,7 +104,7 @@ export function buildAdsPowerProfileRequest({ slot, proxy = null, exitIp = '', w
   fingerprint.random_ua = {
     ua_browser: ['chrome'],
     ua_version: [String(browserVersion)],
-    ua_system_version: deviceProfile === 'windows' ? ['Windows 10', 'Windows 11'] : [osLabel],
+    ua_system_version: deviceProfile === 'windows' ? ['Windows 10'] : [osLabel],
   };
 
   const userProxyConfig = { proxy_soft: 'no_proxy' };
