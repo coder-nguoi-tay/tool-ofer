@@ -1478,14 +1478,19 @@ export function isEssentialOfferUrl(url) {
 }
 
 /**
- * Kiểm tra xem URL có phải là file media nặng (video, audio, streaming video) không.
+ * Kiểm tra xem URL có phải là file media nặng (video, audio, streaming video chunks) không.
  *
  * @param {string} url
  * @return {boolean}
  */
 export function isMediaUrl(url) {
   if (!url) return false;
-  return /\.(mp4|webm|m3u8|ts|ogg|mp3|wav|flv|avi|mkv|m4s|mov)($|\?)/i.test(url);
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return /\.(mp4|webm|m3u8|ts|ogg|mp3|wav|flv|avi|mkv|m4s|mov|aac|f4v|mpd)$/i.test(pathname);
+  } catch {
+    return /\.(mp4|webm|m3u8|ts|ogg|mp3|wav|flv|avi|mkv|m4s|mov|aac|f4v|mpd)($|\?)/i.test(url);
+  }
 }
 
 /**
@@ -1506,10 +1511,14 @@ export function isHeavyAdOrTrackerUrl(url) {
 
 /**
  * Gắn bộ lọc Data Saver để tiết kiệm băng thông proxy cho phiên duyệt web.
- * QUY TẮC CỐT LÕI:
- * - TUYỆT ĐỐI KHÔNG CHẶN ẢNH (image) theo đúng yêu cầu người dùng.
- * - Chặn toàn bộ video, audio, media streaming (thủ phạm ngốn hàng trăm MB).
- * - Chặn các mạng video ad và session replay tracker ngoài.
+ * NGUYÊN TẮC BẢO TOÀN TRẢI NGHIỆM & LEAD (CỐT LÕI):
+ * 1. TUYỆT ĐỐI KHÔNG CHẶN ẢNH (image): Logo câu hỏi, Captcha, hình ảnh khảo sát luôn hiển thị 100%.
+ * 2. TUYỆT ĐỐI KHÔNG CHẶN JAVASCRIPT, API, TÀI LIỆU, IFRAME & CSS:
+ *    - Toàn bộ mã script khảo sát, các lựa chọn trả lời, nút Next/Submit, DOM động được bảo toàn 100%.
+ *    - Không chặn XHR/Fetch gọi API câu hỏi & nộp đáp án.
+ * 3. CHẶN TRIỆT ĐỂ MEDIA (video / audio / m3u8 / ts / m4s / webm streaming):
+ *    - Đây là thủ phạm chính gây tốn 95%-99% băng thông proxy do các video ad tự phát ngầm.
+ *    - Chặn video stream giúp tiết kiệm tối đa data proxy mà không bao giờ làm mất câu hỏi hay câu trả lời.
  *
  * @param {object} context BrowserContext của Playwright.
  * @param {object} session Phiên duyệt web.
@@ -1532,18 +1541,38 @@ export async function attachDataSaver(context, session) {
           return route.continue().catch(() => {});
         }
 
-        // 2. Không chặn tài nguyên thiết yếu (Captcha, Cloudflare Turnstile, Auth)
+        // 2. TUYỆT ĐỐI KHÔNG CHẶN JAVASCRIPT, TÀI LIỆU, IFRAME VÀ STYLESHEET
+        // Bảo đảm 100% JavaScript câu hỏi, các lựa chọn trả lời và cấu trúc trang web hoạt động hoàn hảo
+        if (
+          type === 'script' ||
+          type === 'document' ||
+          type === 'subdocument' ||
+          type === 'stylesheet' ||
+          type === 'font'
+        ) {
+          return route.continue().catch(() => {});
+        }
+
+        // 3. Không chặn tài nguyên bảo mật / captcha thiết yếu (Captcha, Cloudflare Turnstile, Auth)
         if (isEssentialOfferUrl(url)) {
           return route.continue().catch(() => {});
         }
 
-        // 3. Chặn media (video / audio / m3u8 stream)
+        // 4. CHẶN TRIỆT ĐỂ MEDIA (video / audio / m3u8 / ts streaming)
+        // Áp dụng cho cả thẻ <video>/<audio> lẫn các chunk video stream được kéo bằng fetch/xhr
         if (type === 'media' || isMediaUrl(url)) {
           session.blockedMediaCount = (session.blockedMediaCount || 0) + 1;
           return route.abort('blockedbyclient').catch(() => {});
         }
 
-        // 4. Chặn các server phân phối video ad và session replay rác bên thứ 3
+        // 5. KHÔNG CHẶN XHR / FETCH (API câu hỏi, submit form, lead verification)
+        // Trừ các file video chunk đã bị lọc ở bước 4 ở trên
+        if (type === 'xhr' || type === 'fetch') {
+          return route.continue().catch(() => {});
+        }
+
+        // 6. Chặn các kết nối rác bên thứ 3 còn lại (session replay streaming, socket ngầm)
+        // Không ảnh hưởng tới script, API hay hình ảnh vì đã được cho qua ở các bước trên
         if (isHeavyAdOrTrackerUrl(url)) {
           session.blockedAdsCount = (session.blockedAdsCount || 0) + 1;
           return route.abort('blockedbyclient').catch(() => {});
@@ -1557,9 +1586,9 @@ export async function attachDataSaver(context, session) {
 
     session.addBrowserLog?.({
       type: 'data_saver_active',
-      detail: 'Đã kích hoạt Chế độ Tiết Kiệm Băng Thông: Tự động chặn Video/Audio & Ad network rác (giữ nguyên hình ảnh).',
+      detail: 'Đã kích hoạt Chế độ Tiết Kiệm Băng Thông: Tự động chặn Video/Audio streaming (bảo toàn 100% JavaScript, câu hỏi, câu trả lời và hình ảnh).',
     });
-    console.log(`[DataSaver] Slot ${session.slot || '?'}: Đã kích hoạt Chế độ Tiết Kiệm Băng Thông.`);
+    console.log(`[DataSaver] Slot ${session.slot || '?'}: Đã kích hoạt Chế độ Tiết Kiệm Băng Thông (bảo toàn 100% JS & câu trả lời).`);
   } catch (err) {
     console.warn(`[DataSaver] Slot ${session.slot || '?'}: Lỗi gắn route:`, err.message);
   }
@@ -10634,12 +10663,12 @@ async function startLocalInterface() {
               respondWithJson(response, 200, { ok: true, select: { options: picked.options, selectedIndex: picked.selectedIndex } });
               return;
             }
-            await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+            await cdpClient.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: targetX, y: targetY, button: body.button || 'left', clickCount: body.clickCount || 1, modifiers: body.modifiers || 0 });
           } else if (body.type === 'mouseup') {
             if (await sc.pointerCheck) { respondWithJson(response, 200, { ok: true }); return; }
-            await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: targetX, y: targetY, button: body.button || 'left', clickCount: 1, modifiers: body.modifiers || 0 });
+            await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: targetX, y: targetY, button: body.button || 'left', clickCount: body.clickCount || 1, modifiers: body.modifiers || 0 });
             const clickedSession = [...activeBrowsers].find((item) => (item.slot ?? (item.tileIndex ?? -1) + 1) === slot);
-            clickedSession?.addBrowserLog?.({ type: 'click', detail: `Click tay qua Screen View tại (${targetX}, ${targetY})` });
+            clickedSession?.addBrowserLog?.({ type: 'click', detail: `Click tay qua Screen View (${body.button || 'left'}) tại (${targetX}, ${targetY})` });
           } else if (body.type === 'mousemove') {
             await cdpClient.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: targetX, y: targetY, modifiers: body.modifiers || 0 });
           } else if (body.type === 'wheel') {
@@ -10661,6 +10690,28 @@ async function startLocalInterface() {
                 }, deltaY, deltaX).catch(() => {});
               }
             }
+          }
+        } else if (body.type === 'reload') {
+          if (sc.page && !sc.page.isClosed()) {
+            await sc.page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+          }
+        } else if (body.type === 'back') {
+          if (sc.page && !sc.page.isClosed()) {
+            await sc.page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          }
+        } else if (body.type === 'forward') {
+          if (sc.page && !sc.page.isClosed()) {
+            await sc.page.goForward({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          }
+        } else if (body.type === 'scrollPage') {
+          if (sc.page && !sc.page.isClosed()) {
+            const dir = body.direction || 'down';
+            await sc.page.evaluate((d) => {
+              if (d === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+              else if (d === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+              else if (d === 'up') window.scrollBy({ top: -window.innerHeight * 0.75, behavior: 'smooth' });
+              else window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
+            }, dir).catch(() => {});
           }
         } else if (body.type === 'select') {
           // Người dùng chọn một dòng trong danh sách select Screen View vừa hiện.
@@ -10723,7 +10774,7 @@ async function startLocalInterface() {
           }
           respondWithJson(response, 200, { ok: true });
           return;
-        } else if (body.type === 'key' || body.type === 'keydown' || body.type === 'char') {
+        } else if (body.type === 'key' || body.type === 'keydown' || body.type === 'char' || body.type === 'insertText') {
           // Xử lý sự kiện bàn phím thông minh qua Playwright page.keyboard (trực tiếp và không nghẽn CDP)
           if (sc.page && !sc.page.isClosed()) {
             if (body.text) {

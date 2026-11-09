@@ -130,7 +130,7 @@ test('attachDataSaver intercepts routes and never blocks images', async () => {
   assert.equal(videoAborted, true);
   assert.equal(session.blockedMediaCount, 1);
 
-  // Test 3: Heavy ad domain script request must abort
+  // Test 3: Ad/Tracker domain script MUST CONTINUE so survey questions & answers never break!
   let adContinued = false;
   let adAborted = false;
   await routeHandler({
@@ -141,9 +141,8 @@ test('attachDataSaver intercepts routes and never blocks images', async () => {
     continue: async () => { adContinued = true; },
     abort: async () => { adAborted = true; },
   });
-  assert.equal(adContinued, false);
-  assert.equal(adAborted, true);
-  assert.equal(session.blockedAdsCount, 1);
+  assert.equal(adContinued, true, 'Scripts must never be blocked, preserving all questionnaire JS');
+  assert.equal(adAborted, false);
 
   // Test 4: Normal survey script must continue
   let normalContinued = false;
@@ -158,4 +157,52 @@ test('attachDataSaver intercepts routes and never blocks images', async () => {
   });
   assert.equal(normalContinued, true);
   assert.equal(normalAborted, false);
+
+  // Test 5: Survey questions/answers API via Fetch must continue
+  let apiContinued = false;
+  let apiAborted = false;
+  await routeHandler({
+    request: () => ({
+      resourceType: () => 'fetch',
+      url: () => 'https://survey-funnel.com/api/get-questions?offerId=101',
+    }),
+    continue: async () => { apiContinued = true; },
+    abort: async () => { apiAborted = true; },
+  });
+  assert.equal(apiContinued, true, 'API calls fetching survey questions must continue');
+  assert.equal(apiAborted, false);
+
+  // Test 6: Video streaming chunk fetched via Fetch must abort to save bandwidth
+  let chunkContinued = false;
+  let chunkAborted = false;
+  await routeHandler({
+    request: () => ({
+      resourceType: () => 'fetch',
+      url: () => 'https://cdn.videoad.com/hls/segment_001.ts',
+    }),
+    continue: async () => { chunkContinued = true; },
+    abort: async () => { chunkAborted = true; },
+  });
+  assert.equal(chunkContinued, false);
+  assert.equal(chunkAborted, true, 'Streaming video chunks must be aborted to save proxy bandwidth');
+  assert.equal(session.blockedMediaCount, 2);
+
+  // Test 7: Nested survey co-reg iframe (subdocument) must continue
+  let iframeContinued = false;
+  let iframeAborted = false;
+  await routeHandler({
+    request: () => ({
+      resourceType: () => 'subdocument',
+      url: () => 'https://coreg-survey.com/widget?step=2',
+    }),
+    continue: async () => { iframeContinued = true; },
+    abort: async () => { iframeAborted = true; },
+  });
+  assert.equal(iframeContinued, true, 'Nested survey frames must continue');
+  assert.equal(iframeAborted, false);
+
+  // Test 8: API with ?ts= timestamp in query string must NOT be treated as video .ts
+  assert.equal(isMediaUrl('https://survey-funnel.com/api/answer?ts=1731168000'), false);
+  assert.equal(isMediaUrl('https://example.com/stream.m3u8'), true);
+  assert.equal(isMediaUrl('https://example.com/segment.m4s'), true);
 });

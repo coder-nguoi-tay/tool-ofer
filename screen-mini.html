@@ -438,6 +438,220 @@
     }
     .key-btn:active { background: var(--primary); color: #000; }
 
+    /* Interactive Mode Bar */
+    .interact-mode-bar {
+      display: flex;
+      gap: 4px;
+      padding: 4px 8px;
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .interact-pill {
+      flex: 1;
+      padding: 5px 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-align: center;
+      border-radius: 6px;
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .interact-pill.active {
+      background: #0284c7;
+      color: #fff;
+      border-color: #38bdf8;
+      box-shadow: 0 1px 4px rgba(2, 132, 199, 0.4);
+    }
+
+    /* Floating Zoom Controls */
+    .floating-zoom-controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      z-index: 25;
+      pointer-events: auto;
+    }
+    .zoom-btn {
+      width: 32px;
+      height: 32px;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid #334155;
+      color: #f8fafc;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      backdrop-filter: blur(4px);
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+      user-select: none;
+      transition: all 0.12s ease;
+    }
+    .zoom-btn:active {
+      transform: scale(0.92);
+      background: #0284c7;
+      border-color: #38bdf8;
+    }
+    .zoom-level-badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: #38bdf8;
+      text-align: center;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid #334155;
+      border-radius: 4px;
+      padding: 1px 2px;
+    }
+
+    /* Smart Autofill Bar */
+    .smart-autofill-strip {
+      display: flex;
+      gap: 6px;
+      padding: 4px 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      background: #0d1527;
+      border-bottom: 1px solid #1e293b;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .smart-autofill-strip::-webkit-scrollbar { display: none; }
+    .autofill-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #cbd5e1;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+    }
+    .autofill-chip:active {
+      background: #059669;
+      border-color: #34d399;
+      color: #fff;
+      transform: scale(0.95);
+    }
+    .autofill-chip.chip-email { border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; }
+    .autofill-chip.chip-name { border-color: rgba(168, 85, 247, 0.4); color: #c084fc; }
+    .autofill-chip.chip-phone { border-color: rgba(245, 158, 11, 0.4); color: #fbbf24; }
+    .autofill-chip.chip-zip { border-color: rgba(16, 185, 129, 0.4); color: #34d399; }
+    .autofill-chip.chip-pass { border-color: rgba(244, 63, 94, 0.4); color: #fb7185; }
+
+    /* Virtual Mouse Cursor for Trackpad Mode */
+    .virtual-cursor {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      pointer-events: none;
+      z-index: 22;
+      display: none;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8));
+    }
+    .virtual-cursor-arrow {
+      width: 0;
+      height: 0;
+      border-top: 14px solid #38bdf8;
+      border-right: 10px solid transparent;
+      transform: rotate(-35deg);
+    }
+    .virtual-cursor-target {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #38bdf8;
+      border-radius: 50%;
+      top: -7px;
+      left: -7px;
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    .trackpad-action-bar {
+      display: none;
+      gap: 6px;
+      padding: 6px 8px;
+      background: #0d1527;
+      border-top: 1px solid #1e293b;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .trackpad-btn {
+      flex: 1;
+      padding: 8px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      user-select: none;
+    }
+    .trackpad-btn:active {
+      background: #0284c7;
+      border-color: #38bdf8;
+    }
+
+    /* Right Click Ripple */
+    .touch-ripple.ripple-right {
+      background: rgba(239, 68, 68, 0.5);
+      border-color: #ef4444;
+    }
+
+    /* Floating Typing Modal */
+    .type-modal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+    .type-modal-backdrop {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+    }
+    .type-modal-content {
+      position: relative;
+      background: #0f172a;
+      border-top: 1px solid #334155;
+      border-radius: 14px 14px 0 0;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.6);
+      animation: slideUp 0.2s ease-out;
+    }
+
     /* Select Modal Bottom Sheet */
     .select-modal {
       position: fixed;
@@ -656,33 +870,103 @@
         <span id="ipDisplay" style="color:#a78bfa; font-weight:600;">IP: ...</span>
       </div>
 
+      <!-- Interactive Mode Selector Bar -->
+      <div class="interact-mode-bar" id="interactModeBar">
+        <div class="interact-pill active" id="modeTouch" onclick="setInteractionMode('touch')">
+          <span>👆 Chạm (Touch)</span>
+        </div>
+        <div class="interact-pill" id="modeTrackpad" onclick="setInteractionMode('trackpad')">
+          <span>🖱️ Chuột ảo (Trackpad)</span>
+        </div>
+        <div class="interact-pill" id="modeScroll" onclick="setInteractionMode('scroll')">
+          <span>📜 Cuộn (Scroll)</span>
+        </div>
+      </div>
+
+      <!-- Smart Autofill Strip (1-tap field injection) -->
+      <div class="smart-autofill-strip" id="smartAutofillStrip">
+        <span style="font-size:10px; color:#64748b; font-weight:600; white-space:nowrap;">⚡ Điền:</span>
+        <div id="autofillChipsContainer" style="display:inline-flex; gap:5px;"></div>
+      </div>
+
       <!-- Screen Canvas Viewport -->
       <div id="viewport" class="viewport-area">
         <canvas id="streamCanvas"></canvas>
         <div id="canvasMsg" class="canvas-overlay-msg">
           <span>🟢 Đang tải luồng màn hình...</span>
         </div>
-      </div>
 
-      <!-- Typing & Virtual Controls -->
-      <div class="screen-controls">
-        <div style="display:flex; gap:6px;">
-          <input id="textInput" class="input-text" type="text" placeholder="Nhập chữ để gõ vào Chrome..." autocomplete="off">
-          <button id="btnSendText" class="btn btn-primary" style="padding:6px 12px;">Gửi</button>
+        <!-- Floating Zoom Controls -->
+        <div class="floating-zoom-controls">
+          <button class="zoom-btn" onclick="zoomIn()" title="Phóng to">+</button>
+          <span class="zoom-level-badge" id="zoomLevelBadge">1.0x</span>
+          <button class="zoom-btn" onclick="zoomOut()" title="Thu nhỏ">−</button>
+          <button class="zoom-btn" onclick="resetZoom()" style="font-size:11px;" title="Vừa khung">Fit</button>
         </div>
 
+        <!-- Virtual Cursor for Trackpad Mode -->
+        <div id="virtualCursor" class="virtual-cursor">
+          <div class="virtual-cursor-target"></div>
+          <div class="virtual-cursor-arrow"></div>
+        </div>
+      </div>
+
+      <!-- Virtual Trackpad Action Bar (visible only in Trackpad mode) -->
+      <div id="trackpadActionBar" class="trackpad-action-bar">
+        <button class="trackpad-btn" id="btnTrackpadLeftClick" onclick="executeTrackpadClick('left')">👆 Click Trái</button>
+        <button class="trackpad-btn" id="btnTrackpadRightClick" onclick="executeTrackpadClick('right')" style="background:#1e1b4b; border-color:#6366f1; color:#c7d2fe;">🖱️ Chuột Phải</button>
+        <button class="trackpad-btn" id="btnTrackpadDblClick" onclick="executeTrackpadDblClick()" style="background:#0f2e22; border-color:#10b981; color:#a7f3d0;">✌️ Nhấp Đúp</button>
+      </div>
+
+      <!-- Typing & Quick Navigation Controls -->
+      <div class="screen-controls">
+        <div style="display:flex; gap:6px;">
+          <input id="textInput" class="input-text" type="text" placeholder="Gõ văn bản vào trình duyệt..." autocomplete="off">
+          <button id="btnSendText" class="btn btn-primary" style="padding:6px 12px; font-weight:700;">Gửi</button>
+        </div>
+
+        <!-- Quick Nav Toolbar: Back, Reload, Page Nav -->
+        <div class="key-quick-row" style="margin-bottom:2px;">
+          <button class="key-btn" onclick="triggerBrowserBack()">◀ Lùi</button>
+          <button class="key-btn" onclick="triggerBrowserReload()">🔄 Reload</button>
+          <button class="key-btn" onclick="triggerPageScroll('top')" style="background:#131f37; color:#38bdf8;">🔝 Đầu</button>
+          <button class="key-btn" onclick="triggerPageScroll('up')">⬆ Lên</button>
+          <button class="key-btn" onclick="triggerPageScroll('down')">⬇ Xuống</button>
+          <button class="key-btn" onclick="triggerPageScroll('bottom')" style="background:#131f37; color:#38bdf8;">🔚 Đáy</button>
+          <button class="key-btn" id="btnCloseSlot" style="background:#450a0a; border-color:#7f1d1d; color:#f87171;">🛑 Tắt</button>
+        </div>
+
+        <!-- Quick Keys Row: Keyboard, Enter, Tab, Space, Backspace, Paste, Select All -->
         <div class="key-quick-row">
+          <button class="key-btn" onclick="openTypeModal()" style="background:#0284c7; border-color:#38bdf8; color:#fff; font-weight:700;">⌨️ Mở rộng</button>
           <button class="key-btn" data-key="Enter">⏎ Enter</button>
           <button class="key-btn" data-key="Tab">⇥ Tab</button>
           <button class="key-btn" data-key="Backspace">⌫ Xóa</button>
           <button class="key-btn" data-key="Space">␣ Cách</button>
-          <button class="key-btn" id="btnScrollDown" style="background:#0f172a; border-color:#38bdf8; color:#38bdf8;">📜 Cuộn</button>
           <button class="key-btn" id="btnPasteText">📋 Dán</button>
           <button class="key-btn" id="btnSelectAll">🔤 Chọn hết</button>
-          <button class="key-btn" id="btnBack">⬅ Back</button>
-          <button class="key-btn" id="btnReloadSlot">🔄 Reload</button>
-          <button class="key-btn" id="btnCloseSlot" style="background:#450a0a; color:#f87171;">🛑 Tắt</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Gõ chữ (Floating Typing Modal) -->
+  <div id="typeModal" class="type-modal">
+    <div class="type-modal-backdrop" onclick="closeTypeModal()"></div>
+    <div class="type-modal-content">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:700; color:#38bdf8; font-size:13px;">⌨️ Gõ văn bản vào trình duyệt:</span>
+        <button class="btn" style="padding:2px 8px; font-size:11px;" onclick="closeTypeModal()">✕ Đóng</button>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <input id="modalTextInput" class="input-text" type="text" placeholder="Nhập văn bản cần gõ..." autocomplete="off">
+        <button id="btnModalSendText" class="btn btn-primary" style="padding:8px 14px; font-weight:700;" onclick="submitModalText()">Gửi ➔</button>
+      </div>
+      <div style="display:flex; gap:6px; overflow-x:auto;">
+        <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="sendInput({type:'keydown', key:'Enter'}); setTimeout(()=>sendInput({type:'keyup', key:'Enter'}), 30); showToast('Đã gửi Enter');">⏎ Enter</button>
+        <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="sendInput({type:'keydown', key:'Tab'}); setTimeout(()=>sendInput({type:'keyup', key:'Tab'}), 30); showToast('Đã gửi Tab');">⇥ Tab</button>
+        <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="sendInput({type:'keydown', key:'Escape'}); setTimeout(()=>sendInput({type:'keyup', key:'Escape'}), 30); showToast('Đã gửi Escape');">Esc</button>
+        <button class="btn" style="padding:4px 8px; font-size:11px; background:#475569;" onclick="document.getElementById('modalTextInput').value=''">🧹 Xoá</button>
       </div>
     </div>
   </div>
@@ -1154,6 +1438,16 @@
       try { tg.setBackgroundColor('#0b0f19'); } catch (e) {}
     }
 
+    function escHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
     // Biến trạng thái toàn cục
     let currentSlot = 1;
     let screenViewMode = 'grid'; // 'grid' (Lưới tất cả IP) hoặc 'single' (Điều khiển 1 IP)
@@ -1411,48 +1705,41 @@
 
       renderSlotPills();
       pollSlotTabs(slot);
+      updateSmartAutofillChips();
+      resetZoom();
+      if (currentInteractionMode === 'trackpad') updateVirtualCursorDisplay();
     }
 
-    // Render SSE JPEG frames via createImageBitmap
-    async function renderNextFrame() {
-      if (!pendingFrame) return;
+    // ─── Fast Image Renderer (Zero memory thrashing) ──────────────────────────
+    const _streamBufferImg = new Image();
+    let _imgDecoding = false;
+    _streamBufferImg.onload = () => {
+      _imgDecoding = false;
+      if (canvas.width !== _streamBufferImg.naturalWidth || canvas.height !== _streamBufferImg.naturalHeight) {
+        canvas.width = _streamBufferImg.naturalWidth;
+        canvas.height = _streamBufferImg.naturalHeight;
+        canvasNaturalWidth = _streamBufferImg.naturalWidth;
+        canvasNaturalHeight = _streamBufferImg.naturalHeight;
+      }
+      ctx.drawImage(_streamBufferImg, 0, 0);
+      fpsCount++;
+      isRendering = false;
+      if (pendingFrame) requestAnimationFrame(renderNextFrame);
+    };
+    _streamBufferImg.onerror = () => {
+      _imgDecoding = false;
+      isRendering = false;
+      if (pendingFrame) requestAnimationFrame(renderNextFrame);
+    };
+
+    function renderNextFrame() {
+      if (!pendingFrame || _imgDecoding) return;
       isRendering = true;
+      _imgDecoding = true;
       const raw = pendingFrame;
       pendingFrame = null;
       const cleanData = raw.replace(/[\r\n]/g, '');
-
-      try {
-        const resp = await fetch(`data:image/jpeg;base64,${cleanData}`);
-        const blob = await resp.blob();
-        const bmp = await createImageBitmap(blob);
-        if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
-          canvas.width = bmp.width;
-          canvas.height = bmp.height;
-          canvasNaturalWidth = bmp.width;
-          canvasNaturalHeight = bmp.height;
-        }
-        ctx.drawImage(bmp, 0, 0);
-        bmp.close();
-        fpsCount++;
-      } catch (err) {
-        try {
-          const img = new Image();
-          img.onload = () => {
-            if (canvas.width !== img.width || canvas.height !== img.height) {
-              canvas.width = img.width;
-              canvas.height = img.height;
-              canvasNaturalWidth = img.width;
-              canvasNaturalHeight = img.height;
-            }
-            ctx.drawImage(img, 0, 0);
-            fpsCount++;
-          };
-          img.src = `data:image/jpeg;base64,${cleanData}`;
-        } catch {}
-      } finally {
-        isRendering = false;
-        if (pendingFrame) requestAnimationFrame(renderNextFrame);
-      }
+      _streamBufferImg.src = `data:image/jpeg;base64,${cleanData}`;
     }
 
     // ─── Input Dispatching ─────────────────────────────────────────────────────
@@ -1469,96 +1756,494 @@
       }
     }
 
-    function showTouchRipple(x, y) {
+    // ─── Interaction Engine State & Variables ──────────────────────────────────
+    let currentInteractionMode = 'touch'; // 'touch' | 'trackpad' | 'scroll'
+    let zoomScale = 1.0;
+    let zoomPanX = 0, zoomPanY = 0;
+    let trackpadCursorX = 640, trackpadCursorY = 400; // In native browser space
+
+    const virtualCursor = document.getElementById('virtualCursor');
+    const trackpadActionBar = document.getElementById('trackpadActionBar');
+
+    window.setInteractionMode = (mode) => {
+      currentInteractionMode = mode;
+      document.getElementById('modeTouch')?.classList.toggle('active', mode === 'touch');
+      document.getElementById('modeTrackpad')?.classList.toggle('active', mode === 'trackpad');
+      document.getElementById('modeScroll')?.classList.toggle('active', mode === 'scroll');
+
+      if (mode === 'trackpad') {
+        if (virtualCursor) virtualCursor.style.display = 'block';
+        if (trackpadActionBar) trackpadActionBar.style.display = 'flex';
+        updateVirtualCursorDisplay();
+      } else {
+        if (virtualCursor) virtualCursor.style.display = 'none';
+        if (trackpadActionBar) trackpadActionBar.style.display = 'none';
+      }
+      try { tg?.HapticFeedback?.selectionChanged(); } catch {}
+      showToast(`Chế độ: ${mode === 'touch' ? '👆 Chạm trực tiếp' : (mode === 'trackpad' ? '🖱️ Chuột ảo (Trackpad)' : '📜 Cuộn trang')}`);
+    };
+
+    // Zoom & Pan Engine
+    function applyCanvasTransform() {
+      if (zoomScale <= 1.0) {
+        zoomScale = 1.0;
+        zoomPanX = 0;
+        zoomPanY = 0;
+        canvas.style.transform = 'none';
+      } else {
+        const vpRect = viewport.getBoundingClientRect();
+        const maxPanX = (vpRect.width * (zoomScale - 1)) / 2;
+        const maxPanY = (vpRect.height * (zoomScale - 1)) / 2;
+        zoomPanX = Math.max(-maxPanX, Math.min(maxPanX, zoomPanX));
+        zoomPanY = Math.max(-maxPanY, Math.min(maxPanY, zoomPanY));
+        canvas.style.transform = `translate(${zoomPanX}px, ${zoomPanY}px) scale(${zoomScale})`;
+      }
+      const badge = document.getElementById('zoomLevelBadge');
+      if (badge) badge.textContent = `${zoomScale.toFixed(1)}x`;
+      if (currentInteractionMode === 'trackpad') updateVirtualCursorDisplay();
+    }
+
+    window.zoomIn = () => {
+      zoomScale = Math.min(4.0, Number((zoomScale + 0.5).toFixed(1)));
+      applyCanvasTransform();
+      try { tg?.HapticFeedback?.selectionChanged(); } catch {}
+    };
+
+    window.zoomOut = () => {
+      zoomScale = Math.max(1.0, Number((zoomScale - 0.5).toFixed(1)));
+      applyCanvasTransform();
+      try { tg?.HapticFeedback?.selectionChanged(); } catch {}
+    };
+
+    window.resetZoom = () => {
+      zoomScale = 1.0;
+      zoomPanX = 0;
+      zoomPanY = 0;
+      applyCanvasTransform();
+      try { tg?.HapticFeedback?.selectionChanged(); } catch {}
+    };
+
+    // Chuẩn hoá toạ độ điểm chạm (Chống lệch Letterbox & Zoom/Pan)
+    function getCanvasPoint(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+
+      const natW = canvasNaturalWidth || 1280;
+      const natH = canvasNaturalHeight || 800;
+      const canvasAspect = natW / natH;
+      const elemAspect = rect.width / rect.height;
+
+      let renderWidth, renderHeight, offsetX, offsetY;
+      if (elemAspect > canvasAspect) {
+        renderHeight = rect.height;
+        renderWidth = rect.height * canvasAspect;
+        offsetY = 0;
+        offsetX = (rect.width - renderWidth) / 2;
+      } else {
+        renderWidth = rect.width;
+        renderHeight = rect.width / canvasAspect;
+        offsetX = 0;
+        offsetY = (rect.height - renderHeight) / 2;
+      }
+
+      // Vị trí tương đối trong ảnh render (trước zoom)
+      let relX = clientX - rect.left - offsetX;
+      let relY = clientY - rect.top - offsetY;
+
+      // Bù trừ Zoom & Pan nếu có
+      if (zoomScale > 1.0) {
+        const originX = renderWidth / 2;
+        const originY = renderHeight / 2;
+        relX = (relX - originX - zoomPanX) / zoomScale + originX;
+        relY = (relY - originY - zoomPanY) / zoomScale + originY;
+      }
+
+      const clampedX = Math.max(0, Math.min(renderWidth, relX));
+      const clampedY = Math.max(0, Math.min(renderHeight, relY));
+
+      const actualX = Math.round((clampedX / renderWidth) * natW);
+      const actualY = Math.round((clampedY / renderHeight) * natH);
+
+      return {
+        x: actualX,
+        y: actualY,
+        inBounds: (relX >= 0 && relX <= renderWidth && relY >= 0 && relY <= renderHeight),
+      };
+    }
+
+    function showTouchRipple(x, y, isRight = false) {
       const ripple = document.createElement('div');
-      ripple.className = 'touch-ripple';
+      ripple.className = 'touch-ripple' + (isRight ? ' ripple-right' : '');
       ripple.style.left = `${x}px`;
       ripple.style.top = `${y}px`;
       viewport.appendChild(ripple);
-      setTimeout(() => ripple.remove(), 400);
-      try { tg?.HapticFeedback?.impactOccurred('light'); } catch (e) {}
+      setTimeout(() => ripple.remove(), 420);
+      try { tg?.HapticFeedback?.impactOccurred(isRight ? 'medium' : 'light'); } catch (e) {}
     }
 
-    // Touch events for Canvas
-    let touchStartX = 0, touchStartY = 0, touchStartTime = 0, isDragging = false, lastWheelTime = 0;
+    // Cập nhật vị trí con trỏ chuột ảo trên viewport
+    function updateVirtualCursorDisplay() {
+      if (!virtualCursor || currentInteractionMode !== 'trackpad') return;
+      const rect = canvas.getBoundingClientRect();
+      const natW = canvasNaturalWidth || 1280;
+      const natH = canvasNaturalHeight || 800;
+      const canvasAspect = natW / natH;
+      const elemAspect = rect.width / rect.height;
+
+      let renderWidth, renderHeight, offsetX, offsetY;
+      if (elemAspect > canvasAspect) {
+        renderHeight = rect.height;
+        renderWidth = rect.height * canvasAspect;
+        offsetY = 0;
+        offsetX = (rect.width - renderWidth) / 2;
+      } else {
+        renderWidth = rect.width;
+        renderHeight = rect.width / canvasAspect;
+        offsetX = 0;
+        offsetY = (rect.height - renderHeight) / 2;
+      }
+
+      let screenX = (trackpadCursorX / natW) * renderWidth + offsetX;
+      let screenY = (trackpadCursorY / natH) * renderHeight + offsetY;
+
+      if (zoomScale > 1.0) {
+        const originX = rect.width / 2;
+        const originY = rect.height / 2;
+        screenX = (screenX - originX) * zoomScale + originX + zoomPanX;
+        screenY = (screenY - originY) * zoomScale + originY + zoomPanY;
+      }
+
+      virtualCursor.style.left = `${screenX}px`;
+      virtualCursor.style.top = `${screenY}px`;
+    }
+
+    window.executeTrackpadClick = async (button = 'left') => {
+      const pt = { x: trackpadCursorX, y: trackpadCursorY };
+      const vpRect = viewport.getBoundingClientRect();
+      const curRect = virtualCursor.getBoundingClientRect();
+      showTouchRipple(curRect.left - vpRect.left + 7, curRect.top - vpRect.top + 7, button === 'right');
+
+      const res = await sendInput({ type: 'mousedown', x: pt.x, y: pt.y, button, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+      if (res?.select && Array.isArray(res.select.options)) {
+        openSelectPicker(res.select.options, res.select.selectedIndex);
+      } else {
+        setTimeout(() => {
+          sendInput({ type: 'mouseup', x: pt.x, y: pt.y, button, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+        }, 30);
+      }
+    };
+
+    window.executeTrackpadDblClick = async () => {
+      const pt = { x: trackpadCursorX, y: trackpadCursorY };
+      const vpRect = viewport.getBoundingClientRect();
+      const curRect = virtualCursor.getBoundingClientRect();
+      showTouchRipple(curRect.left - vpRect.left + 7, curRect.top - vpRect.top + 7);
+
+      await sendInput({ type: 'mousedown', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+      await sendInput({ type: 'mouseup', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+      setTimeout(async () => {
+        const res = await sendInput({ type: 'mousedown', x: pt.x, y: pt.y, button: 'left', clickCount: 2, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+        if (res?.select && Array.isArray(res.select.options)) {
+          openSelectPicker(res.select.options, res.select.selectedIndex);
+        } else {
+          setTimeout(() => {
+            sendInput({ type: 'mouseup', x: pt.x, y: pt.y, button: 'left', clickCount: 2, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+          }, 30);
+        }
+      }, 50);
+    };
+
+    // Multi-Touch Gestures (Tap, Double-Tap, Long-Press, Pinch-Zoom, Pan, Wheel)
+    let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+    let isDragging = false, lastWheelTime = 0, lastTapTime = 0, lastTapX = 0, lastTapY = 0;
+    let pinchStartDist = 0, pinchStartScale = 1.0;
+    let longPressTimer = null, longPressTriggered = false;
+
+    function getTouchDist(t1, t2) {
+      const dx = t1.clientX - t2.clientX;
+      const dy = t1.clientY - t2.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
     viewport.addEventListener('touchstart', (e) => {
       if (e.touches.length === 1) {
         touchStartX = e.touches[0].clientX;
         touchStartY = e.touches[0].clientY;
         touchStartTime = Date.now();
         isDragging = false;
+        longPressTriggered = false;
+
+        // Long-press timer (520ms) for Right Click
+        if (longPressTimer) clearTimeout(longPressTimer);
+        longPressTimer = setTimeout(async () => {
+          if (!isDragging && currentInteractionMode === 'touch') {
+            longPressTriggered = true;
+            const pt = getCanvasPoint(touchStartX, touchStartY);
+            if (pt) {
+              const vpRect = viewport.getBoundingClientRect();
+              showTouchRipple(touchStartX - vpRect.left, touchStartY - vpRect.top, true);
+              await sendInput({ type: 'mousedown', x: pt.x, y: pt.y, button: 'right', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+              setTimeout(() => {
+                sendInput({ type: 'mouseup', x: pt.x, y: pt.y, button: 'right', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+              }, 40);
+              showToast('🖱️ Chuột phải (Context menu)');
+            }
+          }
+        }, 520);
+
+      } else if (e.touches.length === 2) {
+        if (longPressTimer) clearTimeout(longPressTimer);
+        isDragging = true;
+        pinchStartDist = getTouchDist(e.touches[0], e.touches[1]);
+        pinchStartScale = zoomScale;
       }
-    }, { passive: true });
+    }, { passive: false });
 
     viewport.addEventListener('touchmove', (e) => {
       if (e.touches.length === 1) {
-        const currentY = e.touches[0].clientY;
         const currentX = e.touches[0].clientX;
-        const deltaY = touchStartY - currentY;
+        const currentY = e.touches[0].clientY;
         const deltaX = touchStartX - currentX;
-        if (Math.abs(deltaY) > 8 || Math.abs(deltaX) > 8) {
+        const deltaY = touchStartY - currentY;
+        const dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+        if (dist > 14) {
           isDragging = true;
+          if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        }
+
+        if (isDragging) {
+          if (currentInteractionMode === 'trackpad') {
+            // Move virtual cursor
+            const natW = canvasNaturalWidth || 1280;
+            const natH = canvasNaturalHeight || 800;
+            const moveSpeed = 1.6 / zoomScale;
+            trackpadCursorX = Math.max(0, Math.min(natW, trackpadCursorX - deltaX * moveSpeed));
+            trackpadCursorY = Math.max(0, Math.min(natH, trackpadCursorY - deltaY * moveSpeed));
+            updateVirtualCursorDisplay();
+            touchStartX = currentX;
+            touchStartY = currentY;
+            e.preventDefault();
+            return;
+          }
+
+          if (zoomScale > 1.0) {
+            // Pan zoomed canvas
+            zoomPanX -= deltaX * 1.1;
+            zoomPanY -= deltaY * 1.1;
+            applyCanvasTransform();
+            touchStartX = currentX;
+            touchStartY = currentY;
+            e.preventDefault();
+            return;
+          }
+
+          // In Scroll mode or regular Touch scroll
           const now = Date.now();
-          if (now - lastWheelTime > 35) {
+          if (now - lastWheelTime > 40) {
             lastWheelTime = now;
+            const scrollMult = currentInteractionMode === 'scroll' ? 3.0 : 2.0;
             sendInput({
               type: 'wheel',
-              x: canvasNaturalWidth / 2,
-              y: canvasNaturalHeight / 2,
-              deltaX: deltaX * 2,
-              deltaY: deltaY * 2.5,
+              x: (canvasNaturalWidth || 1280) / 2,
+              y: (canvasNaturalHeight || 800) / 2,
+              deltaX: deltaX * scrollMult,
+              deltaY: deltaY * scrollMult,
               clientWidth: canvasNaturalWidth,
               clientHeight: canvasNaturalHeight,
             });
             touchStartX = currentX;
             touchStartY = currentY;
           }
+          e.preventDefault();
+        }
+
+      } else if (e.touches.length === 2) {
+        // Pinch-to-zoom
+        e.preventDefault();
+        const dist = getTouchDist(e.touches[0], e.touches[1]);
+        if (pinchStartDist > 0) {
+          const ratio = dist / pinchStartDist;
+          zoomScale = Math.max(1.0, Math.min(4.0, pinchStartScale * ratio));
+          applyCanvasTransform();
         }
       }
-    }, { passive: true });
+    }, { passive: false });
 
     viewport.addEventListener('touchend', async (e) => {
-      const elapsed = Date.now() - touchStartTime;
-      if (!isDragging && elapsed < 400) {
-        const changeTouch = e.changedTouches[0];
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = canvasNaturalWidth / rect.width;
-        const scaleY = canvasNaturalHeight / rect.height;
-        const x = Math.round((changeTouch.clientX - rect.left) * scaleX);
-        const y = Math.round((changeTouch.clientY - rect.top) * scaleY);
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      if (longPressTriggered) return;
 
-        showTouchRipple(changeTouch.clientX, changeTouch.clientY);
-        const res = await sendInput({ type: 'mousedown', x, y, button: 'left', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
-        if (res?.select && Array.isArray(res.select.options)) {
-          openSelectPicker(res.select.options, res.select.selectedIndex);
-        } else {
-          setTimeout(() => {
-            sendInput({ type: 'mouseup', x, y, button: 'left', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
-          }, 30);
+      const elapsed = Date.now() - touchStartTime;
+
+      if (!isDragging && elapsed < 450 && e.changedTouches.length === 1) {
+        const changeTouch = e.changedTouches[0];
+        const now = Date.now();
+        const timeSinceLastTap = now - lastTapTime;
+        const distFromLastTap = Math.sqrt((changeTouch.clientX - lastTapX) ** 2 + (changeTouch.clientY - lastTapY) ** 2);
+
+        // Double-Tap to Zoom Toggle
+        if (timeSinceLastTap < 320 && distFromLastTap < 28) {
+          lastTapTime = 0;
+          if (zoomScale <= 1.05) {
+            zoomScale = 2.4;
+            const vpRect = viewport.getBoundingClientRect();
+            zoomPanX = (vpRect.width / 2 - changeTouch.clientX) * 1.2;
+            zoomPanY = (vpRect.height / 2 - changeTouch.clientY) * 1.2;
+            applyCanvasTransform();
+            showToast('🔍 Phóng to 2.4x (Nhấp đúp)');
+          } else {
+            resetZoom();
+            showToast('🔍 Vừa khung (1.0x)');
+          }
+          try { tg?.HapticFeedback?.impactOccurred('medium'); } catch {}
+          return;
+        }
+
+        lastTapTime = now;
+        lastTapX = changeTouch.clientX;
+        lastTapY = changeTouch.clientY;
+
+        if (currentInteractionMode === 'touch') {
+          const pt = getCanvasPoint(changeTouch.clientX, changeTouch.clientY);
+          if (pt) {
+            const vpRect = viewport.getBoundingClientRect();
+            showTouchRipple(changeTouch.clientX - vpRect.left, changeTouch.clientY - vpRect.top);
+            const res = await sendInput({ type: 'mousedown', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+            if (res?.select && Array.isArray(res.select.options)) {
+              openSelectPicker(res.select.options, res.select.selectedIndex);
+            } else {
+              setTimeout(() => {
+                sendInput({ type: 'mouseup', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+              }, 30);
+            }
+          }
+        } else if (currentInteractionMode === 'trackpad') {
+          const pt = getCanvasPoint(changeTouch.clientX, changeTouch.clientY);
+          if (pt) {
+            trackpadCursorX = pt.x;
+            trackpadCursorY = pt.y;
+            updateVirtualCursorDisplay();
+            executeTrackpadClick('left');
+          }
         }
       }
     }, { passive: true });
 
-    // Hỗ trợ chuột click cho người dùng mở Telegram Desktop / Web trên máy tính
+    // Desktop Mouse Click Support (Telegram Desktop / Browser)
     viewport.addEventListener('click', async (e) => {
       if (Date.now() - touchStartTime < 500) return;
-      const rect = canvas.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const scaleX = canvasNaturalWidth / rect.width;
-      const scaleY = canvasNaturalHeight / rect.height;
-      const x = Math.round((e.clientX - rect.left) * scaleX);
-      const y = Math.round((e.clientY - rect.top) * scaleY);
-
-      showTouchRipple(e.clientX, e.clientY);
-      const res = await sendInput({ type: 'mousedown', x, y, button: 'left', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+      const pt = getCanvasPoint(e.clientX, e.clientY);
+      if (!pt) return;
+      const vpRect = viewport.getBoundingClientRect();
+      showTouchRipple(e.clientX - vpRect.left, e.clientY - vpRect.top);
+      const res = await sendInput({ type: 'mousedown', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
       if (res?.select && Array.isArray(res.select.options)) {
         openSelectPicker(res.select.options, res.select.selectedIndex);
       } else {
         setTimeout(() => {
-          sendInput({ type: 'mouseup', x, y, button: 'left', clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+          sendInput({ type: 'mouseup', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
         }, 30);
       }
     });
+
+    // Smart Autofill Chips Injection
+    function updateSmartAutofillChips() {
+      const container = document.getElementById('autofillChipsContainer');
+      if (!container) return;
+      const cur = activeSessions.find(s => s.slot === currentSlot);
+      if (!cur) {
+        container.innerHTML = '<span style="font-size:10px;color:#64748b;">Chưa có dữ liệu</span>';
+        return;
+      }
+      const rec = cur.autofillRecord || {};
+      const email = cur.assignedEmail || rec.email || rec.mail || '';
+      const fname = rec.firstname || rec.firstName || '';
+      const lname = rec.lastname || rec.lastName || '';
+      const zip = rec.zipcode || rec.zip || '';
+      const phone = rec.phonenumber || rec.phone || '';
+      const pass = cur.assignedPass || rec.pass || rec.password || '';
+
+      const chips = [];
+      if (email) chips.push({ label: `📧 ${email.split('@')[0]}`, full: email, cls: 'chip-email', title: email });
+      if (fname) chips.push({ label: `👤 ${fname}`, full: fname, cls: 'chip-name', title: fname });
+      if (lname) chips.push({ label: `👤 ${lname}`, full: lname, cls: 'chip-name', title: lname });
+      if (zip) chips.push({ label: `📮 ${zip}`, full: zip, cls: 'chip-zip', title: zip });
+      if (phone) chips.push({ label: `📱 ${phone}`, full: phone, cls: 'chip-phone', title: phone });
+      if (pass) chips.push({ label: `🔑 Mật khẩu`, full: pass, cls: 'chip-pass', title: 'Điền mật khẩu' });
+
+      if (chips.length === 0) {
+        container.innerHTML = '<span style="font-size:10px;color:#64748b;">Chưa có profile mẫu</span>';
+        return;
+      }
+
+      container.innerHTML = chips.map(c => `
+        <div class="autofill-chip ${c.cls}" onclick="injectAutofillText('${escHtml(c.full)}')" title="${escHtml(c.title)}">
+          <span>${escHtml(c.label)}</span>
+        </div>
+      `).join('');
+    }
+
+    window.injectAutofillText = async (text) => {
+      if (!text) return;
+      await sendInput({ type: 'insertText', text });
+      showToast(`Đã điền: "${text.length > 20 ? text.slice(0, 18) + '...' : text}"`);
+      try { tg?.HapticFeedback?.notificationOccurred('success'); } catch {}
+    };
+
+    // Browser Navigation & Scroll Actions
+    window.triggerBrowserBack = async () => {
+      showToast('◀ Đang lùi trang...');
+      await fetch(`/screen/back/${currentSlot}`, { method: 'POST' }).catch(() => {});
+      try { tg?.HapticFeedback?.impactOccurred('light'); } catch {}
+    };
+
+    window.triggerBrowserReload = async () => {
+      showToast('🔄 Đang tải lại trang...');
+      await fetch(`/screen/reload/${currentSlot}`, { method: 'POST' }).catch(() => {});
+      try { tg?.HapticFeedback?.impactOccurred('light'); } catch {}
+    };
+
+    window.triggerPageScroll = (direction) => {
+      sendInput({ type: 'scrollPage', direction });
+      const labels = { top: 'Đầu trang', bottom: 'Đáy trang', up: 'Cuộn lên', down: 'Cuộn xuống' };
+      showToast(`📜 ${labels[direction] || direction}`);
+      try { tg?.HapticFeedback?.impactOccurred('light'); } catch {}
+    };
+
+    // Typing Modal Handlers
+    window.openTypeModal = () => {
+      const modal = document.getElementById('typeModal');
+      const input = document.getElementById('modalTextInput');
+      if (modal) modal.style.display = 'flex';
+      if (input) {
+        input.value = '';
+        setTimeout(() => input.focus(), 80);
+      }
+      try { tg?.HapticFeedback?.selectionChanged(); } catch {}
+    };
+
+    window.closeTypeModal = () => {
+      const modal = document.getElementById('typeModal');
+      if (modal) modal.style.display = 'none';
+    };
+
+    window.submitModalText = async () => {
+      const input = document.getElementById('modalTextInput');
+      if (!input || !input.value) return;
+      const text = input.value;
+      await sendInput({ type: 'insertText', text });
+      showToast(`Đã gõ: "${text}"`);
+      closeTypeModal();
+      try { tg?.HapticFeedback?.notificationOccurred('success'); } catch {}
+    };
+
+    const modalInput = document.getElementById('modalTextInput');
+    if (modalInput) {
+      modalInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitModalText();
+      });
+    }
 
     // Select Dropdown Sheet Modal
     function openSelectPicker(options, selectedIndex) {
@@ -1582,22 +2267,7 @@
       showToast('Đã chọn mục');
     };
 
-    // Virtual Keyboard & Quick Action Keys
-    document.getElementById('btnSendText').addEventListener('click', async () => {
-      const text = textInput.value;
-      if (!text) return;
-      await sendInput({ type: 'insertText', text });
-      textInput.value = '';
-      showToast(`Đã gõ: "${text}"`);
-      try { tg?.HapticFeedback?.notificationOccurred('success'); } catch (e) {}
-    });
-
-    textInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        document.getElementById('btnSendText').click();
-      }
-    });
-
+    // Quick Action Keys (Enter, Tab, Backspace, Space, Paste, Select All)
     document.querySelectorAll('.key-btn[data-key]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const key = btn.dataset.key;
@@ -1607,39 +2277,33 @@
       });
     });
 
-    document.getElementById('btnScrollDown').addEventListener('click', () => {
-      sendInput({
-        type: 'wheel',
-        x: canvasNaturalWidth / 2,
-        y: canvasNaturalHeight / 2,
-        deltaX: 0,
-        deltaY: 500,
-        clientWidth: canvasNaturalWidth,
-        clientHeight: canvasNaturalHeight,
-      });
-    });
-
-    document.getElementById('btnPasteText').addEventListener('click', async () => {
+    document.getElementById('btnPasteText')?.addEventListener('click', async () => {
       await sendInput({ type: 'shortcut', command: 'paste' });
-      showToast('Đã gửi phím dán');
+      showToast('Đã gửi phím dán (Paste)');
     });
 
-    document.getElementById('btnSelectAll').addEventListener('click', async () => {
+    document.getElementById('btnSelectAll')?.addEventListener('click', async () => {
       await sendInput({ type: 'shortcut', command: 'selectAll' });
-      showToast('Đã chọn tất cả');
+      showToast('Đã chọn tất cả (Ctrl+A)');
     });
 
-    document.getElementById('btnBack').addEventListener('click', () => {
-      sendInput({ type: 'back' });
-      showToast('Đã lùi trang');
+    document.getElementById('btnSendText')?.addEventListener('click', async () => {
+      const input = document.getElementById('textInput');
+      const text = input?.value;
+      if (!text) return;
+      await sendInput({ type: 'insertText', text });
+      input.value = '';
+      showToast(`Đã gõ: "${text}"`);
+      try { tg?.HapticFeedback?.notificationOccurred('success'); } catch (e) {}
     });
 
-    document.getElementById('btnReloadSlot').addEventListener('click', () => {
-      sendInput({ type: 'reload' });
-      showToast('Đang tải lại trang');
+    document.getElementById('textInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('btnSendText')?.click();
+      }
     });
 
-    document.getElementById('btnCloseSlot').addEventListener('click', async () => {
+    document.getElementById('btnCloseSlot')?.addEventListener('click', async () => {
       if (!currentSlot) return;
       showToast(`🛑 Đang tắt Slot ${currentSlot}...`);
       try {
@@ -2283,6 +2947,7 @@
         if (cur) {
           urlDisplay.textContent = cur.websiteUrl || cur.tabs?.[0]?.url || 'Đang mở trang...';
           ipDisplay.textContent = `IP: ${cur.exitIp || 'Local'}`;
+          updateSmartAutofillChips();
         } else if (activeSessions.length > 0) {
           currentSlot = activeSessions[0].slot;
           if (screenViewMode === 'single' && !eventSource) {
