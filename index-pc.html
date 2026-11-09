@@ -1154,16 +1154,22 @@
        ========================================================================== */
     .running-header-toolbar {
       display: flex;
+      flex-direction: column;
+      gap: 7px;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      background: linear-gradient(180deg, #131d31 0%, #0d1527 100%);
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .running-header-top {
+      display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 6px 10px;
-      margin-bottom: 8px;
-      background: #131d31;
-      border: 1px solid #22324e;
-      border-radius: 6px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      gap: 10px;
       flex-wrap: wrap;
-      gap: 8px 12px;
     }
 
     .running-header-left {
@@ -1171,16 +1177,17 @@
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
-      flex: 1 1 auto;
-      min-width: 0;
     }
 
     .running-title {
-      font-size: 11.5px;
+      font-size: 13px;
       font-weight: 700;
       color: #38bdf8;
-      letter-spacing: 0.1px;
+      letter-spacing: 0.2px;
       white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
     }
 
     .live-pill {
@@ -1189,12 +1196,13 @@
       gap: 5px;
       padding: 2px 8px;
       background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(52, 211, 153, 0.3);
-      border-radius: 10px;
-      font-size: 10px;
+      border: 1px solid rgba(52, 211, 153, 0.35);
+      border-radius: 20px;
+      font-size: 10.5px;
       font-weight: 600;
       color: #34d399;
       white-space: nowrap;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
     }
 
     .live-dot {
@@ -1202,7 +1210,7 @@
       height: 6px;
       border-radius: 50%;
       background: #34d399;
-      box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.25);
+      box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.3);
       animation: pulseLive 1.5s infinite;
     }
 
@@ -1223,29 +1231,57 @@
       }
     }
 
+    .running-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .running-header-actions .win-btn {
+      white-space: nowrap;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+
     .running-stat-group {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
       flex-wrap: wrap;
+      padding-top: 6px;
+      border-top: 1px solid rgba(30, 41, 59, 0.65);
     }
 
     .run-stat-chip {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 2px 8px;
-      border-radius: 4px;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 6px;
       font-size: 11px;
       font-weight: 500;
-      background: #0f172a;
-      border: 1px solid #22324e;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid #1e293b;
       color: #cbd5e1;
       white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
+    .run-stat-chip:hover {
+      border-color: #38bdf8;
+      background: rgba(30, 41, 59, 0.95);
     }
 
     .run-stat-chip b {
       font-weight: 700;
+      font-family: Consolas, Menlo, monospace;
     }
 
     .run-stat-chip.chip-threads b {
@@ -1254,7 +1290,7 @@
 
     .run-stat-chip.chip-leads {
       background: rgba(16, 185, 129, 0.15);
-      border-color: rgba(52, 211, 153, 0.3);
+      border-color: rgba(52, 211, 153, 0.35);
       color: #34d399;
     }
 
@@ -1264,7 +1300,7 @@
 
     .run-stat-chip.chip-ai {
       background: rgba(168, 85, 247, 0.15);
-      border-color: rgba(192, 132, 252, 0.3);
+      border-color: rgba(192, 132, 252, 0.35);
       color: #d8b4fe;
     }
 
@@ -1272,19 +1308,25 @@
       color: #c084fc;
     }
 
-    .running-header-actions {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      flex-wrap: wrap;
-      flex-shrink: 0;
-      margin-left: auto;
+    .run-stat-chip.chip-bandwidth {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(52, 211, 153, 0.3);
+      color: #34d399;
+      cursor: pointer;
     }
 
-    .running-header-actions .win-btn {
-      white-space: nowrap;
-      font-size: 11px;
-      padding: 3px 8px;
+    .run-stat-chip.chip-711 {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(52, 211, 153, 0.3);
+      color: #34d399;
+      cursor: pointer;
+    }
+
+    .run-stat-chip.chip-point {
+      background: rgba(2, 132, 199, 0.15);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: #38bdf8;
+      cursor: pointer;
     }
 
     /* Running table specific overrides */
@@ -1473,17 +1515,74 @@
       color: #94a3b8;
     }
 
+    /* Offer Sub-Tabs Modernized as Segmented Pills */
+    .run-offer-pills {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #090d16;
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid #1e293b;
+      margin-bottom: 8px;
+      overflow-x: auto;
+      max-width: 100%;
+    }
+
+    .run-offer-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #94a3b8;
+      cursor: pointer;
+      white-space: nowrap;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .run-offer-pill:hover {
+      color: #f1f5f9;
+      background: rgba(30, 41, 59, 0.7);
+    }
+
+    .run-offer-pill.active {
+      color: #ffffff;
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      border-color: #38bdf8;
+      box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+    }
+
+    .run-offer-pill .pill-count {
+      font-size: 10px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      padding: 1px 6px;
+      border-radius: 10px;
+      line-height: 1.3;
+    }
+
+    .run-offer-pill:not(.active) .pill-count {
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+    }
+
     /* Thumbnail Tiles in Screen View */
     #thumbnailGrid {
       background: #090d16 !important;
       border: 1px solid #1e293b;
-      border-radius: 6px;
+      border-radius: 8px;
     }
 
     #thumbnailTiles {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 14px;
       align-items: start;
     }
 
@@ -1491,21 +1590,21 @@
       position: relative;
       cursor: pointer;
       border: 1px solid #1e293b;
-      border-radius: 8px;
+      border-radius: 10px;
       overflow: hidden;
       width: 100%;
       display: flex;
       flex-direction: column;
-      background: #0d1527;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-      transition: all 0.2s ease-in-out;
+      background: linear-gradient(180deg, #10192d 0%, #0c1322 100%);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
       box-sizing: border-box;
     }
 
     .screen-tile-card:hover {
       border-color: #38bdf8;
-      transform: translateY(-2px);
-      box-shadow: 0 8px 20px rgba(56, 189, 248, 0.22);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5), 0 0 16px rgba(56, 189, 248, 0.22);
     }
 
     .screen-tile-header {
@@ -1513,37 +1612,59 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 6px 8px;
+      padding: 6px 10px;
       background: #0f172a;
       border-bottom: 1px solid #1e293b;
-      gap: 6px;
+      gap: 8px;
       z-index: 1;
       box-sizing: border-box;
     }
 
+    .screen-tile-header-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+
     .screen-tile-slot-badge {
-      font-size: 10px;
+      font-size: 10.5px;
       font-weight: 700;
+      font-family: Consolas, Menlo, monospace;
       color: #fff;
-      background: #0284c7;
-      padding: 2px 6px;
-      border-radius: 3px;
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      padding: 2px 7px;
+      border-radius: 4px;
       flex-shrink: 0;
-      letter-spacing: 0.2px;
+      letter-spacing: 0.3px;
+      box-shadow: 0 1px 4px rgba(2, 132, 199, 0.3);
     }
 
     .screen-tile-device-info {
-      font-size: 10.5px;
-      color: #94a3b8;
+      font-size: 11px;
+      color: #cbd5e1;
       font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
 
     .screen-tile-device-info .browser-badge {
+      font-size: 9.5px;
+      font-weight: 700;
       color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
     }
 
     .screen-tile-actions {
@@ -1555,31 +1676,49 @@
 
     .btn-tile-desktop {
       font-size: 10px;
-      padding: 2px 7px;
-      background: rgba(2, 132, 199, 0.18);
+      padding: 2.5px 7px;
+      background: rgba(2, 132, 199, 0.15);
       color: #38bdf8;
       border: 1px solid rgba(2, 132, 199, 0.4);
-      border-radius: 3px;
+      border-radius: 4px;
       cursor: pointer;
       font-weight: 600;
       transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
     }
 
     .btn-tile-desktop:hover {
       background: #0284c7;
       color: #fff;
+      border-color: #38bdf8;
+    }
+
+    .btn-tile-desktop.is-visible {
+      background: rgba(245, 158, 11, 0.18);
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+
+    .btn-tile-desktop.is-visible:hover {
+      background: #d97706;
+      color: #fff;
     }
 
     .btn-tile-close {
       font-size: 10px;
-      padding: 2px 6px;
-      background: rgba(239, 68, 68, 0.15);
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(239, 68, 68, 0.12);
       color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.35);
-      border-radius: 3px;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 4px;
       cursor: pointer;
       font-weight: 700;
-      line-height: 1;
       transition: all 0.15s ease;
     }
 
@@ -1587,6 +1726,7 @@
       background: #ef4444;
       color: #fff;
       border-color: #ef4444;
+      transform: scale(1.08);
     }
 
     .screen-tile-live-badge {
@@ -1597,8 +1737,8 @@
       font-weight: 700;
       color: #ef4444;
       background: rgba(239, 68, 68, 0.12);
-      border: 1px solid rgba(239, 68, 68, 0.25);
-      padding: 1px 5px;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 1.5px 5px;
       border-radius: 3px;
     }
 
@@ -1607,26 +1747,241 @@
       height: 5px;
       border-radius: 50%;
       background: #ef4444;
+      box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);
       animation: pulseLive 1s infinite;
     }
 
-    .screen-tile-card img {
+    /* Mini Mock Browser Bar */
+    .screen-tile-preview-wrap {
+      position: relative;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .screen-tile-browser-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 3px 8px;
+      background: #0a0f1d;
+      border-bottom: 1px solid #1a243a;
+      font-size: 10px;
+      user-select: none;
+    }
+
+    .screen-tile-traffic-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .screen-tile-traffic-dots .mock-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .mock-dot.red { background: #ff5f56; }
+    .mock-dot.yellow { background: #ffbd2e; }
+    .mock-dot.green { background: #27c93f; }
+
+    .screen-tile-url-pill {
+      flex: 1;
+      max-width: 80%;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 3px;
+      padding: 1px 6px;
+      font-size: 9.5px;
+      font-family: Consolas, Menlo, monospace;
+      color: #94a3b8;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .screen-tile-url-pill .lock-icon {
+      font-size: 8.5px;
+      color: #10b981;
+    }
+
+    .screen-tile-img-container {
+      position: relative;
       width: 100%;
       aspect-ratio: 16/9;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .screen-tile-img-container img {
+      width: 100%;
+      height: 100%;
       object-fit: contain;
       display: block;
       background: #000;
     }
 
+    .screen-tile-hover-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(13, 21, 39, 0.6);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .screen-tile-card:hover .screen-tile-hover-overlay {
+      opacity: 1;
+    }
+
+    .hover-action-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 14px;
+      background: rgba(2, 132, 199, 0.9);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 10px rgba(56, 189, 248, 0.5);
+      border: 1px solid #38bdf8;
+      transform: translateY(4px);
+      transition: transform 0.2s ease;
+    }
+
+    .screen-tile-card:hover .hover-action-pill {
+      transform: translateY(0);
+    }
+
     .screen-tile-footer {
       position: relative;
-      background: #0f172a;
+      background: #0d1527;
       border-top: 1px solid #1e293b;
       color: #f1f5f9;
       font-size: 11px;
-      padding: 6px 8px;
+      padding: 6px 10px;
       box-sizing: border-box;
       z-index: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .screen-tile-ip-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .screen-tile-ip-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 11px;
+      color: #38bdf8;
+      cursor: pointer;
+      padding: 1px 4px;
+      border-radius: 3px;
+      transition: background 0.15s ease;
+    }
+
+    .screen-tile-ip-badge:hover {
+      background: rgba(56, 189, 248, 0.15);
+      color: #7dd3fc;
+    }
+
+    .screen-tile-bw-badge {
+      font-size: 10px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #34d399;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .screen-tile-offer-badge {
+      font-size: 10px;
+      background: rgba(99, 102, 241, 0.15);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .screen-tile-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 11px;
+      min-width: 0;
+    }
+
+    .tile-status {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .tile-status.status-lead {
+      color: #34d399;
+      text-shadow: 0 0 8px rgba(52, 211, 153, 0.3);
+    }
+
+    .tile-status.status-checking {
+      color: #fbbf24;
+      animation: pulseAmber 1.5s infinite ease-in-out;
+    }
+
+    .tile-status.status-jump {
+      color: #38bdf8;
+    }
+
+    .tile-status.status-idle {
+      color: #94a3b8;
+    }
+
+    .tile-email-chip {
+      font-size: 9.5px;
+      color: #94a3b8;
+      background: #1e293b;
+      padding: 1px 5px;
+      border-radius: 3px;
+      max-width: 110px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    @keyframes pulseAmber {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.65; }
     }
 
     /* Screen Modal Tab Bar & Chips */
@@ -2313,59 +2668,58 @@
       <div class="tab-panel" id="panel-tabRunning">
         <!-- Running Header Toolbar -->
         <div class="running-header-toolbar">
-          <div class="running-header-left">
-            <span class="running-title">⚡ Danh sách luồng đang chạy</span>
-            <span class="live-pill" title="Hệ thống tự động đồng bộ trạng thái mỗi 1.5 giây">
-              <span class="live-dot"></span> Realtime
-            </span>
-            <div class="running-stat-group">
-              <span class="run-stat-chip chip-threads" title="Tổng số luồng trình duyệt đang mở">
-                🚀 <b id="runStatThreads">0</b> luồng
-              </span>
-              <span class="run-stat-chip chip-leads" title="Số luồng đã bắt trúng Lead">
-                🎯 <b id="runStatLeads">0</b> lead
-              </span>
-              <span class="run-stat-chip chip-ai" title="Số luồng đang được AI hỗ trợ giải quyết">
-                🤖 <b id="runStatAi">0</b> AI
-              </span>
-              <span class="run-stat-chip chip-bandwidth" id="runStatBandwidthChip"
-                style="background:rgba(16, 185, 129, 0.15);color:#34d399;border:1px solid rgba(16, 185, 129, 0.3);cursor:pointer;"
-                onclick="openBandwidthModal()"
-                title="Tổng băng thông tiêu thụ hôm nay (Click để xem thống kê chi tiết theo ngày)">
-                📶 <b id="runStatBandwidthToday">0 B</b> hôm nay
-              </span>
-              <span class="run-stat-chip chip-711" id="runStat711Chip"
-                style="background:rgba(16, 185, 129, 0.15);color:#34d399;border:1px solid rgba(16, 185, 129, 0.3);cursor:pointer;display:inline-flex;align-items:center;gap:4px;"
-                onclick="openBandwidthModal(null, '711')"
-                title="Số dư băng thông 711Proxy còn lại (Click xem chi tiết: Số đang có, Số đã dùng, Còn lại)">
-                🌐 711: Còn <b id="runStat711Remaining">--</b>
-              </span>
-              <span class="run-stat-chip"
-                style="background:rgba(2, 132, 199, 0.15);color:#38bdf8;border:1px solid rgba(56, 189, 248, 0.3);cursor:pointer;"
-                onclick="switchTab('ToffersLeads')" title="Số Point hiện tại từ toffers.top (Click xem danh sách lead)">
-                💎 <b id="runStatPoint">--</b> pt
+          <div class="running-header-top">
+            <div class="running-header-left">
+              <span class="running-title">⚡ Danh sách luồng đang chạy</span>
+              <span class="live-pill" title="Hệ thống tự động đồng bộ trạng thái mỗi 1.5 giây">
+                <span class="live-dot"></span> Realtime
               </span>
             </div>
+            <div class="running-header-actions">
+              <button type="button" class="win-btn" onclick="fetchRunningState()"
+                title="Cập nhật trạng thái ngay lập tức">🔄 Làm mới</button>
+              <button type="button" id="btnToggleScreenView" class="win-btn" onclick="toggleScreenView()"
+                title="Chuyển đổi giữa chế độ Bảng và Xem màn hình trực tiếp">📺 Xem màn hình</button>
+              <button type="button" class="win-btn" onclick="handleShowAllBrowsers()"
+                title="Bung tất cả cửa sổ trình duyệt ra màn hình Desktop">🖥️ Hiện tất cả</button>
+              <button type="button" class="win-btn" onclick="handleHideAllBrowsers()"
+                title="Thu nhỏ toàn bộ trình duyệt về chạy ngầm trong app">🔽 Ẩn tất cả</button>
+              <button type="button" class="win-btn win-btn-danger" onclick="handleCloseAll()"
+                title="Đóng toàn bộ cửa sổ trình duyệt đang chạy">✕ Đóng tất cả</button>
+            </div>
           </div>
-          <div class="running-header-actions">
-            <button type="button" class="win-btn" onclick="fetchRunningState()"
-              title="Cập nhật trạng thái ngay lập tức">🔄 Làm mới</button>
-            <button type="button" id="btnToggleScreenView" class="win-btn" onclick="toggleScreenView()"
-              title="Chuyển đổi giữa chế độ Bảng và Xem màn hình trực tiếp">📺 Xem màn hình</button>
-            <button type="button" class="win-btn" onclick="handleShowAllBrowsers()"
-              title="Bung tất cả cửa sổ trình duyệt ra màn hình Desktop">🖥️ Hiện tất cả</button>
-            <button type="button" class="win-btn" onclick="handleHideAllBrowsers()"
-              title="Thu nhỏ toàn bộ trình duyệt về chạy ngầm trong app">🔽 Ẩn tất cả</button>
-            <button type="button" class="win-btn win-btn-danger" onclick="handleCloseAll()"
-              title="Đóng toàn bộ cửa sổ trình duyệt đang chạy">✕ Đóng tất cả</button>
+          <div class="running-stat-group">
+            <span class="run-stat-chip chip-threads" title="Tổng số luồng trình duyệt đang mở">
+              🚀 <b id="runStatThreads">0</b> luồng
+            </span>
+            <span class="run-stat-chip chip-leads" title="Số luồng đã bắt trúng Lead">
+              🎯 <b id="runStatLeads">0</b> lead
+            </span>
+            <span class="run-stat-chip chip-ai" title="Số luồng đang được AI hỗ trợ giải quyết">
+              🤖 <b id="runStatAi">0</b> AI
+            </span>
+            <span class="run-stat-chip chip-bandwidth" id="runStatBandwidthChip"
+              onclick="openBandwidthModal()"
+              title="Tổng băng thông tiêu thụ hôm nay (Click để xem thống kê chi tiết theo ngày)">
+              📶 <b id="runStatBandwidthToday">0 B</b> hôm nay
+            </span>
+            <span class="run-stat-chip chip-711" id="runStat711Chip"
+              onclick="openBandwidthModal(null, '711')"
+              title="Số dư băng thông 711Proxy còn lại (Click xem chi tiết: Số đang có, Số đã dùng, Còn lại)">
+              🌐 711: Còn <b id="runStat711Remaining">--</b>
+            </span>
+            <span class="run-stat-chip chip-point" id="runStatPointChip"
+              onclick="switchTab('ToffersLeads')" title="Số Point hiện tại từ toffers.top (Click xem danh sách lead)">
+              💎 <b id="runStatPoint">--</b> pt
+            </span>
           </div>
         </div>
 
         <!-- Offer Sub-Tabs for Running Threads -->
-        <div class="win-tab-headers" id="runningOfferTabHeaders"
-          style="margin-bottom:6px;border-bottom:1px solid var(--card-border);">
-          <div class="win-tab active" data-run-offer="all" onclick="switchRunningOfferTab('all')">🌐 Tất cả luồng (<span
-              id="countRunAll">0</span>)</div>
+        <div class="run-offer-pills" id="runningOfferTabHeaders">
+          <div class="run-offer-pill active" data-run-offer="all" onclick="switchRunningOfferTab('all')">
+            🌐 Tất cả luồng <span class="pill-count" id="countRunAll">0</span>
+          </div>
         </div>
 
         <!-- Thumbnail Grid (ẩn mặc định) -->
@@ -5613,6 +5967,9 @@
     function switchRunningOfferTab(offerKey) {
       currentSelectedRunningOfferTab = String(offerKey);
       fetchRunningState();
+      if (_screenViewActive) {
+        _pollThumbnails();
+      }
     }
 
     function switchOfferLogTab(offerKey) {
@@ -5739,10 +6096,10 @@
       if (runTabContainer) {
         const sortedRunOffers = [...allOfferKeys].sort((a, b) => Number(a) - Number(b));
         const tabsHtml = [
-          `<div class="win-tab ${currentSelectedRunningOfferTab === 'all' ? 'active' : ''}" data-run-offer="all" onclick="switchRunningOfferTab('all')">🌐 Tất cả luồng (<span id="countRunAll">${sessions.length}</span>)</div>`,
+          `<div class="run-offer-pill ${currentSelectedRunningOfferTab === 'all' ? 'active' : ''}" data-run-offer="all" onclick="switchRunningOfferTab('all')">🌐 Tất cả luồng <span class="pill-count" id="countRunAll">${sessions.length}</span></div>`,
           ...sortedRunOffers.map(k => {
             const cnt = runOfferCounts[k] || 0;
-            return `<div class="win-tab ${currentSelectedRunningOfferTab === k ? 'active' : ''}" data-run-offer="${k}" onclick="switchRunningOfferTab('${k}')">🏷️ Offer ${k} (<span>${cnt}</span>)</div>`;
+            return `<div class="run-offer-pill ${currentSelectedRunningOfferTab === k ? 'active' : ''}" data-run-offer="${k}" onclick="switchRunningOfferTab('${k}')">🏷️ Offer ${k} <span class="pill-count">${cnt}</span></div>`;
           })
         ].join('');
         if (runTabContainer.innerHTML !== tabsHtml) {
@@ -6525,95 +6882,184 @@
       if (_thumbPollTimer) { clearInterval(_thumbPollTimer); _thumbPollTimer = null; }
     }
 
+    function getDeviceIcon(str) {
+      if (!str) return '💻';
+      const s = String(str).toLowerCase();
+      if (s.includes('android')) return '🤖';
+      if (s.includes('iphone') || s.includes('ios')) return '📱';
+      if (s.includes('ipad')) return '📲';
+      if (s.includes('mac') || s.includes('darwin')) return '🍎';
+      if (s.includes('win')) return '🪟';
+      if (s.includes('linux')) return '🐧';
+      return '💻';
+    }
+
+    function getCleanDeviceName(entry) {
+      let name = entry.deviceVersion || entry.deviceProfile || 'Desktop';
+      name = name.split(' · ')[0].trim();
+      return name;
+    }
+
+    function getCleanBrowserVersion(ver) {
+      if (!ver) return 'Chrome';
+      const m = String(ver).match(/^(\d+)/);
+      if (m) return `Chrome ${m[1]}`;
+      return String(ver);
+    }
+
+    function getShortDomain(url) {
+      if (!url || typeof url !== 'string') return '';
+      try {
+        const u = new URL(url);
+        if (u.protocol === 'about:' || u.protocol === 'chrome:') return u.href;
+        return u.hostname.replace(/^www\./, '');
+      } catch {
+        return url.replace(/^https?:\/\//, '').split('/')[0] || '';
+      }
+    }
+
     function _pollThumbnails() {
       if (!_screenViewActive || document.hidden) return;
       const tilesDiv = document.getElementById('thumbnailTiles');
       const emptyDiv = document.getElementById('thumbnailEmpty');
-      if (_screenSlots.length === 0) {
+
+      const filteredSlots = currentSelectedRunningOfferTab === 'all'
+        ? _screenSlots
+        : _screenSlots.filter(s => String(s.offerNumber || 1) === currentSelectedRunningOfferTab);
+
+      if (filteredSlots.length === 0) {
         tilesDiv.innerHTML = '';
         emptyDiv.style.display = 'block';
+        emptyDiv.textContent = currentSelectedRunningOfferTab === 'all'
+          ? 'Không có luồng trình duyệt nào đang chạy.'
+          : `Không có luồng nào đang chạy cho Offer ${currentSelectedRunningOfferTab}.`;
         return;
       }
       emptyDiv.style.display = 'none';
+
       // Sync tiles: thêm mới / xoá cũ
       const existingSlots = new Set([...tilesDiv.querySelectorAll('[data-slot]')].map(el => +el.dataset.slot));
-      const currentSlots = new Set(_screenSlots.map(s => s.slot));
+      const currentSlotIds = new Set(filteredSlots.map(s => s.slot));
       for (const slot of existingSlots) {
-        if (!currentSlots.has(slot)) tilesDiv.querySelector(`[data-slot="${slot}"]`)?.remove();
+        if (!currentSlotIds.has(slot)) tilesDiv.querySelector(`[data-slot="${slot}"]`)?.remove();
       }
-      for (const entry of _screenSlots) {
-        const { slot, ip, leadCheckStatus, completedScreens, pageJumps, offerNumber, currentAction } = entry;
+
+      for (const entry of filteredSlots) {
+        const { slot, ip, leadCheckStatus, completedScreens, pageJumps, offerNumber, currentAction, isWindowVisible } = entry;
         let tile = tilesDiv.querySelector(`[data-slot="${slot}"]`);
+        const devIcon = getDeviceIcon(entry.deviceVersion || entry.deviceProfile);
+        const devClean = getCleanDeviceName(entry);
+        const browserClean = getCleanBrowserVersion(entry.version);
+        const domainShort = getShortDomain(entry.websiteUrl) || (ip ? `proxy: ${ip}` : 'connecting...');
+
         if (!tile) {
           tile = document.createElement('div');
           tile.dataset.slot = slot;
           tile.className = 'screen-tile-card';
           tile.onclick = () => openScreenModal(slot);
 
-          const header = document.createElement('div');
-          header.className = 'screen-tile-header';
-          header.innerHTML = `
-            <div style="display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden;">
-              <span class="screen-tile-slot-badge">Slot ${slot}</span>
-              <span class="screen-tile-device-info" title="${escHtml(entry.deviceSummary || entry.deviceVersion || entry.deviceProfile || '')}">${escHtml(entry.deviceVersion || entry.deviceProfile || 'Windows 10')} · <span class="browser-badge">${escHtml(entry.version || 'Chrome')}</span></span>
+          tile.innerHTML = `
+            <div class="screen-tile-header">
+              <div class="screen-tile-header-left">
+                <span class="screen-tile-slot-badge">Slot ${slot}</span>
+                <span class="screen-tile-device-info" title="${escHtml(entry.deviceSummary || entry.deviceVersion || entry.deviceProfile || '')}">
+                  <span class="device-icon">${devIcon}</span>
+                  <span class="device-name">${escHtml(devClean)}</span>
+                  <span class="browser-badge">${escHtml(browserClean)}</span>
+                </span>
+              </div>
+              <div class="screen-tile-actions">
+                <button type="button" class="btn-tile-desktop ${isWindowVisible ? 'is-visible' : ''}" onclick="event.stopPropagation(); toggleBrowserWindow(${slot}, ${Boolean(isWindowVisible)});" title="${isWindowVisible ? 'Thu nhỏ cửa sổ về chạy ngầm' : 'Bung cửa sổ ra Desktop'}">
+                  ${isWindowVisible ? '🔽 Ẩn' : '🖥️ Desktop'}
+                </button>
+                <button type="button" class="btn-tile-close" onclick="event.stopPropagation(); closeSingleBrowser(${slot});" title="Đóng trình duyệt Slot ${slot}">✕</button>
+                <span class="screen-tile-live-badge"><span class="screen-tile-live-dot"></span> LIVE</span>
+              </div>
             </div>
-            <div class="screen-tile-actions">
-              <button type="button" class="btn-tile-desktop" onclick="event.stopPropagation(); toggleBrowserWindow(${slot}, ${Boolean(entry.isWindowVisible)});" title="Bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop">${entry.isWindowVisible ? '🔽 Ẩn' : '🖥️ Desktop'}</button>
-              <button type="button" class="btn-tile-close" onclick="event.stopPropagation(); closeSingleBrowser(${slot});" title="Đóng trình duyệt Slot ${slot} (✕)">✕</button>
-              <span class="screen-tile-live-badge"><span class="screen-tile-live-dot"></span> LIVE</span>
+            <div class="screen-tile-preview-wrap">
+              <div class="screen-tile-browser-bar">
+                <div class="screen-tile-traffic-dots">
+                  <span class="mock-dot red"></span>
+                  <span class="mock-dot yellow"></span>
+                  <span class="mock-dot green"></span>
+                </div>
+                <div class="screen-tile-url-pill" title="${escHtml(entry.websiteUrl || '')}">
+                  <span class="lock-icon">🔒</span>
+                  <span class="url-text">${escHtml(domainShort)}</span>
+                </div>
+              </div>
+              <div class="screen-tile-img-container">
+                <img alt="Slot ${slot}" />
+                <div class="screen-tile-hover-overlay">
+                  <span class="hover-action-pill">🔍 Mở tương tác full</span>
+                </div>
+              </div>
             </div>
+            <div class="screen-tile-footer"></div>
           `;
-          tile.appendChild(header);
-
-          const img = document.createElement('img');
-          img.style.cssText = 'width:100%;aspect-ratio:16/9;object-fit:contain;display:block;background:#000;';
-          img.alt = `Slot ${slot}`;
-          tile.appendChild(img);
-
-          const footer = document.createElement('div');
-          footer.className = 'screen-tile-footer';
-          tile.appendChild(footer);
-
           tilesDiv.appendChild(tile);
         }
+
+        // Cập nhật nút Desktop
         const btnDesktop = tile.querySelector('.btn-tile-desktop');
         if (btnDesktop) {
-          btnDesktop.textContent = entry.isWindowVisible ? '🔽 Ẩn' : '🖥️ Desktop';
-          btnDesktop.onclick = (e) => { e.stopPropagation(); toggleBrowserWindow(slot, Boolean(entry.isWindowVisible)); };
+          btnDesktop.textContent = isWindowVisible ? '🔽 Ẩn' : '🖥️ Desktop';
+          btnDesktop.title = isWindowVisible ? 'Thu nhỏ cửa sổ về chạy ngầm' : 'Bung cửa sổ ra Desktop';
+          btnDesktop.classList.toggle('is-visible', Boolean(isWindowVisible));
+          btnDesktop.onclick = (e) => { e.stopPropagation(); toggleBrowserWindow(slot, Boolean(isWindowVisible)); };
         }
+
+        // Cập nhật Domain / URL
+        const urlTextEl = tile.querySelector('.screen-tile-url-pill .url-text');
+        if (urlTextEl && urlTextEl.textContent !== domainShort) {
+          urlTextEl.textContent = domainShort;
+        }
+
+        // Cập nhật Footer
         const footer = tile.querySelector('.screen-tile-footer');
         if (footer) {
           let statusHtml = '';
-          if (leadCheckStatus === 'confirmed') {
-            statusHtml = `<span style="color:#22c55e;font-weight:600;">✅ Có lead (Màn ${(completedScreens || 0) + 1})</span>`;
+          if (leadCheckStatus === 'confirmed' || leadCheckStatus === 'matched') {
+            statusHtml = `<span class="tile-status status-lead">✅ Có Lead (Màn ${(completedScreens || 0) + 1})</span>`;
           } else if (leadCheckStatus === 'checking') {
-            statusHtml = entry.leadCheckMessage
-              ? `<span style="color:#f59e0b;font-weight:600;">⏳ ${escHtml(entry.leadCheckMessage)}</span>`
-              : `<span style="color:#f59e0b;font-weight:600;">⏳ Chờ lead (2×30s)...</span>`;
+            statusHtml = `<span class="tile-status status-checking">⏳ ${escHtml(entry.leadCheckMessage || 'Chờ lead (2×30s)...')}</span>`;
           } else if (completedScreens > 0) {
-            statusHtml = `<span style="color:#38bdf8;">📄 Màn ${completedScreens + 1}/4 (Nhảy ${pageJumps || completedScreens})</span>`;
+            statusHtml = `<span class="tile-status status-jump">📄 Màn ${completedScreens + 1} (${pageJumps || completedScreens} lần nhảy)</span>`;
           } else {
-            statusHtml = `<span style="color:#94a3b8;">${currentAction || 'Đang mở offer...'}</span>`;
+            statusHtml = `<span class="tile-status status-idle">⚡ ${escHtml(currentAction || 'Đang mở offer...')}</span>`;
           }
+
           const bwBadge = entry.bandwidthFormatted
-            ? `<span style="font-size:10px;background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.35);color:#34d399;padding:1px 5px;border-radius:3px;font-weight:600;" title="Băng thông: ↑${entry.bytesSent ? formatBytes(entry.bytesSent) : '0 B'} · ↓${entry.bytesReceived ? formatBytes(entry.bytesReceived) : '0 B'}">📶 ${entry.bandwidthFormatted}</span>`
+            ? `<span class="screen-tile-bw-badge" title="Băng thông: ↑${entry.bytesSent ? formatBytes(entry.bytesSent) : '0 B'} · ↓${entry.bytesReceived ? formatBytes(entry.bytesReceived) : '0 B'}">📶 ${entry.bandwidthFormatted}</span>`
             : '';
+
+          const emailChip = entry.assignedEmail
+            ? `<span class="tile-email-chip" title="Email gán: ${escHtml(entry.assignedEmail)}">📧 ${escHtml(entry.assignedEmail.split('@')[0])}</span>`
+            : '';
+
           footer.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;gap:6px;">
-              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🌐 <b>${ip || 'Đang kết nối...'}</b></span>
+            <div class="screen-tile-ip-row">
+              <span class="screen-tile-ip-badge" onclick="event.stopPropagation(); copyTextToClipboard('${ip}');" title="Nhấp để copy IP: ${ip || ''}">
+                🌐 <b>${ip || 'Đang kết nối...'}</b>
+                ${ip ? '<span style="font-size:9.5px;opacity:0.75;">📋</span>' : ''}
+              </span>
               <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
                 ${bwBadge}
-                <span style="font-size:10px;background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:1px 5px;border-radius:3px;font-weight:600;">Offer ${offerNumber || 1}</span>
+                <span class="screen-tile-offer-badge">Offer ${offerNumber || 1}</span>
               </div>
             </div>
-            <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${statusHtml}</div>
+            <div class="screen-tile-status-row">
+              ${statusHtml}
+              ${emailChip}
+            </div>
           `;
         }
+
         tile.title = ip ? `Slot ${slot} (${ip}) — Nhấp để mở màn hình tương tác full` : `Slot ${slot} — Nhấp để mở màn hình tương tác full`;
+
         // Refresh ảnh bằng cache-buster (chỉ tải khi slot không đang mở xem trực tiếp ở modal)
         if (_screenActiveSlot === slot) continue;
-        const img = tile.querySelector('img');
-        // Tải ảnh mới ở nền rồi mới thay (không nháy đen), bỏ qua nếu ảnh trước chưa tải xong (không dồn request).
+        const img = tile.querySelector('.screen-tile-img-container img');
         if (img && !img._uxLoading) {
           img._uxLoading = true;
           const next = new Image();
@@ -7226,6 +7672,8 @@
         bytesSent: s.bytesSent || 0,
         bytesReceived: s.bytesReceived || 0,
         tabs: s.tabs || [],
+        websiteUrl: s.websiteUrl || (s.tabs && s.tabs[0] ? s.tabs[0].url : '') || '',
+        assignedEmail: s.assignedEmail || '',
       }));
     }
 
