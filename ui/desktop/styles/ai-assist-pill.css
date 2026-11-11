@@ -1,0 +1,15 @@
+/* AI Assist pill */
+    .option-pill-ai input[type="checkbox"] {
+      accent-color: #f59e0b;
+    }
+
+    .option-pill-ai:has(input:checked),
+    .option-pill-ai.is-checked {
+      background: rgba(245, 158, 11, 0.18);
+      border-color: #f59e0b;
+      color: #fbbf24;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(245, 158, 11, 0.25);
+    }
+
+    

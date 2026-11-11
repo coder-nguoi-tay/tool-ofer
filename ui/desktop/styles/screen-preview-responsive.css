@@ -1,0 +1,96 @@
+/* Toolbar preview trình duyệt giữ đủ nút khi cửa sổ hẹp. */
+.screen-preview-header {
+  min-width: 0;
+  gap: 8px 12px;
+}
+
+.screen-preview-heading,
+.screen-preview-actions {
+  min-width: 0;
+}
+
+.screen-preview-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.screen-preview-actions > button {
+  flex: 0 0 auto;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.screen-html-toolbar {
+  flex-wrap: wrap;
+}
+
+.screen-html-toolbar > strong {
+  flex: 0 0 auto;
+}
+
+.screen-address-bar,
+.screen-address-field {
+  min-width: 0;
+}
+
+#screenUrlInput {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .screen-preview-header {
+    flex-wrap: wrap;
+    align-items: flex-start !important;
+    padding: 6px 10px !important;
+  }
+
+  .screen-preview-heading {
+    flex: 1 1 180px;
+    flex-wrap: wrap;
+    gap: 6px 10px !important;
+  }
+
+  .screen-preview-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .screen-html-toolbar > select {
+    flex-basis: 180px;
+  }
+}
+
+@media (max-width: 520px) {
+  .screen-preview-actions {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .screen-preview-actions > button {
+    width: 100%;
+    min-width: 0;
+    padding-right: 5px !important;
+    padding-left: 5px !important;
+    white-space: normal;
+  }
+
+  .screen-html-toolbar > strong {
+    flex-basis: 100%;
+  }
+
+  .screen-html-toolbar > select {
+    flex-basis: 100%;
+  }
+
+  .screen-address-bar {
+    padding-right: 8px !important;
+    padding-left: 8px !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .screen-preview-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

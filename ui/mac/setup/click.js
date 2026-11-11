@@ -1,0 +1,1 @@
+autoRefillButton.addEventListener('click', toggleAutoRefill);

@@ -1,0 +1,60 @@
+/* Virtual Mouse Cursor for Trackpad Mode */
+    .virtual-cursor {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      pointer-events: none;
+      z-index: 22;
+      display: none;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8));
+    }
+    .virtual-cursor-arrow {
+      width: 0;
+      height: 0;
+      border-top: 14px solid #38bdf8;
+      border-right: 10px solid transparent;
+      transform: rotate(-35deg);
+    }
+    .virtual-cursor-target {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #38bdf8;
+      border-radius: 50%;
+      top: -7px;
+      left: -7px;
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    .trackpad-action-bar {
+      display: none;
+      gap: 6px;
+      padding: 6px 8px;
+      background: #0d1527;
+      border-top: 1px solid #1e293b;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .trackpad-btn {
+      flex: 1;
+      padding: 8px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      user-select: none;
+    }
+    .trackpad-btn:active {
+      background: #0284c7;
+      border-color: #38bdf8;
+    }
+
+    

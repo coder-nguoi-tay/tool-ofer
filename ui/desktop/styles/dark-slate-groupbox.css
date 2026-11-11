@@ -1,0 +1,18 @@
+/* Dark Slate GroupBox */
+    fieldset.win-group {
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 14px 12px 14px;
+      margin: 6px 0 10px 0;
+      background: #131d31;
+    }
+
+    legend.win-legend {
+      font-weight: 700;
+      font-size: 12px;
+      color: #38bdf8;
+      padding: 0 8px;
+      margin-left: 4px;
+    }
+
+    

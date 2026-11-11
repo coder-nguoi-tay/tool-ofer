@@ -1,0 +1,25 @@
+import { handleStatusCommand } from './status.mjs';
+import { handleRunCommand } from './run.mjs';
+import { handleRunKeepCommand } from './run-keep.mjs';
+import { handleStopCommand } from './stop.mjs';
+import { handlePauseCommand } from './pause.mjs';
+import { handleProxyCommand } from './proxy.mjs';
+import { handleClearproxyCommand } from './clearproxy.mjs';
+import { handleEmailCommand } from './email.mjs';
+import { handleDoneCommand } from './done.mjs';
+import { handleSpeedCommand } from './speed.mjs';
+import { handleBuyCommand } from './buy.mjs';
+import { handleResetCommand } from './reset.mjs';
+import { handleLogCommand } from './log.mjs';
+import { handleClearLogCommand } from './clear-log.mjs';
+import { handleBwCommand } from './bw.mjs';
+import { handlePointCommand } from './point.mjs';
+import { handleAppCommand } from './app.mjs';
+import { handleScreenCommand } from './screen.mjs';
+import { handleSlotsCommand } from './slots.mjs';
+import { handleCloseCommand } from './close.mjs';
+import { handleHelpCommand } from './help.mjs';
+import { handleMenuCommand } from './menu.mjs';
+import { handleNaturalLanguageCommand } from './natural-language.mjs';
+export const commandHandlers = [handleStatusCommand, handleRunCommand, handleRunKeepCommand, handleStopCommand, handlePauseCommand, handleProxyCommand, handleClearproxyCommand, handleEmailCommand, handleDoneCommand, handleSpeedCommand, handleBuyCommand, handleResetCommand, handleLogCommand, handleClearLogCommand, handleBwCommand, handlePointCommand, handleAppCommand, handleScreenCommand, handleSlotsCommand, handleCloseCommand, handleHelpCommand, handleMenuCommand, handleNaturalLanguageCommand];
+

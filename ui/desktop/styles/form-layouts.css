@@ -1,0 +1,18 @@
+/* Form Layouts */
+    .form-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .form-label {
+      width: 105px;
+      flex-shrink: 0;
+      font-size: 12px;
+      color: #cbd5e1;
+      text-align: left;
+      font-weight: 500;
+    }
+
+    

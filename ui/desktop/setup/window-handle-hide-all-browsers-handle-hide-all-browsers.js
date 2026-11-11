@@ -1,0 +1,1 @@
+window.handleHideAllBrowsers = handleHideAllBrowsers;

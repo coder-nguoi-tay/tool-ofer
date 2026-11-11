@@ -1,0 +1,1 @@
+window.switchInfoSubTab = switchInfoSubTab;

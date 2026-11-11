@@ -1,0 +1,181 @@
+/* ==========================================================================
+       Tab Running Enhanced Styles
+       ========================================================================== */
+    .running-header-toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      background: linear-gradient(180deg, #131d31 0%, #0d1527 100%);
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .running-header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .running-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .running-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #38bdf8;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(52, 211, 153, 0.35);
+      border-radius: 20px;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #34d399;
+      white-space: nowrap;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
+    }
+
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #34d399;
+      box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.3);
+      animation: pulseLive 1.5s infinite;
+    }
+
+    @keyframes pulseLive {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5);
+      }
+
+      70% {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 5px rgba(52, 211, 153, 0);
+      }
+
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+      }
+    }
+
+    .running-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .running-header-actions .win-btn {
+      white-space: nowrap;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+
+    .running-stat-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding-top: 6px;
+      border-top: 1px solid rgba(30, 41, 59, 0.65);
+    }
+
+    .run-stat-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 500;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid #1e293b;
+      color: #cbd5e1;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
+    .run-stat-chip:hover {
+      border-color: #38bdf8;
+      background: rgba(30, 41, 59, 0.95);
+    }
+
+    .run-stat-chip b {
+      font-weight: 700;
+      font-family: Consolas, Menlo, monospace;
+    }
+
+    .run-stat-chip.chip-threads b {
+      color: #38bdf8;
+    }
+
+    .run-stat-chip.chip-leads {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(52, 211, 153, 0.35);
+      color: #34d399;
+    }
+
+    .run-stat-chip.chip-leads b {
+      color: #34d399;
+    }
+
+    .run-stat-chip.chip-ai {
+      background: rgba(168, 85, 247, 0.15);
+      border-color: rgba(192, 132, 252, 0.35);
+      color: #d8b4fe;
+    }
+
+    .run-stat-chip.chip-ai b {
+      color: #c084fc;
+    }
+
+    .run-stat-chip.chip-bandwidth {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(52, 211, 153, 0.3);
+      color: #34d399;
+      cursor: pointer;
+    }
+
+    .run-stat-chip.chip-711 {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(52, 211, 153, 0.3);
+      color: #34d399;
+      cursor: pointer;
+    }
+
+    .run-stat-chip.chip-point {
+      background: rgba(2, 132, 199, 0.15);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: #38bdf8;
+      cursor: pointer;
+    }
+
+    

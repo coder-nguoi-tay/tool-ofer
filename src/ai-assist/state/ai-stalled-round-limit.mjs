@@ -1,0 +1,2 @@
+const AI_STALLED_ROUND_LIMIT = 3;
+export { AI_STALLED_ROUND_LIMIT };

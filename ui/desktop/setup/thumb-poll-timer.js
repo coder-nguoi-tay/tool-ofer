@@ -1,0 +1,1 @@
+let _thumbPollTimer = null;

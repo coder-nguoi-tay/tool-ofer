@@ -1,0 +1,2 @@
+const MAX_CONCURRENT_AGT = 4;
+export { MAX_CONCURRENT_AGT };

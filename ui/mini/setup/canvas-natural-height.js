@@ -1,0 +1,1 @@
+let canvasNaturalHeight = 800;

@@ -1,0 +1,22 @@
+/* 2. Clickable IP & badges */
+    .clickable-ip {
+      font-weight: 600;
+      color: #38bdf8;
+      font-size: 11px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      padding: 1px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-block;
+    }
+
+    .clickable-ip:hover {
+      background: #1e293b;
+      border-color: #38bdf8;
+      color: #7dd3fc;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+    }
+
+    

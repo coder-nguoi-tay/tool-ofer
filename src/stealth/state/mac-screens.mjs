@@ -1,0 +1,42 @@
+const macScreens = [{
+  width: 1440,
+  height: 900,
+  dpr: 2,
+  availTop: 25
+}, {
+  width: 1470,
+  height: 956,
+  dpr: 2,
+  availTop: 37
+}, {
+  width: 1512,
+  height: 982,
+  dpr: 2,
+  availTop: 37
+}, {
+  width: 1710,
+  height: 1112,
+  dpr: 2,
+  availTop: 37
+}, {
+  width: 1728,
+  height: 1117,
+  dpr: 2,
+  availTop: 37
+}, {
+  width: 1920,
+  height: 1080,
+  dpr: 1,
+  availTop: 25
+}, {
+  width: 2560,
+  height: 1440,
+  dpr: 1,
+  availTop: 25
+}, {
+  width: 2240,
+  height: 1260,
+  dpr: 2,
+  availTop: 25
+}];
+export { macScreens };

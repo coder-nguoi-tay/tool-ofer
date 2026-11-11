@@ -1,0 +1,1 @@
+let screenViewMode = 'grid';

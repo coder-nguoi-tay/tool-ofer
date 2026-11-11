@@ -1,0 +1,1 @@
+logFilterSlot.addEventListener('change', renderLogs);

@@ -1,0 +1,1 @@
+window.syncOptionPills = syncOptionPills;

@@ -1,0 +1,1 @@
+window.switchBandwidthSubTab = switchBandwidthSubTab;

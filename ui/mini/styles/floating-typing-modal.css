@@ -1,0 +1,28 @@
+/* Floating Typing Modal */
+    .type-modal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+    .type-modal-backdrop {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+    }
+    .type-modal-content {
+      position: relative;
+      background: #0f172a;
+      border-top: 1px solid #334155;
+      border-radius: 14px 14px 0 0;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.6);
+      animation: slideUp 0.2s ease-out;
+    }
+
+    

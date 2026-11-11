@@ -1,0 +1,14 @@
+/* Main Tab Content Container */
+    .tab-content {
+      flex: 1;
+      overflow: hidden;
+      display: none;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    

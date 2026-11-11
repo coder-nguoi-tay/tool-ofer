@@ -95,6 +95,30 @@ if (tools && Array.isArray(tools.browserTools)) {
   }
 }
 
+// Repair SDK đi qua cùng ranh giới dữ liệu, không cấp quyền submit dựa riêng vào prompt.
+if (process.env.AUTOLEADPC_REPAIR_ONLY === '1') {
+  const allowedValues = JSON.parse(process.env.AUTOLEADPC_REPAIR_VALUES || '[]');
+  for (const tool of tools.browserTools || []) {
+    if (typeof tool.handle !== 'function') continue;
+    const originalHandle = tool.handle;
+    /**
+     * Chặn thao tác vượt quyền trước khi MCP thực thi trên trình duyệt thật.
+     * @param {object} context Context MCP.
+     * @param {object} parameters Tham số tool đã parse.
+     * @param {*} rest Response và abort signal được truyền nguyên vẹn.
+     * @return {Promise<*>} Kết quả tool được phép.
+     * @throws {Error} Tool/value vượt quyền repair.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-11-11
+     */
+    tool.handle = async function guardedRepairTool(context, parameters, ...rest) {
+      const { enforceMcpRepairPolicy } = await import('./src/ai-assist/repair/enforce-mcp-repair-policy.mjs');
+      enforceMcpRepairPolicy(tool.schema.name, parameters, allowedValues);
+      return originalHandle.call(this, context, parameters, ...rest);
+    };
+  }
+}
+
 if (process.argv.includes('install-browser')) {
   const argv = process.argv.map((arg) => (arg === 'install-browser' ? 'install' : arg));
   libCli.decorateProgram(program);

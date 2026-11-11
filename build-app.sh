@@ -1,10 +1,36 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")"
 
+APP_VERSION="$(node -p "require('./package.json').version")"
+BUILD_NUMBER="18"
+
+APP_NAME="AutoLeadPC Mac 2 AdsPower.app"
+INSTALLED_APP="/Applications/$APP_NAME"
+if pgrep -f "^$INSTALLED_APP/Contents/MacOS/AutoLeadPCMac$" >/dev/null; then
+  echo "Hãy thoát AutoLeadPC trước khi build để cập nhật đúng app đang sử dụng." >&2
+  exit 1
+fi
+BUILD_DIRECTORY="$(mktemp -d "/Applications/.AutoLeadPC-build.XXXXXX")"
+
+# Dọn staging sau khi build; phục hồi app cũ nếu thao tác thay bản mới bị gián đoạn.
+# @return Dọn thư mục tạm hoặc giữ lại bản cũ nếu không thể phục hồi.
+# @author ductv <ductv@getflycrm.com>
+# @since 2026-11-11
+cleanup_app_build() {
+  if [ -d "$BUILD_DIRECTORY/previous.app" ] && [ ! -e "$INSTALLED_APP" ]; then
+    if ! mv "$BUILD_DIRECTORY/previous.app" "$INSTALLED_APP"; then
+      echo "Chưa phục hồi được app cũ; bản đó còn ở $BUILD_DIRECTORY/previous.app" >&2
+      return 1
+    fi
+  fi
+  rm -rf "$BUILD_DIRECTORY"
+}
+trap cleanup_app_build EXIT
+
 echo "=== Compiling native Swift binary ==="
-TMP_BIN="/tmp/AutoLeadPCMac_bin"
+TMP_BIN="$BUILD_DIRECTORY/AutoLeadPCMac_bin"
 swiftc -O -parse-as-library AutoLeadPCMacApp.swift -o "$TMP_BIN"
 
 # Tạo bundle Mac từ source chung với luồng Chrome và AdsPower.
@@ -13,9 +39,9 @@ swiftc -O -parse-as-library AutoLeadPCMacApp.swift -o "$TMP_BIN"
 # @param $3 Cổng giao diện.
 # @param $4 Bundle ID.
 # @param $5 Tên hiển thị.
-# @return Bundle đã đóng gói và ký tại thư mục source.
+# @return Bundle đã đóng gói và ký trong staging, sẵn sàng thay app duy nhất.
 # @author ductv <ductv@getflycrm.com>
-# @since 2026-10-19
+# @since 2026-11-11
 build_app_bundle() {
   local APP_NAME="$1"
   local INSTANCE_ID="$2"
@@ -24,7 +50,7 @@ build_app_bundle() {
   local DISPLAY_NAME="$5"
 
   echo "Building $APP_NAME (Bản $INSTANCE_ID, Port $PORT)..."
-  local APP_BUNDLE="$APP_NAME"
+  local APP_BUNDLE="$BUILD_DIRECTORY/$APP_NAME"
   local MACOS_DIR="$APP_BUNDLE/Contents/MacOS"
   local RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
   local LAUNCHER_DIR="$RESOURCES_DIR/launcher"
@@ -61,9 +87,9 @@ build_app_bundle() {
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2</string>
+	<string>${APP_VERSION}</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>${BUILD_NUMBER}</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>12.0</string>
 	<key>NSHighResolutionCapable</key>
@@ -97,13 +123,12 @@ EOF
     cp -p autoleadpc-icon.svg "$RESOURCES_DIR/autoleadpc-icon.svg"
   fi
 
-  # Copy mọi file .test.mjs bằng glob thay vì liệt kê tay: trước đây gói .app thiếu
-  # multi-tab-ai.test.mjs nên test biến mất khỏi bundle trong im lặng.
-  cp -p ./*.test.mjs "$LAUNCHER_DIR/"
-  # run-tests.mjs có liệt kê test trong mock-pages/; test đó còn gọi test-offline-screens.mjs.
-  cp -R mock-pages "$LAUNCHER_DIR/"
-  cp -p test-offline-screens.mjs "$LAUNCHER_DIR/"
-  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs cloakbrowser-engine.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs codex-form-agent.mjs local-profile-engine.mjs playwright-mcp-human.cjs index.html index-pc.html screen-mini.html pc-app.png package.json package-lock.json relay.mjs selfcheck.mjs run-tests.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs tunnel.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  # Chép toàn bộ test cùng cấu trúc thư mục và các fixture HTML được dùng chung.
+  cp -R tests mock-pages "$LAUNCHER_DIR/"
+  # Test đóng gói cần source compiler và script thật, kể cả khi chạy trong bundle.
+  cp -p build-app.sh AutoLeadPCMacApp.swift AutoLeadPC2.icns autoleadpc-icon.svg "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs cloakbrowser-engine.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs codex-form-agent.mjs local-profile-engine.mjs playwright-mcp-human.cjs pc-app.png package.json package-lock.json relay.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs tunnel.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  cp -R src ui "$LAUNCHER_DIR/"
   # Chỉ chép Config/Browser: Config/Settings có thể chứa token, không được vào bundle.
   mkdir -p "$LAUNCHER_DIR/Config"
   cp -R Config/Browser "$LAUNCHER_DIR/Config/"
@@ -129,45 +154,19 @@ EOF
   fi
 
   # Sign bundle
-  codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+  codesign --force --deep --sign - "$APP_BUNDLE"
+  codesign --verify --deep --strict "$APP_BUNDLE"
   echo "✓ Hoàn tất $APP_NAME"
 }
 
-# Build duy nhất bản AdsPower: AutoLeadPC Mac 2 AdsPower.app (Port 3211)
-rm -f "AutoLeadPC Mac 2 AdsPower.app/Contents/MacOS/AutoLeadPCMac" 2>/dev/null || true
-build_app_bundle "AutoLeadPC Mac 2 AdsPower.app" "2" 3211 "com.autolead.mac2.adspower" "AutoLeadPC Mac 2 AdsPower"
+# Chỉ phát hành một app cố định; staging được dọn, không tạo ZIP hoặc backup lưu lâu dài.
+build_app_bundle "$APP_NAME" "2" 3211 "com.autolead.mac2.adspower" "AutoLeadPC Mac 2 AdsPower"
 
-rm -f "$TMP_BIN"
-
-# Đồng bộ bản build & code sang ~/workspaces/
-if [ -d "$HOME/workspaces" ]; then
-  echo "Đồng bộ bản build & code sang $HOME/workspaces/ ..."
-  rm -rf "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
-  cp -R "AutoLeadPC Mac 2 AdsPower.app" "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
-  (cd "$HOME/workspaces" && zip -rq "AutoLeadPC Mac 2 AdsPower.zip" "AutoLeadPC Mac 2 AdsPower.app") 2>/dev/null || true
-  xattr -dr com.apple.quarantine "$HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
-  rsync -av --exclude 'node_modules' --exclude '.git' --exclude '*.app' --exclude '*.zip' ./ "$HOME/workspaces/AutoLeadPC-mac/" 2>/dev/null || true
+if [ -d "$INSTALLED_APP" ]; then
+  mv "$INSTALLED_APP" "$BUILD_DIRECTORY/previous.app"
 fi
+mv "$BUILD_DIRECTORY/$APP_NAME" "$INSTALLED_APP"
+xattr -dr com.apple.quarantine "$INSTALLED_APP" 2>/dev/null || true
 
-# Cập nhật bản build vào /Applications/ (nếu có quyền ghi hoặc đã tồn tại)
-if [ -w "/Applications" ] || [ -d "/Applications/AutoLeadPC Mac 2 AdsPower.app" ]; then
-  echo "Cập nhật bản build vào /Applications/ ..."
-  rm -rf "/Applications/AutoLeadPC Mac 2 AdsPower.app"
-  cp -R "AutoLeadPC Mac 2 AdsPower.app" "/Applications/AutoLeadPC Mac 2 AdsPower.app"
-  xattr -dr com.apple.quarantine "/Applications/AutoLeadPC Mac 2 AdsPower.app" 2>/dev/null || true
-fi
-
-# Reset trạng thái chạy tự động về 0 khi build mới (không tự mở profile sau khi mở app)
-for d in "AutoLeadPC" "AutoLeadPC-2"; do
-  if [ -d "$HOME/Library/Application Support/$d" ]; then
-    echo "{}" > "$HOME/Library/Application Support/$d/autorefill-settings.json" 2>/dev/null || true
-  fi
-done
-
-echo "=========================================="
-echo "Build thành công bản duy nhất:"
-echo "  AutoLeadPC Mac 2 AdsPower.app   → Cổng 3211"
-echo "Đã lưu tại:"
-echo "  - /Applications/AutoLeadPC Mac 2 AdsPower.app"
-echo "  - $HOME/workspaces/AutoLeadPC Mac 2 AdsPower.app"
-echo "=========================================="
+echo "Build thành công phiên bản $APP_VERSION (build $BUILD_NUMBER):"
+echo "  $INSTALLED_APP"

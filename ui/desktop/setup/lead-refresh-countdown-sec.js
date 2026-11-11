@@ -1,0 +1,1 @@
+let leadRefreshCountdownSec = 10;

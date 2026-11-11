@@ -1,0 +1,93 @@
+/* 1. Toffers Leads KPI Grid */
+    .leads-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .lead-kpi-card {
+      background: #131d31;
+      border: 1px solid #22324e;
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 64px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      transition: all 0.15s ease;
+    }
+
+    .lead-kpi-card:hover {
+      border-color: #38bdf8;
+      transform: translateY(-1px);
+    }
+
+    .lead-kpi-card.kpi-point {
+      background: rgba(2, 132, 199, 0.1);
+      border-color: rgba(56, 189, 248, 0.35);
+    }
+
+    .lead-kpi-card.kpi-leads {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+
+    .lead-kpi-card.kpi-ip {
+      background: rgba(245, 158, 11, 0.08);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #94a3b8;
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .lead-kpi-card.kpi-point .kpi-label { color: #38bdf8; }
+    .lead-kpi-card.kpi-leads .kpi-label { color: #34d399; }
+    .lead-kpi-card.kpi-ip .kpi-label { color: #fbbf24; }
+
+    .kpi-val {
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.5px;
+    }
+
+    .kpi-val-point { color: #38bdf8; text-shadow: 0 0 12px rgba(56, 189, 248, 0.3); }
+    .kpi-val-leads { color: #34d399; text-shadow: 0 0 12px rgba(52, 211, 153, 0.3); }
+
+    .kpi-val-sub {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f8fafc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 170px;
+    }
+
+    .kpi-val-ip { color: #fbbf24; font-family: monospace; }
+
+    .kpi-subtext {
+      font-size: 10.5px;
+      color: #64748b;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 170px;
+    }
+
+    .kpi-icon {
+      font-size: 28px;
+      opacity: 0.75;
+      flex-shrink: 0;
+      margin-left: 10px;
+    }
+
+    

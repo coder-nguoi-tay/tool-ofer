@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoLeadPC Mac</title>
+  <link rel="stylesheet" href="/assets/mac/styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <svg class="brand-icon" viewBox="0 0 64 64" role="img" aria-label="Biểu tượng AutoLeadPC">
+        <defs>
+          <linearGradient id="brandBackground" x1="5" y1="4" x2="59" y2="62" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#2866E8"/><stop offset="1" stop-color="#182B68"/>
+          </linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="16" fill="url(#brandBackground)"/>
+        <rect x="11" y="13" width="42" height="36" rx="7" fill="#F5F8FF"/>
+        <path d="M11 20a7 7 0 0 1 7-7h28a7 7 0 0 1 7 7v4H11v-4Z" fill="#E6EDFA"/>
+        <circle cx="17" cy="18.5" r="1.7" fill="#FF746D"/><circle cx="23" cy="18.5" r="1.7" fill="#FFCA5D"/><circle cx="29" cy="18.5" r="1.7" fill="#45C98B"/>
+        <rect x="16" y="29" width="9" height="14" rx="3" fill="#3974E8"/>
+        <rect x="27.5" y="29" width="9" height="14" rx="3" fill="#30B5D5"/>
+        <rect x="39" y="29" width="9" height="14" rx="3" fill="#765DE8"/>
+        <path d="M17 55h30M23 50v5m9-5v5m9-5v5" stroke="#70DFFF" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="23" cy="57" r="2.8" fill="#70DFFF"/><circle cx="32" cy="57" r="2.8" fill="#70DFFF"/><circle cx="41" cy="57" r="2.8" fill="#70DFFF"/>
+      </svg>
+      <div class="brand-copy">
+        <span class="eyebrow">Chrome proxy launcher</span>
+        <h1>AutoLeadPC Mac</h1>
+        <p>Mở Google Chrome riêng cho từng proxy.</p>
+      </div>
+    </header>
+    <nav class="tabs" role="tablist" aria-label="Các tác vụ AutoLeadPC">
+      <button class="tab" id="tab-setup" type="button" role="tab" aria-selected="false" aria-controls="panel-setup" data-tab="setup" tabindex="-1" onclick="activateTab('setup')">Thiết lập</button>
+      <button class="tab" id="tab-proxies" type="button" role="tab" aria-selected="false" aria-controls="panel-proxies" data-tab="proxies" tabindex="-1" onclick="activateTab('proxies')">Proxy</button>
+      <button class="tab" id="tab-browsers" type="button" role="tab" aria-selected="true" aria-controls="panel-browsers" data-tab="browsers" onclick="activateTab('browsers')">Trình duyệt</button>
+      <button class="tab" id="tab-logs" type="button" role="tab" aria-selected="false" aria-controls="panel-logs" data-tab="logs" tabindex="-1" onclick="activateTab('logs')">Log</button>
+    </nav>
+    <form id="launcher-form" novalidate>
+      <section class="tab-panel" id="panel-setup" role="tabpanel" aria-labelledby="tab-setup" data-panel="setup" hidden>
+        <h2 class="section-title">Kết nối và cấu hình</h2>
+        <p class="hint">Cấu hình được lưu trong database cục bộ trên máy khi bạn bấm Lưu cấu hình.</p>
+        <div class="row">
+          <div>
+            <label for="count">Số cửa sổ</label>
+            <input id="count" name="requestedCount" type="number" min="1" max="30" value="6">
+          </div>
+          <div>
+            <label for="proxy-type">Loại proxy mặc định</label>
+            <select id="proxy-type" name="proxyType">
+              <option value="socks5">SOCKS5</option>
+              <option value="http">HTTP</option>
+            </select>
+          </div>
+        </div>
+        <label for="target-url">Website đích 1 (Luồng 1: IP từ đầu đến cuối)</label>
+        <input id="target-url" name="websiteUrl" type="text" placeholder="https://example1.com">
+        <p class="hint">Nhập trang đích 1. Có thể nhập example.com; app tự thêm https://.</p>
+        <div style="margin-top: 8px; margin-bottom: 8px;">
+          <label for="target-url-2">Website đích 2 (Luồng 2: IP từ cuối ra đầu — Chạy song song)</label>
+          <input id="target-url-2" name="websiteUrl2" type="text" placeholder="https://example2.com (tùy chọn: nhập để chạy 2 luồng song song)">
+          <p class="hint">⚡ Chế độ 2 luồng song song: Luồng 1 dùng IP từ đầu danh sách (0 → N-1), Luồng 2 dùng IP từ cuối danh sách (N-1 → 0). 1 IP mở được cả 2 trang đích đồng thời.</p>
+        </div>
+        <label for="autofill-data">Dữ liệu tự điền (CSV hoặc JSON)</label>
+        <textarea id="autofill-data" name="autofillData" spellcheck="false" placeholder="Họ tên,Address,năm sinh,Số điện thoại,Email&#10;Juan Suarez,2609 NW 162nd st,8/18/1967,4059335582,juan@example.com&#10;John Doe,742 Evergreen Terrace,11/24/1982,5558675309,johndoe@gmail.com"></textarea>
+        <p class="hint">Dòng đầu CSV là tên cột; hoặc dán mảng JSON gồm các object cùng cột. Hỗ trợ mọi trường: Họ tên, Address / Địa chỉ, Năm sinh / Ngày sinh (8/18/1967 hoặc MM/DD/YYYY), SĐT, Zipcode, City, State, SSN, Email, Banking. App tự động phân tách ngày/tháng/năm hoặc chuyển đổi định dạng date picker phù hợp với mọi form.</p>
+        <div style="margin-top: 10px; margin-bottom: 6px;">
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; user-select: none;">
+            <input type="checkbox" id="auto-submit-form" name="autoSubmitForm" checked style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+            <span>Tự động tích ô điều khoản (consent checkbox) và bấm Gửi/Tiếp tục (Submit / Continue)</span>
+          </label>
+        </div>
+        <div style="margin-top: 10px; margin-bottom: 12px; border: 1px solid #d8dfeb; border-radius: 8px; padding: 10px 12px; background: #ffffff;">
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;">
+            <input type="checkbox" id="enable-lead-check" name="enableLeadCheck" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+            <span>Kiểm tra lead khi đến màn số 5 (gọi API toffers.top, trùng IP mới làm tiếp, không thì tắt Chrome đổi sock)</span>
+          </label>
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; margin-top: 6px;">
+            <input type="checkbox" id="auto-close-no-lead" name="autoCloseNoLead" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+            <span>Tự tắt Chrome nếu đợi 30s × 2 lần không có lead về (bỏ tick để giữ trình duyệt mở khi hết lượt check)</span>
+          </label>
+          <p class="hint" style="margin-top: 5px; margin-bottom: 6px;">
+            Điền tự động các màn 1-4 bình thường. Khi làm đến màn 5 (DOB/Gender), hệ thống tạm dừng và gọi API toffers.top kiểm tra lead trùng với IP sock. Nếu lead về mới làm tiếp các bước sau; nếu không có lead sau thời gian chờ thì tắt Chrome và mở sock tiếp theo.
+          </p>
+          <details id="lead-check-advanced" style="margin-top: 6px; font-size: 11px;">
+            <summary style="cursor: pointer; color: #2866e8; font-weight: 500;">Tùy chỉnh API kiểm tra lead (URL, Cookie, datas, chu kỳ, màn kích hoạt)</summary>
+            <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+              <div>
+                <label for="lead-check-api-url" style="font-size: 11px; margin-bottom: 2px;">URL API kiểm tra lead</label>
+                <input id="lead-check-api-url" name="leadCheckApiUrl" type="text" value="https://toffers.top/partner/chat_leading/get_lead_datas" style="font-size: 11px; padding: 6px;">
+              </div>
+              <div>
+                <label for="lead-check-cookie" style="font-size: 11px; margin-bottom: 2px;">Cookie xác thực</label>
+                <input id="lead-check-cookie" name="leadCheckCookie" type="text" value="qcodes_=7p0d1pg081d433i45giksp7k5fvm386o; qcodes_sound=1" style="font-size: 11px; padding: 6px;">
+              </div>
+              <div class="row">
+                <div>
+                  <label for="lead-check-screen" style="font-size: 11px; margin-bottom: 2px;">Màn kích hoạt check</label>
+                  <input id="lead-check-screen" name="leadCheckScreen" type="number" min="1" max="20" value="4" style="font-size: 11px; padding: 6px;">
+                </div>
+                <div>
+                  <label for="lead-check-datas" style="font-size: 11px; margin-bottom: 2px;">Tham số datas (POST)</label>
+                  <input id="lead-check-datas" name="leadCheckDatas" type="text" value="1504" style="font-size: 11px; padding: 6px;">
+                </div>
+                <div>
+                  <label for="lead-check-interval" style="font-size: 11px; margin-bottom: 2px;">Chu kỳ gọi (giây)</label>
+                  <input id="lead-check-interval" name="leadCheckInterval" type="number" min="5" max="300" value="30" style="font-size: 11px; padding: 6px;">
+                </div>
+                <div>
+                  <label for="lead-check-max-attempts" style="font-size: 11px; margin-bottom: 2px;">Số lần thử tối đa</label>
+                  <input id="lead-check-max-attempts" name="leadCheckMaxAttempts" type="number" min="1" max="10" value="2" style="font-size: 11px; padding: 6px;">
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <details id="script-config-panel" style="margin-top:14px;border:1px solid #d8dfeb;border-radius:8px;padding:10px 12px;background:#fff;">
+          <summary style="cursor:pointer;font-weight:700;font-size:13px;color:#25334b;user-select:none;">
+            🤖 Script &amp; Giới hạn chạy <span style="font-size:11px;font-weight:400;color:#768197;">(từ Windows exe)</span>
+          </summary>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:4px;">
+            <label for="script-path" style="margin-top:6px;">File script (.txt)</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="script-path" name="scriptPath" type="text" placeholder="/Users/…/AutoLeadPC/Script/Offers/offer.txt" style="flex:1;">
+              <button id="scripts-browse-btn" class="secondary" type="button" style="white-space:nowrap;min-height:38px;padding:0 12px;flex-shrink:0;">Duyệt</button>
+            </div>
+            <div id="scripts-list" style="display:none;margin-top:6px;max-height:160px;overflow:auto;border:1px solid #e7ebf2;border-radius:6px;background:#f7f9fc;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;"></div>
+            <p class="hint">Đường dẫn tuyệt đối đến file .txt script định dạng lệnh exe ({SendByName}, {SmartClick}, {ByPassReCaptcha}…). Để trống = dùng autofill tự động như cũ.</p>
+
+            <label for="captcha-api-key" style="margin-top:6px;">API key 2captcha</label>
+            <input id="captcha-api-key" name="captchaApiKey" type="text" placeholder="Dán API key từ 2captcha.com">
+            <p class="hint">Cần khi script có lệnh {ByPassReCaptcha}. Để trống nếu không dùng captcha.</p>
+
+            <label for="complete-text" style="margin-top:6px;">Text hoàn tất (đóng Chrome khi tìm thấy)</label>
+            <input id="complete-text" name="completeText" type="text" placeholder="Thank you for submitting">
+            <p class="hint">Khi phát hiện chuỗi này trong nội dung trang (không phân biệt hoa thường), Chrome tự đóng và tăng bộ đếm. Để trống = không dùng.</p>
+
+            <div class="row" style="margin-top:8px;">
+              <div><label for="time-limit">Timeout phiên (giây)</label><input id="time-limit" name="timeLimit" type="number" min="0" value="0" placeholder="0 = không giới hạn"></div>
+              <div><label for="delay-start">Delay trước mở (giây)</label><input id="delay-start" name="delayStart" type="number" min="0" value="0" placeholder="0"></div>
+              <div><label for="delay-stop">Delay trước refill (giây)</label><input id="delay-stop" name="delayStop" type="number" min="0" value="0" placeholder="0"></div>
+            </div>
+
+            <div class="row" style="margin-top:4px;align-items:flex-end;">
+              <div style="flex:2;"><label for="limit-run">Giới hạn số phiên hoàn tất (limitRun)</label><input id="limit-run" name="limitRun" type="number" min="0" value="0" placeholder="0 = không giới hạn"></div>
+              <div style="flex:1;"><label>&nbsp;</label><button id="limit-run-reset-btn" class="secondary" type="button" style="width:100%;min-height:38px;">Đặt lại bộ đếm</button></div>
+            </div>
+            <div id="limit-run-counter" style="margin-top:8px;padding:7px 10px;border-radius:6px;background:#f0f4ff;border:1px solid #c7d7f8;font-size:12px;display:flex;align-items:center;gap:8px;">
+              <span>Đã hoàn tất:</span>
+              <strong id="lr-count" style="color:#2563eb;font-size:15px;">0</strong>
+              <span>/</span>
+              <span id="lr-max" style="color:#768197;">0 (không giới hạn)</span>
+            </div>
+
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eef1f6;">
+              <p class="hint" style="margin:0 0 6px;">Chống fingerprint (tương đương Canvas/ClientRects/WebGL/WebRTC trong bản Windows):</p>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-canvas" name="antiFpCanvas"> Giả mạo Canvas (chống nhận diện qua canvas fingerprint)</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-clientrects" name="antiFpClientRects"> Rung ClientRects (chống đo layout fingerprint)</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="anti-fp-webgl" name="antiFpWebgl"> Giả mạo WebGL vendor/renderer</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="anti-fp-webrtc" name="antiFpWebrtc"> Chặn rò IP qua WebRTC</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px;font-weight:600;color:#003399;"><input type="checkbox" id="use-cloak-browser" name="useCloakBrowser"> 🥷 Kích hoạt CloakBrowser (Stealth Chromium chống bot & Humanize)</label>
+            </div>
+
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eef1f6;">
+              <p class="hint" style="margin:0 0 6px;font-weight:600;color:#6d28d9;">🤖 AI Assist & Tự động gỡ kẹt form:</p>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;"><input type="checkbox" id="ai-assist-enabled" checked> Bật AI Assist (Tự động gỡ kẹt khi form không nhận ô nhập)</label>
+              <div class="row" style="gap:8px;margin-top:4px;">
+                <div style="flex:1;">
+                  <label for="ai-cli-select" style="font-size:11px;">CLI Engine</label>
+                  <select id="ai-cli-select" style="height:32px;font-size:11px;">
+                    <option value="codex_mcp" selected>OpenAI Codex + Playwright MCP (CDP)</option>
+                    <option value="agy">agy (Google Antigravity CLI)</option>
+                    <option value="codex">codex CLI</option>
+                  </select>
+                </div>
+                <div style="flex:1;">
+                  <label for="ai-mode-select" style="font-size:11px;">Chế độ</label>
+                  <select id="ai-mode-select" style="height:32px;font-size:11px;">
+                    <option value="auto_on_stuck">Tự động khi kẹt</option>
+                    <option value="continuous">Hỗ trợ liên tục</option>
+                    <option value="heuristic_only">Heuristic (không token)</option>
+                    <option value="disabled">Tắt AI</option>
+                  </select>
+                </div>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px;"><input type="checkbox" id="ai-codex-mcp" checked> Ưu tiên Codex + Playwright MCP khi chạy trên AdsPower</label>
+            </div>
+          </div>
+        </details>
+
+        <div class="actions">
+          <button id="save-button" class="secondary" type="button">Lưu cấu hình</button>
+        </div>
+
+        <p id="save-status" role="status" aria-live="polite">Chưa tải cấu hình đã lưu.</p>
+        <hr class="panel-divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h2 class="section-title" style="margin:0;">
+            Hàng đợi thông tin —
+            <span id="aq-available-count" style="color:#1c7c45;">Còn: 0</span>
+            &nbsp;|&nbsp;
+            <span id="aq-used-count" style="color:#a4401f;">Đã dùng: 0</span>
+          </h2>
+          <div style="display:flex;gap:8px;">
+            <button id="aq-toggle-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xem đã dùng</button>
+            <button id="aq-reset-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Đặt lại</button>
+          </div>
+        </div>
+        <div id="aq-used-box" style="max-height:200px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;display:none;">
+          <table style="width:100%;border-collapse:collapse;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;">
+            <thead><tr id="aq-used-head"></tr></thead>
+            <tbody id="aq-used-body"></tbody>
+          </table>
+          <p id="aq-used-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:14px 0;margin:0;">Chưa có thông tin nào đã dùng.</p>
+        </div>
+        <hr class="panel-divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h2 class="section-title" style="margin:0;">
+            Hàng đợi Email mẫu —
+            <span id="eq-available-count" style="color:#1c7c45;">Còn: 0</span>
+            &nbsp;|&nbsp;
+            <span id="eq-used-count" style="color:#a4401f;">Đã dùng: 0</span>
+          </h2>
+          <div style="display:flex;gap:8px;">
+            <button id="eq-import-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Nhập danh sách</button>
+            <button id="eq-toggle-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xem đã dùng</button>
+            <button id="eq-reset-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Đặt lại</button>
+          </div>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label for="eq-input-list" style="font-size:11px;color:#556987;display:block;margin-bottom:4px;">
+            Danh sách email mẫu (mỗi dòng một email, tự động lấy khi điền form thay vì email random):
+          </label>
+          <textarea id="eq-input-list" name="emailList" rows="4" placeholder="daj.gomezramirez@gmail.com&#10;designcourses001@gmail.com&#10;..." style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;width:100%;box-sizing:border-box;"></textarea>
+        </div>
+        <div id="eq-used-box" style="max-height:180px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;display:none;">
+          <table style="width:100%;border-collapse:collapse;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;">
+            <thead>
+              <tr>
+                <th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;width:40px;">STT</th>
+                <th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;text-align:left;">Email đã dùng</th>
+              </tr>
+            </thead>
+            <tbody id="eq-used-tbody"></tbody>
+          </table>
+          <p id="eq-used-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:14px 0;margin:0;">Chưa có email nào đã dùng.</p>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="panel-proxies" role="tabpanel" aria-labelledby="tab-proxies" data-panel="proxies" hidden>
+        <h2 class="section-title">Danh sách proxy</h2>
+        <label for="proxy-list">Một proxy trên mỗi dòng</label>
+        <textarea id="proxy-list" name="proxyList" spellcheck="false" placeholder="host:port|username|password&#10;socks5://username:password@host:port"></textarea>
+        <p class="hint">Hỗ trợ host:port, host:port|user|pass hoặc socks5://user:pass@host:port.</p>
+        <div class="actions">
+          <button id="check-button" class="secondary" type="button">Kiểm tra proxy</button>
+          <button id="download-csv-button" class="secondary" type="button" hidden>Tải CSV</button>
+          <button id="usage-history-csv-button" class="secondary" type="button">Tải CSV lịch sử</button>
+          <button id="used-ips-button" class="secondary" type="button">Xem IP đã dùng</button>
+          <button id="clear-history-button" class="secondary" type="button">Xóa lịch sử IP đã dùng</button>
+        </div>
+        <p class="hint">Kiểm tra sẽ đánh dấu proxy chết, trùng IP exit và dòng trùng. CSV lịch sử gồm các lần thử, IP exit và trạng thái mở trang đã lưu qua nhiều phiên.</p>
+        <div id="used-ips" role="region" aria-live="polite"></div>
+        <p class="hint">Danh sách IP exit đã tiêu qua các phiên; lượt mở sau sẽ từ chối proxy nào trả về đúng các IP này.</p>
+
+        <hr class="panel-divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h2 class="section-title" style="margin:0;">
+            Hàng đợi proxy —
+            <span id="pq-available-count" style="color:#1c7c45;">Còn: 0</span>
+            &nbsp;|&nbsp;
+            <span id="pq-used-count" style="color:#a4401f;">Đã dùng: 0</span>
+          </h2>
+          <div style="display:flex;gap:8px;">
+            <button id="pq-import-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Nhập từ danh sách</button>
+            <button id="pq-reset-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Đặt lại</button>
+            <button id="pq-clear-btn" class="secondary" type="button" style="padding:5px 10px;font-size:11px;min-height:0;color:#dc2626;border-color:#fca5a5;">Xóa hết proxy</button>
+          </div>
+        </div>
+        <div id="pq-used-box" style="max-height:160px;overflow:auto;border:1px solid #e7ebf2;border-radius:8px;display:none;">
+          <table style="width:100%;border-collapse:collapse;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;">
+            <thead><tr>
+              <th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;text-align:left;">#</th>
+              <th style="position:sticky;top:0;background:#f7f9fc;color:#768197;font-weight:600;padding:5px 7px;border-bottom:1px solid #e7ebf2;text-align:left;">Proxy đã dùng</th>
+            </tr></thead>
+            <tbody id="pq-used-tbody"></tbody>
+          </table>
+          <p id="pq-used-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:12px 0;margin:0;">Chưa có proxy nào được dùng.</p>
+        </div>
+        <button id="pq-toggle-used-btn" class="secondary" type="button" style="margin-top:8px;padding:5px 10px;font-size:11px;min-height:0;">Xem danh sách đã dùng</button>
+      </section>
+
+      <section class="tab-panel" id="panel-browsers" role="tabpanel" aria-labelledby="tab-browsers" data-panel="browsers">
+        <h2 class="section-title">Điều khiển trình duyệt</h2>
+        <div class="actions">
+          <button id="launch-button" type="submit">Tạo profile và mở</button>
+          <button id="close-button" class="secondary" type="button">Đóng tất cả</button>
+        </div>
+        <p class="hint"><strong>Tạo profile và mở</strong> dùng Google Chrome thường từ bản 150 trở lên, tối đa 10 cửa sổ. Mỗi cửa sổ cần một major khác nhau, một profile và một proxy riêng. Nếu máy thiếu phiên bản, app báo lỗi trước khi mở. User-Agent dùng mẫu Windows với đúng phiên bản của Chrome được mở. Dữ liệu tự điền nằm ở tab Thiết lập. Lịch sử proxy chung hiện ở tab Proxy.</p>
+        <div class="actions">
+          <button id="auto-refill-button" class="secondary" type="button" aria-pressed="true">Tự bù: Đang bật</button>
+          <button id="sequential-start-btn" class="primary" type="button">Chạy tuần tự</button>
+          <button id="sequential-stop-btn" class="secondary" type="button" style="display:none;">Dừng tuần tự</button>
+        </div>
+        <p id="auto-refill-status" class="hint" role="status" aria-live="polite">Tự bù sẽ mở profile khác khi một trình duyệt đóng.</p>
+
+        <!-- Device profiles -->
+        <div id="device-profiles-panel" style="margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+          <div style="margin-bottom:8px;"><strong style="font-size:14px;">📱 Chế độ thiết bị</strong> <span class="hint" style="font-size:12px;">— mỗi Chrome giả lập một thiết bị khác nhau</span></div>
+          <div id="device-profile-checkboxes" style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px;">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="windows" checked> 🪟 Windows (10, 11)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="macos"> 🍎 macOS (14, 15, 26)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="linux"> 🐧 Linux (6.5 - 6.14)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="android"> 🤖 Android (13 - 16)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="ipad"> 📟 iPad (iPadOS 17 - 18)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" value="ios"> 📱 iPhone (iOS 17 - 18)</label>
+          </div>
+          <p class="hint" style="margin:8px 0 0;font-size:11px;">Tích nhiều → Chrome xoay vòng thiết bị. Ít nhất 1 phải được chọn. Áp dụng ngay lần mở tiếp theo.</p>
+        </div>
+
+        <!-- Agent panel -->
+        <div id="agents-panel" style="margin-top:16px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <strong style="font-size:14px;">🖥 Agents đang kết nối</strong>
+            <span id="agents-count" class="hint" style="font-size:12px;">(0)</span>
+            <span id="agents-pending" class="hint" style="font-size:12px;margin-left:auto;"></span>
+          </div>
+          <div id="agents-list">
+            <p class="hint" style="margin:0;font-size:12px;">Chưa có agent từ xa. Xem lệnh kết nối bên dưới.</p>
+          </div>
+          <details style="margin-top:10px;">
+            <summary class="hint" style="cursor:pointer;font-size:12px;">Lệnh kết nối agent từ máy khác</summary>
+            <div style="margin-top:8px;">
+              <code id="agent-connect-cmd" style="display:block;padding:8px;background:#f8f8f8;border-radius:4px;font-size:11px;word-break:break-all;user-select:all;">node app.mjs --hub=http://IP_MÁY_NÀY:3210</code>
+              <p class="hint" style="margin:4px 0 0;font-size:11px;">Chạy lệnh trên máy Windows/Linux cùng mạng LAN. Hub phải khởi động với <code>--public</code> để nhận kết nối từ ngoài.</p>
+            </div>
+          </details>
+        </div>
+
+        <div id="chrome-ip-status" role="status" aria-live="polite">
+          <p class="hint" style="margin: 0;">Chưa có cửa sổ Chrome đang mở.</p>
+        </div>
+        <div class="actions">
+          <button id="template-profile-button" class="secondary" type="button">Cài RoboForm cho profile mới</button>
+        </div>
+        <p class="hint">Mở profile mẫu không qua proxy. Cài RoboForm từ Chrome Web Store, đăng nhập, rồi đóng cửa sổ đó. Từ lúc đó, mỗi profile Chrome mới mà app tạo sẽ có sẵn RoboForm. Chỉ dùng profile mẫu cho RoboForm vì cookie và phiên đăng nhập trong đó cũng được chép sang.</p>
+        <p class="hint">Profile thay thế đang được tạo có thể hoàn tất sau khi tắt tự bù.</p>
+
+        <details id="chrome-versions-advanced">
+          <summary>Kho Chrome for Testing đã tải trước (không dùng để mở)</summary>
+          <p class="hint">Các bản Chrome for Testing đã tải ở lượt trước nằm riêng trong dữ liệu app. Nút <strong>Tạo profile và mở</strong> chỉ dùng ứng dụng Google Chrome thường đã cài; thao tác tải dưới đây không thêm phiên bản cho nút chính.</p>
+          <label for="chrome-version-count">Số bản Chrome for Testing lưu trong kho</label>
+          <input id="chrome-version-count" name="chromeVersionCount" type="number" min="2" max="12" value="10">
+          <p class="hint">Kho này dành riêng cho các bản thử nghiệm tải theo major; mỗi bản chiếm khoảng 350 MB trên đĩa.</p>
+          <div class="actions">
+            <button id="chrome-versions-download-button" class="secondary" type="button">Tải Chrome for Testing</button>
+          </div>
+          <p class="hint">Lịch sử proxy, danh sách IP đã dùng, tự bù và Đóng tất cả dùng chung với nút chính.</p>
+        </details>
+      </section>
+    </form>
+    <section class="tab-panel" id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" data-panel="logs" hidden>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+        <h2 class="section-title" style="margin:0;">Log hành động trình duyệt</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <label style="display:flex;align-items:center;gap:5px;margin:0;font-size:11px;font-weight:600;cursor:pointer;">
+            <input type="checkbox" id="log-auto-refresh" checked style="width:14px;height:14px;"> Tự làm mới
+          </label>
+          <button class="secondary" id="log-open-folder-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;" title="Mở thư mục lưu file HTML trong Finder">📁 Mở thư mục HTML</button>
+          <a href="/browser-replay" target="_blank" rel="noopener">Xem lại phiên / Ghi chú lỗi</a>
+          <button class="secondary" id="log-download-all-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;" title="Tải log, HTML và ảnh giao diện đã lưu">⬇️ Tải tất cả giao diện</button>
+          <button class="secondary" id="log-clear-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;">Xoá bộ lọc</button>
+          <button class="secondary" id="log-clear-all-btn" type="button" style="padding:5px 10px;font-size:11px;min-height:0;color:#dc2626;border-color:#fca5a5;" title="Xoá toàn bộ log thao tác và các file HTML đã lưu">🗑️ Xoá toàn bộ log & HTML</button>
+        </div>
+        <div id="log-clear-confirm" style="display:none;align-items:center;gap:8px;padding:8px 10px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;font-size:12px;color:#991b1b;">
+          <span>⚠️ Xoá toàn bộ log và file HTML? Không thể hoàn tác.</span>
+          <button id="log-clear-confirm-yes" type="button" style="padding:3px 10px;background:#dc2626;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Xoá</button>
+          <button id="log-clear-confirm-no" type="button" style="padding:3px 10px;background:#e5e7eb;color:#374151;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Huỷ</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#475569;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;background:#f8fafc;padding:6px 10px;border-radius:6px;border:1px solid #cbd5e1;">
+        <span id="log-storage-info">📁 Thư mục lưu HTML: <code style="background:#e2e8f0;padding:2px 5px;border-radius:3px;">...</code> (<strong id="log-html-count">0</strong> file)</span>
+        <button type="button" id="log-copy-dir-btn" style="background:none;border:none;color:#2563eb;font-size:11px;cursor:pointer;text-decoration:underline;">Sao chép đường dẫn</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <select id="log-filter-slot" style="flex:1;height:32px;font-size:11px;">
+          <option value="">Tất cả slot</option>
+        </select>
+        <select id="log-filter-type" style="flex:1;height:32px;font-size:11px;">
+          <option value="">Tất cả loại</option>
+          <option value="navigate">Điều hướng</option>
+          <option value="submit_clicked">Bấm Submit</option>
+          <option value="checkbox_checked">Tích checkbox</option>
+          <option value="field_filled">Điền form</option>
+          <option value="click">Click chuột</option>
+        </select>
+      </div>
+      <div id="log-table-wrap">
+        <table id="log-table">
+          <thead><tr>
+            <th>Giờ</th>
+            <th>Slot</th>
+            <th>Loại</th>
+            <th>Chi tiết</th>
+          </tr></thead>
+          <tbody id="log-tbody"></tbody>
+        </table>
+        <p id="log-empty" style="color:#9aabb8;font-size:11px;text-align:center;padding:20px 0;margin:0;" hidden>Chưa có log. Mở cửa sổ Chrome để bắt đầu ghi.</p>
+      </div>
+    </section>
+    <div id="log-html-modal" role="dialog" aria-modal="true" aria-label="HTML của trang">
+      <div id="log-html-box">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong id="log-html-title" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:75%;"></strong>
+          <div style="display:flex;gap:6px;">
+            <button class="secondary" id="log-html-copy" type="button" style="padding:4px 10px;min-height:0;font-size:11px;">Sao chép HTML</button>
+            <button class="secondary" id="log-html-close" type="button" style="padding:4px 10px;min-height:0;font-size:11px;">Đóng</button>
+          </div>
+        </div>
+        <div id="log-html-file-bar" style="font-size:11px;color:#64748b;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;background:#f1f5f9;padding:4px 8px;border-radius:4px;" hidden>
+          <span id="log-html-filepath" style="word-break:break-all;"></span>
+          <button type="button" id="log-html-copy-path" class="secondary" style="padding:2px 8px;font-size:10px;min-height:0;margin-left:8px;white-space:nowrap;">Copy path</button>
+        </div>
+        <pre id="log-html-pre"></pre>
+      </div>
+    </div>
+    <p id="warnings"></p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <p class="notice">Tối đa 10 trình duyệt chạy song song. Nếu máy chậm, giảm số cửa sổ trong tab Thiết lập.</p>
+  </main>
+  <script src="/assets/mac/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+/* 5. Clean Tools Button */
+    .clean-tool-btn {
+      padding: 2px 8px;
+      font-size: 11px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .clean-tool-btn:hover {
+      background: #27354f;
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+
+    

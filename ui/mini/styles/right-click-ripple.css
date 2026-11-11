@@ -1,0 +1,7 @@
+/* Right Click Ripple */
+    .touch-ripple.ripple-right {
+      background: rgba(239, 68, 68, 0.5);
+      border-color: #ef4444;
+    }
+
+    

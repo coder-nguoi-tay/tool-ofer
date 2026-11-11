@@ -1,0 +1,37 @@
+/* Running table specific overrides */
+    #runningTableWrap {
+      border: 1px solid #22324e;
+      border-radius: 4px;
+      background: #0b0f19;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    #dgvRunning th {
+      background: #131d31;
+      color: #f8fafc;
+      font-size: 11px;
+      font-weight: 700;
+      border-right: 1px solid #22324e;
+      border-bottom: 1px solid #334155;
+      padding: 4px 8px;
+    }
+
+    #dgvRunning td {
+      padding: 4px 8px;
+      font-size: 11px;
+      height: 26px;
+      vertical-align: middle;
+      border-right: 1px solid #1a263d;
+      border-bottom: 1px solid #1a263d;
+      color: #cbd5e1;
+    }
+
+    #dgvRunning tr:nth-child(even) td:not(.cell-selector) {
+      background-color: #0d1422;
+    }
+
+    #dgvRunning tr:hover td:not(.cell-selector) {
+      background-color: #162238;
+    }
+
+    

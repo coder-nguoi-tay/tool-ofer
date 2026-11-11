@@ -1,0 +1,58 @@
+/* Offer Sub-Tabs Modernized as Segmented Pills */
+    .run-offer-pills {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #090d16;
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid #1e293b;
+      margin-bottom: 8px;
+      overflow-x: auto;
+      max-width: 100%;
+    }
+
+    .run-offer-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #94a3b8;
+      cursor: pointer;
+      white-space: nowrap;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .run-offer-pill:hover {
+      color: #f1f5f9;
+      background: rgba(30, 41, 59, 0.7);
+    }
+
+    .run-offer-pill.active {
+      color: #ffffff;
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      border-color: #38bdf8;
+      box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+    }
+
+    .run-offer-pill .pill-count {
+      font-size: 10px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      padding: 1px 6px;
+      border-radius: 10px;
+      line-height: 1.3;
+    }
+
+    .run-offer-pill:not(.active) .pill-count {
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+    }
+
+    

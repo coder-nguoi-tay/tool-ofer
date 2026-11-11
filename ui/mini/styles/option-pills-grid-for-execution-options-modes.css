@@ -1,0 +1,42 @@
+/* Option Pills Grid for Execution Options & Modes */
+    .option-pills-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .option-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 7px 9px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .option-pill input[type="checkbox"], .option-pill input[type="radio"] {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--primary);
+      flex-shrink: 0;
+      margin: 0;
+    }
+
+    .option-pill.active {
+      background: rgba(56, 189, 248, 0.12);
+      border-color: #38bdf8;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .option-pill-icon {
+      font-size: 13px;
+    }
+
+    

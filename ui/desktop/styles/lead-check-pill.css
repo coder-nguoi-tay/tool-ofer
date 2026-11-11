@@ -1,0 +1,15 @@
+/* Lead Check pill */
+    .option-pill-leadcheck input[type="checkbox"] {
+      accent-color: #10b981;
+    }
+
+    .option-pill-leadcheck:has(input:checked),
+    .option-pill-leadcheck.is-checked {
+      background: rgba(16, 185, 129, 0.18);
+      border-color: #10b981;
+      color: #34d399;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
+    }
+
+    

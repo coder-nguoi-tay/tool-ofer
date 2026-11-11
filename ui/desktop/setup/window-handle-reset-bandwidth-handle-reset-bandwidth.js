@@ -1,0 +1,1 @@
+window.handleResetBandwidth = handleResetBandwidth;

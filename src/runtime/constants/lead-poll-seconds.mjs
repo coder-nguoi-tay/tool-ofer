@@ -1,0 +1,2 @@
+const LEAD_POLL_SECONDS = 10;
+export { LEAD_POLL_SECONDS };

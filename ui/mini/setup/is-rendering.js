@@ -1,0 +1,1 @@
+let isRendering = false;

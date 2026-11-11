@@ -1,0 +1,55 @@
+/* ==========================================================================
+       MODERN DARK SLATE DASHBOARD THEME
+       Unified with Telegram Mini App & Cyber Slate design
+       ========================================================================== */
+    :root {
+      --bg-dark: #0b0f19;
+      --panel-dark: #0f172a;
+      --card-bg: #131d31;
+      --card-border: #22324e;
+      --input-bg: #1e293b;
+      --input-border: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0ea5e9;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --accent-purple: #a855f7;
+      --win-control: #131d31;
+      --win-control-dark: #0f172a;
+      --win-window: #131d31;
+      --win-text: #f8fafc;
+      --win-blue-legend: #38bdf8;
+      --win-border-light: #334155;
+      --win-border-dark: #1e293b;
+      --win-border-input: #334155;
+      --win-border-group: #22324e;
+      --win-tab-border: #22324e;
+      --win-highlight: #0284c7;
+      --win-highlight-text: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-size: 11.5px;
+      color: var(--text-main);
+      user-select: none;
+      -webkit-user-select: none;
+      height: 100vh;
+      overflow: hidden;
+      padding: 0;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: -0.01em;
+    }
+
+    

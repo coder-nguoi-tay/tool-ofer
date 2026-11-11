@@ -1,0 +1,31 @@
+/* Action Buttons */
+    .btn {
+      background: #1e293b;
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 9px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn:active { transform: scale(0.98); }
+
+    .btn-primary { background: var(--primary); color: #000; border-color: var(--primary); }
+    .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+    .btn-warning { background: var(--warning); color: #000; border-color: var(--warning); }
+    .btn-danger  { background: var(--danger);  color: #fff; border-color: var(--danger); }
+    .btn:disabled, .btn[disabled] {
+      opacity: 0.45 !important;
+      cursor: not-allowed !important;
+      filter: grayscale(40%) !important;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+
+    

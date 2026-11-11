@@ -48,9 +48,9 @@ jobs:
           node --check autofill.mjs
           node --check option-scorer.mjs
           node --check cloakbrowser-engine.mjs
-          node --check run-tests.mjs
+          node --check tests/run-tests.mjs
 
-      # run-tests.mjs tự kiểm tra mọi file test tồn tại trước khi chạy, nên file test
+      # tests/run-tests.mjs tự kiểm tra mọi file test tồn tại trước khi chạy, nên file test
       # bị mất khỏi repo sẽ làm CI fail thay vì bị bỏ qua trong im lặng.
       - name: Run tests
         run: npm test

@@ -1,0 +1,70 @@
+/* Modern Data Grid */
+    .grid-container {
+      border: 1px solid var(--card-border);
+      background: #0f172a;
+      border-radius: 6px;
+      overflow: auto;
+      height: 100%;
+    }
+
+    table.win-grid {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    table.win-grid th {
+      background: #1e293b;
+      border-right: 1px solid var(--card-border);
+      border-bottom: 1px solid var(--card-border);
+      height: 28px;
+      padding: 4px 8px;
+      text-align: left;
+      font-weight: 700;
+      color: #94a3b8;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      white-space: nowrap;
+    }
+
+    table.win-grid th.col-header-selector {
+      width: 22px;
+      min-width: 22px;
+      background: #131d31;
+      border-right: 1px solid var(--card-border);
+      text-align: center;
+    }
+
+    table.win-grid td {
+      border-right: 1px solid #1e293b;
+      border-bottom: 1px solid #1e293b;
+      padding: 4px 8px;
+      height: 26px;
+      white-space: nowrap;
+      font-size: 11.5px;
+      color: #e2e8f0;
+    }
+
+    table.win-grid td.cell-selector {
+      background-color: #131d31;
+      border-right: 1px solid var(--card-border);
+      text-align: center;
+      color: #64748b;
+    }
+
+    table.win-grid tr:nth-child(even) td:not(.cell-selector) {
+      background-color: #131d31;
+    }
+
+    table.win-grid tr:hover td:not(.cell-selector) {
+      background-color: #1e293b;
+    }
+
+    table.win-grid tr.selected td:not(.cell-selector) {
+      background-color: #0284c7 !important;
+      color: #ffffff !important;
+    }
+
+    

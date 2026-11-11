@@ -1,0 +1,2 @@
+const chatHistory = [];
+export { chatHistory };

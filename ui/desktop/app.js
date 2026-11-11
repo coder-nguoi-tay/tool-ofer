@@ -1,0 +1,1 @@
+proxy711FetchBalance(false);

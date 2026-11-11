@@ -1,0 +1,35 @@
+/* Modern Dark Inputs */
+    input.win-input,
+    select.win-select,
+    textarea.win-textarea {
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 12px;
+      background-color: var(--input-bg);
+      color: var(--text-main);
+      height: 28px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    textarea.win-textarea {
+      height: auto;
+      resize: none;
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    input.win-input:focus,
+    select.win-select:focus,
+    textarea.win-textarea:focus {
+      border-color: #38bdf8;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+    }
+
+    select.win-select option {
+      background-color: #1e293b;
+      color: #f8fafc;
+    }
+
+    

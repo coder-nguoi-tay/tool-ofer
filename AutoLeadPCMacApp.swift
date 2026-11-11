@@ -1,5 +1,6 @@
 import AppKit
 import WebKit
+import UniformTypeIdentifiers
 import Security
 import LocalAuthentication
 import SQLite3
@@ -31,10 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         return (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? "AutoLeadPC Mac 2 AdsPower"
     }
 
-    /// Creates the main window, starts the local launcher server, and loads its interface.
-    /// - Parameter notification: The application launch notification.
+    /// Khởi tạo cửa sổ, cầu nối cấu hình/xuất HTML và giao diện server local.
+    /// - Parameter notification: Thông báo khởi động ứng dụng.
+    /// - Returns: Không trả về giá trị.
     /// - Author: ductv <ductv@getflycrm.com>
-    /// - Since: 2026-10-10
+    /// - Since: 2026-11-12
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ngăn chặn hoàn toàn macOS App Nap để đảm bảo luồng chạy nền, FPS video stream và Node.js luôn giữ trên 20 FPS
         activityToken = ProcessInfo.processInfo.beginActivity(
@@ -52,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
         let webViewConfiguration = WKWebViewConfiguration()
         webViewConfiguration.userContentController.add(self, name: "autoleadPreferences")
+        webViewConfiguration.userContentController.add(self, name: "autoleadDebugHtml")
         let webView = WKWebView(frame: .zero, configuration: webViewConfiguration)
         webView.uiDelegate = self
         self.webView = webView
@@ -104,13 +107,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
     }
 
-    /// Receives load and save requests from the app interface.
+    /// Nhận yêu cầu cấu hình và xuất HTML debug từ giao diện ứng dụng.
     /// - Parameters:
     ///   - userContentController: The WebKit message controller.
-    ///   - message: The settings request sent by the interface.
+    ///   - message: Yêu cầu cấu hình hoặc xuất HTML từ giao diện.
     /// - Author: ductv <ductv@getflycrm.com>
-    /// - Since: 2026-10-08
+    /// - Since: 2026-11-12
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "autoleadDebugHtml" {
+            saveDebugHtml(message)
+            return
+        }
         guard let request = message.body as? [String: Any], let action = request["action"] as? String else {
             return
         }
@@ -132,6 +139,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
         let saveStatus = saveSettingsToDatabase(settingsData)
         webView?.evaluateJavaScript("window.receivePreferenceSaveResult(\(saveStatus))")
+    }
+
+    /// Lưu HTML người dùng đang xem qua hộp thoại chọn file của macOS.
+    /// - Parameter message: HTML và tên file từ main frame của giao diện local đúng cổng app.
+    /// - Returns: Không ghi file cho tới khi người dùng chọn nơi lưu và xác nhận.
+    /// - Author: ductv <ductv@getflycrm.com>
+    /// - Since: 2026-11-12
+    private func saveDebugHtml(_ message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard message.frameInfo.isMainFrame,
+              origin.protocol == "http", ["127.0.0.1", "localhost"].contains(origin.host), origin.port == port,
+              let request = message.body as? [String: String], let html = request["html"],
+              let window else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.html]
+        panel.nameFieldStringValue = URL(fileURLWithPath: request["filename"] ?? "autoleadpc-debug.html").lastPathComponent
+        panel.beginSheetModal(for: window) { result in
+            guard result == .OK, let destination = panel.url else { return }
+            do { try html.write(to: destination, atomically: true, encoding: .utf8) }
+            catch { self.showError("Không lưu được HTML: \(error.localizedDescription)") }
+        }
     }
 
     /// Loads launcher settings and removes the obsolete GoLogin token from saved preferences.

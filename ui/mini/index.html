@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>AutoLeadPC Control Mini</title>
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/assets/mini/styles.css">
+</head>
+<body>
+
+  <!-- Top App Bar -->
+  <div class="top-bar">
+    <div class="brand">
+      <span>⚡ AutoLeadPC</span>
+      <span id="topStatusBadge" class="status-badge"><span id="topStatusDot" class="status-dot"></span> <span id="topStatusText">0/0 Luồng</span></span>
+    </div>
+    <div style="display:flex; align-items:center; gap:6px;">
+      <span id="topPointBadge" class="status-badge" style="background:rgba(56, 189, 248, 0.15); border-color:rgba(56, 189, 248, 0.4); color:#38bdf8; font-weight:700;">💎 <span id="topPointVal">-- pt</span></span>
+      <span id="fpsBadge" class="status-badge" style="background:#1e293b; border-color:#334155;">0 FPS</span>
+      <button id="btnTopReload" class="btn" style="padding:4px 8px; font-size:11px;">🔄</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- TAB 1: 📺 MÀN HÌNH LIVE (Screen View & Interaction)                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-screen" class="tab-content active">
+    <!-- View Mode Switcher: Lưới tất cả IP vs Màn hình trực tiếp 1 IP -->
+    <div style="display:flex; padding:6px 10px; background:#090d16; border-bottom:1px solid var(--card-border); gap:6px; flex-shrink:0;">
+      <button id="btnViewGrid" class="btn btn-primary" style="flex:1; padding:6px 4px; font-size:11.5px; font-weight:700;" onclick="switchScreenViewMode('grid')">📱 Lưới màn hình (Tất cả IP)</button>
+      <button id="btnViewSingle" class="btn" style="flex:1; padding:6px 4px; font-size:11.5px; font-weight:700; background:#1e293b; color:#94a3b8;" onclick="switchScreenViewMode('single')">📺 Điều khiển 1 IP (Live)</button>
+    </div>
+
+    <!-- VIEW 1: LƯỚI TẤT CẢ IP (Hiển thị giao diện màn hình của từng IP) -->
+    <div id="screenGridView" class="scroll-page" style="display:flex;">
+      <div id="screenGridCards" style="display:flex; flex-direction:column; gap:10px;"></div>
+      <div id="screenGridEmpty" style="display:none; text-align:center; padding:50px 20px; color:#94a3b8;">
+        <div style="font-size:36px; margin-bottom:10px;">⏸️</div>
+        <div style="font-size:14px; font-weight:700; color:#f8fafc;">Chưa có luồng IP nào đang chạy</div>
+        <div style="font-size:11.5px; margin-top:6px; color:#94a3b8;">Chuyển sang tab <b>🚀 Vận hành</b> để bấm Bắt đầu chạy.</div>
+      </div>
+    </div>
+
+    <!-- VIEW 2: MÀN HÌNH TRỰC TIẾP 1 IP (Tương tác, Chạm & Gõ) -->
+    <div id="screenSingleView" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
+      <!-- Slot Selector Strip -->
+      <div id="slotBar" class="slot-bar">
+        <div class="pill-btn active">Đang tìm slot...</div>
+      </div>
+
+      <!-- Browser Tabs Strip for Current Slot -->
+      <div id="browserTabsBar" class="browser-tabs-bar" style="display:none;"></div>
+
+      <!-- URL & IP Info Strip -->
+      <div class="info-strip">
+        <span id="urlDisplay" class="url-text">Đang kết nối...</span>
+        <span id="ipDisplay" style="color:#a78bfa; font-weight:600;">IP: ...</span>
+      </div>
+
+      <!-- Interactive Mode Selector Bar -->
+      <div class="interact-mode-bar" id="interactModeBar">
+        <div class="interact-pill active" id="modeTouch" onclick="setInteractionMode('touch')">
+          <span>👆 Chạm (Touch)</span>
+        </div>
+        <div class="interact-pill" id="modeTrackpad" onclick="setInteractionMode('trackpad')">
+          <span>🖱️ Chuột ảo (Trackpad)</span>
+        </div>
+        <div class="interact-pill" id="modeScroll" onclick="setInteractionMode('scroll')">
+          <span>📜 Cuộn (Scroll)</span>
+        </div>
+      </div>
+
+      <!-- Smart Autofill Strip (1-tap field injection) -->
+      <div class="smart-autofill-strip" id="smartAutofillStrip">
+        <span style="font-size:10px; color:#64748b; font-weight:600; white-space:nowrap;">⚡ Điền:</span>
+        <div id="autofillChipsContainer" style="display:inline-flex; gap:5px;"></div>
+      </div>
+
+      <!-- Screen Canvas Viewport -->
+      <div id="viewport" class="viewport-area">
+        <canvas id="streamCanvas"></canvas>
+        <div id="canvasMsg" class="canvas-overlay-msg">
+          <span>🟢 Đang tải luồng màn hình...</span>
+        </div>
+
+        <!-- Floating Zoom Controls -->
+        <div class="floating-zoom-controls">
+          <button class="zoom-btn" onclick="zoomIn()" title="Phóng to">+</button>
+          <span class="zoom-level-badge" id="zoomLevelBadge">1.0x</span>
+          <button class="zoom-btn" onclick="zoomOut()" title="Thu nhỏ">−</button>
+          <button class="zoom-btn" onclick="resetZoom()" style="font-size:11px;" title="Vừa khung">Fit</button>
+        </div>
+
+        <!-- Virtual Cursor for Trackpad Mode -->
+        <div id="virtualCursor" class="virtual-cursor">
+          <div class="virtual-cursor-target"></div>
+          <div class="virtual-cursor-arrow"></div>
+        </div>
+      </div>
+
+      <!-- Virtual Trackpad Action Bar (visible only in Trackpad mode) -->
+      <div id="trackpadActionBar" class="trackpad-action-bar">
+        <button class="trackpad-btn" id="btnTrackpadLeftClick" onclick="executeTrackpadClick('left')">👆 Click Trái</button>
+        <button class="trackpad-btn" id="btnTrackpadRightClick" onclick="executeTrackpadClick('right')" style="background:#1e1b4b; border-color:#6366f1; color:#c7d2fe;">🖱️ Chuột Phải</button>
+        <button class="trackpad-btn" id="btnTrackpadDblClick" onclick="executeTrackpadDblClick()" style="background:#0f2e22; border-color:#10b981; color:#a7f3d0;">✌️ Nhấp Đúp</button>
+      </div>
+
+      <!-- Typing & Quick Navigation Controls -->
+      <div class="screen-controls">
+        <!-- Quick Result Picker Bar: Chọn Option 1, Option 2, Random 1-2, Tiếp tục -->
+        <div class="result-picker-bar" id="resultPickerBar">
+          <span style="font-size:11px; font-weight:700; color:#38bdf8; display:flex; align-items:center; gap:3px; white-space:nowrap;">🎯 Chọn KQ:</span>
+          <button class="result-opt-btn" onclick="quickPickOption(0)">1️⃣ Mục 1</button>
+          <button class="result-opt-btn" onclick="quickPickOption(1)">2️⃣ Mục 2</button>
+          <button class="result-opt-btn" onclick="quickPickOption('random')">🎲 Random 1-2</button>
+          <button class="result-opt-btn result-next-btn" onclick="quickSubmitNext()">🚀 Tiếp tục ➔</button>
+        </div>
+
+        <div style="display:flex; gap:6px;">
+          <input id="textInput" class="input-text" type="text" placeholder="Gõ văn bản vào trình duyệt..." autocomplete="off">
+          <button id="btnSendText" class="btn btn-primary" style="padding:6px 12px; font-weight:700;">Gửi</button>
+        </div>
+
+        <!-- Quick Nav Toolbar: Back, Reload, Page Nav -->
+        <div class="key-quick-row" style="margin-bottom:2px;">
+          <button class="key-btn" onclick="triggerBrowserBack()">◀ Lùi</button>
+          <button class="key-btn" onclick="triggerBrowserReload()">🔄 Reload</button>
+          <button class="key-btn" onclick="triggerPageScroll('top')" style="background:#131f37; color:#38bdf8;">🔝 Đầu</button>
+          <button class="key-btn" onclick="triggerPageScroll('up')">⬆ Lên</button>
+          <button class="key-btn" onclick="triggerPageScroll('down')">⬇ Xuống</button>
+          <button class="key-btn" onclick="triggerPageScroll('bottom')" style="background:#131f37; color:#38bdf8;">🔚 Đáy</button>
+          <button class="key-btn" id="btnCloseSlot" style="background:#450a0a; border-color:#7f1d1d; color:#f87171;">🛑 Tắt</button>
+        </div>
+
+        <!-- Quick Keys Row: Keyboard, Enter, Tab, Space, Backspace, Paste, Select All -->
+        <div class="key-quick-row">
+          <button class="key-btn" onclick="openTypeModal()" style="background:#0284c7; border-color:#38bdf8; color:#fff; font-weight:700;">⌨️ Mở rộng</button>
+          <button class="key-btn" data-key="Enter">⏎ Enter</button>
+          <button class="key-btn" data-key="Tab">⇥ Tab</button>
+          <button class="key-btn" data-key="Backspace">⌫ Xóa</button>
+          <button class="key-btn" data-key="Space">␣ Cách</button>
+          <button class="key-btn" id="btnPasteText">📋 Dán</button>
+          <button class="key-btn" id="btnSelectAll">🔤 Chọn hết</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Gõ chữ (Floating Typing Modal) -->
+  <div id="typeModal" class="type-modal">
+    <div class="type-modal-backdrop" onclick="closeTypeModal()"></div>
+    <div class="type-modal-content">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:700; color:#38bdf8; font-size:13px;">⌨️ Gõ văn bản vào trình duyệt:</span>
+        <button class="btn" style="padding:2px 8px; font-size:11px;" onclick="closeTypeModal()">✕ Đóng</button>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <input id="modalTextInput" class="input-text" type="text" placeholder="Nhập văn bản cần gõ..." autocomplete="off">
+        <button id="btnModalSendText" class="btn btn-primary" style="padding:8px 14px; font-weight:700;" onclick="submitModalText()">Gửi ➔</button>
+      </div>
+      <div style="display:flex; gap:6px; overflow-x:auto;">
+        <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="sendInput({type:'keydown', key:'Enter'}); setTimeout(()=>sendInput({type:'keyup', key:'Enter'}), 30); showToast('Đã gửi Enter');">⏎ Enter</button>
+        <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="sendInput({type:'keydown', key:'Tab'}); setTimeout(()=>sendInput({type:'keyup', key:'Tab'}), 30); showToast('Đã gửi Tab');">⇥ Tab</button>
+        <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="sendInput({type:'keydown', key:'Escape'}); setTimeout(()=>sendInput({type:'keyup', key:'Escape'}), 30); showToast('Đã gửi Escape');">Esc</button>
+        <button class="btn" style="padding:4px 8px; font-size:11px; background:#475569;" onclick="document.getElementById('modalTextInput').value=''">🧹 Xoá</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Picker cho thẻ <select> trên màn hình -->
+  <div id="selectModal" class="select-modal" style="display:none;">
+    <div class="select-modal-backdrop" onclick="closeSelectModal()"></div>
+    <div class="select-modal-content">
+      <div class="select-modal-header">
+        <span style="font-weight:700; color:#f8fafc; font-size:13px;">📋 Chọn mục:</span>
+        <button class="btn" style="padding:2px 8px; font-size:11px;" onclick="closeSelectModal()">✕ Đóng</button>
+      </div>
+      <div id="selectModalOptions" class="select-modal-options"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- TAB 2: 🚀 VẬN HÀNH (Cấu hình & Bắt đầu / Tạm dừng / Dừng)                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-run" class="tab-content">
+    <div class="scroll-page">
+      <!-- Top Action Controls (Start / Stop) -->
+      <div class="card" style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1px solid #334155;">
+        <button id="btnStartLaunch" class="btn btn-success" style="padding:12px; font-size:14px; font-weight:700; box-shadow:0 2px 8px rgba(34,197,94,0.3);">
+          ▶ BẮT ĐẦU CHẠY (START)
+        </button>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button id="btnPauseRefill" class="btn btn-warning" style="flex:1; font-weight:600;">
+            ⏸ Tạm dừng bù
+          </button>
+          <button id="btnStopAll" class="btn btn-danger" style="flex:1; font-weight:600;">
+            🛑 Dừng tất cả
+          </button>
+        </div>
+      </div>
+
+      <!-- Card: Chọn Trình duyệt (AdsPower SunBrowser / Chrome) -->
+      <div class="card">
+        <div class="card-title">
+          <span>🌐 Trình duyệt thực thi</span>
+          <span id="badgeBrowserMode" style="color:#22c55e; font-weight:700; font-size:11px;">🛡️ AdsPower SunBrowser</span>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+          <label class="option-pill active" id="pillBrowserAdsPower" onclick="setBrowserMode('AdsPower')">
+            <input type="radio" name="miniBrowserChoice" id="radioAdsPower" value="AdsPower" checked style="display:none;">
+            <span>🛡️ AdsPower SunBrowser</span>
+          </label>
+          <label class="option-pill" id="pillBrowserChrome" onclick="setBrowserMode('Chrome')">
+            <input type="radio" name="miniBrowserChoice" id="radioChrome" value="Chrome" style="display:none;">
+            <span>🌐 Google Chrome</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Card: Cấu hình Offer & Website -->
+      <div class="card">
+        <div class="card-title">
+          <span>🎯 Cấu hình Chiến dịch / Offer</span>
+          <span style="font-size:11px; color:var(--text-muted);">Đồng bộ máy Mac</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Chọn nhanh Offer đã lưu:</label>
+          <select id="selSavedOffer" class="input-select">
+            <option value="">-- Chọn Offer mẫu --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tên Offer (dùng khi lưu):</label>
+          <input id="inputOfferName" class="input-text" type="text" placeholder="Tên chiến dịch / Offer...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Link Offer 1 (chính):</label>
+          <input id="inputWebsiteUrl" class="input-text" type="url" placeholder="https://..." value="https://toffers.top/click/?key=33335&offer_id=2539&aff_id=qg39v">
+        </div>
+
+        <!-- Mở rộng: Đa Link Offer 2, 3, 4 cho Multi-tab -->
+        <details id="detailsMultiLinks" style="background:#0f172a; border:1px solid #334155; border-radius:6px; padding:6px 8px; margin-top:4px;">
+          <summary style="font-size:11px; font-weight:600; color:#38bdf8; cursor:pointer;">
+            ➕ Link Offer 2, 3, 4 (chạy đa tab song song)
+          </summary>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+            <div>
+              <span style="font-size:10px; color:var(--text-muted);">Link Offer 2:</span>
+              <input id="inputWebsiteUrl2" class="input-text" type="url" placeholder="https://...">
+            </div>
+            <div>
+              <span style="font-size:10px; color:var(--text-muted);">Link Offer 3:</span>
+              <input id="inputWebsiteUrl3" class="input-text" type="url" placeholder="https://...">
+            </div>
+            <div>
+              <span style="font-size:10px; color:var(--text-muted);">Link Offer 4:</span>
+              <input id="inputWebsiteUrl4" class="input-text" type="url" placeholder="https://...">
+            </div>
+          </div>
+        </details>
+
+        <!-- Nút quản lý Offer: Lưu / Thêm mới / Xoá -->
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button id="btnSaveOffer" class="btn btn-primary" style="flex:2; font-size:11px;">💾 Lưu Offer vào máy</button>
+          <button id="btnNewOffer" class="btn" style="flex:1; font-size:11px;">➕ Mới</button>
+          <button id="btnDeleteOffer" class="btn btn-danger" style="flex:1; font-size:11px;">🗑️ Xóa</button>
+        </div>
+      </div>
+
+      <!-- Card: Số luồng & Giới hạn -->
+      <div class="card">
+        <div class="card-title">
+          <span>⚡ Số luồng & Giới hạn</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Chọn số luồng chạy cùng lúc:</label>
+          <div id="threadsPills" class="pills-row">
+            <button class="pill-btn" data-thread="1">1</button>
+            <button class="pill-btn" data-thread="2">2</button>
+            <button class="pill-btn active" data-thread="3">3</button>
+            <button class="pill-btn" data-thread="5">5</button>
+            <button class="pill-btn" data-thread="8">8</button>
+            <button class="pill-btn" data-thread="10">10</button>
+            <button class="pill-btn" data-thread="15">15</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+            <span style="font-size:11px; color:var(--text-muted);">Tùy chỉnh:</span>
+            <input id="inputThreadCount" class="input-text" type="number" min="1" max="30" value="3" style="width:80px; text-align:center;">
+            <span style="font-size:11px; color:var(--text-muted);">luồng</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Giới hạn số Leads hoàn thành (0 = Không giới hạn):</label>
+          <input id="inputLimitRun" class="input-text" type="number" min="0" value="0">
+        </div>
+      </div>
+
+      <!-- Card: Cài đặt Thời gian & Delay nâng cao -->
+      <details style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; margin-bottom:2px;">
+        <summary style="font-size:12px; font-weight:700; color:#f8fafc; cursor:pointer;">
+          ⚙️ Thời gian, Delay & Nhận diện Lead (Tùy chọn)
+        </summary>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+            <div>
+              <label class="form-label">Thời gian tối đa (giây):</label>
+              <input id="inputTimeLimit" class="input-text" type="number" min="0" value="30">
+            </div>
+            <div>
+              <label class="form-label">Complete Text:</label>
+              <input id="inputCompleteText" class="input-text" type="text" placeholder="Text hoàn thành...">
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+            <div>
+              <label class="form-label">Delay Bắt đầu (s):</label>
+              <input id="inputDelayStart" class="input-text" type="number" min="0" value="1">
+            </div>
+            <div>
+              <label class="form-label">Delay Kết thúc (s):</label>
+              <input id="inputDelayStop" class="input-text" type="number" min="0" value="1">
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Card: Tuỳ chọn thực thi & Chế độ chạy ngầm -->
+      <div class="card">
+        <div class="card-title">
+          <span>⚡ Tuỳ chọn thực thi & Chế độ ngầm</span>
+          <span style="font-size:10.5px; color:var(--text-muted);">Bấm để bật/tắt</span>
+        </div>
+
+        <div class="option-pills-grid">
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">📺</span> Chạy trong app</span>
+          </label>
+
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxMultiTab" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">📑</span> Đa luồng đa tab</span>
+          </label>
+
+          <label class="option-pill">
+            <input type="checkbox" id="cbxCloakBrowser" onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">🥷</span> CloakBrowser</span>
+          </label>
+
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxDataSaver" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">⚡</span> Tiết kiệm data</span>
+          </label>
+
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxCheckDuplicateIP" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">🛡️</span> Check trùng IP</span>
+          </label>
+
+          <label class="option-pill">
+            <input type="checkbox" id="cbxHideUntilTarget" onchange="if(this.checked){document.getElementById('cbxHideUntilLead').checked=false;} syncOptionPills()">
+            <span><span class="option-pill-icon">🌐</span> Ẩn đến trang đích</span>
+          </label>
+
+          <label class="option-pill">
+            <input type="checkbox" id="cbxHideUntilLead" onchange="if(this.checked){document.getElementById('cbxHideUntilTarget').checked=false; document.getElementById('cbxCheckLead').checked=true;} syncOptionPills()">
+            <span><span class="option-pill-icon">🎯</span> Chỉ hiện có Lead</span>
+          </label>
+
+          <label class="option-pill">
+            <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">⏱️</span> Check Lead (2×30s)</span>
+          </label>
+
+          <label class="option-pill active">
+            <input type="checkbox" id="cbxAiAssist" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">🤖</span> AI Assist</span>
+          </label>
+
+          <label class="option-pill" style="display:none;">
+            <input type="checkbox" id="cbxRRS" onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">💾</span> Save RRS</span>
+          </label>
+
+          <label class="option-pill active">
+            <input id="chkAutoRefill" type="checkbox" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">🔄</span> Tự bù luồng</span>
+          </label>
+
+          <label class="option-pill active">
+            <input id="cbxAutoSubmit" type="checkbox" checked onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">📝</span> Tự submit form</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Card: Hệ điều hành giả lập (Platforms) -->
+      <details style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; margin-bottom:12px;">
+        <summary style="font-size:12px; font-weight:700; color:#f8fafc; cursor:pointer;">
+          💻 Hệ điều hành giả lập (Windows, macOS, Linux...)
+        </summary>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-top:8px;">
+          <label class="option-pill active">
+            <input type="checkbox" id="chkWindows" checked onchange="syncOptionPills()">
+            <span>🪟 Windows</span>
+          </label>
+          <label class="option-pill active">
+            <input type="checkbox" id="chkMac" checked onchange="syncOptionPills()">
+            <span>🍎 macOS</span>
+          </label>
+          <label class="option-pill active">
+            <input type="checkbox" id="chkLinux" checked onchange="syncOptionPills()">
+            <span>🐧 Linux</span>
+          </label>
+          <label class="option-pill">
+            <input type="checkbox" id="chkAndroid" onchange="syncOptionPills()">
+            <span>🤖 Android</span>
+          </label>
+          <label class="option-pill">
+            <input type="checkbox" id="chkIphone" onchange="syncOptionPills()">
+            <span>📱 iPhone</span>
+          </label>
+          <label class="option-pill">
+            <input type="checkbox" id="chkIpad" onchange="syncOptionPills()">
+            <span>📟 iPad</span>
+          </label>
+        </div>
+      </details>
+
+      <!-- Bottom Utilities -->
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+        <button id="btnResetLeadCount" class="btn" style="color:#38bdf8; font-size:11.5px;">
+          🔄 Reset bộ đếm Leads về 0
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- TAB 3: 📦 TÀI NGUYÊN (711Proxy, Autofill, Proxy Queue, Email Queue)        -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-resources" class="tab-content">
+    <div class="scroll-page">
+      <!-- 711Proxy Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🌐 711Proxy (Web API)</span>
+          <span id="badge711Balance" style="color:#22c55e; font-weight:700;">-- GB</span>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between;">
+          <span>Gói: <b id="text711Package" style="color:#fff;">--</b></span>
+          <span>Đã dùng: <b id="text711Used" style="color:#f59e0b;">--</b></span>
+          <span>Còn lại: <b id="text711Remaining" style="color:#22c55e;">--</b></span>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:4px;">
+          <button class="btn btn-primary" style="flex:1; font-size:12px;" onclick="buy711Proxies(20)">🛒 Mua 20</button>
+          <button class="btn btn-primary" style="flex:1; font-size:12px;" onclick="buy711Proxies(50)">🛒 Mua 50</button>
+          <button class="btn btn-primary" style="flex:1; font-size:12px;" onclick="buy711Proxies(100)">🛒 Mua 100</button>
+        </div>
+      </div>
+
+      <!-- Autofill Queue Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>📝 Hồ sơ Autofill (Tên, Địa chỉ, SĐT)</span>
+          <span id="badgeAutofillCount" style="color:#38bdf8; font-weight:700;">--</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+          <span>Khả dụng: <b id="textAutofillAvail" style="color:#22c55e;">--</b></span>
+          <span>Đã dùng: <b id="textAutofillUsed" style="color:#f59e0b;">--</b></span>
+        </div>
+        <button id="btnResetAutofill" class="btn" style="width:100%; font-size:11px; color:#38bdf8;">
+          🔄 Đặt lại hồ sơ đã dùng về hàng đợi
+        </button>
+      </div>
+
+      <!-- Proxy Queue Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🔀 Hàng đợi Proxy</span>
+          <span style="font-size:11px; color:var(--text-muted);">
+            Sẵn sàng: <b id="textProxyAvail" style="color:#38bdf8;">0</b> | Đã dùng: <b id="textProxyUsed" style="color:#94a3b8;">0</b>
+          </span>
+        </div>
+        <textarea id="taProxyInput" class="input-textarea" placeholder="Nhập proxy (mỗi dòng 1 proxy):&#10;ip:port:user:pass hoặc socks5://..."></textarea>
+        <div style="display:flex; gap:6px;">
+          <button id="btnImportProxy" class="btn btn-primary" style="flex:2; font-size:12px;">📥 Nạp thêm Proxy</button>
+          <button id="btnClearProxy" class="btn btn-danger" style="flex:1; font-size:12px;">🗑️ Xóa</button>
+        </div>
+      </div>
+
+      <!-- Email Queue Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>📧 Hàng đợi Email & Form</span>
+          <span style="font-size:11px; color:var(--text-muted);">
+            Sẵn sàng: <b id="textEmailAvail" style="color:#22c55e;">0</b> | Đã dùng: <b id="textEmailUsed" style="color:#94a3b8;">0</b>
+          </span>
+        </div>
+        <textarea id="taEmailInput" class="input-textarea" placeholder="Nhập danh sách email (mỗi dòng 1 email)..."></textarea>
+        <div style="display:flex; gap:6px;">
+          <button id="btnImportEmail" class="btn btn-primary" style="flex:2; font-size:12px;">📥 Nạp Email</button>
+          <button id="btnResetEmail" class="btn" style="flex:1; font-size:12px;">🔄 Đặt lại</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- TAB 4: 📊 THỐNG KÊ & LOGS (Stats, Active Slots, Console)                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-stats" class="tab-content">
+    <div class="scroll-page">
+      <!-- Toffers Point Highlight Card -->
+      <div class="card" style="background: linear-gradient(135deg, rgba(2, 132, 199, 0.25) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1px solid #0284c7; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.15);">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <div>
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px;">💎 Tổng Point Toffers.top</div>
+            <div id="statTotalPointBig" style="font-size:26px; font-weight:800; color:#fff; margin-top:2px;">-- pt</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:11px; font-weight:600; color:#94a3b8;">🎯 Leads ghi nhận</div>
+            <div id="statToffersLeadsCount" style="font-size:20px; font-weight:700; color:#22c55e; margin-top:2px;">-- leads</div>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:10px; color:#64748b; border-top:1px solid rgba(56, 189, 248, 0.2); padding-top:6px;">
+          <span id="textToffersUpdated">Cập nhật: --</span>
+          <button id="btnRefreshToffers" class="btn" style="padding:2px 8px; font-size:10px; background:#0284c7; color:#fff; border:none;" onclick="pollToffersOverview(true)">🔄 Làm mới Point</button>
+        </div>
+      </div>
+
+      <!-- Stats Summary -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Số luồng hoạt động</div>
+          <div id="statThreads" class="stat-val" style="color:#38bdf8;">0 / 0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Leads hoàn thành</div>
+          <div id="statLeads" class="stat-val" style="color:#22c55e;">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Băng thông hôm nay</div>
+          <div id="statBw" class="stat-val" style="color:#f59e0b;">0 B</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tỷ lệ Lead (CR)</div>
+          <div id="statLeadRate" class="stat-val" style="color:#a78bfa;">0%</div>
+        </div>
+      </div>
+
+      <!-- Window Controls Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🪟 Điều khiển Cửa sổ trên Mac</span>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button id="btnHideAllBrowsers" class="btn" style="flex:1; font-size:11px;">👁️ Thu nhỏ / Ẩn ngầm</button>
+          <button id="btnShowAllBrowsers" class="btn" style="flex:1; font-size:11px;">🪟 Hiện cửa sổ lên</button>
+        </div>
+      </div>
+
+      <!-- Active Slots Breakdown -->
+      <div class="card">
+        <div class="card-title">
+          <span>🟢 Luồng trình duyệt đang chạy</span>
+          <span id="textSlotCount" style="color:#38bdf8;">0 slot</span>
+        </div>
+        <div id="activeSlotsList" style="display:flex; flex-direction:column; gap:6px;">
+          <span style="font-size:12px; color:var(--text-muted);">Hiện không có slot nào đang chạy.</span>
+        </div>
+      </div>
+
+      <!-- Recent Toffers Leads Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🎯 Danh sách Leads Toffers gần nhất</span>
+          <span id="badgeLeadListCount" style="color:#22c55e; font-weight:700; font-size:11px;">0 lead</span>
+        </div>
+        <div id="toffersLeadsContainer" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;">
+          <div style="color:#64748b; font-size:11px;">Đang tải danh sách leads...</div>
+        </div>
+      </div>
+
+      <!-- Live Log Terminal -->
+      <div class="card">
+        <div class="card-title">
+          <span>📜 Nhật ký hoạt động (Logs)</span>
+          <button id="btnClearLogs" class="btn" style="padding:2px 8px; font-size:10px;">Xóa log</button>
+        </div>
+        <div id="logBox" class="log-box">
+          <div style="color:#64748b;">Đang tải nhật ký...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- BOTTOM NAVIGATION (4 TABS)                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div class="bottom-nav">
+    <div class="nav-item active" data-tab="tab-screen">
+      <span class="nav-icon">📺</span>
+      <span>Màn hình</span>
+    </div>
+    <div class="nav-item" data-tab="tab-run">
+      <span class="nav-icon">🚀</span>
+      <span>Vận hành</span>
+    </div>
+    <div class="nav-item" data-tab="tab-resources">
+      <span class="nav-icon">📦</span>
+      <span>Tài nguyên</span>
+    </div>
+    <div class="nav-item" data-tab="tab-stats">
+      <span class="nav-icon">📊</span>
+      <span>Thống kê</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- JAVASCRIPT LOGIC                                                            -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <script src="/assets/mini/app.js"></script>
+</body>
+</html>

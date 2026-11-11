@@ -1,0 +1,37 @@
+/* 3. Queue Health Ratio Bar */
+    .queue-health-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+      margin-bottom: 6px;
+      padding: 4px 8px;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .queue-health-bar {
+      flex: 1;
+      height: 6px;
+      background: #1e293b;
+      border-radius: 3px;
+      overflow: hidden;
+      display: flex;
+    }
+
+    .queue-health-ready {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #34d399);
+      transition: width 0.3s ease;
+    }
+
+    .queue-health-used {
+      height: 100%;
+      background: #475569;
+      transition: width 0.3s ease;
+    }
+
+    

@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><style>label{display:block}input,select{display:block;margin:8px}</style>
+<form id="registration" onsubmit="event.preventDefault();this.dataset.sent=1;this.hidden=true;document.querySelector('#done').hidden=false">
+<section id="step1"><label>Title<select name="title_select" id="title_select"><option value="">Select</option><option value="1">Mr.</option><option value="2">Ms.</option><option value="3">Mrs.</option></select></label>
+<label>First Name<input id="fname_input" name="firstname" required></label><label>Last Name<input id="lname_input" name="lastname" required></label>
+<label>Date of Birth<input id="dob" name="dob" type="date" required></label>
+<button type="button" onclick="document.querySelector('#step1').hidden=true;document.querySelector('#step2').hidden=false">Continue →</button></section>
+<section id="step2" hidden><label>Address<input id="address" name="address" required></label><label>Phone<input type="tel" id="phone" name="phone" required></label>
+<label>Email<input type="email" id="email" name="email" required></label><label>ZIP<input id="zip_code" name="zipcode" required></label>
+<button type="submit">YES — Request My Review</button></section></form><h3 id="done" hidden>Thank you, submission received</h3>

@@ -1,0 +1,14 @@
+/* TAB 1: SCREEN VIEW & CONTROLS */
+    .slot-bar {
+      display: flex;
+      gap: 6px;
+      padding: 6px 8px;
+      background: #090d16;
+      border-bottom: 1px solid var(--card-border);
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+    .slot-bar::-webkit-scrollbar { display: none; }
+
+    

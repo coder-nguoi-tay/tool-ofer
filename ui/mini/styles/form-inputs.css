@@ -1,0 +1,66 @@
+/* Form Inputs */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .form-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .input-text, .input-select, .input-textarea {
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      padding: 7px 10px;
+      outline: none;
+      user-select: text;
+      width: 100%;
+    }
+
+    .input-text:focus, .input-select:focus, .input-textarea:focus {
+      border-color: var(--primary);
+    }
+
+    .input-textarea {
+      font-family: monospace;
+      font-size: 11px;
+      resize: vertical;
+      min-height: 70px;
+    }
+
+    .pills-row {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+    .pills-row::-webkit-scrollbar { display: none; }
+
+    .pill-btn {
+      flex-shrink: 0;
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .pill-btn.active {
+      background: var(--primary);
+      color: #000;
+      border-color: var(--primary);
+      font-weight: 700;
+    }
+
+    

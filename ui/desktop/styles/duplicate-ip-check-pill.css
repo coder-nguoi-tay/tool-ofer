@@ -1,0 +1,14 @@
+/* Duplicate IP check pill */
+    .option-pill-dup input[type="checkbox"] {
+      accent-color: #0284c7;
+    }
+
+    .option-pill-dup:has(input:checked),
+    .option-pill-dup.is-checked {
+      background: rgba(2, 132, 199, 0.2);
+      border-color: #38bdf8;
+      color: #7dd3fc;
+      font-weight: 600;
+    }
+
+    

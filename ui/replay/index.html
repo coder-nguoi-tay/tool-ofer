@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="vi">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Xem lại phiên trình duyệt</title><link rel="stylesheet" href="/assets/replay/styles.css"></head>
+<body>
+  <header><a href="/pc">← AutoLeadPC</a><h1>Xem lại phiên trình duyệt</h1><p>Đối chiếu hành động, lỗi và trạng thái form để tìm bước cần sửa.</p></header>
+  <section class="toolbar">
+    <label>Phiên / IP <select id="sessions" aria-label="Chọn phiên trình duyệt"></select></label>
+    <button id="refresh">Nạp lại</button>
+    <button id="debug-start" disabled>Ghi chi tiết 5 phút</button><button id="debug-stop" disabled>Tắt ghi chi tiết</button>
+    <label>Tab <select id="tabs"><option value="">Tất cả</option></select></label>
+    <label><input type="checkbox" id="errors-only"> Chỉ lỗi / đứng</label>
+    <a id="export" href="#">Tải JSON sự kiện + ghi chú</a><a href="/browser-logs/download-all">Tải toàn bộ ảnh, HTML và log (.zip)</a>
+  </section>
+  <p id="status" role="status">Đang tải phiên…</p><p id="summary"></p><p id="recording-mode" class="muted">Mặc định ghi tiến trình và lỗi; thao tác thô chỉ được lưu khi bật ghi chi tiết.</p>
+  <main>
+    <aside><h2>Dòng thời gian</h2><select id="events" size="18" aria-label="Danh sách hành động"></select>
+      <div class="controls"><button id="previous">← Trước</button><button id="play">Phát từng bước</button><button id="next">Sau →</button></div>
+      <input id="position" type="range" min="0" max="0" value="0" aria-label="Vị trí hành động"><p id="position-label"></p>
+      <p class="muted">Phát một bước/giây. Sự kiện quan sát từ trình duyệt có thể do người dùng hoặc bot thực hiện.</p>
+    </aside>
+    <article><h2 id="event-title">Chọn một hành động</h2><p id="event-url"></p>
+      <p id="snapshot-label" class="muted"></p><img id="screenshot" alt="Ảnh giao diện được ghi nhận" hidden>
+      <a id="download-html" hidden>Tải HTML bằng chứng</a>
+      <details open><summary>Chi tiết hành động / lỗi / trạng thái form</summary><pre id="event-detail"></pre></details>
+      <section><h2>Ghi chú để cải thiện code</h2>
+        <form id="feedback"><label>Điều đã xảy ra<textarea id="actual" maxlength="4000" rows="2"></textarea></label>
+          <label>Kết quả đúng mong muốn<textarea id="expected" maxlength="4000" rows="2" required></textarea></label>
+          <button id="save-feedback">Lưu ghi chú cho hành động này</button></form><ul id="feedback-list"></ul>
+      </section>
+    </article>
+  </main><script type="module" src="/assets/replay/app.js"></script>
+</body></html>

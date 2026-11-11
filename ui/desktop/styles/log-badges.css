@@ -1,0 +1,74 @@
+/* Log Badges */
+    .badge-log {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .badge-navigate {
+      background: #0c4a6e;
+      color: #38bdf8;
+    }
+
+    .badge-submit {
+      background: #064e3b;
+      color: #34d399;
+    }
+
+    .badge-checkbox {
+      background: #312e81;
+      color: #a5b4fc;
+    }
+
+    .badge-field {
+      background: #1e293b;
+      color: #cbd5e1;
+    }
+
+    .badge-click {
+      background: #334155;
+      color: #e2e8f0;
+    }
+
+    .badge-ai {
+      background: #3b0764;
+      color: #c084fc;
+      border: 1px solid #7e22ce;
+    }
+
+    .badge-ai-action {
+      background: #4c1d95;
+      color: #ddd6fe;
+    }
+
+    .badge-ai-completed {
+      background: #064e3b;
+      color: #34d399;
+      font-weight: bold;
+    }
+
+    .badge-ai-error {
+      background: #7f1d1d;
+      color: #fca5a5;
+    }
+
+    .badge-lead {
+      background: #064e3b;
+      color: #34d399;
+      font-weight: bold;
+    }
+
+    .badge-blocked {
+      background: #7f1d1d;
+      color: #fca5a5;
+    }
+
+    .badge-offer {
+      background: #1e3a8a;
+      color: #93c5fd;
+      border: 1px solid #2563eb;
+    }
+
+    

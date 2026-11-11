@@ -1,0 +1,2 @@
+// Initial boot sequences
+    loadSavedOffers();

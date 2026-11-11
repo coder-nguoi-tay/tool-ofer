@@ -1,0 +1,43 @@
+/* Modern Dark StatusStrip */
+    .win-statusbar {
+      height: 28px;
+      background: #090d16;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      gap: 8px;
+      flex-shrink: 0;
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+
+    .status-panel {
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 8px;
+      background: #131d31;
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      color: #f8fafc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-panel-flex {
+      flex: 1;
+    }
+
+    .status-grip {
+      width: 14px;
+      height: 14px;
+      background-image: radial-gradient(circle at 2px 2px, #475569 1.2px, transparent 1.2px);
+      background-size: 4px 4px;
+      background-position: bottom right;
+      align-self: flex-end;
+      margin-left: auto;
+    }
+
+    

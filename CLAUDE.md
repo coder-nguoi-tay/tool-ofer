@@ -11,21 +11,21 @@ AutoLeadPC Mac: a macOS app that opens many anti-detect browser windows (one pro
 ```sh
 npm install
 npm start                          # node app.mjs — serves the local UI (port comes from the .app's Info.plist; see app.mjs listen())
-npm test                           # node run-tests.mjs: selfcheck.mjs first, then `node --test` over TEST_FILES
-node --test script.test.mjs        # run a single test file
-node --test --test-name-pattern="<name>" stealth.test.mjs   # single test
-node --check app.mjs               # CI also syntax-checks app/ai-assist/autofill/cloakbrowser-engine/run-tests
+npm test                           # node tests/run-tests.mjs: tests/selfcheck.mjs first, then `node --test` over TEST_FILES
+node --test tests/script.test.mjs        # run a single test file
+node --test --test-name-pattern="<name>" tests/stealth.test.mjs   # single test
+node --check app.mjs               # CI also syntax-checks app/ai-assist/autofill/cloakbrowser-engine/tests/run-tests
 ./build-app.sh                     # compiles AutoLeadPCMacApp.swift (swiftc) and assembles the signed .app bundles
 node mock-html-simulator.mjs       # regenerate mock-pages/offer-sample.html from saved HTML snapshots
 ```
 
-Tests never open a real browser or hit the Internet (CI sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`).
+Automated tests use mocks or offline browser fixtures. The optional captured-screen test skips if its local samples or Chromium are missing. Scripts under `tests/manual/` are run separately and may contact real websites.
 
-**Adding a test file requires adding it to `TEST_FILES` in `run-tests.mjs`** — that list is the single source of truth, and the runner fails if a listed file is missing (`node --test` silently exits 0 on missing files). `build-app.sh` copies `./*.test.mjs` by glob but copies source modules by an **explicit file list**: a new runtime `.mjs` module must also be added to the `cp -p app.mjs autofill.mjs ...` line in `build-app.sh`, or it will be missing from the packaged `.app`. Some `mock-pages/*.test.mjs` files exist but are not in `TEST_FILES`.
+**Add automatic test files to `TEST_FILES` in `tests/run-tests.mjs`.** The runner checks that every listed test exists, then runs `tests/selfcheck.mjs` and the suite from the project root. All automatic test files live in `tests/` or `tests/mock-pages/`; the offline helper is `tests/integration/test-offline-screens.mjs`. `build-app.sh` copies `tests/`, `mock-pages/`, `src/`, and `ui/` recursively. Root runtime facades still use the explicit source file list in the build script.
 
 ## Architecture
 
-- **`app.mjs`** (~8.6k lines) is the orchestrator and HTTP server. It serves `index.html` (Mac UI) / `index-pc.html` (PC-style UI) and a JSON API to them, manages proxy lists/history, slots ("windows"), auto-replace (tự bù) of closed sessions, SQLite preferences, and launches browsers via Playwright (`playwright`'s `chromium`). The Swift wrapper (`AutoLeadPCMacApp.swift`) is just a native shell around this local server; `build-app.sh` produces multiple `.app` variants with different instance ID / port / bundle ID.
+- **`app.mjs`** is the entry point and public compatibility exports. HTTP handlers live in `src/http/routes/`, browser operations in `src/browser/`, form steps in `src/autofill/`, and state in dedicated `state/` files. Root runtime modules re-export the implementations in `src/`. The Swift wrapper (`AutoLeadPCMacApp.swift`) hosts the local UI; `build-app.sh` builds the AdsPower app variant for instance 2 / port 3211.
 - **Browser engines** (selected in Settings > Browser), each a separate module that app.mjs dispatches to:
   - Chrome (installed / Chrome-for-Testing builds, profile copied from a template; `chrome-versions.mjs`),
   - AdsPower SunBrowser (`adspower-profile.mjs`, local API + API key),
@@ -34,7 +34,7 @@ Tests never open a real browser or hit the Internet (CI sets `PLAYWRIGHT_SKIP_BR
 - **`stealth.mjs`**: per-session fingerprint (seed → consistent GPU/CPU/RAM/screen/OS), CDP overrides (UA, Client Hints, languages/timezone from proxy country) and the in-page patch script. Details in `README.md` (limitations listed there).
 - **Proxy plumbing**: `relay.mjs` runs local unauthenticated relays in front of authenticated HTTP/SOCKS5 proxies; `lead-check.mjs` and IP-verification code decide whether an exit IP/page is usable; proxy status history prevents reuse.
 - **Page automation**: `autofill.mjs` (field matching Anh–Việt names, iframes, redirects) → `survey-solver.mjs` (survey/offerwall step answering) → `ai-assist.mjs` and `codex-form-agent.mjs` (LLM / Codex SDK + `@playwright/mcp` fallback for hard cases) → `captcha.mjs`. `script.mjs` runs user-authored step scripts. `observer.mjs`/`analyze-ops.mjs` record manual operations. `tgbot.mjs` is Telegram notifications; `mcp-server.mjs` exposes the app to Codex/Claude via MCP over stdio.
-- **Offline testing**: `mock-pages/` and `mock-html-simulator.mjs` build local fixtures from saved offer HTML (see `mock-pages/README.md`); tests exercise the production selectors against them. `selfcheck.mjs` (~2.6k lines) is the big non-`node:test` assertion suite run first by `npm test`.
+- **Offline testing**: `mock-pages/` and `mock-html-simulator.mjs` build local fixtures from saved offer HTML (see `mock-pages/README.md`); tests exercise the production selectors against them. `tests/selfcheck.mjs` is the big non-`node:test` assertion suite run first by `npm test`.
 - **Research notes**: `PLAYWRIGHT_CORE_INTEGRATION_RESEARCH.md` contains only §17 (age/preference/vehicle question rules), implemented by `handleSurveySemanticQuestions` in `autofill.mjs` — keep doc and code in sync; `QA_TEST_CASES.md` lists manual QA.
 
 ## Things to know

@@ -1,0 +1,1 @@
+window.render711ConsumptionTable = render711ConsumptionTable;

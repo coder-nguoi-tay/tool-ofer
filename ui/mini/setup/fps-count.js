@@ -1,0 +1,1 @@
+let fpsCount = 0;

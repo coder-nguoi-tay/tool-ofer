@@ -1,0 +1,27 @@
+/* Highlight Pill: Hide Until Lead */
+    .option-pill-hidelead {
+      border-color: #22324e;
+      background: #0b1324;
+    }
+
+    .option-pill-hidelead input[type="checkbox"] {
+      accent-color: #a855f7;
+    }
+
+    .option-pill-hidelead:hover {
+      background: #1c1539;
+      border-color: #a855f7;
+      color: #e9d5ff;
+      box-shadow: 0 2px 5px rgba(168, 85, 247, 0.25);
+    }
+
+    .option-pill-hidelead:has(input:checked),
+    .option-pill-hidelead.is-checked {
+      background: rgba(168, 85, 247, 0.2);
+      border-color: #a855f7;
+      color: #d8b4fe;
+      font-weight: 700;
+      box-shadow: 0 2px 6px rgba(168, 85, 247, 0.3);
+    }
+
+    

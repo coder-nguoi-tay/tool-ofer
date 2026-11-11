@@ -146,8 +146,10 @@ Các câu hỏi về độ tuổi, sở thích, và phương tiện xe đang đi
 
 ### 17.8. Tích hợp với các handler hiện có
 
-- Cài đặt: `handleSurveySemanticQuestions` (`autofill.mjs`), gọi ngay sau `handleAlphaIntentQuestions` trong vòng quét frame.
-- **Chọn block:** chỉ xét block có phần chữ câu hỏi nhận diện được; chữ của chính các option không được tính vào phần chữ câu hỏi. Trong các block hợp lệ lấy block nhiều option nhất.
-- **AlphaQ nhường:** nếu `#questionText`/heading khớp một loại §17, `handleAlphaIntentQuestions` không click đáp án đầu nữa, chỉ còn bấm Continue. Handler semantic đặt `data-ux-qclicked` để AlphaQ nhận ra màn đã được trả lời.
-- **Verify sau click:** kiểm tra `checked` / `aria-*` / class selected, hoặc option đã biến mất (màn chuyển). Không thấy thì log `semantic_q_unverified`, không click lại.
-- Test: `survey-semantic.test.mjs` (phân loại); luồng trình duyệt chạy tay bằng `test-offline-screens.mjs`.
+- `handleSurveySemanticQuestions` chạy trong scoped pipeline trước AlphaQ/MUI để hoàn tất các câu semantic trước khi Continue. Nhánh không có scope cũng dùng record đã resolve ở `fillPageForms`.
+- `semantic/collect-question-blocks.mjs` nhóm theo wrapper gần nhất (fieldset/role group/question) hoặc heading gần nhất khi không có wrapper; từng block được chấm điểm độc lập. Nhãn của input lấy từ label, không dùng textContent rỗng của input.
+- Handler chỉ xét control hiển thị qua toàn bộ tổ tiên và `memberSelector`. Không ép visibility, opacity hoặc pointer-events của widget.
+- `verification/perform-survey-answer.mjs` phân biệt dispatched và verified. Native checked, ARIA hoặc class của website là bằng chứng; marker do tool tự đặt không phải bằng chứng. Không đọc được DOM/option biến mất đơn lẻ không được mặc định thành công.
+- Câu chưa verified chỉ mang timestamp attempt để chống click dồn. Chỉ verified mới gắn `data-ux-qclicked`; generic không chọn thay các option được semantic sở hữu.
+- Định danh bước bỏ checked/value/marker; SPA cùng URL phải có heading hoặc tập option mới trước khi ghi autoAdvanced. Nội dung tiến độ như 95% không phải bằng chứng hoàn tất.
+- Test cục bộ: `tests/semantic-blocks.test.mjs`, `tests/scoped-question-widgets.test.mjs`, `tests/survey-verification.test.mjs`, `tests/spa-progress.test.mjs`. Bộ snapshot trong Downloads kiểm tra cấu trúc và trạng thái chờ khi thiếu engine; không coi click chưa xác minh là đã trả lời.

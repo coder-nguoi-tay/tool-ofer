@@ -1,0 +1,113 @@
+/* Screen Modal Tab Bar & Chips */
+    #screenTabBar {
+      display: flex;
+      gap: 6px;
+      padding: 6px 12px;
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      overflow-x: auto;
+      flex-shrink: 0;
+      min-height: 38px;
+      align-items: center;
+    }
+
+    #screenTabBar::-webkit-scrollbar {
+      height: 4px;
+    }
+
+    #screenTabBar::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 2px;
+    }
+
+    .screen-tab-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+      max-width: 210px;
+      flex-shrink: 0;
+    }
+
+    .screen-tab-chip:hover {
+      background: #253349;
+      color: #f1f5f9;
+      border-color: #475569;
+    }
+
+    .screen-tab-chip.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #ffffff;
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(2, 132, 199, 0.4);
+    }
+
+    .screen-tab-favicon {
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .screen-tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .screen-tab-close-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      font-size: 10px;
+      line-height: 1;
+      color: inherit;
+      opacity: 0.75;
+      transition: all 0.12s ease;
+      cursor: pointer;
+      margin-left: 3px;
+    }
+
+    .screen-tab-close-btn:hover {
+      opacity: 1;
+      background: rgba(239, 68, 68, 0.95);
+      color: #ffffff;
+      transform: scale(1.15);
+    }
+
+    .screen-tab-new-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #38bdf8;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+
+    .screen-tab-new-btn:hover {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #38bdf8;
+      transform: scale(1.08);
+    }
+
+    

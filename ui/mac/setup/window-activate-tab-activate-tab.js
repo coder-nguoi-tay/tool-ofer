@@ -1,0 +1,1 @@
+window.activateTab = activateTab;
