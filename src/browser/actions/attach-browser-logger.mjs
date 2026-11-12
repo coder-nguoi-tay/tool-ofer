@@ -4,6 +4,7 @@ import { createSnapshotRecorder } from '../../logging/recorder/create-snapshot-r
 import { attachPageDiagnostics } from '../../logging/recorder/attach-page-diagnostics.mjs';
 import { createRecentActionBuffer } from '../../logging/recorder/create-recent-action-buffer.mjs';
 import { createLogCoalescer } from '../../logging/recorder/create-log-coalescer.mjs';
+import { stampLogSeq } from '../../logging/browser-logs/stamp-log-seq.mjs';
 import { isDetailedRecording, isDiagnosticEvent, shouldCaptureEvent } from '../../logging/recorder/recording-policy.mjs';
 import { limitSessionEvents } from '../../logging/recorder/limit-session-events.mjs';
 
@@ -69,6 +70,7 @@ export function attachBrowserLogger(context, session) {
       limitSessionEvents(sessionItem);
       if (shouldCaptureEvent(logItem)) snapshots.schedule(page, logItem);
     }
+    stampLogSeq(logItem);
     queueSaveBrowserLogs(isNew && (isDiagnosticEvent(logItem) || logItem.type === 'session_closed') ? 250 : 5000);
     return logItem;
   }

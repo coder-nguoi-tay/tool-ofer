@@ -15,6 +15,12 @@ test('quy tắc đóng tab offer phụ: hết offer, chờ xác minh email, life
   assert.match(matchSubOfferCloseReason({ url: 'https://www.lifepointspanel.com/en-us/signup', text: '' }), /lifepointspanel/i);
   assert.equal(matchSubOfferCloseReason({ url: 'https://offer.example.com/form', text: 'Enter your email to continue' }), null);
   assert.equal(matchSubOfferCloseReason({ url: 'https://evil.test/?u=lifepointspanel.com', text: '' }), null);
+  // Quy tắc 2026-11-13: trang chủ yougov.com và landing "earn" của super.com → đóng; form khảo sát account.yougov.com giữ.
+  assert.match(matchSubOfferCloseReason({ url: 'https://yougov.com/', text: '' }), /yougov/i);
+  assert.match(matchSubOfferCloseReason({ url: 'https://www.yougov.com/', text: '' }), /yougov/i);
+  assert.match(matchSubOfferCloseReason({ url: 'https://www.super.com/home/landings/earn?irclickid=X&intent=earn_dsp', text: '' }), /super\.com/i);
+  assert.equal(matchSubOfferCloseReason({ url: 'https://account.yougov.com/us-en/join/new/question-2', text: '' }), null);
+  assert.equal(matchSubOfferCloseReason({ url: 'https://www.super.com/checkout', text: '' }), null);
 });
 
 /**

@@ -90,6 +90,7 @@
     "desktop/functions/fetch-running-state.js",
     "desktop/functions/esc-html.js",
     "desktop/functions/fmt-time.js",
+    "desktop/functions/merge-log-delta.js",
     "desktop/functions/fetch-logs.js",
     "desktop/functions/render-logs.js",
     "desktop/functions/render-ai-activity-grid.js",

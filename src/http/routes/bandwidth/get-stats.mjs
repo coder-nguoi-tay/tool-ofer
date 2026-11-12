@@ -2,6 +2,8 @@ import { activeBrowsers } from '../../../browser/sessions.mjs';
 import { formatBytes } from '../../../monitoring/bandwidth.mjs';
 import { getBandwidthSummary } from '../../../runtime/actions/get-bandwidth-summary.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
+import { bandwidthDailyStats, getLocalDateKey } from '../../../monitoring/bandwidth.mjs';
+import { getTopRelayHosts } from '../../../monitoring/bandwidth/get-top-relay-hosts.mjs';
 
 /**
  * Xử lý API bandwidth-stats.
@@ -14,9 +16,15 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
 export async function handleGetBandwidthStats(request, response) {
   if (request.method === 'GET' && request.url === '/bandwidth/stats') {
     const summary = getBandwidthSummary();
-    const sessionsBw = [...activeBrowsers].filter(session => !session.isClosed && (session.exitIp || session.isManagedProfile || session.slot)).map(session => {
+    const liveSessions = [...activeBrowsers].filter(session => !session.isClosed && (session.exitIp || session.isManagedProfile || session.slot));
+    const sessionsBw = liveSessions.map(session => {
       const livePages = session.browser?.pages ? session.browser.pages().filter(p => !p.isClosed()) : [];
+      // Số đo tại relay = byte proxy thực sự thấy (TLS, CONNECT, socket); null khi phiên không qua relay (SOCKS/không auth).
+      let relay = null;
+      try { relay = session.readRelayBytes?.() || null; } catch {}
+      const relayHosts = relay ? Object.entries(relay.hosts).map(([host, bytes]) => ({ host, bytes: bytes.up + bytes.down })).sort((a, b) => b.bytes - a.bytes).slice(0, 10) : [];
       return {
+        relay: relay ? { up: relay.up, down: relay.down, total: relay.up + relay.down, formatted: formatBytes(relay.up + relay.down), hosts: relayHosts } : null,
         slot: session.slot ?? session.tileIndex + 1,
         exitIp: session.exitIp || 'Direct',
         proxy: session.proxyServer || session.proxyKey || 'Direct',
@@ -38,7 +46,8 @@ export async function handleGetBandwidthStats(request, response) {
     }).sort((a, b) => a.slot - b.slot);
     respondWithJson(response, 200, {
       ...summary,
-      activeSlots: sessionsBw
+      activeSlots: sessionsBw,
+      topHosts: getTopRelayHosts(bandwidthDailyStats.daily[getLocalDateKey()], liveSessions).map(item => ({ ...item, formatted: formatBytes(item.bytes) }))
     });
     return true;
   }

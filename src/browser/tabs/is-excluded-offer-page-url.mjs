@@ -2,6 +2,10 @@ export const excludedOfferPaths = [
   ['contact.uplevelrewards.com', ['/policies/page/about_our_program', '/policies/page/rzu_program_requirements_']],
   ['contact.flashrewards.co', ['/policies/page/about_our_program', '/policies/page/rzu_program_requirements_']],
   ['secure.usgoldbureau.com', ['/affiliate/affiliate-ira-default']],
+  ['yougov.com', ['']],
+  ['www.yougov.com', ['']],
+  ['super.com', ['/home/landings/earn']],
+  ['www.super.com', ['/home/landings/earn']],
 ];
 const excludedPaths = new Map(excludedOfferPaths.map(([host, paths]) => [host, new Set(paths)]));
 

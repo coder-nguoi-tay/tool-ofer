@@ -16,7 +16,17 @@ async function startAuthenticatedHttpRelay(proxy) {
   const upstreamUrl = new URL(proxy.server);
   const authorization = `Basic ${Buffer.from(`${proxy.username}:${proxy.password}`).toString('base64')}`;
   const sockets = new Set();
+  // Đếm byte tại socket phía Chrome: bytesRead = Chrome→proxy, bytesWritten = proxy→Chrome. Node tự đếm trên socket,
+  // không chạm vào luồng dữ liệu. Phần relay thêm vào (Proxy-Authorization ~100 B/kết nối) không tính — sai số nhỏ.
+  const clientSockets = new Set();
+  const hostBySocket = new WeakMap();
+  const closed = { up: 0, down: 0, hosts: {} };
+  const addHost = (host, up, down) => {
+    const bucket = closed.hosts[host] || (closed.hosts[host] = { up: 0, down: 0 });
+    bucket.up += up; bucket.down += down;
+  };
   const server = createHttpServer((clientRequest, clientResponse) => {
+    try { hostBySocket.set(clientRequest.socket, new URL(clientRequest.url).host); } catch {}
     const upstreamRequest = requestHttp({
       host: upstreamUrl.hostname,
       port: Number(upstreamUrl.port),
@@ -35,9 +45,16 @@ async function startAuthenticatedHttpRelay(proxy) {
   });
   server.on('connection', socket => {
     sockets.add(socket);
-    socket.on('close', () => sockets.delete(socket));
+    clientSockets.add(socket);
+    socket.on('close', () => {
+      sockets.delete(socket);
+      clientSockets.delete(socket);
+      closed.up += socket.bytesRead; closed.down += socket.bytesWritten;
+      addHost(hostBySocket.get(socket) || 'unknown', socket.bytesRead, socket.bytesWritten);
+    });
   });
   server.on('connect', (clientRequest, clientSocket, head) => {
+    hostBySocket.set(clientSocket, clientRequest.url);
     const upstreamSocket = connect(Number(upstreamUrl.port), upstreamUrl.hostname);
     sockets.add(upstreamSocket);
     upstreamSocket.on('close', () => sockets.delete(upstreamSocket));
@@ -60,10 +77,28 @@ async function startAuthenticatedHttpRelay(proxy) {
       resolve();
     });
   });
+  /**
+   * Số byte đã qua relay tới giờ (phiên đóng + socket đang mở), tổng và theo host.
+   * @return {{up: number, down: number, hosts: Object<string, {up: number, down: number}>}} Byte lên/xuống.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-13
+   */
+  const readBytes = () => {
+    const snapshot = { up: closed.up, down: closed.down, hosts: {} };
+    for (const [host, bytes] of Object.entries(closed.hosts)) snapshot.hosts[host] = { ...bytes };
+    for (const socket of clientSockets) {
+      snapshot.up += socket.bytesRead; snapshot.down += socket.bytesWritten;
+      const host = hostBySocket.get(socket) || 'unknown';
+      const bucket = snapshot.hosts[host] || (snapshot.hosts[host] = { up: 0, down: 0 });
+      bucket.up += socket.bytesRead; bucket.down += socket.bytesWritten;
+    }
+    return snapshot;
+  };
   return {
     proxy: {
       server: `http://127.0.0.1:${server.address().port}`
     },
+    readBytes,
     close: () => new Promise(resolve => {
       for (const socket of sockets) socket.destroy();
       server.close(resolve);

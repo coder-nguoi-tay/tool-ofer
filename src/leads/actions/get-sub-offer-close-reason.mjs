@@ -5,6 +5,12 @@ const TEXT_RULES = [
 ];
 const HOST_RULES = [
   [/(^|\.)lifepointspanel\.com$/i, 'Offer phụ LifePoints Panel (lifepointspanel.com)'],
+  // 2026-11-13: chỉ trang chủ yougov.com; account.yougov.com là form khảo sát đang điền nên giữ.
+  [/^(www\.)?yougov\.com$/i, 'Offer phụ dừng ở trang chủ YouGov (yougov.com)'],
+];
+// Quy tắc theo host + đường dẫn (2026-11-13).
+const PATH_RULES = [
+  [/^(www\.)?super\.com$/i, /^\/home\/landings\/earn(\/|$)/i, 'Offer phụ landing "earn" của super.com'],
 ];
 
 /**
@@ -18,7 +24,10 @@ const HOST_RULES = [
 export function matchSubOfferCloseReason({ url = '', text = '' } = {}) {
   let host = '';
   try { host = new URL(url).hostname; } catch {}
+  let path = '';
+  try { path = new URL(url).pathname; } catch {}
   for (const [pattern, reason] of HOST_RULES) if (host && pattern.test(host)) return reason;
+  for (const [hostPattern, pathPattern, reason] of PATH_RULES) if (host && hostPattern.test(host) && pathPattern.test(path)) return reason;
   for (const [pattern, reason] of TEXT_RULES) if (pattern.test(text)) return reason;
   return null;
 }

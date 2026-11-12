@@ -1784,16 +1784,22 @@
               <th style="width:70px;text-align:center;">Số tab</th>
               <th style="width:100px;text-align:right;">Upload (↑)</th>
               <th style="width:100px;text-align:right;">Download (↓)</th>
-              <th style="width:110px;text-align:right;color:#34d399;">Tổng</th>
+              <th style="width:110px;text-align:right;color:#34d399;">Tổng (app đo)</th>
+              <th style="width:110px;text-align:right;color:#fb923c;" title="Đếm tại relay cục bộ: mọi byte Chrome gửi/nhận qua proxy, kể cả TLS/CONNECT">Proxy thật</th>
               <th>Chi tiết từng tab</th>
             </tr>
           </thead>
           <tbody id="bwTableSlotsBody">
             <tr>
-              <td colspan="8" style="text-align:center;padding:25px;color:#94a3b8;">Không có luồng nào đang hoạt động.
+              <td colspan="9" style="text-align:center;padding:25px;color:#94a3b8;">Không có luồng nào đang hoạt động.
               </td>
             </tr>
           </tbody>
+        </table>
+        <div style="margin-top:14px;font-size:12px;font-weight:700;color:#fb923c;">🔥 Host tốn băng thông nhất hôm nay <span style="font-weight:400;color:#94a3b8;">(đo tại relay, gồm phiên đã đóng + đang chạy)</span></div>
+        <table class="win-grid" style="width:100%;margin-top:6px;">
+          <thead><tr><th style="width:40px;text-align:center;">#</th><th>Host</th><th style="width:120px;text-align:right;color:#fb923c;">Byte</th><th style="width:70px;text-align:right;">Tỷ trọng</th></tr></thead>
+          <tbody id="bwTableHostsBody"><tr><td colspan="4" style="text-align:center;padding:14px;color:#94a3b8;">Chưa có số đo (cần phiên đi qua relay).</td></tr></tbody>
         </table>
       </div>
 

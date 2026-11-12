@@ -16,6 +16,8 @@ import { homedir } from 'node:os';
  * @since 2026-11-10
  */
 const TEST_FILES = [
+  'relay-bytes.test.mjs',
+  'log-delta.test.mjs',
   'phone-mask-verify.test.mjs',
   'sub-offer-close.test.mjs',
   'adsmith-yes-except-dove.test.mjs',

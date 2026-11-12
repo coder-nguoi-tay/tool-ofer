@@ -285,6 +285,7 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - Card chỉ có button, policy ở footer và DOM dựng lại: vẫn bấm CTA thật đúng một lần. Quét đồng thời không bấm lặp.
 - Click timeout sau input không được gọi thêm click/evaluate/form.submit; AI không được bấm CTA đã xử lý.
 - Hai URL chỉ khác utm nguồn là trùng; hai offer có tham số offer khác nhau vẫn độc lập.
+- Trang gốc yougov.com/www.yougov.com và landing Super `/home/landings/earn` có query tracking: đóng riêng tab. Giữ khảo sát account.yougov.com và các đường dẫn khác; tab cuối của IP có lead vẫn giữ browser bằng tab trống.
 
 ### Phục hồi phạm vi câu hỏi Yes/No (2026-11-12)
 

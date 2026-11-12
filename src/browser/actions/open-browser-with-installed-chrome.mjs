@@ -55,7 +55,8 @@ import { saveAndRecordLeadIpStats } from "../../leads/statistics/save-and-record
 import { saveAutofillQueue } from '../../records/actions/save-autofill-queue.mjs';
 import { screencastSessions } from '../../runtime/constants/screencast-sessions.mjs';
 import { seedChromeProfileFromTemplate } from '../chrome-profiles.mjs';
-import { startAuthenticatedSocksRelay } from '../../../relay.mjs';
+import { startAuthenticatedSocksRelay, startAuthenticatedHttpRelay } from '../../../relay.mjs';
+import { recordRelayUsage } from '../../monitoring/bandwidth/record-relay-usage.mjs';
 import { startLeadVerification } from '../../leads/actions/start-lead-verification.mjs';
 import { startManualOpsRecorder } from '../../../observer.mjs';
 import { stealthInitScript } from '../../../stealth.mjs';
@@ -138,7 +139,9 @@ export async function openBrowserWithInstalledChrome({
   } catch {
     // Không tra được múi giờ không chặn việc xác minh IP trong trình duyệt.
   }
-  const relay = proxy.server.startsWith('socks5://') && proxy.username ? await startAuthenticatedSocksRelay(proxy) : null;
+  // Proxy có auth đều qua relay cục bộ: SOCKS5 vì Chrome không gửi auth SOCKS; HTTP (711) để ĐẾM BYTE THẬT tại socket
+  // (nghiên cứu 2026-11-13: 711 tính gấp 3–4 lần số Playwright đo). Thêm một hop TCP nội bộ, Chrome vẫn CONNECT như cũ.
+  const relay = !proxy.username ? null : proxy.server.startsWith('socks5://') ? await startAuthenticatedSocksRelay(proxy) : await startAuthenticatedHttpRelay(proxy);
   // Mỗi phiên một seed: từ đó bốc ra một máy cụ thể (chip/GPU, nhân CPU, màn hình, bản OS) và nhiễu canvas/audio riêng.
   const sessionSeed = Math.floor(Math.random() * 0x7fffffff) || 1;
   const tileViewport = {
@@ -321,12 +324,14 @@ export async function openBrowserWithInstalledChrome({
       });
     }
   } catch (error) {
+    recordRelayUsage(relay?.readBytes?.());
     await relay?.close();
     throw error;
   }
   const actualOfferNumber = Number(offerNumber) || Number(streamRole) || 1;
   const session = {
     browser: context,
+    readRelayBytes: relay?.readBytes,
     tileIndex,
     slot: (tileIndex ?? 0) + 1,
     enableLeadCheck: leadConfig.enabled === true,
@@ -583,6 +588,7 @@ export async function openBrowserWithInstalledChrome({
     }
     activeBrowsers.delete(session);
     releaseProxyLock(proxy, session.exitIp);
+    recordRelayUsage(relay?.readBytes?.());
     void relay?.close();
     const _slot = session.slot ?? tileIndex + 1;
     const _sc = screencastSessions.get(_slot);
@@ -887,6 +893,7 @@ export async function openBrowserWithInstalledChrome({
     } catch {}
     // QUAN TRỌNG: Force kill ngay tiến trình Chrome của profile này để cửa sổ đóng lập tức 100%, không bị kẹt trên màn hình
     await executeFile('pkill', ['-9', '-f', `user-data-dir.*${proxyKey}`]).catch(() => {});
+    recordRelayUsage(relay?.readBytes?.());
     await relay?.close().catch(() => {});
     void removeChromeSessionProfile(userDataDirectory);
     throw error;

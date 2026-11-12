@@ -24,7 +24,9 @@ export function getBandwidthSummary() {
     sentFormatted: formatBytes(d.bytesSent || 0),
     receivedFormatted: formatBytes(d.bytesReceived || 0),
     proxy711Bytes: d.proxy711Bytes || 0,
-    proxy711Formatted: formatBytes(d.proxy711Bytes || 0)
+    proxy711Formatted: formatBytes(d.proxy711Bytes || 0),
+    relayBytes: (d.relayBytesSent || 0) + (d.relayBytesReceived || 0),
+    relayFormatted: formatBytes((d.relayBytesSent || 0) + (d.relayBytesReceived || 0))
   })).sort((a, b) => b.date.localeCompare(a.date));
   return {
     today: {
@@ -33,7 +35,9 @@ export function getBandwidthSummary() {
       sentFormatted: formatBytes(todayStats.bytesSent || 0),
       receivedFormatted: formatBytes(todayStats.bytesReceived || 0),
       proxy711Bytes: todayStats.proxy711Bytes || 0,
-      proxy711Formatted: formatBytes(todayStats.proxy711Bytes || 0)
+      proxy711Formatted: formatBytes(todayStats.proxy711Bytes || 0),
+      relayBytes: (todayStats.relayBytesSent || 0) + (todayStats.relayBytesReceived || 0),
+      relayFormatted: formatBytes((todayStats.relayBytesSent || 0) + (todayStats.relayBytesReceived || 0))
     },
     allTime: {
       totalBytes: bandwidthDailyStats.totalBytesAllTime,

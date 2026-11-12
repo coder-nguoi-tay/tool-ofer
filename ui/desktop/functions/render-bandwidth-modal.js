@@ -33,9 +33,10 @@ function renderBandwidthModal() {
         const downStr = today.receivedFormatted || formatBytes(today.bytesReceived || 0);
         const reqStr = (today.requestCount || 0).toLocaleString();
         const estStr = today.formatted || formatBytes(today.totalBytes || 0);
+        const relayStr = today.relayBytes ? ` · Relay đo: ${today.relayFormatted}` : '';
         elTodaySub.textContent = data.proxy711?.ok
-          ? `711 thực trừ · App đo ước tính: ${estStr} (↑${upStr} · ↓${downStr} · ${reqStr} reqs)`
-          : `Ước tính app đo (chưa kết nối 711) · ↑ ${upStr} · ↓ ${downStr} · ${reqStr} reqs`;
+          ? `711 thực trừ · App đo ước tính: ${estStr} (↑${upStr} · ↓${downStr} · ${reqStr} reqs)${relayStr}`
+          : `Ước tính app đo (chưa kết nối 711) · ↑ ${upStr} · ↓ ${downStr} · ${reqStr} reqs${relayStr}`;
       }
 
       // Active Slots Card
@@ -68,7 +69,7 @@ function renderBandwidthModal() {
       const slotsTbody = document.getElementById('bwTableSlotsBody');
       if (slotsTbody) {
         if (activeSlots.length === 0) {
-          slotsTbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:25px;color:#94a3b8;">Không có luồng nào đang hoạt động.</td></tr>';
+          slotsTbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:25px;color:#94a3b8;">Không có luồng nào đang hoạt động.</td></tr>';
         } else {
           slotsTbody.innerHTML = activeSlots.map(s => {
             const isHighlighted = _bandwidthModalHighlightSlot && s.slot === _bandwidthModalHighlightSlot;
@@ -101,11 +102,22 @@ function renderBandwidthModal() {
                 <td style="text-align:right;font-size:11px;color:#94a3b8;">${upStr}</td>
                 <td style="text-align:right;font-size:11px;color:#94a3b8;">${downStr}</td>
                 <td style="text-align:right;font-weight:800;font-size:11.5px;color:#34d399;">${totalStr}</td>
+                <td style="text-align:right;font-weight:800;font-size:11.5px;color:#fb923c;" title="${s.relay ? escHtml((s.relay.hosts || []).map(h => `${h.host}: ${formatBytes(h.bytes)}`).join('\n')) : 'Phiên không qua relay'}">${s.relay ? s.relay.formatted : '--'}</td>
                 <td><div style="max-height:80px;overflow-y:auto;">${tabsHtml}</div></td>
               </tr>
             `;
           }).join('');
         }
+      }
+
+      // Host tốn nhất hôm nay (đo tại relay)
+      const hostsTbody = document.getElementById('bwTableHostsBody');
+      if (hostsTbody) {
+        const hosts = data.topHosts || [];
+        const hostTotal = hosts.reduce((sum, h) => sum + (h.bytes || 0), 0) || 1;
+        hostsTbody.innerHTML = hosts.length
+          ? hosts.map((h, i) => `<tr><td style="text-align:center;color:#94a3b8;">${i + 1}</td><td style="font-size:11px;color:#f8fafc;">${escHtml(h.host)}</td><td style="text-align:right;font-weight:700;color:#fb923c;">${h.formatted || formatBytes(h.bytes)}</td><td style="text-align:right;font-size:10.5px;color:#94a3b8;">${Math.round(h.bytes / hostTotal * 100)}%</td></tr>`).join('')
+          : '<tr><td colspan="4" style="text-align:center;padding:14px;color:#94a3b8;">Chưa có số đo (cần phiên đi qua relay).</td></tr>';
       }
 
       // Render Daily History Table

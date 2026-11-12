@@ -20,6 +20,10 @@ const blocked = [
   'https://contact.uplevelrewards.com/policies/page/about_our_program?utm_source=footer-default-40991',
   'https://contact.flashrewards.co/policies/page/rzu_program_requirements_?utm_source=footer-survey',
   'https://secure.usgoldbureau.com/affiliate/affiliate-ira-default/?utm_source=affiliate&_ef_transaction_id=sample&oid=17',
+  'https://yougov.com/',
+  'https://www.yougov.com/?utm_source=fixture',
+  'https://www.super.com/home/landings/earn?irclickid=fixture&utm_source=impact_earn&intent=earn_dsp',
+  'https://super.com/home/landings/earn/?utm_campaign=fixture',
 ];
 
 /**
@@ -40,6 +44,7 @@ test('loại trừ đúng host/path, không phụ thuộc tracking và không đ
   for (const url of ['https://contact.uplevelrewards.com.evil.test/policies/page/about_our_program', 'https://secure.usgoldbureau.com/affiliate/another-offer/', 'https://offer.test/?next=https://contact.uplevelrewards.com/policies/page/about_our_program']) assert.equal(isExcludedOfferPageUrl(url), false);
   assert.equal(normalizeOfferUrl('https://offer.test/?offer=1&utm_source=first#step'), normalizeOfferUrl('https://offer.test/?utm_source=second&offer=1'));
   assert.notEqual(normalizeOfferUrl('https://offer.test/?offer=1'), normalizeOfferUrl('https://offer.test/?offer=2'));
+  for (const url of ['https://account.yougov.com/us-en/join/new/question-2', 'https://yougov.com/survey', 'https://www.super.com/home/landings/other', 'https://yougov.com.evil.test/', 'https://www.super.com.evil.test/home/landings/earn']) assert.equal(isExcludedOfferPageUrl(url), false);
 });
 
 test('mouse.down lỗi sau khi bắt đầu input không chạy thêm click fallback', async () => {
@@ -149,6 +154,7 @@ test('popup window.open qua Gold redirect bị bắt trước khi URL cuối đ�
   await context.route('https://secure.usgoldbureau.com/affiliate/affiliate-ira-default/**', route => route.fulfill({ status: 302, headers: { location: 'https://offer.test/redirected' } }));
   attachUniqueOfferTabs(context, { mainPage: page });
   await installExcludedPopupFilter(context);
+  for (const url of blocked) assert.equal(await page.evaluate(link => window.open(link) === null, url), true);
   assert.equal(await page.evaluate(() => window.open('https://secure.usgoldbureau.com/affiliate/affiliate-ira-default/?source=fixture') === null), true);
   assert.deepEqual(context.pages(), [page]);
   await page.evaluate(() => { window.open('https://offer.test/allowed'); });
