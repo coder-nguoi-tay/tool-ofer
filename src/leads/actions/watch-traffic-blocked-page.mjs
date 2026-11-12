@@ -21,6 +21,7 @@ import { warnIdleOfferSession } from './warn-idle-offer-session.mjs';
 import { recordProxyOutcome, sessionLabel } from './record-proxy-outcome.mjs';
 import { getEmptyOfferPageReason } from './get-empty-offer-page-reason.mjs';
 import { isSessionWorkingOnOffer } from './is-session-working-on-offer.mjs';
+import { readSubOfferCloseReason } from './get-sub-offer-close-reason.mjs';
 
 /**
  * Theo dõi lỗi/tự bù phiên chưa có lead; chỉ đóng thêm trang trắng/một dòng sau thời gian chờ.
@@ -204,6 +205,33 @@ export function watchTrafficBlockedPage(session) {
     session.browser?.on?.('page', bindPageInstantCheck);
   } catch {}
 
+  /**
+   * Đóng các tab offer phụ (không phải tab đầu/tab gốc) đang ở trang hết offer / chờ xác minh email / lifepointspanel,
+   * hoặc sau 30s vẫn không có form/câu hỏi nào để làm (ưu tiên giữ tab có form và đáp án).
+   * Chỉ đóng tab, không đóng trình duyệt; tab đầu không bao giờ bị đóng ở đây.
+   * @param {object} session Phiên trình duyệt.
+   * @param {object[]} pages Các tab đang mở.
+   * @return {Promise<void>}
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-13
+   */
+  const closeFinishedSubOfferTabs = async (session, pages) => {
+    for (const page of pages) {
+      if (page === session.mainPage || page._uxOriginTab || page.isClosed?.()) continue;
+      // Tab phụ là tab cuối: không đóng ở đây (đóng = đóng cả trình duyệt), để nhánh đóng phiên + bù slot bên dưới xử lý.
+      if (!pages.some(other => other !== page && !other.isClosed?.())) continue;
+      let tracker = emptyPageTrackers.get(page);
+      if (!tracker) { tracker = { since: Date.now() }; emptyPageTrackers.set(page, tracker); }
+      const subOfferReason = await readSubOfferCloseReason(page) || await getEmptyOfferPageReason(page, tracker, { subTab: true });
+      if (!subOfferReason || page.isClosed?.()) continue;
+      const currentUrl = typeof page.url === 'function' ? page.url() : '';
+      console.log(`[SubOffer] Đóng tab ${currentUrl}: ${subOfferReason}.`);
+      session.addBrowserLog?.({ type: 'sub_offer_tab_closed', detail: `Đóng tab offer phụ (${subOfferReason}): ${currentUrl}` });
+      page._uxClosedByApp = `offer phụ: ${subOfferReason}`;
+      await page.close().catch(() => {});
+    }
+  };
+
   const timer = setInterval(() => {
     if (checking || blocked) return;
     checking = true;
@@ -214,6 +242,9 @@ export function watchTrafficBlockedPage(session) {
           return;
         }
         const pages = typeof session.browser?.pages === 'function' ? await session.browser.pages() : [];
+        // Đóng tab offer phụ TRƯỚC nhánh bảo vệ phiên có lead: offer phụ chỉ mở sau khi có lead, mà nhánh đó
+        // return sớm nên trước đây (log 2026-11-13 slot 2) tab lifepointspanel 404 không bao giờ bị đóng.
+        await closeFinishedSubOfferTabs(session, pages);
         if (await completeFinancialhelpSession(session, closeSessionAndRefill)) return;
         if (protectConfirmedLeadSession(session)) {
           for (const page of pages) await recoverConfirmedLeadErrorPage(session, page);

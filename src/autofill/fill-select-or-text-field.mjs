@@ -137,12 +137,15 @@ export async function fillSelectOrTextField({
         const maxLen = Number(metadata.maxLength) > 0 ? metadata.maxLength : expectVal.length;
         expectVal = expectVal.replace(/\D/g, '').slice(0, maxLen);
       }
+      // Ô có mask (814-362-6091, (814) 362-6091) hiển thị khác chuỗi đã gõ: ô số thì so theo chữ số.
+      const digitsOnly = String(metadata.type || '').toLowerCase() === 'tel' || /^\d+$/.test(expectVal);
+      const sameValue = current => current.trim() === expectVal.trim() || (digitsOnly && current.replace(/\D/g, '') === expectVal.replace(/\D/g, ''));
       let okTyped = false;
       // 3 lần gõ lại + 1 lần kiểm tra cuối: trước đây lần fill() thứ 3 không được kiểm tra lại, nên ô đã đúng
       // vẫn bị báo "không giữ được giá trị", bỏ cờ filled và vòng quét sau gõ đè email lần nữa.
       for (let retry = 0; retry <= 3; retry++) {
         const current = await field.inputValue().catch(() => '');
-        if (current.trim() === expectVal.trim()) {
+        if (sameValue(current)) {
           okTyped = true;
           break;
         }

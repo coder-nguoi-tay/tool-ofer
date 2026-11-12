@@ -10,7 +10,7 @@ import { readEvidenceWithTimeout } from '../../logging/recorder/read-evidence-wi
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-12
  */
-export async function getEmptyOfferPageReason(page, tracker) {
+export async function getEmptyOfferPageReason(page, tracker, { subTab = false } = {}) {
   if (!page || page.isClosed?.() || page._aiAssistRunning || page._aiFormFixing || page._leadRecoveryInProgress) return null;
   if (page._lateProgressRecoveryActive) { tracker.since = Date.now(); return null; }
   const url = page.url?.() || '';
@@ -41,5 +41,7 @@ export async function getEmptyOfferPageReason(page, tracker) {
   const main = results[mainIndex];
   if (main.empty) return 'Trang trắng không có nội dung offer';
   if (main.singleLine && waited >= NON_OFFER_WAIT_MS.noForm) return 'Trang chỉ có một dòng nội dung, không có form/đáp án';
+  // Tab thứ 2 trở đi (quy tắc 2026-11-13): không có form/câu hỏi ở frame nào sau 30s thì không phải offer để làm → đóng.
+  if (subTab && waited >= NON_OFFER_WAIT_MS.noForm) return 'Tab phụ không có form/câu hỏi để làm';
   return null;
 }

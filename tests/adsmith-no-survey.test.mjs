@@ -62,7 +62,7 @@ test('Adsmith (plc=9235) chọn Yes; câu mở khung radio (Dove) đổi sang No
   assert.equal(await frame.locator('#hidden-no').getAttribute('data-ux-adsmith-target'), null);
   await scan(); await scan(); await scan();
   assert.equal(await frame.evaluate(() => window.nextCount), 2, 'Không click Continue vô hạn hoặc đổi lại Yes');
-  assert.equal(logs.filter(entry => entry.type === 'adsmith_no_waiting').length, 1);
+  assert.equal(logs.filter(entry => entry.type === 'adsmith_continue_rejected').length, 1, 'Continue lần 2 ghi log bị từ chối, sau đó chờ giãn');
   const aiLogs = [];
   await runAiAssist(page, {}, {}, { aiConfig: { enabled: true, mode: 'codex', cliBinary: '/nonexistent' }, onLog: entry => aiLogs.push(entry) });
   assert.equal(aiLogs.length, 0);

@@ -134,6 +134,13 @@ async function findSubmitButton(frame, formScope) {
               reason: 'cancel_text'
             };
           }
+          // account.yougov.com (log 2026-11-12): <a class="back-arrow large secondary">Submit</a> là nút quay lại.
+          if (/(^|[^a-z])(back|prev|previous)(?![a-z])/i.test(idAndClass)) {
+            return {
+              valid: false,
+              reason: 'back_class'
+            };
+          }
 
           // 3. Bỏ qua nút nằm trong header / site-level footer / nav (nếu trang có thẻ)
           if (!insideForm) {
@@ -231,6 +238,7 @@ async function findSubmitButton(frame, formScope) {
         }
         if (href.startsWith('mailto:') || href.startsWith('tel:')) return true;
         if (/cancel|back|previous|prev|quay lại|hủy|close|đóng|skip|bỏ qua/i.test(text)) return true;
+        if (/(^|[^a-z])(back|prev|previous)(?![a-z])/i.test(idAndClass)) return true;
         const inHeader = el.closest('header, nav, #header, #nav, .site-header, .site-nav');
         if (inHeader && !inForm) return true;
         const rect = el.getBoundingClientRect();

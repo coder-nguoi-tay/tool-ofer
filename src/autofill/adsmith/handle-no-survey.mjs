@@ -41,7 +41,7 @@ export async function handleNoSurvey(frame, page, options = {}) {
     return { handled: true, actions: verifiedCount };
   }
   // missingNo (câu bắt buộc không có đáp án No) không chặn Continue nữa: đã chọn No hết chỗ có thể, website tự kiểm tra;
-  // trước đây trang đứng chờ mãi. Giới hạn 2 lần Continue bên dưới vẫn giữ.
+  // trước đây trang đứng chờ mãi.
   if (current.subformOpen || !current.next || options.autoSubmit === false) {
     // Ghi một lần mỗi màn lý do đứng chờ + chữ các nút đang hiện, để chẩn đoán DOM thật của iframe.
     if (!state.waitLogged) {
@@ -51,14 +51,14 @@ export async function handleNoSurvey(frame, page, options = {}) {
     }
     return waiting;
   }
-  if (state.attempts >= 2) {
-    if (!state.logged) options.onLog?.({ type: 'adsmith_no_waiting', detail: 'Đã chọn đáp án và thử Continue hai lần nhưng bước chưa đổi; giữ lựa chọn, chờ website.' }, page);
-    state.logged = true;
-    return waiting;
+  // Continue chưa qua bước (website đang xử lý AJAX hoặc báo thiếu câu): không dừng hẳn như trước
+  // (log 2026-11-12 đứng 146s sau 2 lần), mà thử lại với khoảng chờ giãn dần 5s, 10s, 20s… tối đa 60s.
+  if (state.attempts >= 1) {
+    options.onLog?.({ type: 'adsmith_continue_rejected', detail: `Adsmith AS_IFRAME: Continue lần ${state.attempts} chưa qua bước; lỗi website: ${current.error || 'không có'}; câu bị đánh dấu thiếu: ${current.noAns || 0}. Thử lại.` }, page);
   }
   if (!await humanClick(page, frame.locator(current.next))) return waiting;
   state.attempts++;
-  state.nextAt = Date.now() + 1500;
+  state.nextAt = Date.now() + (state.attempts < 2 ? 1500 : Math.min(60000, 5000 * 2 ** (state.attempts - 2)));
   options.onLog?.({ type: 'submit_clicked', detail: 'Adsmith AS_IFRAME: đã chọn đủ đáp án, bấm Continue.' }, page);
   return { handled: true, actions: 1 };
 }

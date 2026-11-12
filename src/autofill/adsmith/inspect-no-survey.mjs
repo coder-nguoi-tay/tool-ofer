@@ -21,7 +21,9 @@ export function inspectNoSurvey() {
   // Chữ nút có thể kèm ký tự phụ ("Continue »", "NEXT >"): so trên phần chữ cái.
   const isNextText = (element, pattern) => pattern.test(element.textContent.replace(/[^a-z\s]/gi, ' ').replace(/\s+/g, ' ').trim());
   const survey = Array.from(document.querySelectorAll('.Survey')).find(visible);
-  const activePage = survey && Array.from(survey.querySelectorAll('.OfferPage.Active')).find(visible);
+  // PAGINATE=false (log 2026-11-12, path1e): không có .OfferPage, script Adsmith kiểm tra mọi .Survey .Qst
+  // → coi cả .Survey là một trang; trước đây rơi về nhánh "không có câu hỏi" và bấm Continue khi chưa trả lời.
+  const activePage = survey && (Array.from(survey.querySelectorAll('.OfferPage.Active')).find(visible) || (survey.querySelector('.OfferPage') ? null : survey.querySelector('.Qst') && survey));
   if (!survey || !activePage) {
     // Màn không có khối câu hỏi (giới thiệu/chuyển tiếp) nhưng có nút tiếp tục: vẫn bấm để không đứng chờ.
     const plainNext = Array.from(document.querySelectorAll('button, a, input[type="submit"], input[type="button"], [role="button"]'))
@@ -38,8 +40,10 @@ export function inspectNoSurvey() {
     const yes = answerLink(question, 'Yes');
     const no = answerLink(question, 'No');
     const signal = `${question.innerText || ''} ${Array.from(question.querySelectorAll('img')).map(image => `${image.alt} ${image.src}`).join(' ')} ${Array.from(question.querySelectorAll('a[href]')).map(link => link.href).join(' ')}`;
-    const radioPopupOpen = Array.from(question.querySelectorAll('.PopInfo')).some(popup => visible(popup) && Array.from(popup.querySelectorAll('input[type="radio"]')).some(visible));
-    if (/\bdove\b/i.test(signal) || radioPopupOpen) question.dataset.uxAdsmithPrefer = 'No';
+    // DOM thật (2026-11-12): khung PopInfo của Dove là checkbox + select SMS, không phải radio.
+    const formPopupOpen = Array.from(question.querySelectorAll('.PopInfo')).some(popup => visible(popup) && Array.from(popup.querySelectorAll('input[type="radio"], input[type="checkbox"], select')).some(visible));
+    // data-as-oid="11105" là mã offer Dove (Unilever) — dấu hiệu chắc nhất, không phụ thuộc chữ/ảnh.
+    if (question.dataset.asOid === '11105' || /\bdove\b/i.test(signal) || formPopupOpen) question.dataset.uxAdsmithPrefer = 'No';
     const target = question.dataset.uxAdsmithPrefer === 'No' ? no || yes : yes || no;
     if (target) questions.push({ selector: mark(target), selected: target.closest('li').classList.contains('Active'), answer: target === no ? 'No' : 'Yes' });
     else if (!question.classList.contains('NotReq')) missingNo = true;
@@ -55,5 +59,8 @@ export function inspectNoSurvey() {
   // PopInfo chỉ chặn Continue khi là subform thật (có ô nhập đang hiện); khung chỉ có chữ thì không.
   const subformOpen = Array.from(activePage.querySelectorAll('.PopInfo')).some(popup => visible(popup) && Array.from(popup.querySelectorAll('input:not([type="hidden"]), select, textarea')).some(visible));
   const buttons = clickables.map(element => textOf(element).textContent.replace(/\s+/g, ' ').trim().slice(0, 30)).filter(Boolean).slice(0, 8);
-  return { identity: `${location.href}:${activePage.id}:${questions.map(question => question.selector).join('|')}`, questions, missingNo, busy, subformOpen, buttons, next: next ? mark(next) : null };
+  // Khi Continue bị từ chối, script Adsmith gắn .Qst.NoAns và bật .Error.Active — đưa vào log để biết vì sao.
+  const error = Array.from(document.querySelectorAll('.Error')).filter(element => element.classList.contains('Active') || visible(element)).map(element => element.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean).join(' | ').slice(0, 160);
+  const noAns = document.querySelectorAll('.Qst.NoAns').length;
+  return { error, noAns, identity: `${location.href}:${activePage.id}:${questions.map(question => question.selector).join('|')}`, questions, missingNo, busy, subformOpen, buttons, next: next ? mark(next) : null };
 }

@@ -16,6 +16,8 @@ import { homedir } from 'node:os';
  * @since 2026-11-10
  */
 const TEST_FILES = [
+  'phone-mask-verify.test.mjs',
+  'sub-offer-close.test.mjs',
   'adsmith-yes-except-dove.test.mjs',
   'submit-validation-dialog.test.mjs',
   'custom-gender-buttons.test.mjs',

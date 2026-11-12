@@ -46,7 +46,7 @@ export async function findScopedSubmitButton(frame, formScope) {
      * @author ductv <ductv@getflycrm.com>
      * @since 2026-11-10
      */
-    const safe = button => button.type !== 'reset' && !/^(back|previous|cancel|close|no thanks|skip|quay lại|hủy|đóng)$/i.test((button.innerText || button.value || '').trim()) && !((button.tagName === 'A' || button.hasAttribute('href')) && (legalNoise.test(button.textContent || '') || legalNoise.test(button.getAttribute('href') || ''))) && !button.matches('[data-action*="answer"], [data-vector-answer], .question-answer-button, [id^="answer-"], .offerwall-btn, .btn-option');
+    const safe = button => button.type !== 'reset' && !/^(back|previous|cancel|close|no thanks|skip|quay lại|hủy|đóng)$/i.test((button.innerText || button.value || '').trim()) && !/(^|[^a-z])(back|prev|previous)(?![a-z])/i.test(`${button.id} ${button.className}`) && !((button.tagName === 'A' || button.hasAttribute('href')) && (legalNoise.test(button.textContent || '') || legalNoise.test(button.getAttribute('href') || ''))) && !button.matches('[data-action*="answer"], [data-vector-answer], .question-answer-button, [id^="answer-"], .offerwall-btn, .btn-option');
     const eligible = buttons.filter(button => ready(button) && safe(button));
     const primaryNative = native.filter(safe);
     let button = primaryNative.find(ready);

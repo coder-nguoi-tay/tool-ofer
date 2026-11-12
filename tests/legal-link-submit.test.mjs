@@ -49,3 +49,22 @@ test('không chọn link chính sách làm nút submit', { skip: !existsSync(chr
     finally { await context.close(); }
   });
 });
+
+test('không chọn nút quay lại có class back-arrow dù chữ là "Submit" (account.yougov.com)', { skip: !existsSync(chromium.executablePath()) && 'Chưa cài Chromium' }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  for (const [name, html, expected] of [
+    ['trong form, cạnh nút thật', '<form id="main"><input type="email" name="email"><a href="#" class="back-arrow large secondary">Submit</a><button type="button" id="go">Next</button></form>', 'go'],
+    ['ngoài form, chỉ có back-arrow', '<div class="wrap"><p>Question</p><a href="#" class="back-arrow large secondary">Submit</a></div>', null],
+    ['class btn-back / id prev', '<div class="wrap"><a href="#" id="prev" class="btn">Continue</a><a href="#" class="btn-back">Next</a></div>', null],
+    ['class có chữ "background"/"feedback" không bị loại', '<form id="main"><input type="email" name="email"><a href="#" id="ok" class="btn-continue background-blue feedback">Continue</a></form>', 'ok'],
+  ]) {
+    await t.test(name, async () => {
+      const { context, page } = await createFormScopeFixture(browser, html);
+      try {
+        const button = await findSubmitButton(page);
+        assert.equal(button ? await button.getAttribute('id') ?? (await button.evaluate(element => element.outerHTML)) : null, expected);
+      } finally { await context.close(); }
+    });
+  }
+});
