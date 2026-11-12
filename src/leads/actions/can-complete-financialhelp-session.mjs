@@ -41,7 +41,7 @@ export async function canCompleteFinancialhelpSession(session) {
           } finally { await element.dispose(); }
         }
         const content = await readEvidenceWithTimeout(frame, 'completion', () => frame.evaluate(detectOfferContentInPage));
-        if (!content || content.challenge || content.hasForm || content.hasChoices) return false;
+        if (!content || content.loading || content.challenge || content.hasForm || content.hasChoices) return false;
         const pending = await readEvidenceWithTimeout(frame, 'completion-cards', () => frame.evaluate(selector => {
           if (document.readyState !== 'complete') return true;
           return Array.from(document.querySelectorAll(selector)).some(card => card.getClientRects().length > 0 && card.getAttribute('data-ux-opened') !== '1' && card.closest('form')?.getAttribute('data-ux-opened') !== '1' && card.getAttribute('data-ux-soi-done') !== '1');

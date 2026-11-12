@@ -1,3 +1,5 @@
+import { inspectSurveyDropdowns } from '../../survey-solver/inspect-survey-dropdowns.mjs';
+import { inspectCheckboxGroups } from '../../survey-solver/inspect-checkbox-groups.mjs';
 import { inspectYesNoStep } from '../inspect-yes-no-step.mjs';
 import { inspectSurveySubform } from './inspect-survey-subform.mjs';
 
@@ -15,6 +17,8 @@ export async function readYesNoStep(frame, scope) {
     if (!questions) return null;
     const subform = await frame.evaluate(inspectSurveySubform, scope);
     if (!subform) return null;
-    return { ...questions, ...subform };
+    const missingAnswers = await frame.evaluate(inspectCheckboxGroups, { scopeSelector: scope?.memberSelector });
+    const missingDropdowns = await frame.evaluate(inspectSurveyDropdowns, scope?.memberSelector);
+    return { ...questions, ...subform, needsInput: subform.needsInput || missingAnswers.length > 0 || missingDropdowns.length > 0 };
   } catch { return null; }
 }

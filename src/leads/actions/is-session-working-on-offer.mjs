@@ -15,7 +15,7 @@ import { NON_OFFER_WAIT_MS } from '../../runtime/constants/non-offer-wait-ms.mjs
 export function isSessionWorkingOnOffer(session, now = Date.now()) {
   // keepOpenAfterLeadCheck: người dùng tắt "tự đóng khi hết lead" để kiểm tra tay.
   if (session.leadCheckStatus === 'checking' || session.keepOpenAfterLeadCheck === true) return true;
-  // lastActionTime được AI và các handler survey/submit ghi; _uxLastActionAt do bộ đếm ghi.
-  const last = Math.max(session._uxLastActionAt ?? -Infinity, session.lastActionTime ?? -Infinity);
+  // lastActionTime là mốc hoạt động duy nhất. @deprecated _uxLastActionAt: không còn nơi ghi, chỉ đọc dự phòng một bản rồi bỏ.
+  const last = session.lastActionTime ?? session._uxLastActionAt ?? -Infinity;
   return now - last < NON_OFFER_WAIT_MS.noForm;
 }

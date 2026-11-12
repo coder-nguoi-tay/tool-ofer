@@ -12,6 +12,6 @@
 function addActionCount(session, amount = 1) {
   if (!session || !(amount > 0)) return;
   session.autofillActions = (session.autofillActions ?? 0) + amount;
-  session._uxLastActionAt = Date.now(); // isSessionWorkingOnOffer dùng mốc này để biết phiên còn đang làm
+  session.lastActionTime = Date.now(); // mốc hoạt động duy nhất (AI, survey, submit cũng ghi field này)
 }
 export { addActionCount };

@@ -42,23 +42,25 @@ test('retention giữ phiên đang chạy/có ghi chú; chỉ xóa phiên và or
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('retention theo dung lượng dọn phiên cũ trước; không theo symlink ra ngoài logs', async () => {
+test('retention theo dung lượng giữ tóm tắt phiên, bỏ file nặng; không theo symlink ra ngoài logs', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'autolead-retention-'));
   try {
     const outside = join(directory, 'outside.html');
     await writeFile(outside, 'must keep');
     await mkdir(join(directory, 'html'));
     await symlink(directory, join(directory, 'html/offer-1'));
-    await recordingFile(directory, 'manual-ops-old.jsonl', 3);
+    const old = await recordingFile(directory, 'manual-ops-old.jsonl', 3);
     const recent = await recordingFile(directory, 'manual-ops-recent.jsonl', 2);
     const sessions = [
       { id: 'old', endedAt: new Date(Date.now() - 3 * 86_400_000).toISOString() },
       { id: 'recent', endedAt: new Date(Date.now() - 2 * 86_400_000).toISOString() },
     ];
     const result = await pruneStoredRecordings({ directory, sessions, activeIds: new Set(), maxBytes: 15 });
-    assert.equal(result.removedSessions, 1);
-    assert.equal(sessions[0].id, 'recent');
-    await access(recent); await access(outside);
+    assert.equal(result.removedSessions, 0);
+    assert.equal(result.summarizedSessions, 2);
+    assert.deepEqual(sessions.map(session => session.id), ['old', 'recent']);
+    assert.ok(sessions.every(session => session.summaryOnly));
+    await assert.rejects(access(old)); await assert.rejects(access(recent)); await access(outside);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -122,4 +124,71 @@ test('HTML toàn trang mặc định tắt; debug hết hạn hoặc đủ 10 MB
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, AUTOLEADPC_FULL_HTML_DEBUG: enabled }, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   }
+});
+
+
+test('vượt trần file giữ id/sequence/lỗi AI/đóng phiên và bỏ tham chiếu artifact đã xóa', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'autolead-retention-summary-'));
+  try {
+    const evidence = await recordingFile(directory, 'manual-ops-session.jsonl', 1);
+    const sessions = [{ id: 'session', startedAt: new Date(Date.now() - 180000).toISOString(), endedAt: new Date(Date.now() - 120000).toISOString(), logs: [
+      { id: 'noise', sequence: 1, type: 'network_request', detail: 'background' },
+      { id: 'error', sequence: 2, type: 'page_error', detail: 'Widget unavailable', htmlPath: evidence },
+      { id: 'ai', sequence: 3, type: 'ai_action', detail: 'Đã chọn đáp án', snapshotEventId: 'error' },
+      { id: 'select', sequence: 4, type: 'select_value_unmatched', detail: 'Chưa có option' },
+      { id: 'close', sequence: 5, type: 'tab_closed', detail: 'tab trùng link' },
+    ] }];
+    const result = await pruneStoredRecordings({ directory, sessions, activeIds: new Set(), maxFiles: 0 });
+    assert.equal(result.removedSessions, 0);
+    assert.equal(result.summarizedSessions, 1);
+    assert.equal(result.removedFiles, 1);
+    assert.equal(sessions[0].summaryOnly, true);
+    assert.deepEqual(sessions[0].logs.map(event => event.id), ['error', 'ai', 'select', 'close']);
+    assert.equal(sessions[0].logs[0].sequence, 2);
+    assert.equal(sessions[0].logs[0].detail, 'Widget unavailable');
+    assert.ok(sessions[0].logs.every(event => !event.htmlPath && !event.snapshotEventId));
+    await assert.rejects(access(evidence));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('không xóa tóm tắt/ảnh nếu lưu metadata rút gọn thất bại; thứ tự phiên được phục hồi', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'autolead-retention-summary-failure-'));
+  try {
+    const file = await recordingFile(directory, 'manual-ops-session.jsonl', 1);
+    const original = { id: 'session', endedAt: new Date(Date.now() - 120000).toISOString(), logs: [{ id: 'error', type: 'page_error', htmlPath: file }] };
+    const sessions = [original];
+    const result = await pruneStoredRecordings({ directory, sessions, activeIds: new Set(), maxFiles: 0, persist: async () => false });
+    assert.equal(result.summarizedSessions, 0);
+    assert.equal(sessions[0], original);
+    assert.equal(sessions[0].summaryOnly, undefined);
+    await access(file);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('trần file orphan không làm xóa nhật ký phiên gần đây không sở hữu file đó', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'autolead-retention-orphan-metadata-'));
+  try {
+    await recordingFile(directory, 'manual-ops-orphan.jsonl', 1);
+    const original = { id: 'session', endedAt: new Date(Date.now() - 120000).toISOString(), logs: [{ type: 'ai_error', detail: 'AI timeout' }] };
+    const sessions = [original];
+    const result = await pruneStoredRecordings({ directory, sessions, activeIds: new Set(), maxFiles: 0 });
+    assert.equal(result.removedSessions, 0);
+    assert.equal(sessions[0], original);
+    assert.equal(result.removedFiles, 1);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test('giữ phiên chưa có endedAt khi nạp lại app; trần bản tóm tắt chỉ dọn bản cũ nhất', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'autolead-retention-summary-cap-'));
+  try {
+    const file = await recordingFile(directory, 'manual-ops-open.jsonl', 1);
+    const now = Date.now();
+    const open = { id: 'open', startedAt: new Date(now - 120000).toISOString(), endedAt: null, logs: [{ htmlPath: file }] };
+    const sessions = [open, ...[3, 2, 1].map(day => ({ id: 'summary-' + day, summaryOnly: true, endedAt: new Date(now - day * 86400000).toISOString(), logs: [{ type: 'ai_error' }] }))];
+    const result = await pruneStoredRecordings({ directory, sessions, activeIds: new Set(), maxFiles: 0, maxSummaries: 2 });
+    assert.equal(result.removedSessions, 1);
+    assert.deepEqual(sessions.map(session => session.id), ['open', 'summary-2', 'summary-1']);
+    await access(file);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

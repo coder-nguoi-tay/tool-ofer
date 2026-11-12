@@ -1,4 +1,6 @@
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
+import { isNoSurveyFrame } from './adsmith/is-no-survey-frame.mjs';
+import { recordPageDialog } from './record-page-dialog.mjs';
 import { recoverEmptyProgress } from './late-progress/recover-empty-progress.mjs';
 import { inspectAutofillChallenge } from './watchdog/inspect-autofill-challenge.mjs';
 import { getAutofillScanDelay } from './watchdog/get-autofill-scan-delay.mjs';
@@ -130,6 +132,11 @@ export function attachAutofillPageWatcher(page, {
         void scan(true);
       }, 80);
     } else {
+      if (await isNoSurveyFrame(page._activeAutofillFrame)) {
+        noProgressRounds = 0;
+        scanDelayMs = 500;
+        return;
+      }
       // Dùng chung nhận diện visible/iframe với AI, không coi iframe trắng là form bị kẹt.
       if (await recoverEmptyProgress(page, session, options)) { scanDelayMs = 5000; return; }
       const visibleState = await readVisiblePageState(page);
@@ -271,6 +278,7 @@ export function attachAutofillPageWatcher(page, {
   if (typeof page.on === 'function') {
     page.on('dialog', async dialog => {
       try {
+        recordPageDialog(page, dialog); // đồng bộ trước accept: submit kiểm tra alert lỗi nhập liệu
         const msg = dialog.message()?.slice(0, 80) || '';
         console.log(`[Playwright] Tự động xác nhận dialog (${dialog.type()}): "${msg}"`);
         options.onLog?.({

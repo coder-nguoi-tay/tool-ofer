@@ -9,6 +9,15 @@ import { waitForInputPacing } from '../interaction/wait-for-input-pacing.mjs';
  * @since 2026-11-12
  */
 export async function selectNativeOptionWithHumanInteraction({ page, field, target }) {
+  // onchange của một số form (co-reg TMG…) chuyển trang ngay khi chọn: phần tử rời DOM nên đọc lại giá trị lỗi.
+  // Phân biệt với "không giữ giá trị" để không báo select_value_unmatched sai trên trang mới.
+  const readSelectValue = async () => {
+    try {
+      return { value: await field.inputValue() };
+    } catch {
+      return { value: '', detached: !(await field.evaluate(element => element.isConnected).catch(() => false)) };
+    }
+  };
   if (!page?.mouse || !page?.keyboard) return { ...target, verified: false, reason: 'interaction_unavailable' };
   if (!await humanClick(page, field)) return { ...target, verified: false, reason: 'click_failed' };
   await waitForInputPacing(page);
@@ -17,13 +26,13 @@ export async function selectNativeOptionWithHumanInteraction({ page, field, targ
   await page.keyboard.press('Home');
   for (let index = 0; index < targetPosition; index++) await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  let actualValue = await field.inputValue().catch(() => '');
-  if (actualValue === target.value) return { ...target, verified: true, reason: 'option_verified' };
+  let read = await readSelectValue();
+  if (read.value === target.value) return { ...target, verified: true, reason: 'option_verified' };
+  if (read.detached) return { ...target, verified: false, reason: 'navigated' };
 
   // Popup native trên macOS không luôn nhận phím qua CDP. Chỉ fallback sau khi đã click và thử phím.
   await field.selectOption({ index: target.index }, { timeout: 2000 }).catch(() => {});
-  actualValue = await field.inputValue().catch(() => '');
-  return actualValue === target.value
-    ? { ...target, verified: true, reason: 'option_verified_hybrid' }
-    : { ...target, verified: false, reason: 'value_not_retained' };
+  read = await readSelectValue();
+  if (read.value === target.value) return { ...target, verified: true, reason: 'option_verified_hybrid' };
+  return { ...target, verified: false, reason: read.detached ? 'navigated' : 'value_not_retained' };
 }

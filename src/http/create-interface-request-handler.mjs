@@ -1,3 +1,4 @@
+import { attachRequestLogging } from './attach-request-logging.mjs';
 import { primaryRouteHandlers, screenRouteHandlers } from './route-handlers.mjs';
 
 /**
@@ -5,11 +6,11 @@ import { primaryRouteHandlers, screenRouteHandlers } from './route-handlers.mjs'
  * @param {object} context HTML dự phòng và các command đã đăng ký khi khởi động.
  * @return {Function} Listener HTTP xử lý endpoint theo thứ tự hiện có.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-12
  */
 export function createInterfaceRequestHandler(context) {
   return async (request, response) => {
-    console.log('[HTTP]', request.method, request.url);
+    attachRequestLogging(request, response);
     for (const handleRoute of primaryRouteHandlers) {
       if (await handleRoute(request, response, context)) return;
     }

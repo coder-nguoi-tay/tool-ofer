@@ -7,7 +7,7 @@ import { applicationState } from '../../runtime/application-state.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
 import { browserSessionLogs } from '../../logging/browser-logs.mjs';
 import { executeFile } from '../../runtime/constants/execute-file.mjs';
-import { findDuplicateTabs } from '../../browser/actions/find-duplicate-tabs.mjs';
+import { hasUnfinishedOfferWork } from './has-unfinished-offer-work.mjs';
 import { readThrottledPageHealth } from '../page-health/read-throttled-page-health.mjs';
 import { isThankYouUrl } from './is-thank-you-url.mjs';
 import { closeHistoryStatus } from '../../proxy/actions/is-exit-ip-consumed.mjs';
@@ -18,10 +18,13 @@ import { queueSaveBrowserLogs } from '../../logging/browser-logs.mjs';
 import { readProxyUsageHistory } from '../../proxy/actions/read-proxy-usage-history.mjs';
 import { requestManagedProfileStop } from '../../browser/actions/request-managed-profile-stop.mjs';
 import { warnIdleOfferSession } from './warn-idle-offer-session.mjs';
+import { recordProxyOutcome, sessionLabel } from './record-proxy-outcome.mjs';
+import { getEmptyOfferPageReason } from './get-empty-offer-page-reason.mjs';
+import { isSessionWorkingOnOffer } from './is-session-working-on-offer.mjs';
 
 /**
- * Theo dõi lỗi/tự bù phiên chưa có lead; không đóng vì thiếu form/không phải offer.
- * Phiên có lead quay lại trang trước khi lỗi và tiếp tục form.
+ * Theo dõi lỗi/tự bù phiên chưa có lead; chỉ đóng thêm trang trắng/một dòng sau thời gian chờ.
+ * Không phân loại non-offer nói chung. Phiên có lead quay lại trang trước khi lỗi và tiếp tục form.
  *
  * @param {object} session Phiên Chrome đã mở thành công.
  * @return {void} Gắn lịch kiểm tra vào các tab của phiên.
@@ -34,6 +37,7 @@ export function watchTrafficBlockedPage(session) {
   let checking = false;
   let blocked = false;
   const redirectTracker = new WeakMap();
+  const emptyPageTrackers = new WeakMap();
   const idleTracker = { startedAt: Date.now() };
 
   /**
@@ -93,37 +97,19 @@ export function watchTrafficBlockedPage(session) {
       const u = typeof p.url === 'function' ? p.url() : '';
       if (isToffersDuplicateOfferUrl(u)) {
         const slotNum = session.slot ?? (session.tileIndex ?? 0) + 1;
-        const label = session.chromeVersion ? `Chrome ${session.chromeVersion}` : session.profileId ? `Profile ${session.profileId}` : `Slot ${slotNum}`;
+        const label = sessionLabel(session);
         const dupReason = 'IP đã click offer trước đó (Toffers Duplicate IP)';
         console.log(`[ToffersDup] ${label} [Slot ${slotNum}|IP: ${session.exitIp || 'chưa rõ'}]: Phát hiện URL lỗi duplicate offer (${u}). Tự động đóng trình duyệt và bù slot mới ngay lập tức.`);
 
-        try {
-          if (session.proxyKey) {
-            const history = await readProxyUsageHistory();
-            if (protectConfirmedLeadSession(session)) return;
-            if (history?.proxies?.[session.proxyKey]) {
-              history.proxies[session.proxyKey] = {
-                ...history.proxies[session.proxyKey],
-                status: 'duplicate_ip',
-                reason: dupReason,
-                completedAt: new Date().toISOString()
-              };
-              await persistProxyUsageHistory(history);
-            }
-          }
-        } catch {}
+        if (await recordProxyOutcome(session, 'duplicate_ip', dupReason)) return;
 
         autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) đã click offer trước đó; đã đóng cửa sổ và đang tự động mở sock khác thay thế…`;
-        const logs = browserSessionLogs.get(session);
-        if (logs) {
-          logs.push({
-            time: new Date().toISOString(),
-            offer: session.offerNumber ?? session.streamRole ?? 1,
-            type: 'toffers_duplicate_ip',
-            detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị ${dupReason} [${u}]. Đóng cửa sổ và đổi sock khác.`
-          });
-          queueSaveBrowserLogs();
-        }
+        // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+        session.addBrowserLog?.({
+          offer: session.offerNumber ?? session.streamRole ?? 1,
+          type: 'toffers_duplicate_ip',
+          detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị ${dupReason} [${u}]. Đóng cửa sổ và đổi sock khác.`
+        });
         session.updateBadge?.(`⚠️ <strong>IP trùng offer</strong> Đang đổi sock…`);
         await closeSessionAndRefill({ page: p });
       }
@@ -136,11 +122,13 @@ export function watchTrafficBlockedPage(session) {
   const handleThankYouClose = async (p, u) => {
     try {
       if (protectConfirmedLeadSession(session) || p._uxThankYouHandled) return;
-      p._uxThankYouHandled = true;
+      if (await hasUnfinishedOfferWork(p)) return;
       const slotNum = session.slot ?? (session.tileIndex ?? 0) + 1;
-      const label = session.chromeVersion ? `Chrome ${session.chromeVersion}` : session.profileId ? `Profile ${session.profileId}` : `Slot ${slotNum}`;
+      const label = sessionLabel(session);
       const allPages = typeof session.browser?.pages === 'function' ? await session.browser.pages() : [];
       const otherTabs = allPages.filter(other => other !== p && !other.isClosed?.());
+      if (p === session.mainPage && otherTabs.length > 0) return;
+      p._uxThankYouHandled = true;
       // Tab đầu chỉ được người dùng tắt tay: tab đầu tới thankyou thì hoàn tất cả phiên (nhánh dưới), không đóng riêng.
       if (otherTabs.length > 0 && p !== session.mainPage) {
         console.log(`[ThankYou] ${label}: Tab hoàn tất ${u}, tự động đóng tab và quay về tab chính.`);
@@ -158,31 +146,13 @@ export function watchTrafficBlockedPage(session) {
 
       // Nếu là tab duy nhất hoặc toàn bộ tab đã hoàn thành: đóng browser và hoàn thành phiên
       console.log(`[ThankYou] ${label} [Slot ${slotNum}|IP: ${session.exitIp || 'chưa rõ'}]: Phát hiện trang hoàn tất thankyou.php (${u}). Tự động đóng trình duyệt và chuyển proxy mới.`);
-      try {
-        if (session.proxyKey) {
-          const history = await readProxyUsageHistory();
-          if (protectConfirmedLeadSession(session)) return;
-          if (history?.proxies?.[session.proxyKey]) {
-            history.proxies[session.proxyKey] = {
-              ...history.proxies[session.proxyKey],
-              status: 'completed',
-              reason: 'Hoàn tất trang thankyou.php',
-              completedAt: new Date().toISOString()
-            };
-            await persistProxyUsageHistory(history);
-          }
-        }
-      } catch {}
-      const logs = browserSessionLogs.get(session);
-      if (logs) {
-        logs.push({
-          time: new Date().toISOString(),
-          offer: session.offerNumber ?? session.streamRole ?? 1,
-          type: 'thankyou_completed',
-          detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) đã hoàn tất đến trang thankyou.php [${u}]. Tự động đóng trình duyệt.`
-        });
-        queueSaveBrowserLogs();
-      }
+      if (await recordProxyOutcome(session, 'completed', 'Hoàn tất trang thankyou.php')) return;
+      // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+      session.addBrowserLog?.({
+        offer: session.offerNumber ?? session.streamRole ?? 1,
+        type: 'thankyou_completed',
+        detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) đã hoàn tất đến trang thankyou.php [${u}]. Tự động đóng trình duyệt.`
+      });
       session.updateBadge?.(`🎉 <strong>Đã hoàn tất</strong> thankyou.php`);
       await closeSessionAndRefill({ page: p });
     } catch (err) {
@@ -252,18 +222,6 @@ export function watchTrafficBlockedPage(session) {
 
         warnIdleOfferSession(session, idleTracker);
 
-        // Hai tab cùng link: đóng tab trùng do trang tự bật ra, giữ tab gốc / tab mở trước.
-        for (const dup of findDuplicateTabs(pages, p => p === session.mainPage || p._uxOriginTab === true)) {
-          console.log(`[DupTab] Đóng tab trùng link ${dup.url()}.`);
-          session.addBrowserLog?.({
-            type: 'duplicate_tab_closed',
-            detail: `Đóng tab trùng link: ${dup.url()}`
-          });
-          dup._uxClosedByApp = 'tab trùng link';
-          if (protectConfirmedLeadSession(session)) return;
-          await dup.close().catch(() => {});
-        }
-
         for (const page of pages) {
           if (typeof page?.isClosed === 'function' && page.isClosed()) continue;
 
@@ -275,9 +233,16 @@ export function watchTrafficBlockedPage(session) {
             continue;
           }
 
-          // Chỉ kiểm tra lỗi mạng/blocked; không phân loại không-offer để tự đóng nữa.
           bindPageInstantCheck(page);
-          const deadReason = await readThrottledPageHealth(page);
+          let deadReason = await readThrottledPageHealth(page);
+          if (!deadReason && !isSessionWorkingOnOffer(session)) {
+            let tracker = emptyPageTrackers.get(page);
+            if (!tracker) {
+              tracker = { since: Date.now() };
+              emptyPageTrackers.set(page, tracker);
+            }
+            deadReason = await getEmptyOfferPageReason(page, tracker);
+          }
           if (protectConfirmedLeadSession(session)) return;
 
           if (deadReason) {
@@ -300,34 +265,16 @@ export function watchTrafficBlockedPage(session) {
             }
 
             // Tab chính hoặc IP đã click offer bị lỗi → đóng cả browser và bù slot mới
-            try {
-              if (session.proxyKey) {
-                const history = await readProxyUsageHistory();
-                if (protectConfirmedLeadSession(session)) return;
-                if (history?.proxies?.[session.proxyKey]) {
-                  history.proxies[session.proxyKey] = {
-                    ...history.proxies[session.proxyKey],
-                    status: closeHistoryStatus(deadReason, false),
-                    reason: deadReason,
-                    completedAt: new Date().toISOString()
-                  };
-                  await persistProxyUsageHistory(history);
-                }
-              }
-            } catch {}
+            if (await recordProxyOutcome(session, closeHistoryStatus(deadReason, false), deadReason)) return;
 
-            const label = session.chromeVersion ? `Chrome ${session.chromeVersion}` : session.profileId ? `Profile ${session.profileId}` : `Slot ${(session.tileIndex ?? 0) + 1}`;
+            const label = sessionLabel(session);
             autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) bị ${deadReason}; đã đóng cửa sổ và đang tự động mở sock khác thay thế…`;
-            const logs = browserSessionLogs.get(session);
-            if (logs) {
-              logs.push({
-                time: new Date().toISOString(),
-                offer: session.offerNumber ?? session.streamRole ?? 1,
-                type: 'traffic_blocked',
-                detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị ${deadReason}. Đóng cửa sổ và đổi sock khác.`
-              });
-              queueSaveBrowserLogs();
-            }
+            // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+            session.addBrowserLog?.({
+              offer: session.offerNumber ?? session.streamRole ?? 1,
+              type: 'traffic_blocked',
+              detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị ${deadReason}. Đóng cửa sổ và đổi sock khác.`
+            });
             session.updateBadge?.(`⚠️ <strong>${deadReason}</strong> Đang đổi sock…`);
             await closeSessionAndRefill({ page });
             return;
@@ -338,35 +285,17 @@ export function watchTrafficBlockedPage(session) {
           if (isAdtrapper) {
             const isDisabledLanding = /\/disabled(\.html)?(\?|\/|$)/i.test(currentUrl);
             if (isDisabledLanding) {
-              const label = session.chromeVersion ? `Chrome ${session.chromeVersion}` : session.profileId ? `Profile ${session.profileId}` : `Slot ${(session.tileIndex ?? 0) + 1}`;
+              const label = sessionLabel(session);
               const disabledReason = 'Landing báo DISABLED (offer từ chối traffic/IP-geo)';
-              try {
-                if (session.proxyKey) {
-                  const history = await readProxyUsageHistory();
-                  if (protectConfirmedLeadSession(session)) return;
-                  if (history?.proxies?.[session.proxyKey]) {
-                    history.proxies[session.proxyKey] = {
-                      ...history.proxies[session.proxyKey],
-                      status: 'failed',
-                      reason: disabledReason,
-                      completedAt: new Date().toISOString()
-                    };
-                    await persistProxyUsageHistory(history);
-                  }
-                }
-              } catch {}
+              if (await recordProxyOutcome(session, 'failed', disabledReason)) return;
               autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) vào landing DISABLED của adswapper; đã đóng cửa sổ và đang tự động mở sock khác thay thế…`;
               console.log(`[Adtrapper] ${label}: ${disabledReason}. Đóng ngay (không reload).`);
-              const logs = browserSessionLogs.get(session);
-              if (logs) {
-                logs.push({
-                  time: new Date().toISOString(),
-                  offer: session.offerNumber ?? session.streamRole ?? 1,
-                  type: 'adtrapper_disabled_close',
-                  detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) vào landing disabled.html — offer từ chối traffic/IP. Đóng ngay và đổi sock khác.`
-                });
-                queueSaveBrowserLogs();
-              }
+              // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+              session.addBrowserLog?.({
+                offer: session.offerNumber ?? session.streamRole ?? 1,
+                type: 'adtrapper_disabled_close',
+                detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) vào landing disabled.html — offer từ chối traffic/IP. Đóng ngay và đổi sock khác.`
+              });
               await closeSessionAndRefill({ page });
               return;
             }
@@ -391,22 +320,18 @@ export function watchTrafficBlockedPage(session) {
               if (!tracker.reloading) {
                 const timeWaiting = Date.now() - (tracker.lastReloadAt || tracker.firstSeenAt);
                 if (timeWaiting >= 8000) {
-                  const label = session.chromeVersion ? `Chrome ${session.chromeVersion}` : session.profileId ? `Profile ${session.profileId}` : `Slot ${(session.tileIndex ?? 0) + 1}`;
+                  const label = sessionLabel(session);
                   if (tracker.reloadCount < 2) {
                     tracker.reloadCount += 1;
                     tracker.reloading = true;
                     tracker.lastReloadAt = Date.now();
                     console.log(`[Adtrapper] ${label}: Đứng ở adtrapper quá 8s chưa nhảy tab. Đang tải lại trang (lần ${tracker.reloadCount}/2)...`);
-                    const logs = browserSessionLogs.get(session);
-                    if (logs) {
-                      logs.push({
-                        time: new Date().toISOString(),
-                        offer: session.offerNumber ?? session.streamRole ?? 1,
-                        type: 'adtrapper_reload',
-                        detail: `Đứng ở adtrapper quá 8s chưa nhảy tab. Đang tải lại trang (lần ${tracker.reloadCount}/2)...`
-                      });
-                      queueSaveBrowserLogs();
-                    }
+                    // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+                    session.addBrowserLog?.({
+                      offer: session.offerNumber ?? session.streamRole ?? 1,
+                      type: 'adtrapper_reload',
+                      detail: `Đứng ở adtrapper quá 8s chưa nhảy tab. Đang tải lại trang (lần ${tracker.reloadCount}/2)...`
+                    });
                     session.updateBadge?.(`⏳ <strong>Đứng ở adtrapper:</strong> Đang tải lại lần ${tracker.reloadCount}/2…`);
                     try {
                       await page.reload({
@@ -420,32 +345,14 @@ export function watchTrafficBlockedPage(session) {
                   } else {
                     const reason = 'Kẹt tại adtrapper không chuyển hướng sau 2 lần tải lại';
                     console.log(`[Adtrapper] ${label}: ${reason}. Đang đóng cửa sổ và mở sock khác.`);
-                    try {
-                      if (session.proxyKey) {
-                        const history = await readProxyUsageHistory();
-                        if (protectConfirmedLeadSession(session)) return;
-                        if (history?.proxies?.[session.proxyKey]) {
-                          history.proxies[session.proxyKey] = {
-                            ...history.proxies[session.proxyKey],
-                            status: 'failed',
-                            reason,
-                            completedAt: new Date().toISOString()
-                          };
-                          await persistProxyUsageHistory(history);
-                        }
-                      }
-                    } catch {}
+                    if (await recordProxyOutcome(session, 'failed', reason)) return;
                     autoRefill.message = `${label} (IP ${session.exitIp ?? 'chưa rõ'}) bị kẹt tại adtrapper; đã đóng cửa sổ và đang tự động mở sock khác thay thế…`;
-                    const logs = browserSessionLogs.get(session);
-                    if (logs) {
-                      logs.push({
-                        time: new Date().toISOString(),
-                        offer: session.offerNumber ?? session.streamRole ?? 1,
-                        type: 'adtrapper_stuck_close',
-                        detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị kẹt tại adtrapper không nhảy tab sau 2 lần tải lại. Đóng cửa sổ và đổi sock khác.`
-                      });
-                      queueSaveBrowserLogs();
-                    }
+                    // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+                    session.addBrowserLog?.({
+                      offer: session.offerNumber ?? session.streamRole ?? 1,
+                      type: 'adtrapper_stuck_close',
+                      detail: `${label} (IP: ${session.exitIp ?? 'chưa rõ'}) bị kẹt tại adtrapper không nhảy tab sau 2 lần tải lại. Đóng cửa sổ và đổi sock khác.`
+                    });
                     await closeSessionAndRefill({ page });
                     return;
                   }

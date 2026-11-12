@@ -1,6 +1,7 @@
 import { resolveActiveFormScope } from './form-scope/resolve-active-form-scope.mjs';
 import { findScopedSubmitButton } from './form-scope/find-scoped-submit-button.mjs';
 import { SUBMIT_SCAN_VIEWPORTS } from './state/submit-scan-viewports.mjs';
+import { SURVEY_LEGAL_NOISE_RE } from '../survey-solver/state/survey-legal-noise-re.mjs';
 
 /**
  * Tìm nút gửi (Submit / Continue / Next) trên trang hoặc frame.
@@ -32,7 +33,7 @@ async function findSubmitButton(frame, formScope) {
         if (!(await btn.isVisible().catch(() => false))) continue;
 
         // Xác thực phần tử nút bấm: loại trừ tuyệt đối IFRAME, FORM hoặc container DIV lớn
-        const validation = typeof btn.evaluate === 'function' ? await btn.evaluate((el, maxViewports) => {
+        const validation = typeof btn.evaluate === 'function' ? await btn.evaluate((el, { maxViewports, legalNoiseSource } = {}) => {
           const tag = (el.tagName || 'BUTTON').toUpperCase();
           // Không ép nút đang xử lý request (disabled/loading) chạy lại: snapshot
           // SweepstakesAlerts cho thấy #newsletter-submit đổi thành "Submitting...".
@@ -91,8 +92,9 @@ async function findSubmitButton(frame, formScope) {
           const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
 
           // 1. Kiểm tra từ khóa pháp lý / chân trang / link điều khoản
-          const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
-          if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) {
+          // Thiếu nguồn regex (mock gọi evaluate không tham số) thì bỏ qua lọc pháp lý thay vì chặn mọi nút.
+          const legalNoise = legalNoiseSource ? new RegExp(legalNoiseSource, 'i') : null;
+          if (legalNoise && (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass))) {
             return {
               valid: false,
               reason: 'legal_noise'
@@ -187,7 +189,7 @@ async function findSubmitButton(frame, formScope) {
           return {
             valid: true
           };
-        }, SUBMIT_SCAN_VIEWPORTS).catch(() => ({
+        }, { maxViewports: SUBMIT_SCAN_VIEWPORTS, legalNoiseSource: SURVEY_LEGAL_NOISE_RE.source }).catch(() => ({
           valid: true
         })) : {
           valid: true
@@ -205,7 +207,7 @@ async function findSubmitButton(frame, formScope) {
 
   // 5. Fallback thông minh: Quét trực tiếp DOM trong frame để tìm nút Submit của form
   try {
-    const foundByDom = await frame.evaluate(maxViewports => {
+    const foundByDom = await frame.evaluate(({ maxViewports, legalNoiseSource } = {}) => {
       const inFirstScreen = el => el.getBoundingClientRect().top + (window.scrollY || 0) <= (window.innerHeight || 0) * maxViewports;
       const isVisible = el => {
         if (!el || el.disabled) return false;
@@ -221,8 +223,8 @@ async function findSubmitButton(frame, formScope) {
         const text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
         const href = (el.getAttribute ? el.getAttribute('href') : '') || '';
         const idAndClass = `${el.id || ''} ${el.className || ''}`.toLowerCase();
-        const legalNoise = /privacy|terms|condition|policy|disclaimer|cookie|copyright|all rights reserved|do not sell|opt[- ]?out|unsubscribe|dmca|legal|disclosure/i;
-        if (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass)) return true;
+        const legalNoise = legalNoiseSource ? new RegExp(legalNoiseSource, 'i') : null;
+        if (legalNoise && (legalNoise.test(text) || legalNoise.test(href) || legalNoise.test(idAndClass))) return true;
         if (!inForm && !isSubmitTag) {
           const navNoise = /^(sign\s*in|login|log\s*in|my\s*account)$|^(home|homepage)$|\bhome\s*page\b|\b(menu|main menu)\b|\b(cart|shopping cart)\b|\bportal\b|\b(contact\s*us|about\s*us|help & faq|faqs?)\b/i;
           if (navNoise.test(text) || navNoise.test(href) || navNoise.test(idAndClass)) return true;
@@ -264,7 +266,7 @@ async function findSubmitButton(frame, formScope) {
         }
       }
       return false;
-    }, SUBMIT_SCAN_VIEWPORTS).catch(() => false);
+    }, { maxViewports: SUBMIT_SCAN_VIEWPORTS, legalNoiseSource: SURVEY_LEGAL_NOISE_RE.source }).catch(() => false);
     if (foundByDom) {
       const targetLoc = frame.locator('[data-ux-submit-target="true"]').first();
       if ((await targetLoc.count().catch(() => 0)) > 0) {

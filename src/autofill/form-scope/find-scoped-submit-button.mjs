@@ -1,3 +1,5 @@
+import { SURVEY_LEGAL_NOISE_RE } from '../../survey-solver/state/survey-legal-noise-re.mjs';
+
 /**
  * Tìm nút gửi thuộc đúng form, kể cả nút HTML liên kết bằng thuộc tính form ở bên ngoài.
  * @param {object} frame Frame chứa form đang điền.
@@ -7,7 +9,8 @@
  * @since 2026-11-12
  */
 export async function findScopedSubmitButton(frame, formScope) {
-  const selector = await frame.evaluate(scope => {
+  const selector = await frame.evaluate(({ scope, legalNoiseSource }) => {
+    const legalNoise = new RegExp(legalNoiseSource, 'i');
     const root = document.querySelector(scope.rootSelector);
     if (!root) return null;
     /**
@@ -43,7 +46,7 @@ export async function findScopedSubmitButton(frame, formScope) {
      * @author ductv <ductv@getflycrm.com>
      * @since 2026-11-10
      */
-    const safe = button => button.type !== 'reset' && !/^(back|previous|cancel|close|no thanks|skip|quay lại|hủy|đóng)$/i.test((button.innerText || button.value || '').trim()) && !(button.tagName === 'A' && /privacy|terms|policy|unsubscribe/i.test(button.textContent || '')) && !button.matches('[data-action*="answer"], [data-vector-answer], .question-answer-button, [id^="answer-"], .offerwall-btn, .btn-option');
+    const safe = button => button.type !== 'reset' && !/^(back|previous|cancel|close|no thanks|skip|quay lại|hủy|đóng)$/i.test((button.innerText || button.value || '').trim()) && !((button.tagName === 'A' || button.hasAttribute('href')) && (legalNoise.test(button.textContent || '') || legalNoise.test(button.getAttribute('href') || ''))) && !button.matches('[data-action*="answer"], [data-vector-answer], .question-answer-button, [id^="answer-"], .offerwall-btn, .btn-option');
     const eligible = buttons.filter(button => ready(button) && safe(button));
     const primaryNative = native.filter(safe);
     let button = primaryNative.find(ready);
@@ -56,6 +59,6 @@ export async function findScopedSubmitButton(frame, formScope) {
     for (const previous of document.querySelectorAll('[data-ux-scoped-submit="' + scope.id + '"]')) if (previous !== button) previous.removeAttribute('data-ux-scoped-submit');
     if (button.getAttribute('data-ux-scoped-submit') !== scope.id) button.setAttribute('data-ux-scoped-submit', scope.id);
     return '[data-ux-scoped-submit="' + scope.id + '"]';
-  }, formScope).catch(() => null);
+  }, { scope: formScope, legalNoiseSource: SURVEY_LEGAL_NOISE_RE.source }).catch(() => null);
   return selector ? frame.locator(selector).first() : null;
 }

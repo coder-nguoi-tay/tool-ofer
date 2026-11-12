@@ -25,7 +25,9 @@ async function handleCustomGenderButtons(frame, record = {}) {
        * @author ductv <ductv@getflycrm.com>
        * @since 2026-11-10
        */
-      const findControl = selector => Array.from(document.querySelectorAll(selector)).find(element => !scopeSelector || element.matches(scopeSelector));
+      // Chỉ nhận control đang hiển thị: #gender có thể là một bước funnel đang ẩn (selectmypolicy).
+      const shown = element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+      const findControl = selector => Array.from(document.querySelectorAll(selector)).find(element => (!scopeSelector || element.matches(scopeSelector)) && (element.tagName === 'INPUT' || shown(element)));
       // 1. Tìm container gender hoặc nút gender
       const genderContainer = findControl('#gender, [data-tag="gender"], .gender-group, .gender-wrapper, [data-field="gender"]');
       const maleBtn = findControl('#male, .male.gbtn, [data-gender="M"], [data-gender="male"]');
@@ -33,6 +35,9 @@ async function handleCustomGenderButtons(frame, record = {}) {
       if (!maleBtn && !femaleBtn && !genderContainer) return 0;
       const targetBtn = isFemale ? femaleBtn || maleBtn : maleBtn || femaleBtn;
       const genderInput = findControl('input#genderid, input[name="genderid"], input[name="gender"], input#gender');
+      // Không có nút hay input nào để thao tác: không được báo "đã chọn" (trước đây trả 1 mỗi lượt quét,
+      // bị tính là tiến triển nên watcher không bao giờ phát hiện form đang kẹt).
+      if (!targetBtn && !genderInput) return 0;
 
       // Kiểm tra nếu đã được chọn đúng và không bị báo lỗi thì bỏ qua
       const isAlreadySelected = targetBtn && (targetBtn.classList.contains('selected') || targetBtn.classList.contains('active') || targetBtn.dataset.uxClicked === '1') || genderInput && genderInput.value && !genderInput.classList.contains('invalid');

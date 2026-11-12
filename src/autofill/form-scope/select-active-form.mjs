@@ -13,7 +13,7 @@ export function selectActiveForm({ previousId, nextId, flowId }) {
    * @param {Element} element Control hoặc vùng biểu mẫu cần kiểm tra.
    * @return {boolean} Phần tử đang hiển thị.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-11
+   * @since 2026-11-12
    */
   const visible = element => {
     if (!element || !element.isConnected) return false;
@@ -27,8 +27,9 @@ export function selectActiveForm({ previousId, nextId, flowId }) {
   const activeFlowId = flowId || nextId;
   const candidates = new Map();
   for (const control of document.querySelectorAll(controlSelector)) {
-    if (!visible(control) || control.closest(excluded) || control.type === 'search') continue;
-    let root = control.closest('[id^="sign_up_step"]') || control.form || control.closest('[role="form"], .form-step.active, .step.active, .form-container, .survey-container, .quiz-container, [id^="twy-campaigns-"], .twy-campaigns, .twy-customquestion, .loco-widget, #reg-container, #ai-funnel, .form');
+    const labelVisible = control.matches('input[type="radio"],input[type="checkbox"]') && Array.from(control.labels || []).some(visible);
+    if ((!visible(control) && !labelVisible) || control.closest(excluded) || control.type === 'search') continue;
+    let root = control.closest('[id^="sign_up_step"]') || control.closest('[id^="twy-campaigns-"], .twy-campaigns') || control.form || control.closest('[role="form"], .form-step.active, .step.active, .form-container, .survey-container, .quiz-container, [id^="twy-campaigns-"], .twy-campaigns, .twy-customquestion, .loco-widget, #reg-container, #ai-funnel, .form');
     if (!root) {
       for (let parent = control.parentElement; parent && !parent.matches('body, html'); parent = parent.parentElement) {
         if (parent.matches('.input-group, .field, .form-group, .autocomplete')) continue;

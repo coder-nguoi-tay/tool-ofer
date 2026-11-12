@@ -37,9 +37,15 @@ async function refreshToffersOverview(customConfig = null) {
     if (overview.success) {
       const prevPoint = latestToffersOverview.point;
       const prevLeadCount = latestToffersOverview.results?.length || 0;
-      setLatestToffersOverview(overview);
-      if (prevPoint !== overview.point || prevLeadCount !== overview.results.length) {
-        console.log(`[Toffers] [10s Auto-check] Cập nhật: Point = ${overview.point} pt | Tổng số leads = ${overview.results.length}`);
+      // API point hoặc lead lỗi lẻ: giữ giá trị cũ thay vì ghi null/[] (trước đây point nhảy null ↔ 103 mỗi 10s).
+      const merged = {
+        ...overview,
+        point: overview.pointOk === false ? latestToffersOverview.point : overview.point,
+        results: overview.leadsOk === false ? latestToffersOverview.results || [] : overview.results
+      };
+      setLatestToffersOverview(merged);
+      if (prevPoint !== merged.point || prevLeadCount !== merged.results.length) {
+        console.log(`[Toffers] [10s Auto-check] Cập nhật: Point = ${merged.point} pt | Tổng số leads = ${merged.results.length}`);
       }
     } else {
       setLatestToffersOverview({
@@ -49,7 +55,8 @@ async function refreshToffersOverview(customConfig = null) {
     }
     // Phiên không tick Check Lead: đối chiếu IP sau khi nhập email bằng chính kết quả poll này.
     try {
-      observeLeadsAfterEmail(overview);
+      // API lead lỗi → success false để theo dõi lead báo api_error, không coi danh sách rỗng là "chưa có lead".
+      observeLeadsAfterEmail({ ...overview, success: overview.success && overview.leadsOk !== false });
     } catch (observeErr) {
       console.warn('[LeadObserve] Lỗi đối chiếu lead:', observeErr.message);
     }

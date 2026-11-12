@@ -13,14 +13,17 @@ const reportedStates = new WeakMap();
  * @since 2026-11-12
  */
 export function reportSelectMismatch(owner, metadata, candidates, result, options, page) {
+  // Trang đã chuyển ngay khi chọn (onchange điều hướng): không phải lỗi dropdown, không ghi log sai.
+  if (result.reason === 'navigated') return;
   const identity = metadata.id || metadata.name || metadata.names?.[0] || 'select';
   const states = reportedStates.get(owner) || new Map();
   const signature = JSON.stringify([owner.url?.(), owner._activeAutofillFormScope?.id, candidates, metadata.options, result.reason]);
   if (states.get(identity) === signature) return;
   states.set(identity, signature);
   reportedStates.set(owner, states);
-  const detail = result.reason === 'option_unmatched'
+  const pendingReasons = { survey_options_unavailable: `Dropdown ${identity} chưa có lựa chọn hợp lệ; chờ tải dữ liệu hoặc AI hỗ trợ.`, survey_or_record_selection_pending: `Dropdown ${identity} chưa có đáp án; cần bộ giải khảo sát hoặc dữ liệu record.` };
+  const detail = pendingReasons[result.reason] || (result.reason === 'option_unmatched'
     ? `Dropdown ${identity} chưa có option khớp dữ liệu record; giữ chưa hoàn tất để bộ giải/AI kiểm tra.`
-    : `Dropdown ${identity} chưa chọn được (${result.reason || 'unknown'}); giữ chưa hoàn tất để bộ giải/AI kiểm tra.`;
+    : `Dropdown ${identity} chưa chọn được (${result.reason || 'unknown'}); giữ chưa hoàn tất để bộ giải/AI kiểm tra.`);
   options.onLog?.({ type: 'select_value_unmatched', field: identity, reason: result.reason, detail }, page);
 }

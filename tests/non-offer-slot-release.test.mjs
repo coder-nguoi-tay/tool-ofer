@@ -14,8 +14,9 @@ import { autoRefill } from '../src/runtime/constants/auto-refill.mjs';
 import { activeBrowsers } from '../src/browser/sessions.mjs';
 import { startLeadVerification } from '../src/leads/actions/start-lead-verification.mjs';
 import { detectOfferContentInPage } from '../src/leads/actions/detect-offer-content-in-page.mjs';
+import { getEmptyOfferPageReason } from '../src/leads/actions/get-empty-offer-page-reason.mjs';
 
-const EMPTY = { challenge: false, worked: false, hasForm: false, hasChoices: false };
+const EMPTY = { loading: false, challenge: false, worked: false, hasForm: false, hasChoices: false, empty: false, singleLine: false };
 
 /**
  * Tab giả: URL đổi được, mỗi frame trả kết quả nhận diện cố định (hoặc reject).
@@ -81,6 +82,44 @@ test('getNonOfferReason: offer hết hạn, trang trắng, HTTP lỗi, không fo
   assert.equal(await at(empty, emptyTracker, 30_000), 'Trang không có form nhập / đáp án để chọn');
 });
 
+test('getEmptyOfferPageReason: trang trắng 20s, một dòng 30s và không đóng khi còn offer', async t => {
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  const check = async (tab, tracker, at) => { now = at; return getEmptyOfferPageReason(tab, tracker); };
+
+  const blank = fakeTab('about:blank');
+  const blankTracker = {};
+  assert.equal(await check(blank, blankTracker, 0), null);
+  assert.equal(await check(blank, blankTracker, 19_999), null);
+  assert.equal(await check(blank, blankTracker, 20_000), 'Trang trắng (about:blank) không tải offer');
+
+  const empty = fakeTab('https://offer.test/empty', [{ ...EMPTY, empty: true }]);
+  const emptyTracker = {};
+  assert.equal(await check(empty, emptyTracker, 0), null);
+  assert.equal(await check(empty, emptyTracker, 20_000), 'Trang trắng không có nội dung offer');
+
+  const oneLine = fakeTab('https://offer.test/message', [{ ...EMPTY, singleLine: true }]);
+  const lineTracker = {};
+  assert.equal(await check(oneLine, lineTracker, 0), null);
+  assert.equal(await check(oneLine, lineTracker, 20_000), null);
+  assert.equal(await check(oneLine, lineTracker, 30_000), 'Trang chỉ có một dòng nội dung, không có form/đáp án');
+
+  for (const content of [{ ...EMPTY, loading: true }, { ...EMPTY, challenge: true }, { ...EMPTY, hasForm: true }, { ...EMPTY, hasChoices: true }, { ...EMPTY, worked: true }]) {
+    const offer = fakeTab('https://offer.test/work', [content]);
+    const tracker = {};
+    await check(offer, tracker, 0);
+    assert.equal(await check(offer, tracker, 60_000), null);
+  }
+  const iframeOffer = fakeTab('https://offer.test/frame', [{ ...EMPTY, empty: true }, { ...EMPTY, hasForm: true }]);
+  const iframeTracker = {};
+  await check(iframeOffer, iframeTracker, 0);
+  assert.equal(await check(iframeOffer, iframeTracker, 60_000), null);
+  const unreadable = fakeTab('https://offer.test/unreadable', [new Error('detached')]);
+  const unreadableTracker = {};
+  await check(unreadable, unreadableTracker, 0);
+  assert.equal(await check(unreadable, unreadableTracker, 60_000), null);
+});
+
 test('getNonOfferReason: giữ tab có form trong iframe, frame không đọc được, trang trung gian', async t => {
   const at = clockedReason(t);
   const keep = async (tab) => {
@@ -135,8 +174,9 @@ test('isSessionWorkingOnOffer: chỉ đang check lead hoặc hành động trong
   for (const status of ['api_error', 'unmatched', 'failed']) {
     assert.equal(isSessionWorkingOnOffer({ leadCheckStatus: status }, 1e9), false, status);
   }
-  assert.equal(isSessionWorkingOnOffer({ _uxLastActionAt: 1e9 - 29_999 }, 1e9), true);
-  assert.equal(isSessionWorkingOnOffer({ _uxLastActionAt: 1e9 - 30_000, autofillActions: 9, autofillFields: 3, emailFilled: true, completedScreens: 2 }, 1e9), false);
+  assert.equal(isSessionWorkingOnOffer({ lastActionTime: 1e9 - 29_999 }, 1e9), true);
+  assert.equal(isSessionWorkingOnOffer({ _uxLastActionAt: 1e9 - 29_999 }, 1e9), true, 'field cũ (deprecated) vẫn được đọc');
+  assert.equal(isSessionWorkingOnOffer({ lastActionTime: 1e9 - 30_000, autofillActions: 9, autofillFields: 3, emailFilled: true, completedScreens: 2 }, 1e9), false);
   assert.equal(isSessionWorkingOnOffer({}, 1e9), false);
 });
 
@@ -144,12 +184,13 @@ test('addActionCount/addVerifiedFieldCount ghi mốc hành động, amount 0 th�
   t.mock.method(Date, 'now', () => 5000);
   const a = {};
   addActionCount(a, 0);
-  assert.equal(a._uxLastActionAt, undefined);
+  assert.equal(a.lastActionTime, undefined);
   addActionCount(a);
-  assert.equal(a._uxLastActionAt, 5000);
+  assert.equal(a.lastActionTime, 5000);
   const b = {};
   addVerifiedFieldCount(b, 2);
-  assert.equal(b._uxLastActionAt, 5000);
+  assert.equal(b.lastActionTime, 5000);
+  assert.equal(b._uxLastActionAt, undefined, 'chỉ còn một mốc hoạt động');
   assert.equal(b.autofillFields, 2);
 });
 
@@ -187,7 +228,7 @@ test('watcher: đã tắt non-offer, popup trống là tab duy nhất vẫn đư
   autoRefill.enabled = false;
   const { session, counters, tickAt } = await popupOnlySession(t);
   session.autofillActions = 5;
-  session._uxLastActionAt = -100_000;
+  session.lastActionTime = -100_000;
   await tickAt(0);
   assert.equal(counters.browserCloses, 0);
   await tickAt(600_000);
@@ -195,6 +236,23 @@ test('watcher: đã tắt non-offer, popup trống là tab duy nhất vẫn đư
   assert.equal(counters.pageCloses, 0);
   assert.equal(session.closingDueToTrafficBlocked, undefined);
   activeBrowsers.clear();
+});
+
+test('watcher: trang HTML trắng đủ 20s bị đóng dù là tab chính hoặc tab cuối', async t => {
+  for (const mainClosed of [false, true]) await t.test(mainClosed ? 'tab phụ là tab cuối' : 'tab chính', async st => {
+    autoRefill.enabled = false;
+    const fixture = await popupOnlySession(st, { mainClosed });
+    const target = fixture.popup || fixture.page;
+    target.frames = () => [{ evaluate: async () => ({ ...EMPTY, empty: true }) }];
+    await fixture.tickAt(0);
+    await fixture.tickAt(19_999);
+    assert.equal(fixture.counters.browserCloses, 0);
+    await fixture.tickAt(20_000);
+    assert.equal(target.closed, true);
+    assert.equal(fixture.counters.browserCloses, 1);
+    assert.equal(fixture.session.closingDueToTrafficBlocked, true);
+    activeBrowsers.clear();
+  });
 });
 
 test('watcher: popup trống là tab duy nhất nhưng đang check lead hoặc vừa thao tác → giữ', async t => {
@@ -207,7 +265,7 @@ test('watcher: popup trống là tab duy nhất nhưng đang check lead hoặc v
   t.mock.restoreAll();
   const recent = await popupOnlySession(t);
   recent.session.autofillActions = 1;
-  recent.session._uxLastActionAt = 45_000;
+  recent.session.lastActionTime = 45_000;
   await recent.tickAt(0);
   await recent.tickAt(60_000);
   assert.equal(recent.counters.browserCloses, 0);
@@ -242,9 +300,16 @@ test('detectOfferContentInPage: dấu autofill, ô ở nav, ô email', { skip: !
     const result = await detect(`<div ${marker}="1">Offer A</div>`);
     assert.equal(result.worked, true, marker);
     assert.equal(result.hasForm, false, marker);
+    assert.equal(result.empty, false, marker);
+    assert.equal(result.singleLine, false, marker);
   }
-  assert.deepEqual(await detect('<nav><input type="text"></nav><p>news</p>'), EMPTY);
+  assert.deepEqual(await detect('<nav><input type="text"></nav><p>news</p>'), { ...EMPTY, singleLine: true });
   assert.equal((await detect('<input type="email">')).hasForm, true);
+  assert.equal((await detect('')).empty, true, 'HTML rỗng được nhận diện là trang trắng');
+  assert.equal((await detect('<p>Only one line</p>')).singleLine, true);
+  assert.equal((await detect('<p>Please wait</p><div class="spinner"></div>')).empty, false, 'Trang đang tải không bị coi là trắng');
+  assert.equal((await detect('<a href="https://offer.test">Open offer</a>')).singleLine, false, 'Link hành động được giữ');
+  assert.equal((await detect('<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">')).empty, false, 'Nội dung hình ảnh được giữ');
 });
 
 test('isExitIpConsumed: IP đã click offer vẫn bị chặn, lỗi proxy thì không', () => {
@@ -308,7 +373,7 @@ test('startLeadVerification: hết lead với autoCloseNoLead=false đánh dấu
   assert.equal(isSessionWorkingOnOffer(session), true);
 });
 
-test('thankyou: tab đầu tới thankyou khi còn popup → không đóng riêng tab đầu, hoàn tất cả phiên', async t => {
+test('thankyou: tab đầu tới thankyou khi còn popup → giữ cả phiên để không bỏ offer', async t => {
   autoRefill.enabled = false;
   const { session, page, browser, counters, tickAt } = await popupOnlySession(t, { mainClosed: false });
   const popup = await browser.newPage();
@@ -316,8 +381,8 @@ test('thankyou: tab đầu tới thankyou khi còn popup → không đóng riên
   page.currentUrl = 'https://offer.test/thankyou.php';
   await tickAt(0);
   assert.equal(page._uxClosedByApp, undefined, 'app không được đóng riêng tab đầu');
-  assert.equal(counters.browserCloses, 1);
-  assert.equal(session.closingDueToTrafficBlocked, true);
+  assert.equal(counters.browserCloses, 0);
+  assert.notEqual(session.closingDueToTrafficBlocked, true);
   activeBrowsers.clear();
 });
 
@@ -326,6 +391,8 @@ test('thankyou: popup tới thankyou khi còn tab đầu → chỉ đóng popup'
   const { page, browser, counters, tickAt } = await popupOnlySession(t, { mainClosed: false });
   const popup = await browser.newPage();
   popup.currentUrl = 'https://offer.test/thankyou.php';
+  popup.frames = () => [popup];
+  popup.evaluate = async callback => callback.name === 'detectOfferContentInPage' ? EMPTY : null;
   await tickAt(0);
   assert.equal(popup.closed, true);
   assert.equal(page.closed, false);

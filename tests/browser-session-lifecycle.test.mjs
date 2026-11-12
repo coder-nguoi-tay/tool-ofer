@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { closeChromeWhenLastTabCloses, findDuplicateTabs } from "../app.mjs";
 
-test('findDuplicateTabs: đóng tab trùng link, không bao giờ đóng tab gốc', () => {
+test('findDuplicateTabs: đóng tab trùng link kể cả tab gốc, giữ một bản', () => {
   const tab = (url, origin = false) => ({ url: () => url, isClosed: () => false, origin });
   const originA = tab('https://offer.test/a', true);
   const originA2 = tab('https://offer.test/a', true); // đa tab cố ý mở cùng link
@@ -13,7 +13,7 @@ test('findDuplicateTabs: đóng tab trùng link, không bao giờ đóng tab g�
   const blank = tab('about:blank');
   const blank2 = tab('about:blank');
   const dups = findDuplicateTabs([originA, originA2, popupA, popupB, popupB2, blank, blank2], (p) => p.origin);
-  assert.deepEqual(dups, [popupA, popupB2]);
+  assert.deepEqual(dups, [originA2, popupA, popupB2]);
 });
 
 /** Mock một tab Chrome cho kiểm thử vòng đời trình duyệt. */

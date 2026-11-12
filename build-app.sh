@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_VERSION="$(node -p "require('./package.json').version")"
-BUILD_NUMBER="18"
+BUILD_NUMBER="24"
 
 APP_NAME="AutoLeadPC Mac 2 AdsPower.app"
 INSTALLED_APP="/Applications/$APP_NAME"

@@ -32,7 +32,7 @@ Chạy `npm test` để chạy self-check và test bộ cài các phiên bản C
 | ID | Thao tác | Kết quả mong đợi |
 |---|---|---|
 | AI-UI-01 | Bước cũ có input ID số, radio/Continue bị ẩn bởi tổ tiên | AI chỉ nhận control hiển thị; không click bước ẩn hoặc báo sai ID số là không tồn tại. |
-| AI-UI-02 | Câu hỏi Twy có 11 checkbox chung ID, chưa có Continue | Nhận diện cùng một nhóm, chọn có chừng mực; giữ đáp án đã chọn; chờ khi không còn thao tác hợp lệ. |
+| AI-UI-02 | Câu hỏi Twy có 11 checkbox chung ID, chưa có Continue | Nhận diện cùng một nhóm, chọn đúng 2 ô ngẫu nhiên; loại trừ None/Other, giữ đáp án đã chọn; chờ khi không còn thao tác hợp lệ. Checkbox đơn/consent giữ hành vi cũ. |
 | AI-UI-03 | AI thử nhưng trạng thái không đổi; watchdog tiếp tục quét | Không tự gọi lại AI vô hạn. Giao diện thay đổi hoặc gọi AI thủ công mới mở lượt thử lại. Tab khác không bị khóa theo. |
 | AI-UI-04 | Alpha/MUI đang fade-out, đáp án ngoài form vẫn hiển thị | Không ép opacity/visibility/pointer-events; chỉ chọn đáp án trong form sau khi widget hiển thị. |
 | AI-UI-05 | Form đang làm việc nằm trong iframe; click bị chặn hoặc disabled | Tìm đúng frame; không cộng tiến độ cho click thất bại hoặc DOM-click cưỡng ép. |
@@ -233,11 +233,14 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - IP có lead giữ nguyên cờ và browser; nhánh non-offer không đóng tab đang được phục hồi. AI tắt thì hiện lý do, không âm thầm gọi CLI.
 - Regression: `tests/late-progress-recovery.test.mjs`.
 
-### Tắt đóng non-offer
+### Giới hạn đóng non-offer và xử lý trang trắng
 
-- Popup trống/không có form giữ mở dù là tab duy nhất và đã chờ trên 30 giây; không tạo non_offer_tab_closed hoặc đóng browser.
+- Trang không có form nói chung vẫn giữ mở; không bật lại việc đóng mọi trang không phải offer.
+- `about:blank` hoặc HTML trắng liên tục 20 giây bị đóng; trang chỉ một dòng ngắn, không link/media/form/đáp án bị đóng sau 30 giây.
+- Trang đang tải, CAPTCHA, iframe còn offer, DOM không đọc được, phiên vừa thao tác/đang check lead hoặc IP có lead được giữ.
 - Vượt trần tab đã mở không gắn thêm timer quét non-offer hoặc đóng tab; cơ chế đặt chỗ trước khi mở offerwall vẫn giới hạn số tab mới.
-- Lỗi mạng thực sự, bảo vệ IP có lead và hoàn tất FinancialHelpFinder thankyou vẫn chạy theo luồng riêng.
+- Lỗi mạng thực sự và hoàn tất FinancialHelpFinder thankyou vẫn chạy theo luồng riêng.
+- Regression: `tests/non-offer-slot-release.test.mjs`.
 
 ### Hồi quy checkbox chờ lead (2026-11-12)
 
@@ -250,3 +253,49 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - Màn gần cuối có checkbox ẩn với nhãn Yes/No hoặc link tách wrapper: chọn Yes đủ từng nhóm trước Continue; class `chosen` không làm click lặp.
 - Có lead ở luồng không tích chờ: thử reload/lỗi trang, giữ browser và cờ bảo vệ IP; không bật checkbox chờ.
 - Tab thankyou FinancialHelpFinder cùng tab câu hỏi dạng link/checkbox ẩn: giữ toàn bộ browser đến khi hết việc.
+
+### Hồi quy AI, checkbox và select Twy (2026-11-12)
+
+- Trang có chữ Thank you nhưng còn form/iframe/câu hỏi: lượt AI kết thúc phải nhả về autofill và giữ mọi tab.
+- Checkbox cq1 trùng ID: chế độ không ngẫu nhiên chọn lần lượt; giữ đáp án cũ, bổ sung khi chưa đủ yêu cầu chọn hai.
+- Select khảo sát placeholder -1: rê/click select trước chọn option, xác minh giữ giá trị; trường record như state/DOB không chọn bừa.
+- Select đã có giá trị: tiếp tục nút Continue của cùng widget, không kẹt scope câu hỏi.
+- Select chưa tải được option hoặc click thất bại: log lý do khi trạng thái thay đổi; watchdog vẫn gọi hỗ trợ thay vì im lặng đứng.
+
+### Link offer duy nhất và nhận diện công việc còn lại (2026-11-12)
+
+- Một IP có nhiều luồng nhưng URL lặp: chỉ tạo một tab/link; IP khác vẫn chạy cùng URL độc lập.
+- Popup cùng URL/query khác thứ tự/fragment khác: giữ một bản; áp dụng cả tab gốc và IP confirmed.
+- Tab đang trả lời cùng URL với landing trống: giữ tab câu hỏi, cập nhật tab chính nếu cần.
+- Offerwall reload hoặc hai thẻ cùng đích: không mở lại link đã xử lý; link khác trong cùng form vẫn được mở.
+- Thankyou còn form/iframe/Continue/loading hoặc còn tab khác: giữ browser; tab phụ thankyou đã hết việc có thể đóng riêng.
+
+### Lưu tóm tắt và giảm bằng chứng trùng (2026-11-12)
+
+- Vượt trần file/dung lượng: ảnh/HTML được dọn nhưng phiên gần đây vẫn có mốc lỗi, AI, dropdown chờ và lý do đóng; không còn link artifact đã xóa.
+- Lưu metadata thất bại: giữ file bằng chứng và khôi phục danh sách phiên đúng thứ tự. Phiên active, chưa có endedAt hoặc có feedback phải được bảo vệ.
+- DOM chỉ đổi script/marker/con trỏ: tái dùng snapshot mà không chụp ảnh; đổi câu hỏi iframe, checked hoặc selectedIndex thì phải có snapshot mới.
+- Snapshot HTML tự động lớn hơn 512 KB có cờ rút gọn; export HTML thủ công vẫn đầy đủ.
+- GET /state thành công không in log HTTP; lỗi 4xx/5xx, lệnh điều khiển và kết nối bị ngắt vẫn in một dòng không có query.
+
+### Loại trừ policy/Gold và offer bấm một lần (2026-11-12)
+
+- Mở policy Uplevel/FlashRewards hoặc affiliate-ira-default của US Gold Bureau với query bất kỳ: đóng riêng tab; redirect vẫn bị bắt từ request main frame.
+- IP có lead, policy là tab cuối: giữ browser bằng tab trống, không hạ cờ lead.
+- Card chỉ có button, policy ở footer và DOM dựng lại: vẫn bấm CTA thật đúng một lần. Quét đồng thời không bấm lặp.
+- Click timeout sau input không được gọi thêm click/evaluate/form.submit; AI không được bấm CTA đã xử lý.
+- Hai URL chỉ khác utm nguồn là trùng; hai offer có tham số offer khác nhau vẫn độc lập.
+
+### Phục hồi phạm vi câu hỏi Yes/No (2026-11-12)
+
+- Radio/checkbox native ẩn, label Yes/No hiện và Continue còn ẩn: scope vẫn active; chọn đáp án rồi mới Continue khi nút hiện.
+- Scope tạm unavailable: xác định lại trước action AI, không click CTA footer hoặc câu hỏi của bước ẩn.
+- Mất scope giữa lượt AI: có `ai_scope_waiting`, nhả cờ AI và đánh thức autofill; không thử hết ba vòng rồi khóa cùng màn hình.
+- Scope phục hồi: cho phép thử lại một lượt; trạng thái thực sự thất bại và không đổi vẫn bị chặn gọi AI lặp.
+
+### Ngoại lệ No cho iframe Adsmith (2026-11-12)
+
+- FinancialHelpFinder, AS_IFRAME Adsmith `/forge/v4/?plc=9235`: chọn No lần lượt cho mọi câu hỏi của trang Active; đủ No mới Continue. Yes đã chọn trước đó phải chuyển sang No, không Save subform Yes.
+- Không đụng câu hỏi ở OfferPage ẩn; gặp Processing/subform chưa đóng phải giữ bước. `autoSubmit=false` không bấm Continue.
+- Continue không đổi bước sau hai lần: giữ No, không gọi AI/chọn lại Yes hoặc click focus iframe bằng tọa độ.
+- Khác iframe ID, host trang cha hoặc placement: không áp dụng ngoại lệ; luồng Yes hiện tại được giữ.

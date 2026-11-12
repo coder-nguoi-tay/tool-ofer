@@ -4,9 +4,11 @@
  * @param {object|null} formScope Phạm vi form đang xử lý.
  * @return {object} Trạng thái ready và lý do từ chối thao tác.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 export function inspectInteractionReadiness(element, formScope) {
+  const consumed = element.closest?.('[data-ux-offer-action-label]');
+  if (consumed && (consumed.innerText || consumed.value || '').replace(/\s+/g, ' ').trim() === consumed.getAttribute('data-ux-offer-action-label')) return { ready: false, reason: 'offer_already_opened' };
   if (formScope && !element.matches?.(formScope.memberSelector)) return { ready: false, reason: 'outside_active_form' };
   if (formScope?.nativeForm && element.form && element.form !== document.querySelector(formScope.rootSelector)) return { ready: false, reason: 'outside_active_form' };
   if (element.matches?.(':disabled, [aria-disabled="true"]') || element.closest?.('[aria-disabled="true"], [aria-busy="true"], [inert]')) return { ready: false, reason: 'element_disabled' };
@@ -15,7 +17,7 @@ export function inspectInteractionReadiness(element, formScope) {
    * @param {Element|null} target Control hoặc nhãn thực sự được hiển thị.
    * @return {boolean} Target có vùng tương tác hiển thị.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-11
+   * @since 2026-11-12
    */
   const visible = target => {
     if (!target || formScope && !target.matches?.(formScope.memberSelector)) return false;

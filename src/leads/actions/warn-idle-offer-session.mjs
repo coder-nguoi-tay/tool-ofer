@@ -10,7 +10,8 @@
  */
 export function warnIdleOfferSession(session, tracker, now = Date.now()) {
   if (session.isClosed || session.keepOpenAfterLeadCheck || session.leadCheckStatus === 'checking' || ['manual', 'skip'].includes(session.offerMode)) return false;
-  const lastActivityAt = Math.max(tracker.startedAt, session._uxLastActionAt ?? 0, session.lastActionTime ?? 0);
+  // @deprecated _uxLastActionAt: chỉ đọc dự phòng; mốc hoạt động duy nhất là lastActionTime.
+  const lastActivityAt = Math.max(tracker.startedAt, session.lastActionTime ?? session._uxLastActionAt ?? 0);
   if (now - lastActivityAt < 300_000 || tracker.warnedActivityAt === lastActivityAt) return false;
   tracker.warnedActivityAt = lastActivityAt;
   session.addBrowserLog?.({

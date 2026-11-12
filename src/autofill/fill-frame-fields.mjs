@@ -183,6 +183,8 @@ export async function fillFrameFields({
         valueToFill,
         metadata,
         field,
+        frame,
+        page,
         session,
         frameProgress,
         unmatchedFieldNames,

@@ -41,7 +41,7 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
     autoSubmit: options.autoSubmit !== false && strategy.autoSubmit !== false,
     maxPick: Number.isInteger(Number(strategy.maxPick)) && Number(strategy.maxPick) > 0 ? Number(strategy.maxPick) : options.maxPick,
     // pickRandom: true = chọn ngẫu nhiên (mặc định giữ hành vi cũ);
-    // false = không tự điền câu hỏi nhiều đáp án (chỉ điền khi có dữ liệu thực tế).
+    // false = chọn lần lượt đáp án checkbox hợp lệ, không trộn ngẫu nhiên.
     pickRandom: strategy.pickRandom !== false
   };
   const offerMethod = Number(strategy.offerMethod || strategy.methodNumber || 1);

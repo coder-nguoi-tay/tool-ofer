@@ -876,7 +876,7 @@ const mockOfferwallFrame = {
           count: async () => 1,
           isVisible: async () => true,
           click: async () => { clickedOfferwallCards.push(sel); },
-          evaluate: async () => {},
+          evaluate: async () => ({ ready: true }),
         }),
       }),
     }),

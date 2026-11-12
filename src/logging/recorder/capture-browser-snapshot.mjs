@@ -1,3 +1,4 @@
+import { prepareSnapshotHtml } from './prepare-snapshot-html.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -15,27 +16,29 @@ import { readEvidenceWithTimeout } from './read-evidence-with-timeout.mjs';
  * @return {Promise<object|null>} Tệp bằng chứng và trạng thái form, hoặc null khi tab đóng.
  * @throws {Error} Khi không thể ghi tệp bằng chứng.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 export async function captureBrowserSnapshot(page, session, reason, previous = null) {
   if (page.isClosed() || !/^https?:\/\//i.test(page.url())) return null;
   const url = page.url();
   const capturedAt = new Date().toISOString();
-  const [htmlResult, imageResult, titleResult, formResult] = await Promise.allSettled([
+  const [htmlResult, titleResult, formResult] = await Promise.allSettled([
     readEvidenceWithTimeout(page, 'html', () => page.content()),
-    page.screenshot({ type: 'jpeg', quality: 65, scale: 'css', timeout: 5000 }),
     readEvidenceWithTimeout(page, 'title', () => page.title()),
     Promise.all(page.frames().slice(0, 12).map(async frame => ({
       url: frame.url(), ...await readEvidenceWithTimeout(frame, 'form', () => frame.evaluate(inspectFormState)).catch(() => ({ unavailable: true })),
     }))),
   ]);
-  const html = htmlResult.status === 'fulfilled' ? htmlResult.value : '';
-  const image = imageResult.status === 'fulfilled' ? imageResult.value : null;
-  const snapshotHash = createHash('sha256').update(html).update(image || '').digest('hex');
-  if (previous?.snapshotHash === snapshotHash && previous.snapshotUrl === url && previous.htmlPath && previous.screenshotPath) {
+  const prepared = prepareSnapshotHtml(htmlResult.status === 'fulfilled' ? htmlResult.value : '');
+  const { html, contentHash, ...htmlMetadata } = prepared;
+  const snapshotHash = createHash('sha256').update(contentHash).update(JSON.stringify(formResult.status === 'fulfilled' ? formResult.value : [])).digest('hex');
+  const reusableState = htmlResult.status === 'fulfilled' && formResult.status === 'fulfilled' && !formResult.value.some(frame => frame.unavailable || frame.visualOnly);
+  if (reusableState && previous?.snapshotHash === snapshotHash && previous.snapshotUrl === url && previous.htmlPath && previous.screenshotPath) {
     const filesExist = await Promise.all([access(previous.htmlPath), access(previous.screenshotPath)]).then(() => true).catch(() => false);
-    if (filesExist) return { ...previous, snapshotReason: reason, snapshotReused: true };
+    if (filesExist) return { ...previous, snapshotReason: reason, snapshotReused: true, snapshotCheckedAt: capturedAt };
   }
+  const imageResult = await Promise.resolve().then(() => page.screenshot({ type: 'jpeg', quality: 65, scale: 'css', timeout: 5000 })).then(value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason }));
+  const image = imageResult.status === 'fulfilled' ? imageResult.value : null;
   const offer = page._offerNumber ?? session.offerNumber ?? session.streamRole ?? 1;
   const directory = join(interactionHtmlDirectory, `offer-${offer}`);
   await mkdir(directory, { recursive: true });
@@ -54,6 +57,6 @@ export async function captureBrowserSnapshot(page, session, reason, previous = n
     screenshotPath: screenshotFilename ? join(directory, screenshotFilename) : null, screenshotFilename,
     formState: formResult.status === 'fulfilled' ? formResult.value : [],
     snapshotError: [htmlResult, imageResult].filter(result => result.status === 'rejected').map(result => result.reason?.message || 'capture failed').join('; ') || null,
-    snapshotHash,
+    snapshotHash, ...htmlMetadata,
   };
 }

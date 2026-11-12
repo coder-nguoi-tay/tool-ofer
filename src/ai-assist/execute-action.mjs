@@ -1,4 +1,5 @@
 import { humanClick } from '../autofill/human-click.mjs';
+import { isNoSurveyFrame } from '../autofill/adsmith/is-no-survey-frame.mjs';
 import { performSurveyAnswer } from '../survey-solver/verification/perform-survey-answer.mjs';
 import { inspectActionPurpose } from './inspect-action-purpose.mjs';
 import { collectFieldMetadata } from '../autofill/collect-field-metadata.mjs';
@@ -21,7 +22,7 @@ import { addVerifiedFieldCount } from '../autofill/add-verified-field-count.mjs'
  * @param {object} policy Quyền repair và record có nguồn dữ liệu; không cho AI tự submit.
  * @return {Promise<{ok:boolean,verified:boolean,reason:string}>} Kết quả thao tác và xác minh.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 async function executeAction(page, act, session = null, policy = {}) {
   let {
@@ -52,6 +53,7 @@ async function executeAction(page, act, session = null, policy = {}) {
   if (!target.locator) return { ok: false, verified: false, reason: target.reason };
   const { locator } = target;
   try {
+    if (await isNoSurveyFrame(target.frame)) return { ok: false, verified: false, reason: 'survey_owned_by_autofill' };
     if (policy.allowSubmit === false || policy.repairOnly) {
       const purpose = await locator.evaluate(inspectActionPurpose);
       if (action === 'click' && purpose.noise) return { ok: false, verified: false, reason: 'not_answer_control' };

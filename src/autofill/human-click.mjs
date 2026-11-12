@@ -19,7 +19,7 @@ import { renderBrowserMousePointer } from './interaction/render-browser-mouse-po
  * @param {object} target Locator hoặc ElementHandle cần click.
  * @return {Promise<boolean>} True khi đã dispatch click qua input trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 async function humanClick(page, target) {
   if (!target) return false;
@@ -35,6 +35,7 @@ async function humanClick(page, target) {
       } finally { await labelHandle?.dispose().catch(() => {}); }
     }
   }
+  let inputStarted = false;
   try {
     if (typeof target.scrollIntoViewIfNeeded === 'function') await scrollToFormControl(target);
     if (shouldAnimatePageMouse(activePage) && activePage?.mouse && typeof target.boundingBox === 'function') {
@@ -48,8 +49,9 @@ async function humanClick(page, target) {
         let pressed = false;
         try {
           await renderBrowserMousePointer(activePage, clickX, clickY, true);
-          await activePage.mouse.down();
+          inputStarted = true;
           pressed = true;
+          await activePage.mouse.down();
           const holdDuration = Math.floor(Math.random() * 50) + 55;
           await new Promise(r => setTimeout(r, holdDuration));
           await activePage.mouse.up();
@@ -61,7 +63,7 @@ async function humanClick(page, target) {
         return true;
       }
     }
-  } catch {}
+  } catch { if (inputStarted) return false; }
 
   // Giữ click dự phòng của Playwright khi không lấy được tọa độ.
   try {

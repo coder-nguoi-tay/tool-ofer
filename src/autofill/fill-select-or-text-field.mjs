@@ -32,7 +32,8 @@ export async function fillSelectOrTextField({
   if (metadata.kind === 'select') {
     const candidates = buildSelectCandidates(valueToFill, metadata);
     const result = await selectOptionWithHumanInteraction({ page, field, candidates }).catch(() => ({ matched: false, verified: false, reason: 'select_unavailable' }));
-    if (!result.verified) {
+    // navigated: trang đã chuyển ngay khi chọn — không coi là ô chưa khớp.
+    if (!result.verified && result.reason !== 'navigated') {
       const identity = metadata.id || metadata.name || metadata.names?.[0] || 'select';
       unmatchedFieldNames?.add(identity);
       reportSelectMismatch(frame || page, metadata, candidates, result, options, page);

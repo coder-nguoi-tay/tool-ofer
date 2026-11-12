@@ -1,4 +1,5 @@
 import { handleYesNoStep } from './handle-yes-no-step.mjs';
+import { handleNoSurvey } from './adsmith/handle-no-survey.mjs';
 import { processScopedFormControls } from './form-scope/process-scoped-form-controls.mjs';
 import { addActionCount } from './add-action-count.mjs';
 import { addVerifiedFieldCount } from './add-verified-field-count.mjs';
@@ -32,7 +33,7 @@ export async function processFrameSurveys({
   session,
   frameProgress
 }) {
-  const yesNo = await handleYesNoStep({ frame, page, options });
+  const yesNo = await handleNoSurvey(frame, page, options) || await handleYesNoStep({ frame, page, options });
   if (yesNo.handled) {
     frameProgress.widgetAdvanced = true;
     if (yesNo.actions) {

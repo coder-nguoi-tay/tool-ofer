@@ -114,11 +114,15 @@ Tab **Thông tin → Hàng đợi Proxy** của desktop có nút **Thêm vào h�
 
 `src/http/read-ui-asset.mjs` ghép các phần theo `ui/bundles.json` và phục vụ ở runtime. JavaScript giao diện là script thường, không phải ES module: các hàm/biến global và handler inline vẫn phụ thuộc nhau, thứ tự ghép là một phần của hành vi. Mỗi giao diện được ghép thành một JS và một CSS. Toolbar preview Desktop dùng `ui/desktop/styles/screen-preview-responsive.css`: nút xuống dòng ở màn hẹp, chuyển lưới 3 cột dưới 520px và 2 cột dưới 360px, không được cắt nút hoặc tạo tràn ngang.
 
-Recorder mặc định chỉ ghi tiến trình/lỗi; event thô giữ trong bộ đệm 100 thao tác/60 giây và chỉ ghi JSONL khi bật debug tối đa 10 phút. Input/cuộn và request nền không tạo event riêng; log phiên tối đa 2.000 event, ảnh chụp tối đa hai lượt toàn app; lưu trữ dọn phiên cũ đã đóng quá 7 ngày hoặc vượt 500 MB/200 file, giữ phiên active/có feedback; orphan có grace 15 phút khi vượt trần file. HTML toàn trang mặc định tắt, debug chủ động giới hạn 10 phút/10 MB.
+Recorder mặc định chỉ ghi tiến trình/lỗi; event thô giữ trong bộ đệm 100 thao tác/60 giây và chỉ ghi JSONL khi bật debug tối đa 10 phút. Input/cuộn và request nền không tạo event riêng; log phiên tối đa 2.000 event, ảnh chụp tối đa hai lượt toàn app; lưu trữ dọn artifact khi vượt 500 MB/200 file nhưng giữ tóm tắt 100 mốc (tối đa 1.000 bản, 7 ngày), giữ phiên active/chưa endedAt/có feedback; orphan có grace 15 phút khi vượt trần file. HTML toàn trang mặc định tắt, debug chủ động giới hạn 10 phút/10 MB.
 
 Thumbnail desktop chỉ tải ô nhìn thấy mỗi 5 giây; cache 10 giây và tối đa hai lượt chụp toàn app. Watcher health cache DOM 3 giây, vô hiệu khi điều hướng; URL lỗi vẫn kiểm tra ngay. Offerwall dùng chung trần MAX_OFFER_TABS=10 và đặt chỗ context trước await khi mở popup. Phiên im lâu chỉ cảnh báo, không áp thời gian sống cứng.
 
 Watchdog autofill phải phân biệt script captcha nền với challenge thực sự, thử repair bằng record trước AI và giãn scan khi không tiến triển (tối đa 5 giây). CLI và sửa form/SDK dùng chung `waitForAiCapacity()`: ưu tiên IP confirmed, FIFO trong từng nhóm, chờ tối đa 15 giây; caller chỉ nhả chỗ sau acquired, không tiêu retry khi hết hạn hàng. Data Saver có danh sách hẹp video/replay bên thứ ba, vẫn giữ captcha, ảnh, tài liệu và API của form.
+
+Form scope tính cả radio/checkbox native ẩn có label hiển thị. AI dùng `ensureAvailableFormScope()` xác định lại scope inactive/unavailable trước khi đọc/thao tác; khi chưa phục hồi được phải nhả AI về autofill, không đốt retry/khóa trạng thái vì lỗi scope. Phục hồi tăng revision để mở lại lượt thử, vẫn giữ khóa chống lặp cho thất bại thật sự và không mở rộng tìm kiếm ngoài form.
+
+Ngoại lệ đáp án No nằm riêng trong `src/autofill/adsmith/`: chỉ AS_IFRAME Adsmith `/forge/v4/`, `plc=9235` nhúng trong FinancialHelpFinder. Chọn/xác minh đủ `li.No.Active` ở OfferPage Active rồi Continue; không chạy generic Yes, Save subform Yes, focus tọa độ hoặc AI trong iframe này. Những iframe khác giữ quy tắc Yes/fallback hiện tại.
 
 ### Browser, proxy và vòng đời phiên
 
@@ -315,4 +319,12 @@ Logic Yes/No/Save chia theo trách nhiệm trong `src/autofill/yes-no/`; hai han
 
 Màn 80–99% trống control: `src/autofill/late-progress/` chờ 60s mỗi lượt, reload tối đa hai lần cùng path rồi chẩn đoán AI một lần. Kiểm mọi iframe hiển thị; không áp dụng thankyou/100%/captcha/manual/skip/consent. `_lateProgressRecoveryActive` giữ tab khỏi nhánh non-offer trong thời gian phục hồi, không thay cờ lead.
 
-Tự đóng non-offer đã tắt theo yêu cầu: watchTrafficBlockedPage không gọi getNonOfferReason; limitOfferTabs giữ API tương thích nhưng không gắn listener quét/đóng. Trần đặt chỗ offerwall trước khi mở tab vẫn hoạt động. Các rule lỗi trang và hoàn tất thankyou là độc lập.
+Tự đóng non-offer nói chung vẫn tắt: watchTrafficBlockedPage không gọi getNonOfferReason; limitOfferTabs giữ API tương thích nhưng không gắn listener quét/đóng. Ngoại lệ `getEmptyOfferPageReason` đóng trang trắng sau 20 giây và trang một dòng ngắn không tương tác sau 30 giây; giữ loading/challenge/form/iframe offer, phiên vừa thao tác, đang check lead và IP confirmed. Trần đặt chỗ offerwall trước khi mở tab vẫn hoạt động. Các rule lỗi trang và hoàn tất thankyou là độc lập.
+
+Sau lượt AI, cả Chrome và AdsPower gọi `resumeAutofillAfterAi`; không đặt nhánh tự đóng theo chữ Thank you trong callback AI. Nhóm checkbox nhiều đáp án chọn tối đa 2 ô ngẫu nhiên qua `src/survey-solver/pick-random-checkbox-items.mjs`; generic handler/lượt quét cuối chỉ xử lý checkbox đơn/consent. Khi `pickRandom=false`, giữ chế độ tuần tự tối đa 2 ô. Widget Twy phải giữ scope ngoài cùng chứa câu hỏi và Continue. Nhóm checkbox chưa đủ yêu cầu và select còn placeholder vẫn là công việc chưa hoàn tất; dropdown đi qua primitive chuột chung, lỗi ghi log khi trạng thái đổi.
+
+Link offer duy nhất theo BrowserContext/IP: `selectUniqueOfferUrls` loại link lặp từ hai launcher; `reserveOfferLink` khóa mở trước await và giữ lịch sử qua reload; `attachUniqueOfferTabs` dọn tab trùng theo điều hướng, kể cả tab gốc/confirmed. Ngoại lệ đóng tab trùng không được đóng browser/tab cuối và phải ưu tiên giữ tab có form/câu hỏi. Thankyou chung phải kiểm tra `hasUnfinishedOfferWork`; tab chính còn tab khác thì giữ phiên.
+
+Recorder không xóa nhật ký phiên gần đây chỉ do trần artifact: dùng `summarizeRecordingSession` và lưu metadata thành công trước khi unlink. Snapshot tự động dùng `prepareSnapshotHtml` (512 KB, bỏ script/data URI lớn) và so DOM/form/iframe trước khi screenshot; canvas/video hiển thị không dùng so DOM để bỏ chụp. HTTP polling thành công được lọc tại `attachRequestLogging`, giữ lỗi/abort/lệnh và không log query.
+
+Rule tab loại trừ tại `is-excluded-offer-page-url.mjs` bắt từ request main frame để không lọt redirect; `closeExcludedOfferTab` giữ browser có lead bằng tab trống khi cần. Offerwall dùng `readOfferwallCards` và `reserveOfferwallCard` để khóa định danh offer trước await và giữ lịch sử qua dựng lại DOM; CTA đã xử lý không đi qua readiness/AI lần nữa. Không chạy fallback click cộng form.submit sau timeout.

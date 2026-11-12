@@ -1,3 +1,4 @@
+import { ensureAvailableFormScope } from '../autofill/form-scope/ensure-available-form-scope.mjs';
 import { normalizeElementSelector } from '../browser/locators/normalize-element-selector.mjs';
 import { inspectInteractionReadiness } from '../browser/locators/inspect-interaction-readiness.mjs';
 import { locateFormElements } from '../autofill/form-scope/locate-form-elements.mjs';
@@ -8,15 +9,15 @@ import { locateFormElements } from '../autofill/form-scope/locate-form-elements.
  * @param {string} selector Selector AI đề xuất.
  * @return {Promise<object>} Locator, frame, readiness hoặc lý do từ chối chính xác.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 export async function resolveActionTarget(page, selector) {
   const normalizedSelector = normalizeElementSelector(selector);
   const frames = page._activeAutofillFrame ? [page._activeAutofillFrame] : typeof page.frames === 'function' ? page.frames() : [page];
   let reason = 'selector_not_found';
   for (const frame of frames) {
+    if (!await ensureAvailableFormScope(frame)) { reason = 'scope_unavailable'; continue; }
     const formScope = frame._activeAutofillFormScope;
-    if (formScope?.unavailable || formScope?.active === false) return { reason: 'scope_unavailable' };
     try {
       const candidates = locateFormElements(frame, normalizedSelector, formScope);
       const count = typeof candidates.count === 'function' ? await candidates.count() : 1;

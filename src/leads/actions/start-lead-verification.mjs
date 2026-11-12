@@ -64,17 +64,13 @@ export async function startLeadVerification(session, leadConfig) {
       session.leadCheckMessage = `❌ ${reasonText}. Tự động tắt trình duyệt để đổi sock mới...`;
       updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#ef4444;">❌ ${reasonText}. Tự tắt Chrome...</span>`);
       console.log(`[LeadCheck] ${label}: ❌ ${reasonText}. Tắt trình duyệt và xoay sock.`);
-      const logs = browserSessionLogs.get(session);
-      if (logs) {
-        logs.push({
-          time: new Date().toISOString(),
-          offer: session.offerNumber ?? session.streamRole ?? 1,
-          type: logType,
-          ip: exitIp,
-          detail: `${reasonText}. Tự động đóng trình duyệt để chuyển proxy tiếp theo.`
-        });
-        queueSaveBrowserLogs();
-      }
+      // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+      session.addBrowserLog?.({
+        offer: session.offerNumber ?? session.streamRole ?? 1,
+        type: logType,
+        ip: exitIp,
+        detail: `${reasonText}. Tự động đóng trình duyệt để chuyển proxy tiếp theo.`
+      });
       try {
         if (session.browser && !session.browser.isClosed?.()) {
           session.suppressAutoRefill = false;
@@ -161,18 +157,14 @@ export async function startLeadVerification(session, leadConfig) {
 
       // Nếu đang bật chế độ ẩn chờ lead: hiển thị trình duyệt lên màn hình ngay khi có lead
       await session.showWindow?.(true);
-      const logs = browserSessionLogs.get(session);
-      if (logs) {
-        const targetScreen = session.completedScreens || leadConfig.checkScreen || 4;
-        logs.push({
-          time: new Date().toISOString(),
-          offer: session.offerNumber ?? session.streamRole ?? 1,
-          type: 'lead_confirmed',
-          ip: exitIp,
-          detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt} (Màn ${targetScreen}). Đã làm đến Màn ${currentScreen}, đã nhảy trang ${jumpCount} lần.`
-        });
-        queueSaveBrowserLogs();
-      }
+      const targetScreen = session.completedScreens || leadConfig.checkScreen || 4;
+      // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+      session.addBrowserLog?.({
+        offer: session.offerNumber ?? session.streamRole ?? 1,
+        type: 'lead_confirmed',
+        ip: exitIp,
+        detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt} (Màn ${targetScreen}). Đã làm đến Màn ${currentScreen}, đã nhảy trang ${jumpCount} lần.`
+      });
 
       // Kích hoạt ngay lượt quét autofill tiếp theo để tiếp tục Jump Page / Rewards / Offerwall
       try {
@@ -213,17 +205,13 @@ export async function startLeadVerification(session, leadConfig) {
         session.leadCheckMessage = `⚠️ ${reasonText}. Giữ trình duyệt mở theo cài đặt (không auto-đóng).`;
         updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⚠️ Không có lead. Giữ Chrome mở...</span>`);
         console.log(`[LeadCheck] ${label}: ⚠️ ${reasonText}. autoCloseNoLead=false → giữ trình duyệt mở.`);
-        const logsKeep = browserSessionLogs.get(session);
-        if (logsKeep) {
-          logsKeep.push({
-            time: new Date().toISOString(),
-            offer: session.offerNumber ?? session.streamRole ?? 1,
-            type: 'lead_failed_keep_open',
-            ip: exitIp,
-            detail: `${reasonText}. Đã hết 2 lần × 30s check nhưng để trình duyệt mở theo cài đặt checkbox.`
-          });
-          queueSaveBrowserLogs();
-        }
+        // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
+        session.addBrowserLog?.({
+          offer: session.offerNumber ?? session.streamRole ?? 1,
+          type: 'lead_failed_keep_open',
+          ip: exitIp,
+          detail: `${reasonText}. Đã hết 2 lần × 30s check nhưng để trình duyệt mở theo cài đặt checkbox.`
+        });
         return;
       }
       await closeForNewSlot('lead_failed', reasonText);

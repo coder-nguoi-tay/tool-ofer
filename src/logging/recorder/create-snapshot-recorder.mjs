@@ -1,3 +1,4 @@
+import { getSnapshotDelay } from './get-snapshot-delay.mjs';
 import { captureBrowserSnapshot } from './capture-browser-snapshot.mjs';
 import { queueSaveBrowserLogs } from '../browser-logs/queue-save-browser-logs.mjs';
 import { reserveEvidenceCapture } from './reserve-evidence-capture.mjs';
@@ -8,7 +9,7 @@ import { isDiagnosticEvent } from './recording-policy.mjs';
  * @param {object} session Phiên trình duyệt đang ghi nhận.
  * @return {object} Hàm schedule và stop để quản lý bộ chụp.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 export function createSnapshotRecorder(session) {
   const pages = new Map();
@@ -19,7 +20,7 @@ export function createSnapshotRecorder(session) {
    * @param {object} state Hàng đợi và trạng thái chụp của tab.
    * @return {Promise<void>} Hoàn tất lưu bằng chứng hoặc ghi lý do không chụp được.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-11
+   * @since 2026-11-12
    */
   async function capturePending(page, state) {
     state.timer = null;
@@ -37,6 +38,7 @@ export function createSnapshotRecorder(session) {
       const snapshot = await captureBrowserSnapshot(page, session, evidenceEvent.type, state.previousSnapshot);
       if (snapshot) {
         state.previousSnapshot = snapshot;
+        state.lastCheckedAt = Date.now();
         Object.assign(evidenceEvent, snapshot);
         for (const entry of entries) if (entry !== evidenceEvent) entry.snapshotEventId = evidenceEvent.id;
       }
@@ -46,18 +48,18 @@ export function createSnapshotRecorder(session) {
       state.busy = false;
       queueSaveBrowserLogs();
       if (!stopped && state.entries.length) {
-        state.timer = setTimeout(() => void capturePending(page, state), 650);
+        state.timer = setTimeout(() => void capturePending(page, state), getSnapshotDelay(page, state));
         state.timer.unref?.();
       } else if (stopped || page.isClosed()) pages.delete(page);
     }
   }
   /**
-   * Lên lịch một ảnh cho nhóm sự kiện cùng tab trong khoảng 650 ms.
+   * Lên lịch một ảnh cho nhóm sự kiện cùng tab theo nhịp gộp, ưu tiên lỗi mới.
    * @param {object} page Tab nguồn của sự kiện.
    * @param {object} entry Sự kiện sẽ nhận đường dẫn ảnh và HTML.
    * @return {void} Xếp sự kiện vào nhóm đang chờ chụp.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-11
+   * @since 2026-11-12
    */
   function schedule(page, entry) {
     if (stopped || !page || page.isClosed()) return;
@@ -73,8 +75,9 @@ export function createSnapshotRecorder(session) {
       const removed = state.entries.splice(discard >= 0 ? discard : 0, 1)[0];
       removed.snapshotError = 'Đã gộp quá 100 mốc chờ chụp; ưu tiên bằng chứng mới nhất.';
     }
+    if (!state.busy && state.timer && isDiagnosticEvent(entry)) { clearTimeout(state.timer); state.timer = null; }
     if (!state.busy && !state.timer) {
-      state.timer = setTimeout(() => void capturePending(page, state), 650);
+      state.timer = setTimeout(() => void capturePending(page, state), getSnapshotDelay(page, state));
       state.timer.unref?.();
     }
   }

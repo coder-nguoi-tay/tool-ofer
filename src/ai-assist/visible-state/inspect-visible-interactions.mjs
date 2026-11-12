@@ -3,7 +3,7 @@
  * @param {object} context Phạm vi form và tiền tố marker cho control không có id duy nhất.
  * @return {object} Trạng thái tương tác đang hiển thị của document, không chứa HTML thô.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 export function inspectVisibleInteractions({ formScope, markerPrefix }) {
   /**
@@ -11,7 +11,7 @@ export function inspectVisibleInteractions({ formScope, markerPrefix }) {
    * @param {Element} element Control hoặc vùng câu hỏi cần kiểm tra.
    * @return {boolean} Phần tử có giao diện hiển thị trong phạm vi đã chọn.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-11
+   * @since 2026-11-12
    */
   const visible = element => {
     if (!element || formScope && !element.matches(formScope.memberSelector)) return false;
@@ -27,12 +27,14 @@ export function inspectVisibleInteractions({ formScope, markerPrefix }) {
    * @param {*} text Nội dung từ DOM.
    * @return {string} Nội dung ngắn gọn để AI đọc và so sánh tiến triển.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-11
+   * @since 2026-11-12
    */
   const normalize = text => String(text || '').replace(/\s+/g, ' ').trim();
   const controls = [];
   const elements = document.querySelectorAll('input:not([type="hidden"]), textarea, select, button, [role="button"], [role="checkbox"], [role="radio"], [contenteditable="true"], a.btn, a.button, a[href*="/next"], .btn-option, .twy-buttonnext, .cta-button, .rjp-cta-button, .sjp-cta-button, div.button, div.btn, .choice-btn, .option-btn, .quiz-btn, .answer-btn, a.choice, .choices a, .answers a, .creative-survey-answer, .choice-card, .option-card, [data-vector-answer="true"]');
   for (const element of elements) {
+    const consumed = element.closest('[data-ux-offer-action-label]');
+    if (consumed && normalize(consumed.innerText || consumed.value) === consumed.getAttribute('data-ux-offer-action-label')) continue;
     const checkable = element.matches('input[type="checkbox"], input[type="radio"]');
     const label = element.closest('label') || (element.id ? Array.from(document.querySelectorAll('label[for]')).find(item => item.htmlFor === element.id) : null);
     if (!visible(element) && !(checkable && visible(label))) continue;
@@ -48,6 +50,8 @@ export function inspectVisibleInteractions({ formScope, markerPrefix }) {
     controls.push({
       selector: '[data-ux-ai-target="' + marker + '"]', id: element.id, name: element.getAttribute('name') || '',
       tag: element.tagName.toLowerCase(), type, label: labelText, value, checked, disabled, readOnly: Boolean(element.readOnly),
+      pendingSelection: element.tagName === 'SELECT' && (!String(value).trim() || /^(0|-1|none|placeholder|default|select)$/i.test(value) || /^(select|choose|chọn|vui lòng|pick|--|\.\.\.|please select)/i.test(element.options[element.selectedIndex]?.text?.trim() || '')),
+      minimumChoices: Number((group?.querySelector('h1,h2,h3,h4,legend,.question-title,.twy-cqlabel,p')?.textContent || '').match(/(?:pick|select|choose|chọn)\s+(?:exactly\s+)?(\d+)/i)?.[1] || 1),
       required: Boolean(element.required) || element.getAttribute('aria-required') === 'true',
       invalid: element.matches(':invalid, [aria-invalid="true"], .invalid, .error'),
       selected: checked || element.getAttribute('data-ux-qclicked') === '1' || element.getAttribute('data-ux-mui-clicked') === '1' || element.getAttribute('aria-selected') === 'true' || element.getAttribute('data-ux-clicked') === '1' || element.classList.contains('selected'),

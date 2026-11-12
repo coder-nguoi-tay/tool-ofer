@@ -123,6 +123,15 @@ test('solveSurveyCheckboxes returns 0 when no checkboxes on frame', async () => 
   assert.equal(count, 0);
 });
 
+test('picker trộn Fisher–Yates, trả đúng 2 vị trí và giữ nguyên danh sách đầu vào', () => {
+  const items = ['A', 'B', 'C', 'D', 'E'];
+  assert.deepEqual(pickRandomCheckboxItems(items, 2, () => 0), ['B', 'C']);
+  assert.deepEqual(pickRandomCheckboxItems(items, 2, () => 0.999999), ['A', 'B']);
+  assert.deepEqual(items, ['A', 'B', 'C', 'D', 'E']);
+  assert.equal(new Set(pickRandomCheckboxItems(items)).size, 2);
+  assert.equal(pickRandomCheckboxItems(['A']).length, 1);
+});
+
 test('NOISE_PATTERNS correctly matches legal, footer, and nav noise labels while keeping answers intact', () => {
   const noiseLabels = [
     'Privacy Policy',

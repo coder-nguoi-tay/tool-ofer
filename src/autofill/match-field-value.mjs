@@ -139,7 +139,9 @@ function matchFieldValue(candidateNames, record, metadata = {}) {
   for (const candidate of normalizedCandidates) {
     if (Object.hasOwn(record, candidate) && record[candidate] !== '') {
       if (/^(namsinh|ngaysinh|ngaythangnamsinh|dob|birthdate|dateofbirth|birthday|bday)$/.test(candidate)) {
-        const parsed = parseDobComponents(record[candidate]);
+        // Record dạng tách (birthmonth/birthday/birthyear): "birthday" chỉ là NGÀY trong tháng ("13").
+        // Ô ngày sinh đầy đủ phải nhận MM/DD/YYYY ghép từ getDobString; ô 2 ký tự mới là ô ngày riêng.
+        const parsed = parseDobComponents(record[candidate]) || (metadata.maxLength === 2 ? null : parseDobComponents(getDobString(record)));
         if (parsed) {
           if (metadata.type === 'date') return parsed.isoDob;
           if (metadata.maxLength === 4 || metadata.kind === 'select' && !metadata.names?.some(n => /month|day/i.test(n))) {

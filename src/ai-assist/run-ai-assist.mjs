@@ -1,4 +1,5 @@
 import { readVisiblePageState } from './visible-state/read-visible-page-state.mjs';
+import { isNoSurveyFrame } from '../autofill/adsmith/is-no-survey-frame.mjs';
 import { inspectAiStateGate, blockAiForState } from './retry/ai-state-gate.mjs';
 import { AI_PROGRESS_CHECK_INTERVAL_MS } from './state/ai-progress-check-interval-ms.mjs';
 import { AI_STALLED_ROUND_LIMIT } from './state/ai-stalled-round-limit.mjs';
@@ -76,6 +77,7 @@ async function runAiAssist(page, record, session = {}, options = {}) {
   let waitingReason = 'Chờ giao diện thay đổi';
   const maxRounds = cfg.maxRounds || MAX_ROUNDS;
   try {
+    if (await isNoSurveyFrame(page._activeAutofillFrame)) return;
     for (let round = 1; round <= maxRounds; round++) {
       if (page.isClosed() || session.isClosed) break;
 
@@ -227,6 +229,13 @@ Format các action:
               type: 'ai_action_failed',
               detail: `[AI Assist] Không thực hiện được ${act.action} trên ${act.selector || '(thiếu selector)'}: ${actionResult.reason}.`
             });
+            if (actionResult.reason === 'scope_unavailable') {
+              stagnantRounds = 0;
+              waitingForPage = true;
+              waitingReason = 'Phạm vi form tạm thời chưa khả dụng; trả quyền cho autofill xác định lại';
+              addLog({ type: 'ai_scope_waiting', detail: waitingReason });
+              return;
+            }
             continue;
           }
           totalActionsExecuted += 1;
@@ -299,7 +308,7 @@ Format các action:
       addLog({
         time: new Date().toISOString(),
         type: 'ai_completed',
-        detail: `[AI Assist - Slot ${slotNum} Tab ${tabNum}] Đã hoàn tất các vòng hỗ trợ (${totalActionsExecuted} hành động đã thực hiện).`
+        detail: `[AI Assist - Slot ${slotNum} Tab ${tabNum}] Kết thúc lượt hỗ trợ (${totalActionsExecuted} hành động đã thực hiện); trả quyền cho autofill, chưa kết luận hoàn tất offer.`
       });
     }
     console.log(`[AI-Assist] Slot ${slotNum} Tab ${tabNum}: kết thúc hỗ trợ AI (${totalActionsExecuted} actions).`);

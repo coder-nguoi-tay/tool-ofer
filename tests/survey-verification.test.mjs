@@ -38,6 +38,29 @@ test('survey xác minh native/ARIA và không tự tạo trạng thái selected'
   });
 });
 
+test('checkbox nhiều đáp án luôn chọn đúng 2 ô và loại trừ None', async t => {
+  const browser = await chromium.launch({ headless:true });
+  t.after(() => browser.close());
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const { context, page } = await createFormScopeFixture(browser, '<fieldset><legend>Choose all that apply</legend>' + ['A', 'B', 'C', 'D', 'E', 'None of the above'].map(text => `<label><input type="checkbox">${text}</label>`).join('') + '</fieldset><label><input id="consent" type="checkbox">I agree to terms</label>');
+    try {
+      assert.equal(await solveSurveyCheckboxes(page.mainFrame(), { pickRandom:true }), 2);
+      assert.equal(await page.locator('fieldset input:checked').count(), 2);
+      assert.equal(await page.locator('fieldset label:has(input:checked)').filter({ hasText:'None of the above' }).count(), 0);
+      assert.equal(await page.locator('#consent').isChecked(), true);
+    } finally { await context.close(); }
+  }
+});
+
+test('checkbox yêu cầu tối thiểu 3 không được tính hoàn thành sau khi chọn 2', async t => {
+  const browser = await chromium.launch({ headless:true });
+  t.after(() => browser.close());
+  const { context, page } = await createFormScopeFixture(browser, '<fieldset><legend>Pick at least 3</legend><label><input type="checkbox">A</label><label><input type="checkbox">B</label><label><input type="checkbox">C</label><label><input type="checkbox">D</label></fieldset>');
+  t.after(() => context.close());
+  assert.equal(await solveSurveyCheckboxes(page.mainFrame(), { pickRandom:true }), 0);
+  assert.equal(await page.locator('input:checked').count(), 2);
+});
+
 test('submit click lỗi không đặt cờ màn/email và còn retry được',async t=>{
   const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
   const {context,page}=await createFormScopeFixture(browser,'<form id="main" onsubmit="event.preventDefault();this.dataset.sent=1"><input name="email" type="email" value="test@example.invalid"><button>Submit</button></form>');t.after(()=>context.close());

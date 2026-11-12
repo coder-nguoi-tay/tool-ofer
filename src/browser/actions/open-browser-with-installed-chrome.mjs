@@ -1,7 +1,9 @@
+import { attachUniqueOfferTabs } from '../tabs/attach-unique-offer-tabs.mjs';
+import { selectUniqueOfferUrls } from '../tabs/select-unique-offer-urls.mjs';
+import { resumeAutofillAfterAi } from './resume-autofill-after-ai.mjs';
 import { attachBrowserCloseHandler } from './attach-browser-close-handler.mjs';
 import { protectConfirmedLeadSession } from '../../leads/actions/protect-confirmed-lead-session.mjs';
 import { DEVICE_PROFILES } from '../../runtime/constants/device-profiles.mjs';
-import { MAX_OFFER_TABS } from '../../runtime/constants/max-offer-tabs.mjs';
 import { activeBrowsers } from '../sessions.mjs';
 import { appDataDirectory } from '../../config/paths.mjs';
 import { applicationState } from '../../runtime/application-state.mjs';
@@ -18,6 +20,7 @@ import { autofillQueue } from '../../runtime/constants/autofill-queue.mjs';
 import { autofillRecordIdentity } from '../../records/actions/autofill-record-identity.mjs';
 import { browserProfilePath } from './browser-profile-path.mjs';
 import { browserSessionLogs } from '../../logging/browser-logs.mjs';
+import { isClosedTargetError } from './is-closed-target-error.mjs';
 import { buildBrandLists } from '../../../stealth.mjs';
 import { buildStealthConfig } from '../../../stealth.mjs';
 import { buildUserAgentOverride } from '../../../stealth.mjs';
@@ -38,7 +41,6 @@ import { markAutofillRecordUsed } from '../../records/actions/mark-autofill-reco
 import { mkdir } from 'node:fs/promises';
 import { navigationTimeout } from '../../runtime/constants/navigation-timeout.mjs';
 import { offerStrategyState } from '../../runtime/constants/offer-strategy-state.mjs';
-import { pageHasWork } from '../../../ai-assist.mjs';
 import { pickConfiguredUserAgent } from "../user-agents/pick-configured-user-agent.mjs";
 import { queueAutomaticRefill } from '../../refill/actions/queue-automatic-refill.mjs';
 import { readConfiguredUserAgents } from "../user-agents/read-configured-user-agents.mjs";
@@ -72,7 +74,7 @@ import { withoutSessionEmail } from '../../records/actions/without-session-email
  * @return {Promise<*>} Kết quả xử lý open browser with installed chrome.
  * @throws {Error} Khi dữ liệu không hợp lệ hoặc thao tác không thể hoàn tất.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 export async function openBrowserWithInstalledChrome({
   build,
@@ -380,6 +382,7 @@ export async function openBrowserWithInstalledChrome({
   session.trueHeadless = trueHeadless;
   suppressBringToFrontWhileHidden(context, session);
   limitOfferTabs(context, session);
+  attachUniqueOfferTabs(context, session);
   attachBrowserLogger(context, session);
   attachBandwidthTracker(context, session);
   if (session.dataSaver !== false) {
@@ -407,7 +410,10 @@ export async function openBrowserWithInstalledChrome({
   const applyDeviceOverrides = targetPage => {
     if (!overrideTasks.has(targetPage)) {
       overrideTasks.set(targetPage, (async () => {
-        await applyNativeOverrides(context, targetPage, nativeOverrides).catch(error => console.warn(`[Stealth] Không áp được override cho tab: ${error.message}`));
+        await applyNativeOverrides(context, targetPage, nativeOverrides).catch(error => {
+          // Tab đóng giữa chừng (popup tự đóng, đổi proxy) là va chạm vô hại: không ghi cảnh báo nhiễu.
+          if (!isClosedTargetError(error, targetPage)) console.warn(`[Stealth] Không áp được override cho tab: ${error.message}`);
+        });
         if (antiFingerprint?.workerInjection) {
           await attachGuardedWorkerInjection(context, targetPage, stealthConfig, {
             enabled: true,
@@ -544,37 +550,7 @@ export async function openBrowserWithInstalledChrome({
       }
       void runAiAssist(page, currentRecord, session, {
         onLog: entry => session.addLog?.(entry)
-      }).then(async () => {
-        // AI xong → kích autofill quét lại một lần
-        session.triggerAutofillScan?.();
-        // Chờ ngắn 600ms để trang ổn định
-        await new Promise(r => setTimeout(r, 600));
-        if (page.isClosed()) return;
-        const stillHasWork = await pageHasWork(page);
-
-        // CHỈ ĐÓNG TRÌNH DUYỆT KHI ĐÃ ĐẠT TRANG HOÀN TẤT (Thank You / Confirmation)
-        const isThankYouPage = await page.evaluate(() => {
-          const text = (document.body?.innerText || '').toLowerCase();
-          const url = (window.location.href || '').toLowerCase();
-          const hasThankYouText = /thank\s*you|congratulations|confirmed|your\s*submission|application\s*received|cảm ơn/i.test(text);
-          const hasThankYouUrl = /thank[-_]?you|confirmation|success|completed|receipt/i.test(url);
-          return hasThankYouText || hasThankYouUrl;
-        }).catch(() => false);
-        const completedAutofillWork = (session.autofillFields ?? 0) + (session.autofillActions ?? 0);
-        if (!stillHasWork && isThankYouPage && completedAutofillWork > 0 && !protectConfirmedLeadSession(session)) {
-          console.log(`[AI-Assist] Slot ${tileIndex + 1}: đã đạt trang cảm ơn (${session.autofillFields} trường, ${session.autofillActions ?? 0} thao tác), đóng trình duyệt và mở phiên mới.`);
-          session.addLog?.({
-            time: new Date().toISOString(),
-            type: 'ai_completed',
-            detail: `AI Assist đã hoàn tất đến trang cảm ơn (${session.autofillFields} trường, ${session.autofillActions ?? 0} thao tác). Đóng trình duyệt và mở phiên mới.`
-          });
-          if (protectConfirmedLeadSession(session)) return;
-          session.suppressAutoRefill = false;
-          await session.browser?.close?.().catch(() => {});
-        } else if (!stillHasWork && !isThankYouPage) {
-          console.log(`[AI-Assist] Slot ${tileIndex + 1}: chưa đạt trang cảm ơn, tiếp tục giữ trình duyệt để người dùng theo dõi hoặc trang tải tiếp.`);
-        }
-      });
+      }).then(() => resumeAutofillAfterAi(page, session));
     }
   });
   activeBrowsers.add(session);
@@ -734,21 +710,7 @@ export async function openBrowserWithInstalledChrome({
     session.streamRole = streamRole;
     session.streamLabel = streamLabel;
     session.websiteUrl = websiteUrl;
-    const tabUrlsToOpen = [];
-    if (Array.isArray(offerUrls) && offerUrls.length > 0) {
-      tabUrlsToOpen.push(...offerUrls);
-    } else if (websiteUrl) {
-      tabUrlsToOpen.push(websiteUrl);
-    }
-    if (multiTab && threadCount > tabUrlsToOpen.length) {
-      const baseCount = tabUrlsToOpen.length || 1;
-      while (tabUrlsToOpen.length < threadCount) {
-        tabUrlsToOpen.push(tabUrlsToOpen[tabUrlsToOpen.length % baseCount] || websiteUrl);
-      }
-    }
-
-    // Không mở quá MAX_OFFER_TABS tab offer, nếu không limitOfferTabs sẽ đóng ngay các tab vượt mức.
-    if (tabUrlsToOpen.length > MAX_OFFER_TABS) tabUrlsToOpen.length = MAX_OFFER_TABS;
+    const tabUrlsToOpen = selectUniqueOfferUrls(offerUrls, websiteUrl);
     const primaryUrl = tabUrlsToOpen[0] || websiteUrl;
     const response = await page.goto(primaryUrl, {
       waitUntil: 'domcontentloaded',

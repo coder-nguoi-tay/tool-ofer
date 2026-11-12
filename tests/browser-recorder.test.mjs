@@ -99,13 +99,15 @@ test('lỗi screenshot vẫn giữ HTML và trạng thái form, không làm mấ
 });
 
 test('bằng chứng giống nhau dùng lại file; file bị xóa được tạo lại thay vì giữ tham chiếu hỏng', async () => {
+  let screenshots = 0;
   const page = {
     isClosed: () => false, url: () => `${baseUrl}/stable`, content: async () => '<form></form>',
-    screenshot: async () => Buffer.from('same-image'), title: async () => 'Stable', frames: () => [],
+    screenshot: async () => { screenshots++; return Buffer.from('image-' + screenshots); }, title: async () => 'Stable', frames: () => [],
   };
   const first = await captureBrowserSnapshot(page, { offerNumber: 1 }, 'submit_clicked');
   const reused = await captureBrowserSnapshot(page, { offerNumber: 1 }, 'page_error', first);
   assert.equal(reused.snapshotReused, true);
+  assert.equal(screenshots, 1, 'DOM/form không đổi thì không chụp ảnh lại');
   assert.equal(reused.screenshotPath, first.screenshotPath);
   assert.equal(reused.htmlPath, first.htmlPath);
   await rm(first.screenshotPath);
@@ -301,4 +303,30 @@ test('normal Chromium: input vào bộ đệm, lỗi có ngữ cảnh; UI bật/
   }
   await context.close();
   await recorder.stop();
+});
+
+
+test('snapshot nhận câu hỏi iframe/checkbox đổi; canvas vẫn được chụp khi DOM đứng yên', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(baseUrl + '/offer');
+  await page.setContent('<iframe srcdoc="<h3>Question one</h3><label><input type=checkbox>Answer</label>"></iframe>');
+  let screenshots = 0;
+  t.mock.method(page, 'screenshot', async () => { screenshots++; return Buffer.from('image'); });
+  const first = await captureBrowserSnapshot(page, {}, 'screen_advanced');
+  await page.frames()[1].locator('h3').evaluate(element => { element.textContent = 'Question two'; });
+  const changed = await captureBrowserSnapshot(page, {}, 'screen_advanced', first);
+  assert.notEqual(changed.snapshotHash, first.snapshotHash);
+  await page.frames()[1].locator('input').check();
+  const checked = await captureBrowserSnapshot(page, {}, 'submit_clicked', changed);
+  assert.notEqual(checked.snapshotHash, changed.snapshotHash);
+  const reused = await captureBrowserSnapshot(page, {}, 'page_loaded', checked);
+  assert.equal(reused.snapshotReused, true);
+  assert.equal(screenshots, 3);
+  await page.setContent('<canvas width="100" height="100"></canvas>');
+  const canvas = await captureBrowserSnapshot(page, {}, 'screen_advanced', reused);
+  const nextCanvas = await captureBrowserSnapshot(page, {}, 'screen_advanced', canvas);
+  assert.notEqual(nextCanvas.screenshotPath, canvas.screenshotPath);
+  assert.equal(screenshots, 5);
 });

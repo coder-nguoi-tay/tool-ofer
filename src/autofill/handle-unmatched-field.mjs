@@ -1,16 +1,18 @@
-import { addVerifiedFieldCount } from './add-verified-field-count.mjs';
+import { reportSelectMismatch } from './report-select-mismatch.mjs';
 
 /**
  * Xử lý trường không khớp dữ liệu lead và các select câu hỏi độc lập.
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần bỏ qua trường hiện tại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-12
  */
 export async function handleUnmatchedField({
   valueToFill,
   metadata,
   field,
+  frame,
+  page,
   session,
   frameProgress,
   unmatchedFieldNames,
@@ -18,39 +20,14 @@ export async function handleUnmatchedField({
   options
 }) {
   if (!valueToFill) {
-    // Nếu là thẻ select câu hỏi (như Yes/No, câu hỏi khảo sát) mà không khớp trường trong record:
-    // Tự động chọn ngẫu nhiên một option hợp lệ (ngoại trừ option placeholder đầu tiên)!
-    if (metadata.kind === 'select' && (!metadata.value || metadata.value === '')) {
-      const picked = await field.evaluate(sel => {
-        const validOptions = Array.from(sel.options).filter((opt, idx) => {
-          if (idx === 0 && (!opt.value || /select|choose|chọn|vui lòng/i.test(opt.text))) return false;
-          return Boolean(opt.value);
-        });
-        if (validOptions.length > 0) {
-          const chosen = validOptions[Math.floor(Math.random() * validOptions.length)];
-          sel.value = chosen.value;
-          sel.dispatchEvent(new Event('input', {
-            bubbles: true
-          }));
-          sel.dispatchEvent(new Event('change', {
-            bubbles: true
-          }));
-          return true;
-        }
-        return false;
+    // Select khảo sát do solver xử lý qua chuột; không đoán dữ liệu record hoặc đổi DOM tại đây.
+    if (metadata.kind === 'select') {
+      const answered = await field.evaluate(select => {
+        const option = select.options[select.selectedIndex];
+        return Boolean(option && !option.disabled && option.value && !/^(0|-1|none|placeholder|default|select)$/i.test(option.value) && !/^(select|choose|chọn|vui lòng|pick|--|\.\.\.|please select)/i.test(option.text.trim()) && select.validity.valid);
       }).catch(() => false);
-      if (picked) {
-        const verifyVal = await field.evaluate(el => el.value || '').catch(() => '');
-        if (!verifyVal || verifyVal.trim() === '') {
-          return true;
-        }
-        await field.evaluate(el => {
-          el.dataset.uxFilled = '1';
-        }).catch(() => {});
-        addVerifiedFieldCount(session, 1);
-        frameProgress.filledInThisPass += 1;
-        return true;
-      }
+      if (!answered && !await field.getAttribute('data-survey-dropdown-uid').catch(() => null)) reportSelectMismatch(frame || field, metadata, [], { reason: 'survey_or_record_selection_pending' }, options, page);
+      return true;
     }
     const displayName = metadata.names[0] ?? '';
     if (displayName) unmatchedFieldNames.add(displayName.slice(0, 40));

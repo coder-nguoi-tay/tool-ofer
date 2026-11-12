@@ -1,7 +1,9 @@
+import { attachUniqueOfferTabs } from '../tabs/attach-unique-offer-tabs.mjs';
+import { selectUniqueOfferUrls } from '../tabs/select-unique-offer-urls.mjs';
+import { resumeAutofillAfterAi } from './resume-autofill-after-ai.mjs';
 import { attachBrowserCloseHandler } from './attach-browser-close-handler.mjs';
 import { protectConfirmedLeadSession } from '../../leads/actions/protect-confirmed-lead-session.mjs';
 import { DEVICE_PROFILES } from '../../runtime/constants/device-profiles.mjs';
-import { MAX_OFFER_TABS } from '../../runtime/constants/max-offer-tabs.mjs';
 import { activeBrowsers } from '../sessions.mjs';
 import { activeExitIpLocks } from '../../runtime/constants/active-exit-ip-locks.mjs';
 import { appDataDirectory } from '../../config/paths.mjs';
@@ -60,7 +62,7 @@ import { withoutSessionEmail } from '../../records/actions/without-session-email
  * @return {Promise<object>} Session trình duyệt đã kết nối.
  * @throws {Error} Khi trình duyệt, CDP hoặc IP proxy không khớp.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-12
  */
 export async function openAdsPowerBrowser({
   tileIndex,
@@ -502,6 +504,7 @@ export async function openAdsPowerBrowser({
   session.trueHeadless = trueHeadless;
   suppressBringToFrontWhileHidden(context, session);
   limitOfferTabs(context, session);
+  attachUniqueOfferTabs(context, session);
   attachBrowserLogger(context, session);
   attachBandwidthTracker(context, session);
   if (session.dataSaver !== false) {
@@ -562,21 +565,7 @@ export async function openAdsPowerBrowser({
   // Khai báo trước khi gán record cho tab (trước đây khai báo phía dưới nên dòng này lỗi TDZ).
   const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords.length > 0 ? autofillRecords : autofillQueue.used;
   page._assignedRecord = session.currentRecord ? safeCloneRecord(session.currentRecord) : takeNextRecord(recordPool, autofillRecords);
-  const tabUrlsToOpen = [];
-  if (Array.isArray(offerUrls) && offerUrls.length > 0) {
-    tabUrlsToOpen.push(...offerUrls);
-  } else if (websiteUrl) {
-    tabUrlsToOpen.push(websiteUrl);
-  }
-  if (multiTab && threadCount > tabUrlsToOpen.length) {
-    const baseCount = tabUrlsToOpen.length || 1;
-    while (tabUrlsToOpen.length < threadCount) {
-      tabUrlsToOpen.push(tabUrlsToOpen[tabUrlsToOpen.length % baseCount] || websiteUrl);
-    }
-  }
-
-  // Không mở quá MAX_OFFER_TABS tab offer, nếu không limitOfferTabs sẽ đóng ngay các tab vượt mức.
-  if (tabUrlsToOpen.length > MAX_OFFER_TABS) tabUrlsToOpen.length = MAX_OFFER_TABS;
+  const tabUrlsToOpen = selectUniqueOfferUrls(offerUrls, websiteUrl);
   const primaryUrl = tabUrlsToOpen[0] || websiteUrl;
   if (primaryUrl) {
     await Promise.race([page.goto(primaryUrl, {
@@ -789,7 +778,7 @@ export async function openAdsPowerBrowser({
         }
         void runAiAssist(p, currentRecord, session, {
           onLog: e => session.addLog?.(e)
-        });
+        }).then(() => resumeAutofillAfterAi(p, session));
       }
     });
   }

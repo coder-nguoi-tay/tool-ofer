@@ -180,9 +180,18 @@ export async function submitFrameForm({
 
           // Thao tác click tự nhiên bằng humanClick (Bézier curves + CDP mouse events)
           const beforeSubmitState = await readQuestionState(frame);
+          const clickStartedAt = Date.now();
           let submitDispatched = await humanClick(page, submitBtn);
           if (!submitDispatched) {
             submitDispatched = await submitBtn.click({ timeout: 2000 }).then(() => true).catch(() => false);
+          }
+          // Website chặn ngay bằng alert lỗi nhập liệu ("Please enter a birthday…"): không tính là đã submit/tiến triển.
+          // Trước đây mỗi lần vẫn cộng action nên watcher bấm Continue lặp mãi (log 2026-11-12: 54 lần).
+          const rejectedDialog = submitDispatched && page._uxLastDialog?.validation && page._uxLastDialog.at >= clickStartedAt ? page._uxLastDialog : null;
+          if (rejectedDialog) {
+            page.off?.('popup', popupHandler);
+            options.onLog?.({ type: 'submit_rejected_dialog', id: btnInfo.id, detail: `Website chặn ${submitLabel} bằng thông báo: "${rejectedDialog.message.slice(0, 120)}"; không tính là tiến triển.` }, page);
+            return false;
           }
           if (!submitDispatched) {
             page.off?.('popup', popupHandler);
@@ -193,7 +202,9 @@ export async function submitFrameForm({
             button.dataset.uxSubmitted = '1';
             button.dataset.uxSubmitCount = String(count);
             button.dataset.uxLastFields = String(progress + 1);
-          }, { progress: (session.autofillFields ?? 0) + (session.autofillActions ?? 0), count: btnInfo.clickCount }).catch(() => {});
+          // timeout ngắn: click thường làm trang chuyển đi, Locator nút cũ không còn — không có timeout thì
+          // Playwright chờ mặc định 30s và chặn cả vòng autofill (log 2026-11-12: "Return to Financial Help Finder").
+          }, { progress: (session.autofillFields ?? 0) + (session.autofillActions ?? 0), count: btnInfo.clickCount }, { timeout: 500 }).catch(() => {});
           options.onLog?.({ type: 'submit_clicked', id: btnInfo.id, text: submitLabel, detail: `Đã dispatch submit: ${submitLabel}; chờ website xác nhận.` }, page);
           session.lastActionTime = Date.now();
           addActionCount(session, 1);

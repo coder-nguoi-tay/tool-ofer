@@ -17,6 +17,9 @@ async function fetchToffersOverview(config = {}) {
   const leadErr = leadsRes.status === 'rejected' ? leadsRes.reason?.message : null;
   return {
     success: Boolean(point !== null || leadData !== null),
+    // Báo riêng từng API: một API lỗi lẻ không được xóa giá trị đang có của API kia.
+    pointOk: point !== null && point !== undefined,
+    leadsOk: leadData !== null,
     point,
     results: Array.isArray(leadData?.results) ? leadData.results : [],
     check: leadData?.check ?? null,

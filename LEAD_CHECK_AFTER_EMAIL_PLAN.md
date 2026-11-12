@@ -4,7 +4,7 @@ Ngày: 2026-11-11. Trạng thái: **đã triển khai (chưa commit, chưa build
 
 ## Đã chốt và triển khai
 
-- D1 = (a): không tick Check Lead → chỉ hiển thị + log `lead_observed` / `lead_observe_not_found`; **không** ghi thống kê lead, **không** bật `protectConfirmedLeadSession`, không tạm dừng autofill, không đóng trình duyệt.
+- D1 (cập nhật 2026-11-12 theo code `observe-leads-after-email.mjs:31-38`): không tick Check Lead, khi **thấy lead** → gán `confirmedLeadIp` và **bật** `protectConfirmedLeadSession` cho đúng IP đó (phiên được giữ như lead đã xác nhận); vẫn **không** ghi thống kê lead, không tạm dừng autofill, không đóng trình duyệt khi chưa thấy lead. Bản đầu (2026-11-11) chỉ hiển thị — đã đổi ngoài phiên, test `lead-observe-after-email.test.mjs` theo hành vi mới.
 - D2: cửa sổ theo dõi 10 phút (`LEAD_OBSERVE_WINDOW_MS`) từ lần poll đầu thấy `emailFilled`; vẫn đối chiếu sau khi trình duyệt đã đóng (Set trong RAM, mất khi tắt app).
 - D3: báo Telegram một lần khi có lead.
 - D4: dùng kết quả poll nền `refreshToffersOverview` (cấu hình Toffers), không gọi API thêm.
