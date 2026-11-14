@@ -11,7 +11,7 @@ import { requestManagedProfileStop } from './request-managed-profile-stop.mjs';
 import { writeFile } from 'node:fs/promises';
 
 /**
- * Đóng mọi trình duyệt do app mở.
+ * Đóng mọi trình duyệt do app mở và ghi nhận lệnh đóng toàn bộ trước khi ngắt kết nối.
  *
  * Playwright chạy Chromium với --no-startup-window nên đóng hết cửa sổ không làm tiến
  * trình thoát — nó nằm chờ trên CDP pipe và vẫn hiện icon dưới Dock. Phải gọi close().
@@ -19,7 +19,7 @@ import { writeFile } from 'node:fs/promises';
  * @return {Promise<{results: string[], warnings: string[]}>} Số trình duyệt đã đóng.
  * @throws {Error} Khi hệ thống không thể xử lý thao tác đóng phiên.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-13
  */
 export async function closeActiveBrowsers() {
   const sessions = [...activeBrowsers];
@@ -35,6 +35,7 @@ export async function closeActiveBrowsers() {
   applicationState.exclusiveQueue = Promise.resolve(); // Giải phóng ngay hàng đợi để không bị nghẽn
 
   for (const session of sessions) {
+    session.addBrowserLog?.({ type: 'browser_close_all_requested', detail: 'Nhận lệnh Đóng tất cả/Dừng toàn bộ từ app.' });
     session.suppressAutoRefill = true;
     session.isClosed = true;
     if (session._monitorInterval) {
@@ -73,6 +74,7 @@ export async function closeActiveBrowsers() {
   await new Promise(r => setTimeout(r, 800));
   const lateComers = [...activeBrowsers];
   for (const s of lateComers) {
+    s.addBrowserLog?.({ type: 'browser_close_all_requested', detail: 'Đóng phiên mở muộn theo lệnh Đóng tất cả/Dừng toàn bộ.' });
     s.suppressAutoRefill = true;
     s.isClosed = true;
     if (s._monitorInterval) {

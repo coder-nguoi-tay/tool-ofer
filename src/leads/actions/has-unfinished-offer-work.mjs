@@ -1,4 +1,5 @@
 import { detectOfferContentInPage } from './detect-offer-content-in-page.mjs';
+import { hasOfferWorkEvidence } from './has-offer-work-evidence.mjs';
 import { readEvidenceWithTimeout } from '../../logging/recorder/read-evidence-with-timeout.mjs';
 
 /**
@@ -21,7 +22,7 @@ export async function hasUnfinishedOfferWork(page) {
         finally { await element.dispose(); }
       }
       const content = await readEvidenceWithTimeout(frame, 'offer-work', () => frame.evaluate(detectOfferContentInPage));
-      if (!content || content.loading || content.challenge || content.hasForm || content.hasChoices) return true;
+      if (!content || content.loading || content.challenge || hasOfferWorkEvidence(content)) return true;
     }
     return false;
   } catch { return true; }

@@ -10,18 +10,20 @@
  * bị hiểu ngược thành "vẫn ổn" nên node mồ côi sống mãi và giữ cổng 3211 — app mới
  * không bao giờ lên được cổng, giao diện lại nối vào bản code cũ.
  *
+ * @param {Function} [onParentExit] Việc dọn dẹp trước khi thoát (mặc định thoát ngay).
  * @return {void} Không trả về giá trị.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-10
  */
-export function exitWhenParentExits() {
+export function exitWhenParentExits(onParentExit = () => process.exit(0)) {
   if (process.env.AUTOLEADPC_NO_WATCHDOG === '1') return;
   const parentPid = process.ppid;
   if (parentPid <= 1) return;
   const watchdog = setInterval(() => {
     if (process.ppid === parentPid) return;
     console.error('Tiến trình cha đã thoát, đóng máy chủ giao diện.');
-    process.exit(0);
+    clearInterval(watchdog);
+    onParentExit();
   }, 2000);
   // Không để watchdog là thứ giữ process sống; máy chủ HTTP làm việc đó.
   watchdog.unref();

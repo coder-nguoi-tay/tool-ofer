@@ -1,17 +1,20 @@
 import { existsSync } from 'node:fs';
 import { getAutoLeadPCDir } from '../../../config/paths.mjs';
 import { join } from 'node:path';
+import { readGoLoginConfig } from '../../../runtime/actions/read-gologin-config.mjs';
 import { readAdsPowerApiKey } from '../../../runtime/actions/read-ads-power-api-key.mjs';
+import { readMultiloginConfig } from '../../../runtime/actions/read-multilogin-config.mjs';
+import { DEFAULT_GOLOGIN_DEVICES } from '../../../gologin-profile/device-choices.mjs';
 import { readFileSync } from 'node:fs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 
 /**
- * Xử lý API pc-settings-read.
+ * Trả cài đặt PC và trạng thái đã cấu hình GoLogin; không trả token GoLogin.
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-14
  */
 export async function handleGetPcSettingsRead(request, response) {
   if (request.method === 'GET' && request.url === '/pc/settings/read') {
@@ -30,11 +33,11 @@ export async function handleGetPcSettingsRead(request, response) {
         const m = text.match(new RegExp(`^${key}=(.+)`, 'mi'));
         return m ? m[1].trim() : '';
       };
+      const gologin = await readGoLoginConfig();
       respondWithJson(response, 200, {
         Chrome: getBool('Chrome'),
         ChromeFirefox: getBool('ChromeFirefox'),
         ChromeAdsPower: getBool('ChromeAdsPower'),
-        CloakBrowser: getBool('CloakBrowser'),
         Canvas: getBool('Canvas'),
         ClientRects: getBool('ClientRects'),
         WebGLImage: getBool('WebGLImage'),
@@ -47,7 +50,10 @@ export async function handleGetPcSettingsRead(request, response) {
         Android: getBool('Android'),
         iPhone: getBool('iPhone'),
         iPad: getBool('iPad'),
-        AdsPowerApiKey: await readAdsPowerApiKey()
+        gologinConfigured: Boolean(gologin.token),
+        gologinDevices: gologin.devices || [...DEFAULT_GOLOGIN_DEVICES],
+        AdsPowerApiKey: await readAdsPowerApiKey(),
+        multiloginConfig: await readMultiloginConfig()
       });
     } catch (err) {
       respondWithJson(response, 200, {});

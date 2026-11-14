@@ -1,4 +1,5 @@
 import { handleYesNoStep } from './handle-yes-no-step.mjs';
+import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { readQuestionState, didQuestionAdvance } from '../survey-solver/verification/read-question-state.mjs';
 import { inspectSubmitErrors } from './form-scope/inspect-submit-errors.mjs';
 import { isControlInActiveForm } from './form-scope/is-control-in-active-form.mjs';
@@ -19,7 +20,7 @@ import { selectFirstAddressSuggestion } from './select-first-address-suggestion.
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần dừng lượt quét trang.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export async function submitFrameForm({
   options,
@@ -31,6 +32,7 @@ export async function submitFrameForm({
   screenInfo,
   scanStartUrl
 }) {
+  if (shouldStopAfterLead(session)) return true;
   if (options.autoSubmit !== false) {
     const yesNo = await handleYesNoStep({ frame, page, options });
     if (yesNo.waitingForInput) return false;

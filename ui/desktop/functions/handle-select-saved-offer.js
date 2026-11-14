@@ -17,7 +17,7 @@ function handleSelectSavedOffer() {
         document.getElementById('txtLinkOffer4').value = found.LinkOffer4 || '';
         if (found.LinkOffer2 || found.LinkOffer3 || found.LinkOffer4) toggleExtraOfferLinks(true);
         applyOfferMethods(Array.isArray(found.methodConfigs) ? found.methodConfigs : []);
-        if (found.TimeLimit) document.getElementById('txtTimeLimit').value = found.TimeLimit;
+        document.getElementById('txtTimeLimit').value = found.MaxRunMinutes ?? '10';
         if (found.Complete && found.Complete !== 'id') {
           document.getElementById('txtTextComplete').value = found.Complete;
         } else {
@@ -45,6 +45,19 @@ function handleSelectSavedOffer() {
             cbxHT.checked = found.HideUntilTarget;
             try { localStorage.setItem('autoleadpc_hide_until_target', String(found.HideUntilTarget)); } catch { }
           }
+        }
+        if (Array.isArray(found.schedules)) {
+          found.schedules.forEach(s => {
+            if (s && s.offerIndex) {
+              const cbx = document.getElementById(`cbxScheduleOffer${s.offerIndex}`);
+              const timeInput = document.getElementById(`timeScheduleOffer${s.offerIndex}`);
+              if (cbx) cbx.checked = Boolean(s.enabled);
+              if (timeInput) {
+                if (s.time) timeInput.value = s.time;
+                timeInput.style.display = s.enabled ? 'inline-block' : 'none';
+              }
+            }
+          });
         }
         syncOptionPills();
 

@@ -23,7 +23,7 @@ export async function closeExcludedOfferTab(context, session, page, destination 
     if (session.mainPage === page && others.length) session.mainPage = others[0];
     page._uxClosedByApp = 'trang thuộc danh sách loại trừ';
     await page.close();
-    session.addBrowserLog?.({ type: 'excluded_tab_closed', detail: 'Đã đóng tab chính sách hoặc offer thuộc danh sách loại trừ; giữ các tab đang làm việc.' });
+    session.addBrowserLog?.({ type: 'excluded_tab_closed', detail: `Đã đóng tab thuộc danh sách chặn: ${destination}; giữ các tab đang làm việc.` });
   } catch (error) {
     session.addBrowserLog?.({ type: 'excluded_tab_close_failed', detail: `Chưa đóng được tab thuộc danh sách loại trừ (${error.name || 'error'}); giữ các tab khác.` });
   } finally { closing.delete(page); }

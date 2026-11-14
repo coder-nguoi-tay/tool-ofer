@@ -12,6 +12,12 @@ async function pollState() {
 
         const running = state.enabled && !state.stopRequested;
         activeSessions = (state.chromeSessions || []).filter((s) => !s.isClosed);
+        // Đồng bộ "Không bù slot" với trạng thái server (đổi từ app chính hoặc mini khác).
+        const noSlotRefill = document.getElementById('cbxNoSlotRefill');
+        if (noSlotRefill && !noSlotRefill.disabled && typeof state.noSlotRefill === 'boolean' && noSlotRefill.checked !== state.noSlotRefill) {
+          noSlotRefill.checked = state.noSlotRefill;
+          syncOptionPills();
+        }
         const isRunning = running || activeSessions.length > 0 || ((state.activeCount || 0) > 0);
         const activeCount = activeSessions.length || state.activeCount || 0;
 

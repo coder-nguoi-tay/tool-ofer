@@ -152,16 +152,46 @@ test('offerwall: mở tối đa 10 tab tổng và tiếp tục offer còn lại 
   } finally { await browser.close(); }
 });
 
-test('tắt non-offer: tab đã mở không bị quét/đóng dù vượt trần hoặc không có form', () => {
+test('Chrome mở trực tiếp 12 tab: chỉ giữ 10 tab đầu, tab 11 và 12 bị đóng', { skip: !existsSync(chromium.executablePath()) }, async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    const logs = [];
+    const pages = [];
+    limitOfferTabs(context, { addBrowserLog: entry => logs.push(entry) });
+    for (let index = 0; index < 12; index++) pages.push(await context.newPage());
+    const deadline = Date.now() + 3000;
+    while (context.pages().filter(page => !page.isClosed()).length > 10 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(context.pages().filter(page => !page.isClosed()).length, 10);
+    assert.ok(pages.slice(0, 10).every(page => !page.isClosed()));
+    assert.ok(pages.slice(10).every(page => page.isClosed()));
+    assert.equal(logs.filter(entry => entry.type === 'tab_limit_closed').length, 2);
+  } finally { await browser.close(); }
+});
+
+test('tab trong giới hạn không bị quét/đóng dù không có form; chỉ tab vượt trần bị đóng', async () => {
   const context = new EventEmitter();
-  let closed = false, scans = 0;
-  const popup = { isClosed: () => closed, frames: () => { scans++; return []; }, close: async () => { closed = true; } };
-  context.pages = () => [popup, { isClosed: () => false }];
-  limitOfferTabs(context, {}, 1);
-  context.emit('page', popup);
-  assert.equal(closed, false);
-  assert.equal(scans, 0);
-  assert.equal(context.listenerCount('page'), 0);
+  const pages = [];
+  const makePage = () => {
+    let closed = false;
+    const page = { isClosed: () => closed, frames: () => { throw new Error('Không được quét DOM'); }, close: async () => { closed = true; } };
+    pages.push(page);
+    return page;
+  };
+  context.pages = () => pages;
+  const main = makePage();
+  limitOfferTabs(context, {}, 2);
+  const second = makePage();
+  context.emit('page', second);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(main.isClosed(), false);
+  assert.equal(second.isClosed(), false);
+  const third = makePage();
+  context.emit('page', third);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(third.isClosed(), true);
+  assert.equal(pages.filter(page => !page.isClosed()).length, 2);
+  assert.equal(context.listenerCount('page'), 1);
 });
 
 test('thumbnail UI: bỏ qua ô ngoài viewport và vùng cuộn bị che', { skip: !existsSync(chromium.executablePath()) }, async () => {

@@ -14,8 +14,9 @@ async function buy711Proxies(count) {
           body: JSON.stringify({ count }),
         });
         const data = await res.json();
-        if (data.success) {
-          showToast(`Đã lấy ${data.count || count} proxy vào hàng đợi!`);
+        // POST /711proxy/generate trả {ok, added, message} (lỗi: HTTP 500 {error}), không có `success`.
+        if (data.ok) {
+          showToast(data.message || `Đã lấy ${data.added} proxy vào hàng đợi!`);
           pollResources();
         } else {
           alert('Lỗi mua: ' + (data.error || 'Thử lại sau'));

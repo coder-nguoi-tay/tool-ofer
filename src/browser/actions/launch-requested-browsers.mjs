@@ -50,7 +50,7 @@ import { watchTrafficBlockedPage } from '../../leads/actions/watch-traffic-block
  * @return {Promise<{results: string[], warnings: string[]}>} Kết quả proxy thành công/thất bại và cảnh báo.
  * @throws {Error} Khi cấu hình không hợp lệ hoặc sổ proxy không đọc/ghi được.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-13
  */
 export async function launchRequestedBrowsers(requestBody, {
   layoutTarget = null,
@@ -65,8 +65,10 @@ export async function launchRequestedBrowsers(requestBody, {
   const captchaApiKey = body.captchaApiKey ?? '';
   const completeText = body.completeText ?? '';
   const timeLimit = Math.max(0, Number(body.timeLimit) || 0); // giây
+  const maxRunMinutes = Math.max(0, Number(body.maxRunMinutes) || 0); // ô Chờ tối đa: phút
   const delayStart = Math.max(0, Number(body.delayStart) || 0); // giây
   const delayStop = Math.max(0, Number(body.delayStop) || 0); // giây
+  const choiceDelay = body.enableChoiceDelay !== false && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0; // giây delay chọn kết quả
   const newLimitRun = Math.max(0, Number(body.limitRun) || 0);
   if (newLimitRun > 0) applicationState.limitRunMax = newLimitRun;
   const antiFingerprint = {
@@ -79,7 +81,6 @@ export async function launchRequestedBrowsers(requestBody, {
   };
   const hideUntilTarget = Boolean(body.hideUntilTarget ?? body.hideBrowser);
   const hideUntilLead = Boolean(body.hideUntilLead);
-  const useCloakBrowser = Boolean(body.useCloakBrowser ?? body.cloakBrowser);
   // "Chạy trong app" (checkbox cbxRunInApp): true = chạy ngầm thu nhỏ (ScreenView),
   // false = mở cửa sổ Chrome bình thường ra Desktop. Mặc định true giữ hành vi cũ.
   const screenPreviewOnly = Boolean(body.screenPreviewOnly ?? body.runInApp ?? true);
@@ -296,6 +297,7 @@ export async function launchRequestedBrowsers(requestBody, {
       emailList: body.emailList,
       autoSubmitForm: body.autoSubmitForm !== false,
       enableLeadCheck: body.enableLeadCheck === true,
+      stopAutofillOnLead: body.stopAutofillOnLead === true,
       leadCheckApiUrl: body.leadCheckApiUrl,
       leadCheckCookie: body.leadCheckCookie,
       leadCheckDatas: body.leadCheckDatas,
@@ -305,8 +307,11 @@ export async function launchRequestedBrowsers(requestBody, {
       captchaApiKey,
       completeText,
       timeLimit,
+      maxRunMinutes,
       delayStart,
       delayStop,
+      choiceDelay,
+      enableChoiceDelay: choiceDelay > 0,
       limitRun: newLimitRun,
       antiFpCanvas: antiFingerprint.canvas,
       antiFpClientRects: antiFingerprint.clientRects,
@@ -318,7 +323,6 @@ export async function launchRequestedBrowsers(requestBody, {
       Android: Boolean(body.Android),
       iPhone: Boolean(body.iPhone),
       iPad: Boolean(body.iPad),
-      useCloakBrowser,
       dataSaver: Boolean(body.dataSaver !== false)
     };
     if (autoRefill.targetCount < 1) autoRefill.targetCount = targetSuccessCount;
@@ -399,6 +403,7 @@ export async function launchRequestedBrowsers(requestBody, {
         };
         const leadConfig = {
           enabled: body.enableLeadCheck === true,
+          stopAutofillOnLead: body.stopAutofillOnLead === true,
           apiUrl: body.leadCheckApiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
           cookie: body.leadCheckCookie || DEFAULT_LEAD_CONFIG.cookie,
           datas: body.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
@@ -432,14 +437,15 @@ export async function launchRequestedBrowsers(requestBody, {
           captchaApiKey,
           completeText,
           timeLimit,
+          maxRunMinutes,
           delayStop,
+          choiceDelay,
           scriptPath,
           antiFingerprint,
           checkDuplicate: body.checkDuplicate !== false,
           hideUntilTarget,
           hideUntilLead,
           screenPreviewOnly,
-          useCloakBrowser,
           dataSaver: body.dataSaver !== false
         });
         activeSession = openedBrowser.session;

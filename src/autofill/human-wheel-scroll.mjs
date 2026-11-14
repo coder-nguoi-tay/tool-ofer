@@ -9,7 +9,7 @@ import { shouldAnimatePageMouse } from './interaction/should-animate-page-mouse.
  * @param {number} deltaY Quãng đường cuộn theo trục Y.
  * @return {Promise<void>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-13
  */
 async function humanWheelScroll(page, deltaY = 200) {
   if (!shouldAnimatePageMouse(page)) return;
@@ -17,6 +17,7 @@ async function humanWheelScroll(page, deltaY = 200) {
   const bursts = Math.max(3, Math.min(5, Math.round(Math.abs(deltaY) / 60)));
   let remaining = deltaY;
   for (let b = 0; b < bursts; b++) {
+    if (!shouldAnimatePageMouse(page)) return;
     const factor = (bursts - b) / bursts;
     const chunk = Math.round(remaining * factor / 2) || (remaining > 0 ? 10 : -10);
     remaining -= chunk;

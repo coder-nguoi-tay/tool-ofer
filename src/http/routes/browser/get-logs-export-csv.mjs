@@ -13,12 +13,12 @@ export async function handleGetBrowserLogsExportCsv(request, response) {
     const parsedUrl = new URL(request.url, 'http://localhost');
     const offerFilter = parsedUrl.searchParams.get('offer');
     const csvCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Thời gian', 'Offer #', 'Slot', 'IP Exit', 'Loại sự kiện', 'Chi tiết thao tác', 'Tên file HTML', 'URL trang'].map(csvCell).join(',')];
+    const rows = [['Thời gian', 'Offer #', 'Slot', 'IP Exit', 'Thiết bị', 'OS GoLogin', 'Platform thực tế', 'Orbita thực tế', 'User-Agent thực tế', 'Loại sự kiện', 'Chi tiết thao tác', 'Tên file HTML', 'URL trang'].map(csvCell).join(',')];
     for (const session of persistedBrowserLogs) {
       for (const entry of session.logs || []) {
         const entryOffer = String(entry.offer ?? session.offer ?? 1);
         if (offerFilter && entryOffer !== offerFilter) continue;
-        rows.push([entry.time || '', entryOffer, session.slot ?? '', session.ip ?? '', entry.type ?? '', entry.detail || entry.text || entry.url || '', entry.htmlFilename || '', entry.url || session.offerUrl || ''].map(csvCell).join(','));
+        rows.push([entry.time || '', entryOffer, session.slot ?? '', session.ip ?? '', session.deviceVersion || session.deviceProfile || '', session.goLoginOs || '', session.goLoginPlatform || '', session.goLoginOrbitaVersion || '', session.goLoginUserAgent || '', entry.type ?? '', entry.detail || entry.text || entry.url || '', entry.htmlFilename || '', entry.url || session.offerUrl || ''].map(csvCell).join(','));
       }
     }
     const filename = offerFilter ? `autoleadpc-offer-${offerFilter}-logs.csv` : 'autoleadpc-interaction-logs.csv';

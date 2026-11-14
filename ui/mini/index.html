@@ -55,8 +55,21 @@
 
       <!-- URL & IP Info Strip -->
       <div class="info-strip">
-        <span id="urlDisplay" class="url-text">Đang kết nối...</span>
+        <span id="urlDisplay" class="url-text" title="Chạm để sửa URL" style="cursor:pointer;">Đang kết nối...</span>
         <span id="ipDisplay" style="color:#a78bfa; font-weight:600;">IP: ...</span>
+      </div>
+
+      <!-- Công cụ màn hình: nhập URL để điều hướng, DevTools trên Mac, xem HTML, mở ra Desktop -->
+      <div id="scrUrlRow" style="display:none; gap:6px; padding:4px 10px; background:#090d16; flex-shrink:0;">
+        <input id="scrUrlInput" class="input-text" type="url" inputmode="url" placeholder="Nhập URL rồi bấm Đi..." autocomplete="off" style="flex:1; padding:5px 8px;">
+        <button id="scrUrlGo" class="btn btn-primary" style="padding:4px 10px; font-weight:700;">Đi</button>
+        <button id="scrUrlCopy" class="btn" style="padding:4px 8px;" title="Sao chép URL">📋</button>
+      </div>
+      <div class="key-quick-row" style="padding:4px 10px; background:#090d16; flex-shrink:0;">
+        <button class="key-btn" id="scrBtnUrl">🔗 URL</button>
+        <button class="key-btn" id="scrBtnDevtools">🛠 DevTools</button>
+        <button class="key-btn" id="scrBtnHtml">📄 HTML</button>
+        <button class="key-btn" id="scrBtnPopOut">🖥️ Ra Desktop</button>
       </div>
 
       <!-- Interactive Mode Selector Bar -->
@@ -146,6 +159,26 @@
         </div>
       </div>
     </div>
+
+    <!-- Bảng xem HTML của tab đang xem (chỉ hiển thị text, không chạy script trang) -->
+    <div id="scrHtmlModal" class="select-modal" style="display:none;">
+      <div id="scrHtmlBackdrop" class="select-modal-backdrop"></div>
+      <div class="select-modal-content" style="max-height:88vh;">
+        <div class="select-modal-header">
+          <span style="font-weight:700; color:#f8fafc; font-size:13px;">📄 HTML trang đang xem</span>
+          <button id="scrHtmlClose" class="btn" style="padding:2px 8px; font-size:11px;">✕ Đóng</button>
+        </div>
+        <div style="padding:8px; display:flex; flex-direction:column; gap:6px; min-height:0;">
+          <select id="scrHtmlFrame" class="input-select"></select>
+          <textarea id="scrHtmlContent" class="input-textarea" readonly spellcheck="false" style="height:55vh; resize:none;"></textarea>
+          <div style="display:flex; gap:6px;">
+            <button id="scrHtmlReload" class="btn" style="flex:1;">🔄 Đọc lại</button>
+            <button id="scrHtmlCopy" class="btn" style="flex:1;">📋 Sao chép</button>
+            <button id="scrHtmlDownload" class="btn btn-primary" style="flex:1;">⬇️ Tải file</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Modal Gõ chữ (Floating Typing Modal) -->
@@ -199,22 +232,33 @@
             🛑 Dừng tất cả
           </button>
         </div>
+        <div style="display:flex; align-items:center; gap:6px; margin-top:8px;">
+          <label class="form-label" style="margin:0; white-space:nowrap;">Chế độ chạy:</label>
+          <select id="miniRunMode" class="input-select" style="flex:1;">
+            <option value="auto">Song song (tự bù slot)</option>
+            <option value="sequential">Tuần tự (mỗi lần một phiên)</option>
+          </select>
+        </div>
+        <div id="miniScheduleBanner" style="display:none; align-items:center; gap:6px; margin-top:8px; padding:6px 8px; border:1px solid #f59e0b; border-radius:6px; background:rgba(245,158,11,0.12);">
+          <span id="miniScheduleText" style="flex:1; font-size:11px; color:#fbbf24;"></span>
+          <button id="miniScheduleCancel" class="btn btn-danger" style="padding:3px 8px; font-size:11px;">Huỷ hẹn</button>
+        </div>
       </div>
 
-      <!-- Card: Chọn Trình duyệt (AdsPower SunBrowser / Chrome) -->
+      <!-- Card: Chọn Trình duyệt (Chrome / GoLogin) -->
       <div class="card">
         <div class="card-title">
           <span>🌐 Trình duyệt thực thi</span>
-          <span id="badgeBrowserMode" style="color:#22c55e; font-weight:700; font-size:11px;">🛡️ AdsPower SunBrowser</span>
+          <span id="badgeBrowserMode" style="color:#38bdf8; font-weight:700; font-size:11px;">🌐 Google Chrome</span>
         </div>
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
-          <label class="option-pill active" id="pillBrowserAdsPower" onclick="setBrowserMode('AdsPower')">
-            <input type="radio" name="miniBrowserChoice" id="radioAdsPower" value="AdsPower" checked style="display:none;">
-            <span>🛡️ AdsPower SunBrowser</span>
-          </label>
-          <label class="option-pill" id="pillBrowserChrome" onclick="setBrowserMode('Chrome')">
-            <input type="radio" name="miniBrowserChoice" id="radioChrome" value="Chrome" style="display:none;">
+          <label class="option-pill active" id="pillBrowserChrome" onclick="setBrowserMode('Chrome')">
+            <input type="radio" name="miniBrowserChoice" id="radioChrome" value="Chrome" checked style="display:none;">
             <span>🌐 Google Chrome</span>
+          </label>
+          <label class="option-pill" id="pillBrowserGoLogin" onclick="setBrowserMode('GoLogin')">
+            <input type="radio" name="miniBrowserChoice" id="radioGoLogin" value="GoLogin" style="display:none;">
+            <span>🚀 GoLogin Orbita</span>
           </label>
         </div>
       </div>
@@ -239,8 +283,8 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Link Offer 1 (chính):</label>
-          <input id="inputWebsiteUrl" class="input-text" type="url" placeholder="https://..." value="https://toffers.top/click/?key=33335&offer_id=2539&aff_id=qg39v">
+          <label class="form-label">Link Offer 1 (chính; nhiều link thì mỗi dòng một link):</label>
+          <textarea id="inputWebsiteUrl" class="input-text" rows="2" placeholder="https://...">https://toffers.top/click/?key=33335&offer_id=2539&aff_id=qg39v</textarea>
         </div>
 
         <!-- Mở rộng: Đa Link Offer 2, 3, 4 cho Multi-tab -->
@@ -262,6 +306,18 @@
               <input id="inputWebsiteUrl4" class="input-text" type="url" placeholder="https://...">
             </div>
           </div>
+        </details>
+
+        <!-- Hẹn giờ chạy theo từng link (lưu cùng offer, giống app chính) -->
+        <details style="background:#0f172a; border:1px solid #334155; border-radius:6px; padding:6px 8px; margin-top:6px;">
+          <summary style="font-size:11px; font-weight:600; color:#fbbf24; cursor:pointer;">⏰ Hẹn giờ chạy theo link</summary>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-top:6px;">
+            <label style="font-size:11px; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="miniSchedOn1"> Offer 1 <input id="miniSchedTime1" class="input-text" type="time" value="07:00" style="padding:2px 4px;"></label>
+            <label style="font-size:11px; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="miniSchedOn2"> Offer 2 <input id="miniSchedTime2" class="input-text" type="time" value="08:00" style="padding:2px 4px;"></label>
+            <label style="font-size:11px; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="miniSchedOn3"> Offer 3 <input id="miniSchedTime3" class="input-text" type="time" value="12:00" style="padding:2px 4px;"></label>
+            <label style="font-size:11px; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="miniSchedOn4"> Offer 4 <input id="miniSchedTime4" class="input-text" type="time" value="20:00" style="padding:2px 4px;"></label>
+          </div>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Tới giờ thì tự bấm Start; cần để mini mở tới giờ hẹn.</div>
         </details>
 
         <!-- Nút quản lý Offer: Lưu / Thêm mới / Xoá -->
@@ -310,22 +366,27 @@
         <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
             <div>
-              <label class="form-label">Thời gian tối đa (giây):</label>
-              <input id="inputTimeLimit" class="input-text" type="number" min="0" value="30">
+              <label class="form-label">Chờ tối đa (phút):</label>
+              <input id="inputTimeLimit" class="input-text" type="number" min="0" step="1" value="10"
+                title="Phiên chạy quá số phút này (tính từ lúc mở xong) thì tự tắt và bù slot mới, kể cả offer làm đến cuối không chờ lead. Không tắt phiên đã có lead. 0 = không giới hạn.">
             </div>
             <div>
               <label class="form-label">Complete Text:</label>
               <input id="inputCompleteText" class="input-text" type="text" placeholder="Text hoàn thành...">
             </div>
           </div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px;">
             <div>
-              <label class="form-label">Delay Bắt đầu (s):</label>
+              <label class="form-label">Delay Mở (s):</label>
               <input id="inputDelayStart" class="input-text" type="number" min="0" value="1">
             </div>
             <div>
-              <label class="form-label">Delay Kết thúc (s):</label>
+              <label class="form-label">Delay Đóng (s):</label>
               <input id="inputDelayStop" class="input-text" type="number" min="0" value="1">
+            </div>
+            <div>
+              <label class="form-label">Delay Chọn (s):</label>
+              <input id="inputChoiceDelay" class="input-text" type="number" min="0" value="2" title="Số giây delay suy nghĩ trước khi chọn đáp án / kết quả">
             </div>
           </div>
         </div>
@@ -349,9 +410,10 @@
             <span><span class="option-pill-icon">📑</span> Đa luồng đa tab</span>
           </label>
 
-          <label class="option-pill">
-            <input type="checkbox" id="cbxCloakBrowser" onchange="syncOptionPills()">
-            <span><span class="option-pill-icon">🥷</span> CloakBrowser</span>
+
+          <label class="option-pill" id="pillMiniChoiceDelay" title="Tăng thời gian delay suy nghĩ trước khi chọn đáp án / kết quả">
+            <input type="checkbox" id="cbxChoiceDelay" onchange="syncOptionPills()">
+            <span><span class="option-pill-icon">⏳</span> Delay chọn đáp án</span>
           </label>
 
           <label class="option-pill active">
@@ -375,23 +437,22 @@
           </label>
 
           <label class="option-pill">
-            <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
+            <input type="checkbox" id="cbxCheckLead" onchange="if(!this.checked){document.getElementById('cbxHideUntilLead').checked=false; document.getElementById('cbxStopAutofillOnLead').checked=false;} syncOptionPills()">
             <span><span class="option-pill-icon">⏱️</span> Check Lead (2×30s)</span>
           </label>
 
+          <label class="option-pill" title="Khi IP có lead: giữ trình duyệt mở và dừng autofill, AI, chuột tự động. Tự bật Check Lead (2×30s).">
+            <input type="checkbox" id="cbxStopAutofillOnLead" onchange="if(this.checked){document.getElementById('cbxCheckLead').checked=true;} syncOptionPills()">
+            <span><span class="option-pill-icon">⏸️</span> Dừng autofill khi có lead</span>
+          </label>
+
           <label class="option-pill active">
-            <input type="checkbox" id="cbxAiAssist" checked onchange="syncOptionPills()">
+            <input type="checkbox" id="cbxAiAssist" checked onchange="miniRunToggleAiAssist(this.checked)">
             <span><span class="option-pill-icon">🤖</span> AI Assist</span>
           </label>
-
-          <label class="option-pill" style="display:none;">
-            <input type="checkbox" id="cbxRRS" onchange="syncOptionPills()">
-            <span><span class="option-pill-icon">💾</span> Save RRS</span>
-          </label>
-
-          <label class="option-pill active">
-            <input id="chkAutoRefill" type="checkbox" checked onchange="syncOptionPills()">
-            <span><span class="option-pill-icon">🔄</span> Tự bù luồng</span>
+          <label class="option-pill" title="Giữ các phiên đang chạy nhưng không mở phiên mới để bù slot đã đóng. Áp dụng ngay khi đang chạy.">
+            <input type="checkbox" id="cbxNoSlotRefill" onchange="miniRunToggleNoSlotRefill(this.checked)">
+            <span><span class="option-pill-icon">🚫</span> Không bù slot</span>
           </label>
 
           <label class="option-pill active">
@@ -464,6 +525,66 @@
           <button class="btn btn-primary" style="flex:1; font-size:12px;" onclick="buy711Proxies(50)">🛒 Mua 50</button>
           <button class="btn btn-primary" style="flex:1; font-size:12px;" onclick="buy711Proxies(100)">🛒 Mua 100</button>
         </div>
+        <details>
+          <summary class="form-label" style="cursor:pointer; padding:4px 0;">⚙️ Cấu hình 711Proxy đầy đủ</summary>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
+            <div class="option-pills-grid">
+              <label class="option-pill"><input type="radio" name="res711Mode" id="res711ModeSubuser" checked> User &amp; Pass</label>
+              <label class="option-pill"><input type="radio" name="res711Mode" id="res711ModeApi"> API Whitelist</label>
+            </div>
+            <div id="res711SecSubuser" style="display:flex; flex-direction:column; gap:6px;">
+              <input type="text" id="res711SubUser" class="input-text" placeholder="Sub-user (vd: mac1)" autocomplete="off">
+              <input type="password" id="res711SubPass" class="input-text" placeholder="Mật khẩu sub-user" autocomplete="off">
+              <select id="res711Gateway" class="input-select">
+                <option value="global.rotgbapi.trustsource.live:10000">Global (Mặc định - 10000)</option>
+                <option value="as.rotgbapi.trustsource.live:10000">Asia (Châu Á - 10000)</option>
+                <option value="us.rotgbapi.trustsource.live:10000">US (Bắc Mỹ - 10000)</option>
+              </select>
+              <button id="res711BtnSaveSubuser" class="btn" style="font-size:12px;">💾 Lưu Sub-user</button>
+              <div style="font-size:10.5px; color:var(--text-muted);">💡 Tạo sub-user tại dashboard.711proxy.com/sub-user, không cần whitelist IP.</div>
+            </div>
+            <div id="res711SecApi" style="display:none; flex-direction:column; gap:6px;">
+              <input type="text" id="res711User" class="input-text" placeholder="Email tài khoản chính" autocomplete="username">
+              <input type="password" id="res711Pass" class="input-text" placeholder="Mật khẩu chính" autocomplete="current-password">
+              <div style="display:flex; gap:6px;">
+                <button id="res711BtnLogin" class="btn btn-primary" style="flex:1; font-size:12px;">🔑 Đăng nhập &amp; Lưu</button>
+                <button id="res711BtnWhitelist" class="btn" style="flex:1; font-size:12px;">🛡️ Thêm IP Whitelist</button>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-muted);">
+                <span style="flex:1;">🌐 IP: <b id="res711MyIp" style="color:#38bdf8; font-family:monospace;">--</b></span>
+                <button id="res711BtnCheckIp" class="btn" style="padding:4px 8px; font-size:11px;">🔍 Kiểm tra</button>
+                <button id="res711BtnCopyIp" class="btn" style="padding:4px 8px; font-size:11px;">📋 Copy</button>
+              </div>
+              <div style="font-size:10.5px; color:var(--text-muted);">"Kiểm tra" hiện IP của máy Mac chạy app (IP cần whitelist), kể cả khi mở mini trên điện thoại.</div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">
+              <div class="form-group"><span class="form-label">Khu vực</span>
+                <select id="res711Region" class="input-select">
+                  <option value="US">US</option><option value="GB">GB</option><option value="CA">CA</option>
+                  <option value="AU">AU</option><option value="DE">DE</option><option value="GLOBAL">GLOBAL</option>
+                </select>
+              </div>
+              <div class="form-group"><span class="form-label">Số lượng</span><input type="number" id="res711Count" class="input-text" value="50" min="1" max="200"></div>
+              <div class="form-group"><span class="form-label">Sticky (phút)</span><input type="number" id="res711SessTime" class="input-text" value="20" min="1" max="120"></div>
+            </div>
+            <div class="option-pills-grid">
+              <label class="option-pill"><input type="checkbox" id="res711SessAuto" checked> Đổi IP trước hạn</label>
+              <label class="option-pill"><input type="checkbox" id="res711AutoRefill"> Tự nạp khi hết</label>
+            </div>
+            <button id="res711BtnGenerate" class="btn btn-primary" style="font-size:12px;">⚡ Tạo proxy vào hàng đợi</button>
+            <div id="res711Status" style="font-size:11px; font-weight:600; color:#38bdf8;"></div>
+            <div class="form-label">📦 Gói 711Proxy đã mua (GB)</div>
+            <div class="pills-row">
+              <button class="pill-btn" data-res-gb="1">1</button><button class="pill-btn" data-res-gb="2">2</button>
+              <button class="pill-btn" data-res-gb="5">5</button><button class="pill-btn" data-res-gb="10">10</button>
+              <button class="pill-btn" data-res-gb="20">20</button><button class="pill-btn" data-res-gb="50">50</button>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <input type="number" id="res711CustomGb" class="input-text" step="0.5" min="0.5" placeholder="Số GB khác, vd 3.5" style="flex:2;">
+              <button id="res711BtnCustomGb" class="btn" style="flex:1; font-size:12px;">💾 Lưu gói</button>
+            </div>
+          </div>
+        </details>
       </div>
 
       <!-- Autofill Queue Card -->
@@ -479,6 +600,21 @@
         <button id="btnResetAutofill" class="btn" style="width:100%; font-size:11px; color:#38bdf8;">
           🔄 Đặt lại hồ sơ đã dùng về hàng đợi
         </button>
+        <div style="display:flex; gap:6px;">
+          <button id="resBtnLeadZip5" class="btn btn-primary" style="flex:1; font-size:11px;">📥 1.060 Lead (Zip 5)</button>
+          <button id="resBtnLeadFull" class="btn" style="flex:1; font-size:11px;">📥 7.135 Lead đầy đủ</button>
+        </div>
+        <details id="resAutofillListBox">
+          <summary class="form-label" style="cursor:pointer; padding:4px 0;">📋 Xem hàng đợi Autofill <span id="resAutofillListCount"></span></summary>
+          <div style="max-height:240px; overflow:auto; margin-top:6px; border:1px solid var(--card-border); border-radius:6px; user-select:text;">
+            <table style="border-collapse:collapse; font-size:10.5px; width:100%;">
+              <thead style="position:sticky; top:0; background:#1e293b; color:var(--text-muted);">
+                <tr><th style="padding:3px 6px;">#</th><th style="padding:3px 6px; text-align:left;">Họ tên</th><th style="padding:3px 6px; text-align:left;">Ngày sinh</th><th style="padding:3px 6px; text-align:left;">SĐT</th><th style="padding:3px 6px; text-align:left;">Thành phố / Bang / Zip</th></tr>
+              </thead>
+              <tbody id="resAutofillListBody"></tbody>
+            </table>
+          </div>
+        </details>
       </div>
 
       <!-- Proxy Queue Card -->
@@ -489,11 +625,28 @@
             Sẵn sàng: <b id="textProxyAvail" style="color:#38bdf8;">0</b> | Đã dùng: <b id="textProxyUsed" style="color:#94a3b8;">0</b>
           </span>
         </div>
+        <div style="display:flex; height:6px; border-radius:3px; overflow:hidden; background:#1e293b;">
+          <div id="resProxyHealthReady" style="width:0%; background:#22c55e;"></div>
+          <div id="resProxyHealthUsed" style="width:0%; background:#64748b;"></div>
+        </div>
+        <div id="resProxyHealthRatio" style="font-size:10.5px; color:var(--text-muted);">0% sẵn sàng</div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="form-label">Giao thức:</span>
+          <select id="resProxyType" class="input-select" style="flex:1;">
+            <option value="socks5">SOCKS5</option>
+            <option value="http">HTTP/HTTPS</option>
+          </select>
+        </div>
         <textarea id="taProxyInput" class="input-textarea" placeholder="Nhập proxy (mỗi dòng 1 proxy):&#10;ip:port:user:pass hoặc socks5://..."></textarea>
         <div style="display:flex; gap:6px;">
-          <button id="btnImportProxy" class="btn btn-primary" style="flex:2; font-size:12px;">📥 Nạp thêm Proxy</button>
+          <button id="resBtnDedupeProxy" class="btn" style="flex:1; font-size:11px;">🧹 Lọc trùng</button>
+          <button id="resBtnShuffleProxy" class="btn" style="flex:1; font-size:11px;">🔀 Trộn</button>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button id="resBtnImportProxy" class="btn btn-primary" style="flex:2; font-size:12px;">📥 Nạp thêm Proxy</button>
           <button id="btnClearProxy" class="btn btn-danger" style="flex:1; font-size:12px;">🗑️ Xóa</button>
         </div>
+        <button id="resBtnResetProxy" class="btn" style="font-size:11px; color:#38bdf8;">🔄 Đặt lại hàng proxy</button>
       </div>
 
       <!-- Email Queue Card -->
@@ -506,9 +659,35 @@
         </div>
         <textarea id="taEmailInput" class="input-textarea" placeholder="Nhập danh sách email (mỗi dòng 1 email)..."></textarea>
         <div style="display:flex; gap:6px;">
+          <button id="resBtnDedupeEmail" class="btn" style="flex:1; font-size:11px;">🧹 Lọc trùng</button>
+          <button id="resBtnShuffleEmail" class="btn" style="flex:1; font-size:11px;">🔀 Trộn</button>
+          <label class="btn" style="flex:1; font-size:11px;">📂 Từ file<input type="file" id="resEmailFile" accept=".txt,.csv,text/plain" hidden></label>
+        </div>
+        <div style="display:flex; gap:6px;">
           <button id="btnImportEmail" class="btn btn-primary" style="flex:2; font-size:12px;">📥 Nạp Email</button>
           <button id="btnResetEmail" class="btn" style="flex:1; font-size:12px;">🔄 Đặt lại</button>
         </div>
+        <button id="resBtnClearEmail" class="btn btn-danger" style="font-size:11px;">🗑️ Xóa tất cả email</button>
+        <details id="resEmailListBox">
+          <summary class="form-label" style="cursor:pointer; padding:4px 0;">📋 Xem hàng đợi email <span id="resEmailListCount"></span></summary>
+          <textarea id="resEmailList" class="input-textarea" readonly style="margin-top:6px; min-height:140px;"></textarea>
+        </details>
+        <details>
+          <summary class="form-label" style="cursor:pointer; padding:4px 0;">♻️ Tự động nạp email từ file</summary>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+            <label class="option-pill"><input type="checkbox" id="resEmailAutoRefill"> Tự động nạp khi hết</label>
+            <input type="text" id="resEmailAutoRefillPath" class="input-text" placeholder="Đường dẫn file .txt trên máy chạy app">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="form-label">Mỗi lần nạp</span>
+              <input type="number" id="resEmailAutoRefillBatch" class="input-text" value="1000" min="100" max="50000" style="flex:1;">
+              <span class="form-label">dòng</span>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button id="resBtnLoadEmailFromPath" class="btn btn-primary" style="flex:1; font-size:11px;">📥 Nạp ngay từ file</button>
+              <button id="resBtnResetEmailCursor" class="btn" style="flex:1; font-size:11px;">⏮️ Reset vị trí đọc</button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   </div>
@@ -573,8 +752,24 @@
           <span>🟢 Luồng trình duyệt đang chạy</span>
           <span id="textSlotCount" style="color:#38bdf8;">0 slot</span>
         </div>
+        <div id="stRunOfferPills" class="pills-row"></div>
+        <div id="stActiveIps" style="font-size:10px; color:#94a3b8; word-break:break-all;">IP đang chạy: --</div>
         <div id="activeSlotsList" style="display:flex; flex-direction:column; gap:6px;">
           <span style="font-size:12px; color:var(--text-muted);">Hiện không có slot nào đang chạy.</span>
+        </div>
+      </div>
+
+      <!-- AI: chạy AI thủ công cho slot + hoạt động AI gần nhất -->
+      <div class="card">
+        <div class="card-title">
+          <span>🤖 Hoạt động AI</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <select id="stAiSlot" class="input-select" style="flex:1;"><option value="">Chưa có slot</option></select>
+          <button class="btn btn-primary" style="flex:1; font-size:11px;" onclick="miniStatsTriggerAi()">🤖 Chạy AI cho slot</button>
+        </div>
+        <div id="stAiList" class="log-box" style="max-height:160px;">
+          <div style="color:#64748b;">Chưa có hoạt động AI nào được ghi nhận.</div>
         </div>
       </div>
 
@@ -584,18 +779,100 @@
           <span>🎯 Danh sách Leads Toffers gần nhất</span>
           <span id="badgeLeadListCount" style="color:#22c55e; font-weight:700; font-size:11px;">0 lead</span>
         </div>
-        <div id="toffersLeadsContainer" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;">
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">Lead mới nhất</div><div id="stLeadLatestTime" style="font-size:11px; font-weight:700; color:#f8fafc;">--</div></div>
+          <div class="stat-card"><div class="stat-label">Offer</div><div id="stLeadLatestOffer" style="font-size:11px; font-weight:700; color:#f8fafc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">--</div></div>
+          <div class="stat-card"><div class="stat-label">IP (chạm để copy)</div><div id="stLeadLatestIp" style="font-size:11px; font-weight:700; color:#38bdf8;" onclick="miniStatsCopy(this.dataset.copy)">--</div></div>
+          <div class="stat-card"><div class="stat-label">Thành viên</div><div id="stLeadLatestUser" style="font-size:11px; font-weight:700; color:#f8fafc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">--</div></div>
+        </div>
+        <input id="stLeadSearch" class="input-text" type="text" placeholder="🔍 Lọc theo Offer, IP, ID, User..." oninput="miniStatsRenderLeads()">
+        <div style="display:flex; gap:6px; align-items:center; font-size:11px; color:#cbd5e1;">
+          <span>datas:</span>
+          <input id="stLeadDatas" class="input-text" type="text" value="1504" style="width:70px;" title="Tham số datas POST lên toffers.top">
+          <label style="display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" id="stLeadAuto" checked> Tự làm mới (10s)</label>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-primary" style="flex:1; font-size:11px;" onclick="pollToffersOverview(true)">🔄 Làm mới</button>
+          <button class="btn" style="flex:1; font-size:11px;" onclick="miniStatsExportLeadStats()">📥 Xuất Lead IP</button>
+        </div>
+        <details>
+          <summary style="font-size:11px; color:#94a3b8; cursor:pointer;">⚙️ Cookie toffers.top</summary>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+            <textarea id="stLeadCookie" class="input-textarea" placeholder="Dán cookie toffers.top (lưu trên máy này, dùng chung với bản desktop)..."></textarea>
+            <button class="btn" style="font-size:11px;" onclick="miniStatsSaveLeadCookie()">💾 Lưu Cookie</button>
+          </div>
+        </details>
+        <div id="toffersLeadsContainer" style="display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto;">
           <div style="color:#64748b; font-size:11px;">Đang tải danh sách leads...</div>
         </div>
+      </div>
+
+      <!-- Chi tiết băng thông -->
+      <div class="card">
+        <details id="stBwDetails">
+          <summary class="card-title" style="cursor:pointer;">📶 Chi tiết băng thông</summary>
+          <div style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-top:6px;">
+            <div class="stats-grid">
+              <div class="stat-card"><div class="stat-label">Hôm nay</div><div id="stBwToday" class="stat-val" style="color:#f59e0b;">--</div></div>
+              <div class="stat-card"><div class="stat-label">Đang chạy (realtime)</div><div id="stBwActive" class="stat-val" style="color:#34d399;">--</div><div id="stBwActiveSub" style="font-size:10px; color:#94a3b8;"></div></div>
+              <div class="stat-card"><div class="stat-label">Toàn thời gian</div><div id="stBwAll" class="stat-val" style="color:#38bdf8;">--</div><div id="stBwAllSub" style="font-size:10px; color:#94a3b8;"></div></div>
+            </div>
+            <div id="stBwTodaySub" style="font-size:10px; color:#94a3b8;"></div>
+            <b style="color:#e2e8f0;">Theo slot & tab</b>
+            <div id="stBwSlots" style="display:flex; flex-direction:column; gap:6px;"></div>
+            <b style="color:#e2e8f0;">Host tốn nhất hôm nay</b>
+            <div id="stBwHosts" style="display:flex; flex-direction:column; gap:2px;"></div>
+            <b style="color:#e2e8f0;">Lịch sử theo ngày</b>
+            <div id="stBwDaily" style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto;"></div>
+            <b style="color:#e2e8f0;">Tiêu hao 711 theo giờ</b>
+            <div style="display:flex; gap:6px;">
+              <select id="stBw711Range" class="input-select" style="flex:1;">
+                <option value="today">Hôm nay</option>
+                <option value="yesterday">Hôm qua + nay</option>
+                <option value="3days">3 ngày</option>
+                <option value="7days">7 ngày</option>
+              </select>
+              <button class="btn" style="font-size:11px;" onclick="miniStatsLoad711()">📊 Tải</button>
+            </div>
+            <div id="stBw711" style="display:flex; flex-direction:column; gap:4px; max-height:240px; overflow-y:auto;"></div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-warning" style="flex:1; font-size:11px;" onclick="miniStatsResetBandwidth('today')">↺ Đặt lại hôm nay</button>
+              <button class="btn btn-danger" style="flex:1; font-size:11px;" onclick="miniStatsResetBandwidth('all')">🗑 Xoá toàn bộ</button>
+            </div>
+          </div>
+        </details>
       </div>
 
       <!-- Live Log Terminal -->
       <div class="card">
         <div class="card-title">
           <span>📜 Nhật ký hoạt động (Logs)</span>
-          <button id="btnClearLogs" class="btn" style="padding:2px 8px; font-size:10px;">Xóa log</button>
+          <span id="stLogCount" style="color:#38bdf8; font-size:11px;">0 dòng</span>
         </div>
-        <div id="logBox" class="log-box">
+        <div id="stLogOfferPills" class="pills-row"></div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">Lượt chạy</div><div id="stLogKpiRuns" class="stat-val" style="color:#38bdf8;">0</div></div>
+          <div class="stat-card"><div class="stat-label">Lead</div><div id="stLogKpiLeads" class="stat-val" style="color:#22c55e;">0</div></div>
+          <div class="stat-card"><div class="stat-label">Bị chặn / lỗi</div><div id="stLogKpiBlocked" class="stat-val" style="color:#f87171;">0</div></div>
+          <div class="stat-card"><div class="stat-label">AI</div><div id="stLogKpiAi" class="stat-val" style="color:#a78bfa;">0</div></div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <select id="stLogSlot" class="input-select" style="flex:1;" onchange="miniStatsRenderLogs()"><option value="">Tất cả slot</option></select>
+          <select id="stLogType" class="input-select" style="flex:1;" onchange="miniStatsRenderLogs()"><option value="">Tất cả loại</option></select>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; justify-content:space-between; font-size:11px; color:#cbd5e1;">
+          <label style="display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" id="stLogAuto" checked> Tự làm mới (3s)</label>
+          <button class="btn" style="padding:2px 8px; font-size:10px;" onclick="miniStatsClearLogFilters()">Bỏ lọc</button>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <a id="stLogCsv" class="btn" style="font-size:11px; text-decoration:none;" href="/browser-logs/export-csv" target="_blank" rel="noopener">📄 CSV</a>
+          <button class="btn" style="font-size:11px;" onclick="miniStatsOpenLogFolder()">📂 Mở thư mục HTML</button>
+          <a class="btn" style="font-size:11px; text-decoration:none;" href="/browser-logs/download-all">⬇️ Tải tất cả giao diện</a>
+          <a class="btn" style="font-size:11px; text-decoration:none;" href="/browser-replay" target="_blank" rel="noopener">🎬 Xem lại phiên</a>
+          <button id="btnClearLogs" class="btn btn-danger" style="font-size:11px;">🗑 Xoá log</button>
+        </div>
+        <div id="stLogHtmlInfo" style="font-size:10px; color:#64748b; word-break:break-all;">📁 -- file HTML</div>
+        <div id="logBox" class="log-box" style="max-height:360px;">
           <div style="color:#64748b;">Đang tải nhật ký...</div>
         </div>
       </div>
@@ -603,7 +880,128 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════════ -->
-  <!-- BOTTOM NAVIGATION (4 TABS)                                                 -->
+  <!-- TAB 5: ⚙️ CÀI ĐẶT (GoLogin, chống fingerprint, Telegram, AI, Hướng dẫn)     -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-settings" class="tab-content">
+    <div class="scroll-page">
+      <!-- GoLogin & chống fingerprint: lưu qua /pc/settings/save, hệ điều hành lấy từ tab Vận hành -->
+      <div class="card">
+        <div class="card-title"><span>🚀 GoLogin &amp; Chống fingerprint</span></div>
+        <div class="form-group">
+          <span class="form-label">GoLogin API token</span>
+          <input id="setGologinToken" class="input-text" type="password" autocomplete="off" placeholder="Nhập token GoLogin">
+          <span id="setGologinTokenStatus" style="font-size:10.5px; color:#94a3b8;">Đang đọc cấu hình...</span>
+        </div>
+        <span class="form-label">Thiết bị GoLogin</span>
+        <div id="setGologinDevices" class="option-pills-grid">
+          <label class="option-pill active"><input type="checkbox" data-gologin-device="windows" checked onchange="syncOptionPills()"><span>Windows 10</span></label>
+          <label class="option-pill active"><input type="checkbox" data-gologin-device="windows11" checked onchange="syncOptionPills()"><span>Windows 11</span></label>
+          <label class="option-pill active"><input type="checkbox" data-gologin-device="macos-intel" checked onchange="syncOptionPills()"><span>Mac Intel</span></label>
+          <label class="option-pill active"><input type="checkbox" data-gologin-device="macos-arm" checked onchange="syncOptionPills()"><span>Mac ARM (M2)</span></label>
+          <label class="option-pill active"><input type="checkbox" data-gologin-device="linux" checked onchange="syncOptionPills()"><span>Linux</span></label>
+          <label class="option-pill active"><input type="checkbox" data-gologin-device="android" checked onchange="syncOptionPills()"><span>Android</span></label>
+        </div>
+        <span class="form-label">Chống fingerprint</span>
+        <div class="option-pills-grid">
+          <label class="option-pill"><input type="checkbox" id="setAfCanvas" onchange="syncOptionPills()"><span>Canvas</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAfClientRects" checked onchange="syncOptionPills()"><span>ClientRects</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAfWebgl" checked onchange="syncOptionPills()"><span>WebGLImage</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAfFonts" checked onchange="syncOptionPills()"><span>Fonts</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAfWebrtc" checked onchange="syncOptionPills()"><span>WebRTC</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAfApiFakeIp" checked onchange="syncOptionPills()"><span>Api Fake IP</span></label>
+        </div>
+        <span style="font-size:10.5px; color:#64748b;">Hệ điều hành giả lập lấy theo lựa chọn ở tab 🚀 Vận hành.</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button id="setPcSave" class="btn btn-primary" style="font-weight:700;">💾 Lưu cài đặt</button>
+          <span id="setPcStatus" style="font-size:11px;"></span>
+        </div>
+      </div>
+
+      <!-- Telegram bot -->
+      <div class="card">
+        <div class="card-title"><span>✈️ Telegram bot</span></div>
+        <div class="form-group">
+          <span class="form-label">Bot Token</span>
+          <input id="setTgToken" class="input-text" type="password" autocomplete="off" placeholder="123456789:AA...">
+        </div>
+        <div style="display:flex; gap:6px;">
+          <div class="form-group" style="flex:1;">
+            <span class="form-label">User ID admin</span>
+            <input id="setTgUserId" class="input-text" type="text" inputmode="numeric" autocomplete="off">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <span class="form-label">Chat ID nhận thông báo</span>
+            <input id="setTgChatId" class="input-text" type="text" inputmode="numeric" autocomplete="off" placeholder="(tùy chọn)">
+          </div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button id="setTgSave" class="btn btn-primary" style="flex:1; font-weight:700;">💾 Lưu</button>
+          <button id="setTgTest" class="btn" style="flex:1;">📨 Gửi thử</button>
+        </div>
+        <span id="setTgStatus" style="font-size:11px;"></span>
+      </div>
+
+      <!-- AI engine -->
+      <div class="card">
+        <div class="card-title"><span>🤖 AI Engine</span></div>
+        <div class="form-group">
+          <span class="form-label">Chế độ AI</span>
+          <select id="setAiMode" class="input-select">
+            <option value="auto_on_stuck">Auto on Stuck (gỡ kẹt khi form kẹt - khuyên dùng)</option>
+            <option value="continuous">Continuous (hỗ trợ liên tục từ màn 1)</option>
+            <option value="heuristic_only">Heuristic Only (chỉ Smart Fallback, không tốn token)</option>
+            <option value="disabled">Disabled (tắt hoàn toàn AI)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <span class="form-label">CLI Binary</span>
+          <select id="setAiBinary" class="input-select">
+            <option value="agy" selected>agy (Google Antigravity - mặc định)</option>
+          </select>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <div class="form-group" style="flex:1;">
+            <span class="form-label">Max rounds</span>
+            <input id="setAiMaxRounds" class="input-text" type="number" min="1" max="50" value="20">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <span class="form-label">Timeout (giây, 5-300)</span>
+            <input id="setAiTimeout" class="input-text" type="number" min="5" max="300" value="100">
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button id="setAiTest" class="btn" style="flex-shrink:0;">🔌 Kiểm tra kết nối</button>
+          <span id="setAiTestResult" style="font-size:10.5px;"></span>
+        </div>
+        <span class="form-label">Smart Fallback</span>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <label class="option-pill active"><input type="checkbox" id="setAiSolveBotQuiz" checked onchange="syncOptionPills()"><span>Tự giải câu hỏi Bot Verification</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAiSolveSurveyCards" checked onchange="syncOptionPills()"><span>Tự chọn câu khảo sát / choice cards</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAiClickJumpPage" checked onchange="syncOptionPills()"><span>Tự click nút nhận thưởng Jump Page</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAiMultiStepSubmit" checked onchange="syncOptionPills()"><span>Tự Submit / Next ở form nhiều bước</span></label>
+          <label class="option-pill active"><input type="checkbox" id="setAiSyncAutofill" checked onchange="syncOptionPills()"><span>Kích hoạt lại Autofill sau mỗi hành động AI</span></label>
+        </div>
+        <div class="form-group">
+          <span class="form-label">Chỉ dẫn tùy chỉnh cho AI</span>
+          <textarea id="setAiInstructions" class="input-textarea" placeholder="Ví dụ: luôn chọn đáp án đầu tiên..."></textarea>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button id="setAiSave" class="btn btn-primary" style="flex:1; font-weight:700;">💾 Lưu cấu hình AI</button>
+          <button id="setAiReset" class="btn" style="flex:1;">↩️ Mặc định</button>
+        </div>
+        <span id="setAiStatus" style="font-size:11px;"></span>
+      </div>
+
+      <!-- Hướng dẫn sử dụng (/pc/help), nạp khi mở -->
+      <details id="setHelpBox" style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px;">
+        <summary style="font-size:12px; font-weight:700; color:#f8fafc; cursor:pointer;">❓ Hướng dẫn sử dụng</summary>
+        <pre id="setHelpText" style="margin-top:8px; white-space:pre-wrap; font-size:11px; color:#cbd5e1; max-height:50vh; overflow-y:auto; user-select:text;">Đang tải...</pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- BOTTOM NAVIGATION (5 TABS)                                                 -->
   <!-- ═══════════════════════════════════════════════════════════════════════════ -->
   <div class="bottom-nav">
     <div class="nav-item active" data-tab="tab-screen">
@@ -621,6 +1019,10 @@
     <div class="nav-item" data-tab="tab-stats">
       <span class="nav-icon">📊</span>
       <span>Thống kê</span>
+    </div>
+    <div class="nav-item" data-tab="tab-settings">
+      <span class="nav-icon">⚙️</span>
+      <span>Cài đặt</span>
     </div>
   </div>
 

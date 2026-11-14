@@ -1,4 +1,5 @@
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
+import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { isNoSurveyFrame } from './adsmith/is-no-survey-frame.mjs';
 import { recordPageDialog } from './record-page-dialog.mjs';
 import { recoverEmptyProgress } from './late-progress/recover-empty-progress.mjs';
@@ -17,7 +18,7 @@ import { inspectAndFixFormWithAi } from '../../ai-assist.mjs';
  * @param {object} context Dữ liệu phiên và callback điều phối được giữ bởi attachAutofill.
  * @return {void} Hoàn tất thao tác trên tab.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export function attachAutofillPageWatcher(page, {
   trackedPages,
@@ -44,12 +45,13 @@ export function attachAutofillPageWatcher(page, {
    * @param {boolean} force Bỏ thời gian chờ khi có sự kiện trang hoặc yêu cầu thử lại.
    * @return {Promise<void>} Hoàn tất lượt quét hoặc chuyển lỗi sang log.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-12
+   * @since 2026-11-13
    */
   // Khóa `filling` phải bật ngay khi kiểm tra, trước mọi `await`: trước đây bật sau lệnh kiểm tra Cloudflare
   // (tối đa 4s), nên timer 250ms / load / triggerAutofillScan chen vào được và chạy nhiều lượt điền song song —
   // hai lần keyboard.type cùng lúc trộn ký tự vào một ô (vd "addoanr1sh4d3@ognm1a4i3@l.gmcaoiml").
   const scan = async (force = false) => {
+    if (shouldStopAfterLead(session)) return;
     if (force !== true && Date.now() < nextScanAt) return;
     if (filling || page._leadRecoveryInProgress || page.isClosed() || page._aiFormFixing || page._aiAssistRunning) return;
     filling = true;

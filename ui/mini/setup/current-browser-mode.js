@@ -1,1 +1,1 @@
-let currentBrowserMode = 'AdsPower';
+let currentBrowserMode = 'Chrome';

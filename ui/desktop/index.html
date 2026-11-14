@@ -89,11 +89,19 @@
           </div>
 
           <!-- Hàng 2: Link Offer chính (hỗ trợ dán nhiều dòng) + nút mở rộng Link 2..4 -->
-          <div class="form-row" style="margin-bottom:4px;">
+          <div class="form-row" style="margin-bottom:4px;flex-wrap:wrap;gap:4px;">
             <span class="form-label" style="min-width:70px;">Link Offer:</span>
-            <input type="text" id="txtLinkOffer" class="win-input" style="flex:1;"
+            <input type="text" id="txtLinkOffer" class="win-input" style="flex:1;min-width:240px;"
               value="https://demoqa.com/automation-practice-form"
               placeholder="Dán URL Offer (hoặc dán nhiều link, mỗi dòng 1 link để tự động luân phiên)">
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
+              title="Tích vào để hẹn giờ tự động chạy Link Offer 1">
+              <input type="checkbox" id="cbxScheduleOffer1" onchange="toggleScheduleOffer(1, this.checked)" style="cursor:pointer;">
+              <span>⏰ Hẹn giờ:</span>
+            </label>
+            <input type="time" id="timeScheduleOffer1" class="win-input" value="07:00"
+              style="width:75px;padding:1px 4px;font-size:11px;display:none;background:#0f172a;color:#fbbf24;border-color:#f59e0b;"
+              title="Chọn giờ chạy cho Offer 1 (ví dụ 07:00)">
             <button type="button" class="win-btn" id="btnToggleExtraLinks" onclick="toggleExtraOfferLinks()"
               style="padding:2px 8px;font-size:11px;color:#38bdf8;white-space:nowrap;"
               title="Mở rộng thêm ô điền Link 2, Link 3, Link 4 dự phòng">➕ Thêm Link 2, 3, 4</button>
@@ -101,20 +109,56 @@
 
           <!-- Khối mở rộng Link 2, 3, 4 (ẩn mặc định, tự hiện khi có link 2..4) -->
           <div id="extraOfferLinks" style="display:none;padding:6px 8px;background:rgba(15,23,42,0.6);border:1px dashed #22324e;border-radius:5px;margin-bottom:6px;">
-            <div class="form-row" style="margin-bottom:4px;">
+            <div class="form-row" style="margin-bottom:4px;flex-wrap:wrap;gap:4px;">
               <span class="form-label" style="min-width:70px;color:#94a3b8;font-size:11px;">Link Offer 2:</span>
-              <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;"
+              <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;min-width:240px;"
                 placeholder="URL Offer 2 (tùy chọn)">
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
+                title="Tích vào để hẹn giờ tự động chạy Link Offer 2">
+                <input type="checkbox" id="cbxScheduleOffer2" onchange="toggleScheduleOffer(2, this.checked)" style="cursor:pointer;">
+                <span>⏰ Hẹn giờ:</span>
+              </label>
+              <input type="time" id="timeScheduleOffer2" class="win-input" value="08:00"
+                style="width:75px;padding:1px 4px;font-size:11px;display:none;background:#0f172a;color:#fbbf24;border-color:#f59e0b;"
+                title="Chọn giờ chạy cho Offer 2 (ví dụ 08:00)">
             </div>
-            <div class="form-row" style="margin-bottom:4px;">
+            <div class="form-row" style="margin-bottom:4px;flex-wrap:wrap;gap:4px;">
               <span class="form-label" style="min-width:70px;color:#94a3b8;font-size:11px;">Link Offer 3:</span>
-              <input type="text" id="txtLinkOffer3" class="win-input" style="flex:1;"
+              <input type="text" id="txtLinkOffer3" class="win-input" style="flex:1;min-width:240px;"
                 placeholder="URL Offer 3 (tùy chọn)">
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
+                title="Tích vào để hẹn giờ tự động chạy Link Offer 3">
+                <input type="checkbox" id="cbxScheduleOffer3" onchange="toggleScheduleOffer(3, this.checked)" style="cursor:pointer;">
+                <span>⏰ Hẹn giờ:</span>
+              </label>
+              <input type="time" id="timeScheduleOffer3" class="win-input" value="12:00"
+                style="width:75px;padding:1px 4px;font-size:11px;display:none;background:#0f172a;color:#fbbf24;border-color:#f59e0b;"
+                title="Chọn giờ chạy cho Offer 3">
             </div>
-            <div class="form-row">
+            <div class="form-row" style="flex-wrap:wrap;gap:4px;">
               <span class="form-label" style="min-width:70px;color:#94a3b8;font-size:11px;">Link Offer 4:</span>
-              <input type="text" id="txtLinkOffer4" class="win-input" style="flex:1;"
+              <input type="text" id="txtLinkOffer4" class="win-input" style="flex:1;min-width:240px;"
                 placeholder="URL Offer 4 (tùy chọn)">
+              <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
+                title="Tích vào để hẹn giờ tự động chạy Link Offer 4">
+                <input type="checkbox" id="cbxScheduleOffer4" onchange="toggleScheduleOffer(4, this.checked)" style="cursor:pointer;">
+                <span>⏰ Hẹn giờ:</span>
+              </label>
+              <input type="time" id="timeScheduleOffer4" class="win-input" value="20:00"
+                style="width:75px;padding:1px 4px;font-size:11px;display:none;background:#0f172a;color:#fbbf24;border-color:#f59e0b;"
+                title="Chọn giờ chạy cho Offer 4">
+            </div>
+          </div>
+
+          <!-- Thanh trạng thái Hẹn giờ chạy Offer (tự động hiện khi đang đếm ngược hẹn giờ) -->
+          <div id="offerScheduleBanner" style="display:none;margin-top:6px;padding:8px 12px;background:linear-gradient(90deg, rgba(245,158,11,0.15) 0%, rgba(15,23,42,0.9) 100%);border:1px solid #f59e0b;border-radius:6px;align-items:center;justify-content:space-between;gap:8px;box-shadow:0 2px 8px rgba(245,158,11,0.2);">
+            <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#fbbf24;font-weight:600;">
+              <span style="font-size:16px;">⏰</span>
+              <span id="offerScheduleBannerText">Đang hẹn giờ chạy...</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button type="button" class="win-btn win-btn-danger" onclick="cancelOfferSchedule()"
+                style="padding:3px 10px;font-size:11px;font-weight:700;">⏹ Hủy hẹn giờ</button>
             </div>
           </div>
         </fieldset>
@@ -191,14 +235,20 @@
               <div class="form-row">
                 <span class="form-label" style="min-width:75px;">Chờ tối đa:</span>
                 <div style="display:flex;align-items:center;gap:6px;flex:1;flex-wrap:wrap;">
-                  <input type="number" id="txtTimeLimit" class="win-input" value="30" style="width:72px;"
-                    title="Thời gian chờ tối đa (giây)">
-                  <span style="font-size:11px;color:#94a3b8;">s</span>
+                  <input type="number" id="txtTimeLimit" class="win-input" value="10" min="0" step="1" style="width:72px;"
+                    title="Phiên chạy quá số phút này (tính từ lúc mở xong) thì tự tắt trình duyệt và bù slot mới, kể cả offer làm đến cuối không chờ lead. Không tắt phiên đã có lead. 0 = không giới hạn.">
+                  <span style="font-size:11px;color:#94a3b8;">phút</span>
                   <span style="font-size:11px;color:#94a3b8;margin-left:6px;">Delay:</span>
                   <input type="number" id="nudDelayStart" class="win-input" value="1" min="0" style="width:42px;">
                   <span style="color:#64748b;">-</span>
                   <input type="number" id="nudDelayStop" class="win-input" value="1" min="0" style="width:42px;">
                   <span style="font-size:11px;color:#94a3b8;">s</span>
+                  <label style="display:inline-flex;align-items:center;gap:4px;margin-left:10px;cursor:pointer;user-select:none;" title="Tích vào để tăng thời gian delay đọc và suy nghĩ trước khi chọn đáp án / survey (mô phỏng người thật tránh bot)">
+                    <input type="checkbox" id="cbxChoiceDelay" onchange="toggleChoiceDelay(this.checked)" style="cursor:pointer;">
+                    <span style="font-size:11px;color:#38bdf8;font-weight:600;">Delay chọn:</span>
+                  </label>
+                  <input type="number" id="nudChoiceDelay" class="win-input" value="2" min="1" max="60" style="width:42px;display:none;" title="Số giây delay suy nghĩ trước khi chọn kết quả (1-60s)">
+                  <span id="lblChoiceDelayUnit" style="font-size:11px;color:#38bdf8;display:none;font-weight:600;">s</span>
                 </div>
               </div>
             </div>
@@ -232,7 +282,7 @@
                   <label class="option-pill option-pill-hidelead"
                     title="Chạy ngầm ẩn trình duyệt hoàn toàn; chỉ những IP nào kiểm tra có lead mới hiển thị lên màn hình, không có lead sẽ tự động đóng.">
                     <input type="checkbox" id="cbxHideUntilLead"
-                      onchange="if(this.checked){const t=document.getElementById('cbxHideUntilTarget');if(t)t.checked=false;const c=document.getElementById('cbxCheckLead');if(c)c.checked=true;} syncOptionPills();">
+                      onchange="if(this.checked){const t=document.getElementById('cbxHideUntilTarget');if(t)t.checked=false;if(!getLeadCheckSettings().enableLeadCheck)selectLeadCheckInterval(30,true);} syncOptionPills();">
                     <span class="option-pill-text"><span class="option-pill-icon">🎯</span> Chỉ hiện khi có Lead</span>
                   </label>
                 </div>
@@ -273,17 +323,38 @@
                     <span class="option-pill-text"><span class="option-pill-icon">✨</span> AI Assist</span>
                   </label>
 
-                  <label class="option-pill" id="pillCloakBrowser"
-                    title="Sử dụng CloakBrowser (Stealth Chromium chống bot Cloudflare Turnstile/FingerprintJS & mô phỏng thao tác người thật Humanize).">
-                    <input type="checkbox" id="cbxCloakBrowser"
-                      onchange="syncCloakBrowserSetting(this.checked); syncOptionPills();">
-                    <span class="option-pill-text"><span class="option-pill-icon">🥷</span> CloakBrowser Stealth</span>
+
+                  <label class="option-pill" id="pillGoLogin"
+                    title="Sử dụng profile GoLogin Orbita qua SDK.">
+                    <input type="checkbox" id="cbxGoLogin"
+                      onchange="syncGoLoginSetting(this.checked); syncOptionPills();">
+                    <span class="option-pill-text"><span class="option-pill-icon">🚀</span> GoLogin Orbita</span>
+                  </label>
+
+                  <label class="option-pill" id="pillChoiceDelay"
+                    title="Tăng thời gian delay suy nghĩ trước khi chọn đáp án / khảo sát (mô phỏng người thật đọc câu hỏi, tránh bị phát hiện bot do chọn quá nhanh).">
+                    <input type="checkbox" id="cbxChoiceDelayPill"
+                      onchange="toggleChoiceDelay(this.checked); syncOptionPills();">
+                    <span class="option-pill-text"><span class="option-pill-icon">⏳</span> Tăng delay chọn đáp án</span>
                   </label>
 
                   <label class="option-pill option-pill-leadcheck"
-                    title="Chỉ khi tick: sau khi qua màn nhập email, dừng lại kiểm tra lead 2 lần × 30s. Có lead thì tiếp tục, không có lead thì tự động đóng trình duyệt để đổi sock mới. Bỏ tick thì không check lead.">
-                    <input type="checkbox" id="cbxCheckLead" onchange="syncOptionPills()">
+                    title="Sau khi qua màn nhập email, dừng kiểm tra lead 2 lần × 30 giây. Có lead thì tiếp tục; hết lượt chưa có lead thì đóng trình duyệt để đổi sock. Bỏ chọn thì không chờ lead.">
+                    <input type="checkbox" id="cbxCheckLead" onchange="selectLeadCheckInterval(30,this.checked)">
                     <span class="option-pill-text"><span class="option-pill-icon">⏱️</span> Check Lead (2×30s)</span>
+                  </label>
+
+
+                  <label class="option-pill option-pill-leadcheck"
+                    title="Tự làm đến bước chờ lead. Khi IP có lead, giữ trình duyệt mở và dừng autofill, AI, chuột tự động. Chưa chọn thời gian chờ thì dùng 2×30s; bỏ tick để chạy theo logic thường.">
+                    <input type="checkbox" id="cbxStopAutofillOnLead" onchange="toggleStopAutofillOnLead(this.checked)">
+                    <span class="option-pill-text"><span class="option-pill-icon">⏸️</span> Dừng autofill khi có lead</span>
+                  </label>
+
+                  <label class="option-pill"
+                    title="Khi được tích: giữ nguyên các trình duyệt đang chạy nhưng không mở proxy/profile mới để bù slot đã đóng hoặc hoàn tất. Bỏ tích để cho phép bù slot trở lại.">
+                    <input type="checkbox" id="cbxNoSlotRefill" onchange="toggleNoSlotRefill(this.checked)">
+                    <span class="option-pill-text"><span class="option-pill-icon">🚫</span> Không bù slot</span>
                   </label>
 
                   <label class="option-pill" style="display:none;"
@@ -1132,6 +1203,24 @@
         <!-- Subpanel 1: System Settings -->
         <div class="sub-panel active" id="settingpanel-system">
           <fieldset class="win-group">
+            <legend class="win-legend">GoLogin Orbita</legend>
+            <label for="gologinApiToken" style="display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap;">
+              API Token:
+              <input id="gologinApiToken" type="password" autocomplete="off" class="win-input"
+                style="flex:1;min-width:180px;" placeholder="Nhập token GoLogin">
+            </label>
+            <div id="gologinTokenStatus" role="status" style="font-size:11px;color:#94a3b8;margin-top:6px;">Nhập token rồi bấm Lưu cài đặt. Để trống để giữ token đã lưu.</div>
+            <div class="os-chips-grid" style="margin-top:10px;">
+              <label class="os-selector-chip"><input type="checkbox" data-gologin-device="windows" checked> Windows 10</label>
+              <label class="os-selector-chip"><input type="checkbox" data-gologin-device="windows11" checked> Windows 11</label>
+              <label class="os-selector-chip"><input type="checkbox" data-gologin-device="macos-intel" checked> Mac Intel</label>
+              <label class="os-selector-chip"><input type="checkbox" data-gologin-device="macos-arm" checked> Mac ARM (M2)</label>
+              <label class="os-selector-chip"><input type="checkbox" data-gologin-device="linux" checked> Linux</label>
+              <label class="os-selector-chip"><input type="checkbox" data-gologin-device="android" checked> Android</label>
+            </div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:6px;">Hệ điều hành chạy theo các ô ở mục "Hệ điều hành Chrome / GoLogin" (gồm cả iPhone/iPad); ở đây chỉ chọn biến thể Windows 10/11 và Mac Intel/ARM. Bấm Lưu cài đặt để giữ lựa chọn.</div>
+          </fieldset>
+          <fieldset class="win-group">
             <legend class="win-legend">Trình duyệt sử dụng</legend>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
               <div
@@ -1170,35 +1259,19 @@
           </details>
 
           <fieldset class="win-group">
-            <legend class="win-legend">Operating System (Hệ điều hành &amp; Phiên bản thiết bị)</legend>
+            <legend class="win-legend">Hệ điều hành Chrome / GoLogin</legend>
             <div class="os-chips-grid">
               <label class="os-selector-chip"><input type="checkbox" id="chkWindows" checked> 🪟 Windows 10</label>
               <label class="os-selector-chip"><input type="checkbox" id="chkMac"> 🍎 macOS (14.x, 15.x, 26.x)</label>
               <label class="os-selector-chip"><input type="checkbox" id="chkLinux"> 🐧 Linux (6.5 - 6.14)</label>
               <label class="os-selector-chip"><input type="checkbox" id="chkAndroid"> 🤖 Android (13 - 16, Pixel/Galaxy)</label>
-              <label class="os-selector-chip"><input type="checkbox" id="chkIphone"> 📱 iPhone (iOS 17.6 - 18.6)</label>
-              <label class="os-selector-chip"><input type="checkbox" id="chkIpad"> 📟 iPad (iPadOS 17 - 18)</label>
+              <label class="os-selector-chip" title="Trong GoLogin: giả lập iPhone trên Orbita/Chromium, không phải Safari iOS thật."><input type="checkbox" id="chkIphone"> 📱 iPhone (iOS 17.6 - 18.6)</label>
+              <label class="os-selector-chip" title="Trong GoLogin: giả lập iPad trên Orbita/Chromium, không phải Safari iPadOS thật."><input type="checkbox" id="chkIpad"> 📟 iPad (iPadOS 17 - 18)</label>
             </div>
             <div style="margin-top:8px;color:#94a3b8;font-size:11px;">Mỗi phiên trình duyệt sẽ tự động giả lập một máy
               cụ thể với phiên bản OS, GPU, CPU, màn hình và phiên bản Chrome hoàn chỉnh.</div>
           </fieldset>
 
-          <fieldset class="win-group">
-            <legend class="win-legend">CloakBrowser Stealth Engine (Anti-Bot Bypass)</legend>
-            <label
-              style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:bold;color:#38bdf8;">
-              <input type="checkbox" id="chkUseCloakBrowser" onchange="syncCloakBrowserSetting(this.checked)">
-              🥷 Kích hoạt CloakBrowser (Stealth Chromium &amp; Humanize)
-            </label>
-            <div style="font-size:11px;color:#94a3b8;margin-left:22px;margin-top:3px;">
-              Vượt kiểm duyệt bot-detection sâu (Cloudflare Turnstile, Kasada, Akamai, FingerprintJS) bằng nhân Chromium
-              Stealth của CloakBrowser và tự động mô phỏng chuột/phím mượt mà như người thật.
-            </div>
-            <div id="cloakBrowserStatusNotice"
-              style="font-size:11px;color:#10b981;margin-left:22px;margin-top:3px;font-weight:bold;">
-              ● CloakBrowser đã sẵn sàng trên hệ thống
-            </div>
-          </fieldset>
 
           <fieldset class="win-group">
             <legend class="win-legend">Telegram Bot</legend>
@@ -1241,7 +1314,7 @@
 
           <div style="margin-top:8px;">
             <button type="button" class="win-btn win-btn-primary" id="BtnSaveSettings"
-              onclick="saveWindowsSettings()">Save Setting</button>
+              onclick="saveWindowsSettings()">Lưu cài đặt</button>
             <span id="settingsSaveStatus" style="margin-left:10px;font-size:11px;color:#38bdf8;"></span>
           </div>
         </div>
@@ -1470,7 +1543,7 @@
                   <th class="col-header-selector"></th>
                   <th style="width:70px;">Time</th>
                   <th style="width:75px;">Offer</th>
-                  <th style="width:130px;">Slot / IP</th>
+                  <th style="width:210px;">Slot / IP / Thiết bị</th>
                   <th style="width:140px;">Type</th>
                   <th>Detail &amp; HTML Snapshot</th>
                 </tr>

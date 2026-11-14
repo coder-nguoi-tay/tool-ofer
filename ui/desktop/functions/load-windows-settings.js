@@ -1,32 +1,30 @@
 /**
-     * Nạp cấu hình trình duyệt và fingerprint từ Settings.ini.
+     * Nạp cấu hình trình duyệt và trạng thái token GoLogin, không tải token về giao diện.
      * @return {Promise<void>} Hoàn tất cập nhật các trường Settings.
      * @throws {Error} Khi giao diện không đọc được cấu hình cục bộ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-14
  */
 async function loadWindowsSettings() {
       const data = await api('/pc/settings/read');
       syncBrowserChoice('Chrome', false);
+      if (typeof applyGoLoginDeviceChoices === 'function') applyGoLoginDeviceChoices(data?.gologinDevices);
+      const tokenInput = document.getElementById('gologinApiToken');
+      if (tokenInput) tokenInput.placeholder = data?.gologinConfigured
+        ? 'Đã lưu token — nhập để thay đổi' : 'Nhập token GoLogin';
+      const tokenStatus = document.getElementById('gologinTokenStatus');
+      if (tokenStatus) tokenStatus.textContent = data?.gologinConfigured
+        ? 'Đã cấu hình token GoLogin. Để trống để giữ token hiện tại.'
+        : 'Chưa có token GoLogin. Nhập token rồi bấm Lưu cài đặt.';
 
-      const savedCloak = (() => {
-        try { return localStorage.getItem('autolead_use_cloakbrowser'); } catch { return null; }
+
+      const savedGoLogin = (() => {
+        try { return localStorage.getItem('autolead_use_gologin'); } catch { return null; }
       })();
-      const cloakEnabled = savedCloak !== null ? savedCloak === '1' : Boolean(data?.CloakBrowser);
-      syncCloakBrowserSetting(cloakEnabled);
+      if (typeof syncGoLoginSetting === 'function') {
+        syncGoLoginSetting(savedGoLogin === '1');
+      }
 
-      api('/cloakbrowser/status').then((status) => {
-        const el = document.getElementById('cloakBrowserStatusNotice');
-        if (el && status) {
-          if (status.installed) {
-            el.innerHTML = `● CloakBrowser ${status.version || ''} (${status.platform}) đã sẵn sàng trên hệ thống`;
-            el.style.color = '#28a745';
-          } else {
-            el.innerHTML = `○ CloakBrowser chưa tải binary. Khi bấm Start, app sẽ tự động tải phiên bản stealth thích hợp.`;
-            el.style.color = '#d97706';
-          }
-        }
-      }).catch(() => { });
 
       if (data) {
         if (data.Canvas !== undefined) document.getElementById('CheckBoxCanvas').checked = data.Canvas;

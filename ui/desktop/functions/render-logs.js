@@ -216,6 +216,9 @@ function renderLogs() {
         } else if (entry.type === 'adtrapper_reload') {
           typeBadge = '<span class="badge-log" style="background:rgba(245,158,11,0.2);color:#fbbf24;">🔄 Tải lại</span>';
           detail = `<span style="color:#fbbf24;">${escHtml(entry.detail || '')}</span>`;
+        } else if (entry.type === 'gologin_device_detected') {
+          typeBadge = '<span class="badge-log badge-field">📱 Fingerprint</span>';
+          detail = `<span style="color:#38bdf8;">${escHtml(entry.detail || '')}</span>`;
         } else if (entry.detail) {
           detail = escHtml(entry.detail);
         }
@@ -230,12 +233,14 @@ function renderLogs() {
 
         const offerNum = entry.offer ?? session.offer ?? 1;
         const offerBadge = `<span class="badge-log badge-offer">Offer ${offerNum}</span>`;
+        const deviceLabel = session.deviceVersion || session.deviceProfile || 'Chưa rõ thiết bị';
+        const deviceTitle = [session.goLoginUserAgent, session.goLoginPlatform ? `Platform: ${session.goLoginPlatform}` : '', session.goLoginOrbitaVersion ? `Orbita: ${session.goLoginOrbitaVersion}` : ''].filter(Boolean).join('\n');
 
         return `<tr onclick="if(${hasHtml})openLogHtmlModal(${idx})">
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
           <td>${fmtTime(entry.time)}</td>
           <td>${offerBadge}</td>
-          <td>Slot ${session.slot} · <b>${escHtml(session.ip || '?')}</b></td>
+          <td>Slot ${session.slot} · <b>${escHtml(session.ip || '?')}</b><br><span style="color:#94a3b8;font-size:10px;" title="${escHtml(deviceTitle || session.deviceSummary || '')}">${getDeviceIcon(deviceLabel)} ${escHtml(deviceLabel)}</span></td>
           <td>${typeBadge}</td>
           <td>${detail}${fileTag}${viewHtmlBtn}</td>
         </tr>`;

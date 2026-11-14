@@ -103,8 +103,10 @@ Kết quả trước build cho khôi phục form đứng: selfcheck OK; 319/320 
 | Bấm Dừng/Đóng tất cả hoặc tắt tự bù | Không tự mở lại, kể cả callback đóng đến muộn. |
 | Check lead bật, đóng chủ động một cửa sổ | Giảm target đúng một lần và không bù slot đã đóng. |
 | Trang tự đóng nhưng IP đã confirmed và browser còn chạy | Giữ cơ chế bảo vệ lead hiện có, không tự đóng browser để bù. |
+| Tích **Không bù slot** khi đang thiếu slot hoặc queue đang delay | Không xếp/mở phiên thay thế; browser đang chạy tiếp tục, target/settings được giữ. |
+| Bỏ tích **Không bù slot**, khởi động lại app | Lựa chọn được khôi phục; khi đang chạy, bỏ tích cho phép queue bù theo cấu hình hiện có. |
 
-Test mới: `tests/no-lead-auto-refill.test.mjs`; queue và launcher thực được chạy trong fixture module tạm với launcher giả, không mở Chrome/AdsPower hoặc dùng proxy thật. Regression cũ `proxy-stop.test.mjs:69` về giảm target của luồng đóng chủ động cũng phải đạt.
+Test mới: `tests/no-lead-auto-refill.test.mjs`; queue và launcher thực được chạy trong fixture module tạm với launcher giả, không mở Chrome/AdsPower hoặc dùng proxy thật. `tests/no-slot-refill.test.mjs` kiểm tra lưu/khôi phục tùy chọn, chặn queue, giữ target và checkbox/API desktop. Regression cũ `proxy-stop.test.mjs:69` về giảm target của luồng đóng chủ động cũng phải đạt.
 
 Kết quả sửa tự bù không check lead: 39/39 test mục tiêu đạt; `npm test` đạt 328/328, failed=0, skipped=0, selfcheck OK. Lỗi test giảm target cũ tại `proxy-stop.test.mjs:69` đã được xử lý trong chính sách đóng chủ động của luồng check lead, không bỏ/đổi yếu assertion. Log: `/tmp/autolead-refill-full-tests.log`. Chưa cập nhật app hoặc đóng browser thật để thử vì người dùng đang có các phiên hoạt động.
 
@@ -128,7 +130,8 @@ Test: `tests/non-offer-slot-release.test.mjs` (20 test, có 1 test Chromium). `n
 
 ## Giảm tải và nhường slot — 2026-11-11
 
-- Mở offerwall có ít nhất 4 thẻ: chỉ giữ tổng 3 tab; thẻ chưa mở không bị đánh dấu đã mở. Đóng một popup, lượt sau mở thêm đúng một thẻ. Thử hai offerwall cùng context cùng mở để kiểm tra đặt chỗ.
+- Mở offerwall có nhiều thẻ: chỉ giữ tổng 10 tab trong mỗi trình duyệt; thẻ chưa mở không bị đánh dấu đã mở. Đóng một popup, lượt sau mở thêm đúng một thẻ. Thử hai offerwall cùng context cùng mở để kiểm tra đặt chỗ.
+- Trong một Chrome/AdsPower/Multilogin, mở trực tiếp 12 tab kể cả tab đầu: chỉ 10 tab đầu còn lại, tab 11–12 bị đóng và có log `tab_limit_closed`; không quét DOM hay đóng tab không form trong 10 tab đầu. Giới hạn tính riêng mỗi trình duyệt.
 - Cuộn lưới thumbnail: ô ngoài vùng xem không phát request screenshot; cuộn lại thì ảnh cập nhật ở lượt 5 giây tiếp theo. Ẩn giao diện sau khi đã hẹn callback tải ảnh cũng không được gửi request mới.
 - Đổi trang/tab lúc đang chụp: không trả ảnh của tài liệu trước. Nhiều client cùng xem không vượt hai lượt thumbnail đang chụp; khi quá tải chưa có cache thì 503 và lượt sau thử lại.
 - Trang tĩnh trong Screen View vẫn cập nhật sau khoảng 1,5 giây; chuột/bàn phím và tọa độ tương tác đúng; cửa sổ thu nhỏ không chụp bù gây treo.
@@ -235,12 +238,15 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 
 ### Giới hạn đóng non-offer và xử lý trang trắng
 
-- Trang không có form nói chung vẫn giữ mở; không bật lại việc đóng mọi trang không phải offer.
+- Tab chính không phải offer nói chung vẫn giữ mở; tab phụ không có công việc offer sau 30 giây bị đóng riêng khi còn tab khác.
 - `about:blank` hoặc HTML trắng liên tục 20 giây bị đóng; trang chỉ một dòng ngắn, không link/media/form/đáp án bị đóng sau 30 giây.
-- Trang đang tải, CAPTCHA, iframe còn offer, DOM không đọc được, phiên vừa thao tác/đang check lead hoặc IP có lead được giữ.
-- Vượt trần tab đã mở không gắn thêm timer quét non-offer hoặc đóng tab; cơ chế đặt chỗ trước khi mở offerwall vẫn giới hạn số tab mới.
+- Chỉ nhận form/câu hỏi/CTA trong `main`, `[role=main]` hoặc cột nội dung trung tâm. Search, header/nav/footer/aside/sidebar và link Next/Continue điều hướng không giữ tab phụ.
+- Form email/search trong cùng form vẫn giữ nhờ email; form căn giữa không có thẻ `main` và offerwall link-only có card/metadata offer vẫn được giữ.
+- Link/media thường chỉ ngăn trang bị gọi là trắng, không được tính là công việc offer.
+- Trang đang tải, CAPTCHA, iframe còn offer, DOM không đọc được, phiên vừa thao tác/đang check lead hoặc IP có lead được giữ theo guard của từng nhánh.
+- Guard giới hạn tab chỉ đếm tab và đóng phần vượt 10, không gắn timer quét non-offer; cơ chế đặt chỗ trước khi mở offerwall vẫn giới hạn số tab mới.
 - Lỗi mạng thực sự và hoàn tất FinancialHelpFinder thankyou vẫn chạy theo luồng riêng.
-- Regression: `tests/non-offer-slot-release.test.mjs`.
+- Regression: `tests/non-offer-slot-release.test.mjs`, `tests/sub-offer-close.test.mjs`, `tests/unique-offer-tabs.test.mjs`, `tests/financialhelp-completion.test.mjs`.
 
 ### Hồi quy checkbox chờ lead (2026-11-12)
 
@@ -286,6 +292,29 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - Click timeout sau input không được gọi thêm click/evaluate/form.submit; AI không được bấm CTA đã xử lý.
 - Hai URL chỉ khác utm nguồn là trùng; hai offer có tham số offer khác nhau vẫn độc lập.
 - Trang gốc yougov.com/www.yougov.com và landing Super `/home/landings/earn` có query tracking: đóng riêng tab. Giữ khảo sát account.yougov.com và các đường dẫn khác; tab cuối của IP có lead vẫn giữ browser bằng tab trống.
+- Offer phụ vào `chrome-error://chromewebdata/`: đóng tab lỗi, giữ tab chính và browser, kể cả IP có lead. Chuỗi URL lỗi trong query của trang HTTP không bị nhận nhầm.
+- Mở đồng thời năm popup cùng link hoặc gắn watcher sau khi có tab trùng: chỉ còn một tab; khác utm/fragment vẫn là trùng. Cùng link ở IP/context khác được giữ độc lập.
+
+### Log tối giản và bằng chứng đóng phiên (2026-11-13)
+
+- App mặc định `AUTOLEADPC_LOG_MODE=access`: trang vào được không tạo log/console; mỗi tab chỉ có tối đa một lỗi không vào được trang. Trang kiểm tra IP và chuyển hướng Toffers không chiếm kết quả của offer.
+- Reload, chuyển bước, fill, AI, lỗi nền và thao tác chuột không tạo log mới, ảnh/HTML hoặc manual-ops JSONL. Xuất HTML chủ động và autofill/AI vẫn chạy.
+- URL trong kết quả không chứa query/fragment. Console không in HTTP/autofill/AI lặp; lỗi tiến trình nghiêm trọng vẫn được ghi.
+- `AUTOLEADPC_LOG_MODE=full` trước khởi động khôi phục recorder hiện có; không xóa log lịch sử.
+
+### Chọn thời gian chờ lead Desktop (2026-11-13)
+
+- Tick 2×20s: bỏ 2×30s; Start thường/tuần tự gửi `enableLeadCheck=true`, `leadCheckInterval=20`, `leadCheckMaxAttempts=2`.
+- Tick 2×30s: bỏ 2×20s; gửi interval 30. Bỏ cả hai: không chờ và không tự đóng vì chưa có lead.
+- “Chỉ hiện khi có Lead” giữ lựa chọn 20s đang có; nếu chưa chọn thì bật 30s. Bỏ cả hai ô chờ phải bỏ luôn chế độ này.
+- Khi chọn 20s, badge dùng thời gian backend trả về; không hiển thị nhầm fallback 2×30s.
+
+### Dừng tự động sau khi có lead (2026-11-13)
+
+- Bật “Dừng autofill khi có lead” trước Start: chưa có thời gian chờ thì bật 2×30s, có 20s thì giữ 20s. Payload Chrome/AdsPower, tự bù và Start tuần tự giữ `stopAutofillOnLead=true`.
+- Trước khi có lead vẫn điền/trả lời bình thường; tới bước chờ dùng thời gian đã chọn. Có lead thì không phát thêm input/click/rê/cuộn hoặc AI trên mọi tab của IP đó; giữ browser, kể cả khi đang ở thankyou.
+- Lead về giữa lúc gõ/AI xếp hàng/phản hồi AI đến muộn: không được lách sang fill fallback hoặc tiếp tục bấm. Codex MCP đang chạy nhận abort; phiên khác không bị ảnh hưởng.
+- Reload vẫn dừng nếu IP đã confirmed. Bỏ tùy chọn khi cấu hình phiên mới: tiếp tục sau lead theo luồng thường; tắt cả hai ô chờ phải bỏ luôn chế độ dừng. Điều khiển thủ công vẫn hoạt động.
 
 ### Phục hồi phạm vi câu hỏi Yes/No (2026-11-12)
 
@@ -300,3 +329,59 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - Không đụng câu hỏi ở OfferPage ẩn; gặp Processing/subform chưa đóng phải giữ bước. `autoSubmit=false` không bấm Continue.
 - Continue không đổi bước sau hai lần: giữ No, không gọi AI/chọn lại Yes hoặc click focus iframe bằng tọa độ.
 - Khác iframe ID, host trang cha hoặc placement: không áp dụng ngoại lệ; luồng Yes hiện tại được giữ.
+
+
+### Bằng chứng đóng trình duyệt có lead (2026-11-13)
+
+- Trong chế độ access, lead chủ động/thụ động và đóng tab/phiên vẫn ghi IP, confirmedLeadIp và leadStatus; scan/chuột/AI thường không tạo log.
+- Đóng tất cả: có browser_close_all_requested trước session_closed; bản kết thúc giữ closeReasonType và trạng thái lead, kể cả sau dọn ảnh/HTML.
+- Đóng riêng offer phụ hoặc tab trùng không được trở thành lý do đóng toàn bộ browser.
+- Chỉ mất CDP không có yêu cầu đóng từ app: ghi unknown_external_close, không khẳng định crash hoặc người dùng bấm X; context close tiếp theo không ghi kết thúc lần hai.
+- Nhật ký cũ rỗng không được bổ sung nguyên nhân suy đoán. Log mới không chứa query/fragment URL hoặc nội dung form.
+
+
+### GoLogin: phiên, proxy, lead và tự bù (2026-11-14)
+
+- Chưa cấu hình token: báo thiếu token, không dùng token dự phòng. Nhập token mới: lưu file riêng, không có token trong last-launch-settings/auto-refill settings hoặc localStorage.
+- Thiếu/hết proxy, proxy không ra IP, IP đã dùng cho offer hoặc IP đang chạy: không mở Direct. IP đọc trong Orbita khác IP kiểm tra: dừng trước offer và dọn profile SDK.
+- Danh sách tài khoản có profile cá nhân hoặc profile AutoLeadPC chưa rõ trạng thái: không sửa chúng. Cập nhật profile lỗi: không chạy proxy/fingerprint cũ. Hai lượt cấp profile đồng thời không chọn cùng profile.
+- Mở đủ URL duy nhất, tối đa 10 tab; mỗi tab có record và chuột. Autofill nhận session/options đúng hợp đồng; không gọi check lead ngay lúc mở browser.
+- Tick 2×20s hoặc 2×30s: chỉ chờ sau email hợp lệ, giữ thời gian khi tự bù. Không tick thì tiếp tục và chỉ theo dõi lead thụ động.
+- Đóng context và ngắt CDP cùng lúc: chỉ dọn/bù một lần, ghi IP/lead/lý do đóng. Không xóa profile cá nhân hay profile được tái sử dụng. Lệnh Stop và Không bù slot được tôn trọng.
+- Bù slot được phân công Offer 2: mở đúng URL và giữ target/settings; lỗi kết nối CDP hoặc khởi tạo sau CDP phải dừng SDK và loại phiên dở dang.
+
+
+### Token GoLogin trong Cài đặt (2026-11-14)
+
+- Chỉ có một ô token tại Cài đặt & Logs → Cài đặt hệ thống → GoLogin Orbita; không có trên thanh tùy chọn chạy.
+- Nhập token và bấm Lưu cài đặt: API lưu vào file riêng; ô nhập được xóa và hiện đã cấu hình. API GET chỉ trả gologinConfigured, không trả token.
+- Lưu lại khi ô trống hoặc chỉ sửa fingerprint: giữ nguyên token đã lưu. Nếu lưu lỗi, giữ nội dung ô để thử lại.
+- Start thường/tuần tự không gửi token; launcher dùng cấu hình đã lưu. Kiểm tra sau mở lại app, trạng thái đã cấu hình vẫn đúng.
+
+
+### Sáu hệ điều hành trong GoLogin (2026-11-14)
+
+- Tick riêng hoặc kết hợp Windows/Mac/Linux/Android/iPhone/iPad: không còn báo chưa hỗ trợ iPhone/iPad; sáu slot đầu lần lượt nhận đúng các thiết bị được chọn.
+- iPhone/iPad có tooltip giả lập Orbita/Chromium, không phải Safari/iOS thật. Payload nền Mac phải có UA/platform iPhone/iPad, Apple GPU và 5 điểm chạm; không rơi về cấu hình Windows.
+- Android/iPhone/iPad: navigator.resolution, screenWidth/screenHeight và devicePixelRatio khớp cấu hình; viewport/DPR/cảm ứng được áp trước khi điều hướng offer.
+- Reload hoặc mở tab/popup mới: UA, platform và viewport không quay về Desktop; input/select/chuột vẫn hoạt động. CDP lỗi phải có gologin_device_error, không tạo vòng log lặp.
+- Đóng slot iPhone trong nhóm sáu hệ điều hành: tự bù vẫn chọn iPhone theo số slot. IP/lead/đóng và giới hạn tab vẫn dùng guard cũ.
+
+
+### Profile GoLogin chính thức và chạy thử tài khoản thật (2026-11-14)
+
+- Cài đặt GoLogin có Windows 10, Windows 11, Mac Intel, Mac ARM (M2), Linux, Android; mặc định đủ sáu. Chọn/lưu/tải lại giữ đúng danh sách; không đọc nhầm checkbox thiết bị Chrome. Start thường/tuần tự và tự bù truyền gologinDevices.
+- Mở liên tiếp sáu profile mới với cấu hình mặc định: OS phân phối luân phiên đủ sáu loại; User-Agent và nhãn phiên bản cùng khớp Orbita random 148–154/156, không mặc định cứng 150. Profile cũ giữ nguyên OS/nhân đã tạo.
+- Windows 11 gửi os=win/osSpec=win11; Mac Intel gửi mac/chuỗi rỗng; Mac ARM gửi mac/M2. Không tái sử dụng profile khác OS/osSpec dù đã dừng.
+- Android Orbita: nhấn/thả dùng touchStart/touchEnd, rê chuột vẫn hoạt động; form, select và Continue không treo ở mousePressed.
+- Dừng: tiến trình Orbita đúng SDK đã thoát trước khi commit/dọn; không dùng pkill diện rộng. Stop thất bại giữ khóa và ghi log.
+- Chạy chủ động `AUTOLEADPC_INSTANCE=2 node tests/manual/gologin-supported-devices.mjs --live`: sáu profile QA lần lượt, xác minh OS/osSpec, đọc IP, điền tên/email giả trên trang offline, bấm Continue; dọn profile mới tạo, không sửa profile cũ hoặc gửi offer.
+
+
+### GoLogin: log khởi tạo, chạy trong app và mất CDP (2026-11-14)
+
+- Lỗi REST tạo profile, SDK, CDP hoặc xác minh IP: có gologin_starting/gologin_start_failed với phase/reasonCode trước dừng SDK; giữ lỗi ẩn cửa sổ trong mode access. Không log token, proxy credentials hoặc query form.
+- Tick Chạy trong app: process spawn có --headless=new, không có cửa sổ OS hiển thị, form và screenshot vẫn chạy. Không đợi IP xong mới ẩn. Headful ẩn tới lead theo dõi popup và có log khi ẩn thất bại.
+- Chủ động ngắt CDP khi Orbita còn sống: không SIGTERM, không nhả khóa, không giảm active count; kết nối lại cùng process, giữ lead/record/id recording và không mở lại offer hoặc chạy lại script.
+- Nối lại ba lần không được: giữ browser và log một mốc gologin_reconnect_failed, không tự bù browser trùng IP. Process thoát hoặc Stop chủ động: dọn một lần theo chính sách cũ.
+- Chạy chủ động `node tests/manual/gologin-in-app-recovery.mjs --live`: proxy QA loopback thật, form riêng, Windows/Android chạy headless, kiểm tra cửa sổ bằng CoreGraphics, ngắt CDP rồi xác minh cùng process/lead/record và screenshot; dọn chỉ profile QA.

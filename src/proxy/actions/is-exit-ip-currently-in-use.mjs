@@ -13,7 +13,7 @@ export function isExitIpCurrentlyInUse(exitIp) {
   if (!exitIp) return false;
   if (activeExitIpLocks.has(exitIp)) return true;
   for (const session of activeBrowsers) {
-    if (session.exitIp === exitIp) return true;
+    if (session.exitIp === exitIp || session.exitIps?.has(exitIp)) return true;
   }
   return false;
 }

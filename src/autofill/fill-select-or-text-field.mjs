@@ -1,4 +1,5 @@
 import { reportSelectMismatch } from './report-select-mismatch.mjs';
+import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { buildSelectCandidates } from './select/build-select-candidates.mjs';
 import { selectOptionWithHumanInteraction } from './select/select-option-with-human-interaction.mjs';
 import { scrollToFormControl } from './form-scope/scroll-to-form-control.mjs';
@@ -15,7 +16,7 @@ import { selectFirstAddressSuggestion } from './select-first-address-suggestion.
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần bỏ qua trường hiện tại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export async function fillSelectOrTextField({
   metadata,
@@ -29,6 +30,7 @@ export async function fillSelectOrTextField({
   frame,
   record
 }) {
+  if (shouldStopAfterLead(session || page?._autofillSession)) return true;
   if (metadata.kind === 'select') {
     const candidates = buildSelectCandidates(valueToFill, metadata);
     const result = await selectOptionWithHumanInteraction({ page, field, candidates }).catch(() => ({ matched: false, verified: false, reason: 'select_unavailable' }));
@@ -144,6 +146,7 @@ export async function fillSelectOrTextField({
       // 3 lần gõ lại + 1 lần kiểm tra cuối: trước đây lần fill() thứ 3 không được kiểm tra lại, nên ô đã đúng
       // vẫn bị báo "không giữ được giá trị", bỏ cờ filled và vòng quét sau gõ đè email lần nữa.
       for (let retry = 0; retry <= 3; retry++) {
+        if (shouldStopAfterLead(session || page?._autofillSession)) return true;
         const current = await field.inputValue().catch(() => '');
         if (sameValue(current)) {
           okTyped = true;

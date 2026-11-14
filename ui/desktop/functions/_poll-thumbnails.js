@@ -2,7 +2,7 @@
  * Đồng bộ các ô trình duyệt và chỉ tải thumbnail đang nằm trong vùng nhìn của người dùng.
  * @return {void} Cập nhật thông tin và lên lịch tải ảnh có giới hạn.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-13
  */
 function _pollThumbnails() {
       if (!_screenViewActive || document.hidden) return;
@@ -36,7 +36,7 @@ function _pollThumbnails() {
         let tile = tilesDiv.querySelector(`[data-slot="${slot}"]`);
         const devIcon = getDeviceIcon(entry.deviceVersion || entry.deviceProfile);
         const devClean = getCleanDeviceName(entry);
-        const browserClean = getCleanBrowserVersion(entry.version);
+        const browserClean = getCleanBrowserVersion(entry.version, entry.engine);
         const domainShort = getShortDomain(entry.websiteUrl) || (ip ? `proxy: ${ip}` : 'connecting...');
 
         if (!tile) {
@@ -96,6 +96,10 @@ function _pollThumbnails() {
           btnDesktop.onclick = (e) => { e.stopPropagation(); toggleBrowserWindow(slot, Boolean(isWindowVisible)); };
         }
 
+        // Slot có thể được bù bằng trình duyệt khác; luôn hiện đúng trình duyệt hiện tại.
+        const browserBadge = tile.querySelector('.browser-badge');
+        if (browserBadge && browserBadge.textContent !== browserClean) browserBadge.textContent = browserClean;
+
         // Cập nhật Domain / URL
         const urlTextEl = tile.querySelector('.screen-tile-url-pill .url-text');
         if (urlTextEl && urlTextEl.textContent !== domainShort) {
@@ -109,7 +113,7 @@ function _pollThumbnails() {
           if (leadCheckStatus === 'confirmed' || leadCheckStatus === 'matched') {
             statusHtml = `<span class="tile-status status-lead">✅ Có Lead (Màn ${(completedScreens || 0) + 1})</span>`;
           } else if (leadCheckStatus === 'checking') {
-            statusHtml = `<span class="tile-status status-checking">⏳ ${escHtml(entry.leadCheckMessage || 'Chờ lead (2×30s)...')}</span>`;
+            statusHtml = `<span class="tile-status status-checking">⏳ ${escHtml(entry.leadCheckMessage || 'Chờ lead...')}</span>`;
           } else if (leadObserveStatus === 'found') {
             statusHtml = `<span class="tile-status status-lead">✅ Có Lead (Màn ${(completedScreens || 0) + 1})</span>`;
           } else if (leadObserveStatus === 'waiting' || leadObserveStatus === 'api_error') {

@@ -1,4 +1,5 @@
 import { readVisiblePageState } from './visible-state/read-visible-page-state.mjs';
+import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
 import { isNoSurveyFrame } from '../autofill/adsmith/is-no-survey-frame.mjs';
 import { inspectAiStateGate, blockAiForState } from './retry/ai-state-gate.mjs';
 import { AI_PROGRESS_CHECK_INTERVAL_MS } from './state/ai-progress-check-interval-ms.mjs';
@@ -24,9 +25,10 @@ import { waitForAiCapacity } from './wait-for-ai-capacity.mjs';
  * @return {Promise<void>}
  * @throws {Error} Nếu thao tác Playwright ngoài các nhánh fallback phát sinh lỗi.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 async function runAiAssist(page, record, session = {}, options = {}) {
+  if (shouldStopAfterLead(session)) return;
   if (['manual','skip','consent_only'].includes(session.offerMode) && !options.forceRetry) return;
   const cfg = {
     ...globalAiConfig,
@@ -79,6 +81,7 @@ async function runAiAssist(page, record, session = {}, options = {}) {
   try {
     if (await isNoSurveyFrame(page._activeAutofillFrame)) return;
     for (let round = 1; round <= maxRounds; round++) {
+      if (shouldStopAfterLead(session)) break;
       if (page.isClosed() || session.isClosed) break;
 
       const visibleState = await readVisiblePageState(page);
@@ -219,6 +222,7 @@ Format các action:
         }
       }
       for (const act of actions) {
+        if (shouldStopAfterLead(session)) break;
         if (page.isClosed() || session.isClosed) break;
         try {
           updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#818cf8;font-weight:600;">🤖 AI: ${act.action} ${act.selector || ''}</span>`);
@@ -303,7 +307,9 @@ Format các action:
     session.aiAssistRunning = (session.aiRunningPages?.size ?? 0) > 0;
     if ((waitingForPage || totalActionsExecuted > 0) && !page.isClosed()) session.triggerAutofillScan?.();
     session.aiCallCount = 0;
-    updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:${waitingForPage ? '#f59e0b' : '#22c55e'};font-weight:600;">${waitingForPage ? `🤖 ${waitingReason}` : '🤖 AI đã kết thúc lượt kiểm tra'}</span>`);
+    updateBadge(shouldStopAfterLead(session)
+      ? `🌐 <strong>IP:</strong> ${ip} | ⏸️ Có lead — đã dừng tự động`
+      : `🌐 <strong>IP:</strong> ${ip} | <span style="color:${waitingForPage ? '#f59e0b' : '#22c55e'};font-weight:600;">${waitingForPage ? `🤖 ${waitingReason}` : '🤖 AI đã kết thúc lượt kiểm tra'}</span>`);
     if (totalActionsExecuted > 0) {
       addLog({
         time: new Date().toISOString(),

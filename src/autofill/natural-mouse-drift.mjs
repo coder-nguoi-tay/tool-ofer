@@ -11,7 +11,7 @@ import { shouldAnimatePageMouse } from './interaction/should-animate-page-mouse.
  * @param {number} [count=1] Số lần trôi chuột.
  * @return {Promise<void>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-13
  */
 async function naturalMouseDrift(page, count = 1) {
   if (!shouldAnimatePageMouse(page)) return;
@@ -23,6 +23,7 @@ async function naturalMouseDrift(page, count = 1) {
     };
   }
   for (let c = 0; c < count; c++) {
+    if (!shouldAnimatePageMouse(page)) return;
     const angle = Math.random() * 2 * Math.PI;
     const distance = Math.floor(Math.random() * 22) + 12; // 12px - 34px
     const targetX = Math.max(20, Math.min(1200, Math.round(page._lastMousePos.x + Math.cos(angle) * distance)));

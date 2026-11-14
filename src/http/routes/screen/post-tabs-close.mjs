@@ -47,7 +47,7 @@ export async function handlePostScreenTabsClose(request, response) {
           type: 'manual_browser_closed',
           detail: 'Đã đóng tab cuối cùng qua Screen View; tắt trình duyệt.'
         });
-        if (autoRefill.enabled && !autoRefill.stopRequested && autoRefill.targetCount > 0) {
+        if (autoRefill.enabled && !autoRefill.stopRequested && !autoRefill.noSlotRefill && autoRefill.targetCount > 0) {
           autoRefill.targetCount -= 1;
           void saveAutoRefillSettings();
         }

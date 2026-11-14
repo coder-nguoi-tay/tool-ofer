@@ -1,5 +1,6 @@
 import { NON_OFFER_WAIT_MS } from '../../runtime/constants/non-offer-wait-ms.mjs';
 import { detectOfferContentInPage } from './detect-offer-content-in-page.mjs';
+import { hasOfferWorkEvidence } from './has-offer-work-evidence.mjs';
 import { readEvidenceWithTimeout } from '../../logging/recorder/read-evidence-with-timeout.mjs';
 
 /**
@@ -32,7 +33,7 @@ export async function getEmptyOfferPageReason(page, tracker, { subTab = false } 
   if (!frames.length) return null;
   const results = await Promise.all(frames.map(frame => readEvidenceWithTimeout(frame, 'empty-offer-page', () => frame.evaluate(detectOfferContentInPage)).catch(() => null)));
   if (results.some(result => !result)) return null;
-  if (results.some(result => result.loading || result.challenge || result.worked || result.hasForm || result.hasChoices)) {
+  if (results.some(result => result.loading || result.challenge || result.worked || hasOfferWorkEvidence(result))) {
     tracker.since = Date.now();
     return null;
   }

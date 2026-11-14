@@ -8,12 +8,13 @@ import { get as requestHttps } from 'node:https';
  * Yêu cầu ipinfo qua proxy hoặc mạng trực tiếp và trả thông tin địa chỉ IP bên ngoài.
  *
  * @param {object|null} proxy Cấu hình proxy đã phân tích; null để tra IP trực tiếp.
+ * @param {string} [url=checkUrl] Dịch vụ tra IP trả JSON (mặc định ipinfo); lỗi thì vẫn dự phòng qua ip-api.
  * @return {Promise<object>} Thông tin JSON do ipinfo trả về.
  * @throws {Error} Khi proxy không kết nối được hoặc endpoint trả mã lỗi.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-10
  */
-export function requestProxyIpInfo(proxy = null) {
+export function requestProxyIpInfo(proxy = null, url = checkUrl) {
   let agent;
   if (proxy) {
     const proxyUrl = new URL(proxy.server);
@@ -50,8 +51,15 @@ export function requestProxyIpInfo(proxy = null) {
     });
     proxyRequest.on('timeout', () => proxyRequest.destroy(new Error(`Timeout tra IP sau ${timeoutMs}ms.`)));
     proxyRequest.on('error', reject);
+    // Hạn chót cứng cho cả request: tuỳ chọn timeout chỉ đếm khi đã có socket, còn proxy nhận TCP mà không trả lời
+    // CONNECT thì agent chờ mãi, treo luôn lượt bù slot đang chờ IP/geo của proxy đó.
+    const deadline = setTimeout(() => {
+      reject(new Error(`Timeout tra IP sau ${timeoutMs}ms.`));
+      proxyRequest.destroy();
+    }, timeoutMs);
+    proxyRequest.on('close', () => clearTimeout(deadline));
   });
-  return fetchJson(checkUrl, 4000).catch(async () => {
+  return fetchJson(url, 4000).catch(async () => {
     // Fallback qua ip-api.com khi ipinfo.io bị quá tải hoặc lỗi
     const ipApi = await fetchJson('http://ip-api.com/json', 5000);
     return {

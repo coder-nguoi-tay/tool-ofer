@@ -1,4 +1,6 @@
+import { assertNotMacPublicIp } from './get-mac-public-ip.mjs';
 import { IpVerificationError } from './ip-verification-error.mjs';
+import { closePageBestEffort } from './close-page-best-effort.mjs';
 import { activeExitIpLocks } from '../../runtime/constants/active-exit-ip-locks.mjs';
 import { browserIpCheckUrls } from '../../runtime/constants/browser-ip-check-urls.mjs';
 import { isExitIpCurrentlyInUse } from './is-exit-ip-currently-in-use.mjs';
@@ -61,8 +63,10 @@ export async function verifyBrowserExitIp(browser, usedExitIps, onExitIp, websit
       throw new IpVerificationError(`Tất cả dịch vụ xác minh IP đều lỗi (${failures.join(' | ')}).`);
     }
   } finally {
-    await ipPage.close().catch(() => {});
+    await closePageBestEffort(ipPage);
   }
+  // Proxy hỏng hoặc trong suốt: trình duyệt ra Internet bằng IP thật của Mac thì không mở offer.
+  await assertNotMacPublicIp(exitIp);
   await onExitIp(exitIp);
   // Kiểm tra xung đột IP đồng thời: tuyệt đối không mở 2 cửa sổ có cùng exit IP cùng một thời điểm
   if (isExitIpCurrentlyInUse(exitIp)) {

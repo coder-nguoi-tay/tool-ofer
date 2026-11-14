@@ -11,8 +11,13 @@ import { downloadRealChromeVersions } from '../../browser/actions/download-real-
 import { executeFile } from '../../runtime/constants/execute-file.mjs';
 import { existsSync } from 'node:fs';
 import { exitWhenParentExits } from '../../process/actions/exit-when-parent-exits.mjs';
+import { shutdownAppGracefully } from '../../process/actions/shutdown-app-gracefully.mjs';
+import { deleteAppGoLoginProfiles } from '../../gologin-profile/delete-app-gologin-profiles.mjs';
+import { readGoLoginConfig } from '../../runtime/actions/read-gologin-config.mjs';
 import { initializeEmailQueue } from '../../queues/email.mjs';
 import { instanceId } from '../../config/paths.mjs';
+import { launchGoLoginBrowsers } from '../../browser/actions/launch-gologin-browsers.mjs';
+import { launchMultiloginBrowsers } from '../../browser/actions/launch-multilogin-browsers.mjs';
 import { launchRequestedBrowsers } from '../../browser/actions/launch-requested-browsers.mjs';
 import { launchUserRequestedBrowsers } from '../../browser/actions/launch-user-requested-browsers.mjs';
 import { listUsedExitIps } from '../../proxy/actions/list-used-exit-ips.mjs';
@@ -42,7 +47,9 @@ import { start711BalanceBackgroundPolling } from '../../proxy/provider711.mjs';
 import { startTelegramBot } from '../../../tgbot.mjs';
 import { startToffersBackgroundPolling } from '../../leads/toffers-overview.mjs';
 import { startTunnel } from '../../../tunnel.mjs';
+import { loadNoSlotRefillSettings } from '../../refill/actions/load-no-slot-refill-settings.mjs';
 import { updateAutoRefill } from '../../refill/actions/update-auto-refill.mjs';
+import { updateNoSlotRefill } from '../../refill/actions/update-no-slot-refill.mjs';
 import { userInterfacePath } from '../../runtime/constants/user-interface-path.mjs';
 import { userInterfacePcPath } from '../../runtime/constants/user-interface-pc-path.mjs';
 import { writeFile } from 'node:fs/promises';
@@ -90,6 +97,7 @@ export async function startLocalInterface() {
   await loadProxy711Config();
   await loadProxy711AutoRefillConfig();
   await loadOfferStrategies();
+  await loadNoSlotRefillSettings();
   // Khi khởi động app: luôn reset về 0 (idle/stopped), không tự động chạy lại
   autoRefill.enabled = false;
   autoRefill.settings = null;
@@ -111,10 +119,13 @@ export async function startLocalInterface() {
   const handlers = {
     '/launch': runExclusively(launchUserRequestedBrowsers),
     '/launch-adspower': runExclusively(launchRequestedBrowsers),
+    '/launch-multilogin': runExclusively(launchMultiloginBrowsers),
+    '/launch-gologin': runExclusively(launchGoLoginBrowsers),
     '/check': checkRequestedProxies,
     '/close': closeActiveBrowsers,
     '/stop': closeActiveBrowsers,
     '/auto-refill': updateAutoRefill,
+    '/auto-refill/no-slot-refill': updateNoSlotRefill,
     '/used-ips': listUsedExitIps,
     '/used-ips/clear': runExclusively(clearUsedProxyHistory),
     '/chrome-versions/download': runExclusively(downloadRealChromeVersions),
@@ -182,7 +193,13 @@ export async function startLocalInterface() {
 
   // Cài watchdog TRƯỚC khi lắng nghe: nếu lắng nghe hỏng thì tiến trình cũng phải
   // tự thoát khi cha chết, không được sống sót giữ cổng.
-  exitWhenParentExits();
+  // Tắt app (Swift gửi SIGTERM, hoặc app cha chết khi quit qua AppleScript): dừng mọi Orbita và xóa profile GoLogin.
+  exitWhenParentExits(() => void shutdownAppGracefully('App đã thoát', server));
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => void shutdownAppGracefully(signal, server));
+  // Mở app: chưa có phiên nào, profile "AutoLeadPC Mac" còn trên GoLogin là đồ sót sau crash/Force Quit.
+  void readGoLoginConfig().then(({ token }) => deleteAppGoLoginProfiles(token)).then(({ deleted }) => {
+    if (deleted) console.log(`[GoLogin] Đã xóa ${deleted} profile sót từ lần chạy trước.`);
+  }).catch(() => {});
   // Dọn trình duyệt mồ côi từ phiên trước: app vừa khởi động là KHÔNG có session nào
   // trong bộ nhớ, còn lại Chrome/SunBrowser chạy ngầm từ lần trước sẽ biến thành
   // "web đang chạy nhưng tab Running không thấy gì". Kill sạch trước khi nhận luồng mới.

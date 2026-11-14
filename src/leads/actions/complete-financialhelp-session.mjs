@@ -1,4 +1,5 @@
 import { canCompleteFinancialhelpSession } from './can-complete-financialhelp-session.mjs';
+import { shouldStopAfterLead } from '../../autofill/should-stop-after-lead.mjs';
 import { readProxyUsageHistory } from '../../proxy/actions/read-proxy-usage-history.mjs';
 import { persistProxyUsageHistory } from '../../proxy/actions/persist-proxy-usage-history.mjs';
 
@@ -10,9 +11,10 @@ const completing = new WeakSet();
  * @param {Function} closeSession Luồng đóng/bù hiện có, nhận cờ hoàn tất được xác minh nội bộ.
  * @return {Promise<boolean>} True khi phiên đã được đóng do hoàn tất, không do lỗi trang.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export async function completeFinancialhelpSession(session, closeSession) {
+  if (shouldStopAfterLead(session)) return false;
   if (completing.has(session)) return false;
   completing.add(session);
   try {

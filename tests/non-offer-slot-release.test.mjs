@@ -16,7 +16,7 @@ import { startLeadVerification } from '../src/leads/actions/start-lead-verificat
 import { detectOfferContentInPage } from '../src/leads/actions/detect-offer-content-in-page.mjs';
 import { getEmptyOfferPageReason } from '../src/leads/actions/get-empty-offer-page-reason.mjs';
 
-const EMPTY = { loading: false, challenge: false, worked: false, hasForm: false, hasChoices: false, empty: false, singleLine: false };
+const EMPTY = { loading: false, challenge: false, worked: false, hasForm: false, hasChoices: false, hasFormProgress: false, hasOfferEntry: false, hasOfferWork: false, empty: false, singleLine: false };
 
 /**
  * Tab giả: URL đổi được, mỗi frame trả kết quả nhận diện cố định (hoặc reject).
@@ -304,12 +304,79 @@ test('detectOfferContentInPage: dấu autofill, ô ở nav, ô email', { skip: !
     assert.equal(result.singleLine, false, marker);
   }
   assert.deepEqual(await detect('<nav><input type="text"></nav><p>news</p>'), { ...EMPTY, singleLine: true });
-  assert.equal((await detect('<input type="email">')).hasForm, true);
+  assert.equal((await detect('<main><input type="email"></main>')).hasForm, true);
   assert.equal((await detect('')).empty, true, 'HTML rỗng được nhận diện là trang trắng');
   assert.equal((await detect('<p>Only one line</p>')).singleLine, true);
   assert.equal((await detect('<p>Please wait</p><div class="spinner"></div>')).empty, false, 'Trang đang tải không bị coi là trắng');
-  assert.equal((await detect('<a href="https://offer.test">Open offer</a>')).singleLine, false, 'Link hành động được giữ');
+  assert.equal((await detect('<a href="https://offer.test">Open offer</a>')).singleLine, false, 'Link thường chỉ chứng minh trang không trắng');
   assert.equal((await detect('<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">')).empty, false, 'Nội dung hình ảnh được giữ');
+});
+
+test('detectOfferContentInPage: loại search, sidebar và link điều hướng nhưng giữ offer ở main/trung tâm', { skip: !existsSync(chromium.executablePath()) && 'Chưa cài Chromium' }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const detect = async html => { await page.setContent(html); return page.evaluate(detectOfferContentInPage); };
+  for (const html of [
+    '<main><form role="search"><input type="text" name="keyword" placeholder="What are you looking for?"></form></main>',
+    '<main><form action="/search"><input type="text" name="term"><button>Go</button></form></main>',
+    '<main><input type="search" name="q"></main>',
+    '<main><div role="search"><input type="text" name="term"></div></main>',
+    '<main><input type="text" aria-label="Site search"></main>'
+  ]) {
+    const result = await detect(html);
+    assert.equal(result.hasForm, false, html);
+    assert.equal(result.hasOfferWork, false, html);
+  }
+  const mixed = await detect('<main><form action="/search"><input type="search" name="q"><input type="email" name="email"></form></main>');
+  assert.equal(mixed.hasForm, true, 'chỉ loại ô search, không loại email trong cùng form');
+  assert.equal((await detect('<aside><input type="email"></aside>')).hasForm, false);
+  assert.equal((await detect('<div class="sidebar"><input type="email"></div>')).hasForm, false);
+  assert.equal((await detect('<div style="position:absolute;left:0;top:80px;width:120px"><input type="email"></div>')).hasForm, false, 'form ngoài cột trung tâm không được tính');
+  assert.equal((await detect('<div style="width:400px;margin:60px auto"><input type="email"></div>')).hasForm, true, 'form căn giữa không cần thẻ main');
+  assert.equal((await detect('<main style="width:240px;margin:0"><input type="email"></main>')).hasForm, true, 'main ngữ nghĩa được giữ');
+
+  for (const html of [
+    '<main><a href="/article/2">Next</a></main>',
+    '<main><a href="/article/2">Continue</a></main>',
+    '<main><button>Next</button></main>',
+    '<main><a href="https://example.test">Open offer</a></main>'
+  ]) {
+    const result = await detect(html);
+    assert.equal(result.hasChoices, false, html);
+    assert.equal(result.hasFormProgress, false, html);
+    assert.equal(result.hasOfferEntry, false, html);
+    assert.equal(result.hasOfferWork, false, html);
+  }
+  const survey = await detect('<main><div class="survey-container"><h2>Do you own a car?</h2><button>Yes</button><button>No</button><button>Continue</button></div></main>');
+  assert.equal(survey.hasChoices, true);
+  assert.equal(survey.hasFormProgress, true);
+  assert.equal(survey.hasOfferWork, true);
+  const offerwall = await detect('<main><div class="offerwall-card" data-offer-id="42"><a href="https://offer.test/start">Open offer</a></div></main>');
+  assert.equal(offerwall.hasOfferEntry, true);
+  assert.equal(offerwall.hasOfferWork, true);
+});
+
+test('getEmptyOfferPageReason: tab phụ có search/link điều hướng vẫn đóng sau 30s, offer ở main được giữ', { skip: !existsSync(chromium.executablePath()) && 'Chưa cài Chromium' }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('https://news.example.com/article', route => route.fulfill({ contentType: 'text/html', body: '<main>Loading</main>' }));
+  await page.goto('https://news.example.com/article');
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  const reasonAt30s = async html => {
+    await page.setContent(html);
+    const tracker = {};
+    now = 0;
+    assert.equal(await getEmptyOfferPageReason(page, tracker, { subTab: true }), null);
+    now = 31_000;
+    return getEmptyOfferPageReason(page, tracker, { subTab: true });
+  };
+  assert.match(await reasonAt30s('<main><form role="search"><input type="text" name="keyword"><button>Search</button></form></main>'), /Tab phụ|một dòng|trắng/);
+  assert.equal(await reasonAt30s('<main><article><a href="/article/2">Continue</a></article></main>'), 'Tab phụ không có form/câu hỏi để làm');
+  assert.equal(await reasonAt30s('<main><form><input type="email" name="email"><button>Continue</button></form></main>'), null);
+  assert.equal(await reasonAt30s('<main><div class="offerwall-card"><a href="https://offer.test">Open offer</a></div></main>'), null);
 });
 
 test('isExitIpConsumed: IP đã click offer vẫn bị chặn, lỗi proxy thì không', () => {

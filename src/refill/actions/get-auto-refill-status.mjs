@@ -1,4 +1,5 @@
 import { protectConfirmedLeadSession } from '../../leads/actions/protect-confirmed-lead-session.mjs';
+import { shouldStopAfterLead } from '../../autofill/should-stop-after-lead.mjs';
 import { activeBrowsers } from '../../browser/sessions.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
 import { formatBytes } from '../../monitoring/bandwidth.mjs';
@@ -11,12 +12,13 @@ import { pruneDeadManagedSessions } from '../../runtime/actions/prune-dead-manag
  *
  * @return {object} Trạng thái hiện tại của trình duyệt và cơ chế tự bù.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-13
  */
 export function getAutoRefillStatus() {
   void pruneDeadManagedSessions().catch(() => {});
   return {
     enabled: autoRefill.enabled,
+    noSlotRefill: autoRefill.noSlotRefill === true,
     sequential: autoRefill.sequential,
     activeCount: activeBrowsers.size,
     targetCount: autoRefill.targetCount,
@@ -24,6 +26,7 @@ export function getAutoRefillStatus() {
     bandwidth: getBandwidthSummary(),
     chromeSessions: [...activeBrowsers].filter(session => !session.isClosed && session.chromeVersion && (session.exitIp || session.isManagedProfile)).map(session => {
       protectConfirmedLeadSession(session);
+      const stoppedAfterLead = shouldStopAfterLead(session);
       const livePages = session.browser?.pages ? session.browser.pages().filter(p => !p.isClosed()) : [];
       const tabCount = Math.max(1, livePages.length);
       const tabsInfo = livePages.map((p, idx) => ({
@@ -41,6 +44,7 @@ export function getAutoRefillStatus() {
       return {
         slot: session.slot ?? session.tileIndex + 1,
         version: session.chromeVersion,
+        engine: session.isGoLogin ? 'GoLogin' : session.isAdsPower ? 'AdsPower' : session.isMultilogin ? 'Multilogin' : 'Chrome',
         deviceProfile: session.deviceProfile ?? 'windows',
         deviceVersion: session.deviceVersion ?? (session.deviceSummary ? session.deviceSummary.split(' · ')[0] : session.deviceProfile),
         deviceSummary: session.deviceSummary ?? null,
@@ -65,6 +69,8 @@ export function getAutoRefillStatus() {
         emailFilled: Boolean(session.emailFilled),
         emailScreenSubmitted: Boolean(session.emailScreenSubmitted),
         leadCheckEnabled: session.enableLeadCheck !== false,
+        stopAutofillOnLead: session.stopAutofillOnLead === true,
+        autofillPausedForLead: stoppedAfterLead,
         extensions: session.extensions ?? null,
         streamRole: session.streamRole ?? 1,
         streamLabel: session.streamLabel ?? '',
@@ -77,9 +83,9 @@ export function getAutoRefillStatus() {
         requestCount: session.requestCount || 0,
         tabCount,
         tabs: tabsInfo,
-        aiRunning: anyTabAiRunning,
-        aiStatus: anyTabAiRunning ? tabCount > 1 ? `Đang phân tích form bằng AI (${aiRunningCount || 1}/${tabCount} tabs)...` : 'Đang phân tích form bằng AI...' : session.autofillFields ? `Đã điền ${session.autofillFields} trường` : 'Sẵn sàng',
-        action: anyTabAiRunning ? tabCount > 1 ? `🤖 AI đang chạy trên ${aiRunningCount || 1}/${tabCount} tabs` : '🤖 AI đang phân tích & điền form' : session.lastActionText || (session.autofillFields ? `Đã điền ${session.autofillFields} ô` : session.websiteUrl ? 'Đang duyệt' : 'Running'),
+        aiRunning: !stoppedAfterLead && anyTabAiRunning,
+        aiStatus: stoppedAfterLead ? 'Có lead — đã dừng tự động' : anyTabAiRunning ? tabCount > 1 ? `Đang phân tích form bằng AI (${aiRunningCount || 1}/${tabCount} tabs)...` : 'Đang phân tích form bằng AI...' : session.autofillFields ? `Đã điền ${session.autofillFields} trường` : 'Sẵn sàng',
+        action: stoppedAfterLead ? '⏸️ Có lead — đã dừng autofill và chuột' : anyTabAiRunning ? tabCount > 1 ? `🤖 AI đang chạy trên ${aiRunningCount || 1}/${tabCount} tabs` : '🤖 AI đang phân tích & điền form' : session.lastActionText || (session.autofillFields ? `Đã điền ${session.autofillFields} ô` : session.websiteUrl ? 'Đang duyệt' : 'Running'),
         lastLog: session.logs && session.logs.length > 0
         // Ép chỉ giữ các trường chuỗi/số — tránh object Playwright (frame/page) lọt vào gây
         // JSON.stringify nổ → GET /state chết âm thầm.

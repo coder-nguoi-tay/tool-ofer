@@ -40,6 +40,7 @@ export async function handleGetPcOfferRead(request, response) {
           Script: getVal('Script'),
           Complete: getVal('Complete'),
           TimeLimit: getVal('Timeload1') || '30',
+          MaxRunMinutes: getVal('MaxRunMinutes') || '10',
           delayStart: getVal('delayStart') || '1',
           delayStop: getVal('delayStop') || '1',
           Thread: getVal('Thread') || '1',

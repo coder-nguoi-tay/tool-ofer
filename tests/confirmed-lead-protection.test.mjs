@@ -327,3 +327,22 @@ test('Back ném lỗi: nhả khóa phục hồi, giữ IP có lead và không đ
   assert.equal(protectConfirmedLeadSession(session), true);
   assert.equal(counters.browserCloses + counters.pageCloses, 0);
 });
+
+test('GoLogin đã có lead gặp trang lỗi: không dừng Orbita, F5 tải lại trang để điền tiếp như Chrome', async (t) => {
+  const ticks = captureLeadWatcherTicks(t);
+  const { session, page, counters } = createLeadTestSession(confirmedIp);
+  let stops = 0, reloads = 0;
+  Object.assign(session, { isGoLogin: true, isManagedProfile: true, profileId: 'fixture-gologin', _stopProfile: async () => { stops++; } });
+  recordLeadIpStats({ ip: confirmedIp });
+  page.currentUrl = 'chrome-error://chromewebdata/';
+  page.reload = async () => { reloads++; page.currentUrl = 'https://offer.test/form'; return { status: () => 200 }; };
+  watchTrafficBlockedPage(session);
+  for (const tick of ticks) tick();
+  await flushEvents();
+  await flushEvents();
+  assert.equal(stops, 0, 'không dừng Orbita của phiên có lead');
+  assert.equal(counters.browserCloses, 0);
+  assert.equal(counters.pageCloses, 0);
+  assert.ok(reloads >= 1, 'F5 tải lại trang lỗi');
+  assert.equal(session.leadCheckStatus, 'confirmed');
+});

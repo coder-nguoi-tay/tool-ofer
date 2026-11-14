@@ -14,7 +14,7 @@ npm start                          # node app.mjs — serves the local UI (port 
 npm test                           # node tests/run-tests.mjs: tests/selfcheck.mjs first, then `node --test` over TEST_FILES
 node --test tests/script.test.mjs        # run a single test file
 node --test --test-name-pattern="<name>" tests/stealth.test.mjs   # single test
-node --check app.mjs               # CI also syntax-checks app/ai-assist/autofill/cloakbrowser-engine/tests/run-tests
+node --check app.mjs               # CI also syntax-checks app/ai-assist/autofill/option-scorer/tests/run-tests
 ./build-app.sh                     # compiles AutoLeadPCMacApp.swift (swiftc) and assembles the signed .app bundles
 node mock-html-simulator.mjs       # regenerate mock-pages/offer-sample.html from saved HTML snapshots
 ```
@@ -29,7 +29,7 @@ Automated tests use mocks or offline browser fixtures. The optional captured-scr
 - **Browser engines** (selected in Settings > Browser), each a separate module that app.mjs dispatches to:
   - Chrome (installed / Chrome-for-Testing builds, profile copied from a template; `chrome-versions.mjs`),
   - AdsPower SunBrowser (`adspower-profile.mjs`, local API + API key),
-  - CloakBrowser (`cloakbrowser-engine.mjs`), and local profile engine (`local-profile-engine.mjs`, uses a `zero_profile` template under `~/.autoleadpc/Profiles`).
+  - local profile engine (`local-profile-engine.mjs`, uses a `zero_profile` template under `~/.autoleadpc/Profiles`).
   Each engine attaches to Playwright (often via CDP), then goes through the same IP-verify → open-target → autofill flow.
 - **`stealth.mjs`**: per-session fingerprint (seed → consistent GPU/CPU/RAM/screen/OS), CDP overrides (UA, Client Hints, languages/timezone from proxy country) and the in-page patch script. Details in `README.md` (limitations listed there).
 - **Proxy plumbing**: `relay.mjs` runs local unauthenticated relays in front of authenticated HTTP/SOCKS5 proxies; `lead-check.mjs` and IP-verification code decide whether an exit IP/page is usable; proxy status history prevents reuse.

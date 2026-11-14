@@ -1,5 +1,2 @@
-document.getElementById('btnClearLogs').addEventListener('click', async () => {
-      await fetch('/browser-logs/clear', { method: 'POST' });
-      pollLogs();
-      showToast('Đã xóa nhật ký');
-    });
+// Xoá log cần xác nhận và theo offer đang chọn (xem miniStatsClearLogs).
+document.getElementById('btnClearLogs').addEventListener('click', () => miniStatsClearLogs());

@@ -13,7 +13,7 @@ function openScreenModal(slot) {
       const entry = _screenSlots.find(s => s.slot === slot);
       const modalTitle = document.getElementById('screenModalTitle');
       if (modalTitle) {
-        modalTitle.innerHTML = `Màn hình Slot ${slot} • <span style="color:#22c55e;">🌐 IP: ${escHtml(entry?.ip || 'Direct')}</span> • <span style="color:#a7f3d0;font-weight:600;" title="Băng thông luồng này">📶 ${escHtml(entry?.bandwidthFormatted || '0 B')}</span> • <span style="color:#cbd5e1;" title="${escHtml(entry?.deviceSummary || '')}">${escHtml(entry?.deviceVersion || entry?.deviceProfile || 'Windows 10')}</span> • <span style="color:#38bdf8;">${escHtml(entry?.version || 'Chrome')}</span> <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(nhấp canvas để điều khiển)</span>`;
+        modalTitle.innerHTML = `Màn hình Slot ${slot} • <span style="color:#22c55e;">🌐 IP: ${escHtml(entry?.ip || 'Direct')}</span> • <span style="color:#a7f3d0;font-weight:600;" title="Băng thông luồng này">📶 ${escHtml(entry?.bandwidthFormatted || '0 B')}</span> • <span style="color:#cbd5e1;" title="${escHtml(entry?.deviceSummary || '')}">${escHtml(entry?.deviceVersion || entry?.deviceProfile || 'Windows 10')}</span> • <span style="color:#38bdf8;">${escHtml(getCleanBrowserVersion(entry?.version, entry?.engine))}</span> <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(nhấp canvas để điều khiển)</span>`;
       }
 
       const fpsEl = document.getElementById('screenModalFps');

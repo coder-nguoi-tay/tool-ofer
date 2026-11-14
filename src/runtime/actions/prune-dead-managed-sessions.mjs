@@ -6,14 +6,15 @@ import { releaseProxyLock } from '../../proxy/actions/release-proxy-lock.mjs';
 import { requestManagedProfileStop } from '../../browser/actions/request-managed-profile-stop.mjs';
 
 /**
- * Loại khỏi danh sách phiên AdsPower những kết nối CDP đã đóng.
+ * Dọn phiên managed đã kết thúc; giữ GoLogin khi tiến trình còn sống dù CDP bị ngắt.
  *
  * @return {Promise<void>} Hoàn tất sau khi dọn trạng thái phiên.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-14
  */
 export async function pruneDeadManagedSessions() {
   for (const s of [...activeBrowsers]) {
+    if (s.isGoLogin && s.isGoLoginProcessAlive?.()) continue;
     if (s.isManagedProfile && s.profileId && !s._cdpBrowser?.isConnected()) {
       if (s._monitorInterval) {
         clearInterval(s._monitorInterval);

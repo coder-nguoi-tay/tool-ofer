@@ -12,7 +12,7 @@ import { renderBrowserMousePointer } from './interaction/render-browser-mouse-po
  * @param {number} targetY Toạ độ Y đích.
  * @return {Promise<void>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-13
  */
 async function humanMouseMove(page, targetX, targetY) {
   if (!shouldAnimatePageMouse(page)) return;
@@ -46,6 +46,7 @@ async function humanMouseMove(page, targetX, targetY) {
   const cp2X = startX + dx * 0.75 + normalX * curvature * 0.5 + (Math.random() - 0.5) * 12;
   const cp2Y = startY + dy * 0.75 + normalY * curvature * 0.5 + (Math.random() - 0.5) * 12;
   for (let i = 1; i <= steps; i++) {
+    if (!shouldAnimatePageMouse(page)) return;
     const t = i / steps;
     const easedT = t * t * (3 - 2 * t);
     const u = 1 - easedT;
@@ -55,6 +56,7 @@ async function humanMouseMove(page, targetX, targetY) {
     await page.mouse.move(Math.round(x + jitter), Math.round(y + jitter)).catch(() => {});
     await renderBrowserMousePointer(page, Math.round(x + jitter), Math.round(y + jitter));
   }
+  if (!shouldAnimatePageMouse(page)) return;
   await page.mouse.move(targetX, targetY).catch(() => {});
   await renderBrowserMousePointer(page, targetX, targetY);
   page._lastMousePos = {

@@ -118,10 +118,12 @@ function launch(body, engine, options) {
 }
 export function launchRequestedBrowsers(body, options) { return launch(body,'Chrome',options); }
 export function launchAdsPowerBrowsers(body, automatic, roles) { return launch(body,'AdsPower',{ automatic, roles }); }
+export function launchMultiloginBrowsers(body, automatic, roles) { return launch(body,'Multilogin',{ automatic, roles }); }
+export function launchGoLoginBrowsers(body, automatic, roles) { return launch(body,'GoLogin',{ automatic, roles }); }
 `);
   const fixture = await import(pathToFileURL(join(directory, 'fixture.mjs')).href);
   const { queueAutomaticRefill } = await import(pathToFileURL(join(directory, 'queue.mjs')).href);
-  for (const mode of ['Chrome', 'AdsPower']) {
+  for (const mode of ['Chrome', 'AdsPower', 'GoLogin']) {
     fixture.activeBrowsers.clear();
     fixture.activeBrowsers.add({ isClosed: false, offerNumber: 1 });
     fixture.calls.length = 0;

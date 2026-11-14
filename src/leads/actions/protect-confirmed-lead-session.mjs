@@ -9,9 +9,10 @@ import { leadIpStatsMap, normalizeIpAddress } from '../../../lead-check.mjs';
  * @since 2026-11-12
  */
 export function protectConfirmedLeadSession(session) {
-  const exitIp = normalizeIpAddress(session?.exitIp);
+  if (!session) return false;
+  const exitIp = normalizeIpAddress(session.exitIp) || normalizeIpAddress(session.confirmedLeadIp);
   if (!exitIp) return false;
-  if (session.confirmedLeadIp === exitIp || (session.leadCheckStatus === 'confirmed' && !session.confirmedLeadIp) || leadIpStatsMap.has(exitIp)) {
+  if (session.confirmedLeadIp === exitIp || (session.leadCheckStatus === 'confirmed' && (!session.confirmedLeadIp || session.confirmedLeadIp === exitIp)) || leadIpStatsMap.has(exitIp)) {
     session.confirmedLeadIp = exitIp;
     session.leadCheckStatus = 'confirmed';
     session.screen5LeadVerified = true;

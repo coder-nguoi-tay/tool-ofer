@@ -1,4 +1,5 @@
 import { ADJACENT_KEYS } from './state/adjacent-keys.mjs';
+import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { humanClick } from './human-click.mjs';
 import { tryFastTextInput } from './interaction/try-fast-text-input.mjs';
 
@@ -10,12 +11,13 @@ import { tryFastTextInput } from './interaction/try-fast-text-input.mjs';
  * @param {object} options Tuỳ chọn nhịp gõ và mô phỏng lỗi gõ.
  * @return {Promise<void>} Hoàn tất điền hoặc trả về khi giá trị rỗng.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 async function humanTypeCore(field, text, page = null, options = {}) {
   const str = String(text ?? '');
   if (!str) return;
   const activePage = page || (typeof field?.page === 'function' ? field.page() : null);
+  if (shouldStopAfterLead(activePage?._autofillSession)) return;
   if (activePage?._autofillMouseSlot > 1 && await tryFastTextInput(field, str, activePage)) return;
   const isRealBrowser = Boolean(activePage?.mouse && typeof activePage.mouse.move === 'function');
   const enableTypo = options.simulateTypo !== undefined ? Boolean(options.simulateTypo) : isRealBrowser;
@@ -52,6 +54,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   }
 
   // Xóa nội dung cũ tự nhiên qua tổ hợp phím (Select All + Backspace) nếu trường đã có chữ
+  if (shouldStopAfterLead(activePage?._autofillSession)) return;
   try {
     const isMac = process.platform === 'darwin';
     const selectAllKey = isMac ? 'Meta+A' : 'Control+A';
@@ -87,6 +90,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
     try {
       let typoDone = false;
       for (let i = 0; i < str.length; i++) {
+        if (shouldStopAfterLead(activePage?._autofillSession)) return;
         const char = str[i];
         // Nhịp gõ người thật nhanh và mượt mà: 45-85ms/ký tự, có biến động tự nhiên
         let charDelay = isNameOrEmail ? Math.floor(Math.random() * 35) + 45 : isDigitsOnly ? Math.floor(Math.random() * 30) + 50 : Math.floor(Math.random() * 35) + 45;
@@ -131,6 +135,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
     try {
       let typoDone = false;
       for (let i = 0; i < str.length; i++) {
+        if (shouldStopAfterLead(activePage?._autofillSession)) return;
         const char = str[i];
         // Nhịp gõ người thật (bản pressSequentially): đồng bộ với nhánh keyboard.type
         let charDelay = isNameOrEmail ? Math.floor(Math.random() * 80) + 110 : isDigitsOnly ? Math.floor(Math.random() * 70) + 130 : Math.floor(Math.random() * 80) + 115;
@@ -171,6 +176,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   }
 
   // Fallback an toàn nếu chưa gõ được qua keyboard/pressSequentially
+  if (shouldStopAfterLead(activePage?._autofillSession)) return;
   if (!typedOk && typeof field.pressSequentially === 'function') {
     try {
       await field.pressSequentially(str, {

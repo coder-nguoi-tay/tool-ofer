@@ -19,6 +19,7 @@ function _updateScreenSlots(sessions) {
         pageJumps: s.pageJumps || 0,
         currentAction: s.currentAction || s.status || '',
         version: s.version || 'Chrome',
+        engine: s.engine || 'Chrome',
         deviceProfile: s.deviceProfile || 'Windows 10',
         deviceVersion: s.deviceVersion || (s.deviceSummary ? s.deviceSummary.split(' · ')[0] : s.deviceProfile) || 'Windows 10',
         deviceSummary: s.deviceSummary || '',

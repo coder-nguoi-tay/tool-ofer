@@ -14,7 +14,7 @@
   "dependencies": {
     "@openai/codex-sdk": "^0.163.0",
     "@playwright/mcp": "^0.0.83",
-    "cloakbrowser": "^0.6.3",
+    "gologin": "^3.0.8",
     "https-proxy-agent": "^7.0.6",
     "playwright": "^1.56.1",
     "socks-proxy-agent": "^10.1.0"

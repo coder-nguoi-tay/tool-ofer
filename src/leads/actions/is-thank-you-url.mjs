@@ -1,3 +1,5 @@
+import { isFinancialhelpPathThankyouUrl } from './is-financialhelp-path-thankyou-url.mjs';
+
 /**
  * Kiểm tra xem URL có phải trang cảm ơn / hoàn tất luồng offer hay không (vd thankyou.php).
  *
@@ -8,5 +10,7 @@
  */
 export function isThankYouUrl(url) {
   if (!url || typeof url !== 'string') return false;
+  // paththankyou.php của FinancialHelpFinder chỉ là trang trung gian còn nút chuyển tiếp: không đóng như trang cảm ơn.
+  if (isFinancialhelpPathThankyouUrl(url)) return false;
   return /thank[-_]?you(\.php|\.html|\/|\?|$)|thanks(\.php|\.html|\/|\?|$)|confirmation(\.php|\.html|\/|\?|$)/i.test(url);
 }

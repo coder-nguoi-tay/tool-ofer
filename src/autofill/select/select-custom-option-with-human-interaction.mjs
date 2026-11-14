@@ -1,4 +1,5 @@
 import { humanClick } from '../human-click.mjs';
+import { shouldStopAfterLead } from '../should-stop-after-lead.mjs';
 import { waitForInputPacing } from '../interaction/wait-for-input-pacing.mjs';
 import { findVisibleCustomSelectOption } from './find-visible-custom-select-option.mjs';
 
@@ -7,7 +8,7 @@ import { findVisibleCustomSelectOption } from './find-visible-custom-select-opti
  * @param {object} context Page, select gốc, trigger hiển thị và option đích.
  * @return {Promise<object>} Kết quả chọn và xác minh giá trị select gốc.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export async function selectCustomOptionWithHumanInteraction({ page, field, trigger, target }) {
   if (!await humanClick(page, trigger)) return { ...target, verified: false, reason: 'click_failed' };
@@ -16,6 +17,7 @@ export async function selectCustomOptionWithHumanInteraction({ page, field, trig
   let optionHandle;
   const deadline = Date.now() + 2000;
   do {
+    if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
     optionHandle = await field.evaluateHandle(findVisibleCustomSelectOption, target);
     option = optionHandle.asElement();
     if (option) break;
@@ -23,6 +25,7 @@ export async function selectCustomOptionWithHumanInteraction({ page, field, trig
     await new Promise(resolve => setTimeout(resolve, 80));
   } while (Date.now() < deadline);
   try {
+    if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
     if (!option) {
       await page.keyboard.press('Escape').catch(() => {});
       return { ...target, verified: false, reason: 'option_not_visible' };

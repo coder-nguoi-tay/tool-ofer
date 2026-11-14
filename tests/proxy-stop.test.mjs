@@ -165,6 +165,25 @@ test('watchTrafficBlockedPage does not re-enable autoRefill if stopRequested is 
   assert.equal(fakeSession.suppressAutoRefill, true, 'suppressAutoRefill must be set to true');
 });
 
+test('phiên GoLogin bị chặn traffic chỉ dừng đúng profile, không pkill theo proxy dùng chung', async () => {
+  autoRefill.stopRequested = true;
+  autoRefill.enabled = false;
+  let stops = 0;
+  const fakePage = { isClosed: () => false, url: () => 'chrome-error://chromewebdata/', close: async () => {} };
+  const sharedGateway = 'http://shared-gateway.invalid:10077';
+  const fakeSession = {
+    isManagedProfile: true, isGoLogin: true, profileId: 'blocked-profile', mainPage: fakePage,
+    browser: { pages: async () => [fakePage], isClosed: () => false, close: async () => {} },
+    proxyKey: sharedGateway, suppressAutoRefill: false,
+    _stopProfile: async () => { stops++; }
+  };
+  watchTrafficBlockedPage(fakeSession);
+  await new Promise(r => setTimeout(r, 1200));
+  assert.equal(stops, 1, 'dừng profile của chính phiên bị chặn');
+  const pkillCalls = existsSync(pkillLogPath) ? readFileSync(pkillLogPath, 'utf8') : '';
+  assert.equal(pkillCalls.includes('shared-gateway.invalid'), false, 'không pkill theo proxy vì sẽ giết các Orbita khác cùng cổng');
+});
+
 test('clearAllProxyQueue completely empties available and used queues and resets state', async () => {
   proxyQueue.available = ['1.1.1.1:8080', '2.2.2.2:8080'];
   proxyQueue.used = ['3.3.3.3:8080'];

@@ -1,5 +1,5 @@
 /**
-     * Nạp cấu hình AI và đồng bộ giới hạn timeout của watchdog.
+     * Nạp cấu hình AI; timeout hiện đúng giá trị đã lưu (5-300 giây, mặc định 100), không chặn ở 15 giây.
      * @return {Promise<void>} Hoàn tất khi cấu hình được nạp vào giao diện.
      * @throws {Error} Khi API đọc cấu hình không phản hồi.
  * @author ductv <ductv@getflycrm.com>
@@ -12,7 +12,7 @@ async function loadAiConfigUi() {
       if (document.getElementById('cbbAiMode')) document.getElementById('cbbAiMode').value = cfg.mode || 'auto_on_stuck';
       if (document.getElementById('cbbAiBinary')) document.getElementById('cbbAiBinary').value = cfg.cliBinary || 'agy';
       if (document.getElementById('nudAiMaxRounds')) document.getElementById('nudAiMaxRounds').value = cfg.maxRounds || 20;
-      if (document.getElementById('nudAiTimeout')) document.getElementById('nudAiTimeout').value = Math.min(Number(cfg.timeoutSeconds) || 15, 15);
+      if (document.getElementById('nudAiTimeout')) document.getElementById('nudAiTimeout').value = Number(cfg.timeoutSeconds) || 100;
 
       if (document.getElementById('chkSolveBotQuiz')) document.getElementById('chkSolveBotQuiz').checked = cfg.solveBotQuiz !== false;
       if (document.getElementById('chkSolveSurveyCards')) document.getElementById('chkSolveSurveyCards').checked = cfg.solveSurveyCards !== false;

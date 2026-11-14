@@ -6,9 +6,10 @@ import { attachBrowserMousePointer } from './attach-browser-mouse-pointer.mjs';
  * @param {object} session Phiên có slot bắt đầu từ 1 hoặc tileIndex bắt đầu từ 0.
  * @return {void} Lưu slot khi phiên đã có định danh màn hình.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export function configurePageMousePolicy(page, session) {
+  page._autofillSession = session;
   if (session?.slot != null) page._autofillMouseSlot = Number(session.slot);
   else if (session?.tileIndex != null) page._autofillMouseSlot = Number(session.tileIndex) + 1;
   attachBrowserMousePointer(page);

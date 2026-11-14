@@ -10,11 +10,11 @@ import { saveAutoRefillSettings } from '../../refill/actions/save-auto-refill-se
  * @since 2026-11-11
  */
 export function prepareManualBrowserClose(session) {
-  if (session._manualBrowserClosePrepared) return !session.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested;
+  if (session._manualBrowserClosePrepared) return !session.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested && !autoRefill.noSlotRefill;
   session._manualBrowserClosePrepared = true;
-  const refill = session.enableLeadCheck === false && autoRefill.enabled && !autoRefill.stopRequested && !session.suppressAutoRefill;
+  const refill = session.enableLeadCheck === false && autoRefill.enabled && !autoRefill.stopRequested && !autoRefill.noSlotRefill && !session.suppressAutoRefill;
   session.suppressAutoRefill = !refill;
-  if (!refill && autoRefill.enabled && !autoRefill.stopRequested && autoRefill.targetCount > 0) {
+  if (!refill && autoRefill.enabled && !autoRefill.stopRequested && !autoRefill.noSlotRefill && autoRefill.targetCount > 0) {
     autoRefill.targetCount -= 1;
     void saveAutoRefillSettings();
   }

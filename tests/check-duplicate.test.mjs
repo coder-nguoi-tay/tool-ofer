@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setMacPublicIpLookup } from '../src/proxy/actions/get-mac-public-ip.mjs';
+// Không gọi Internet trong test: IP Mac giả, khác mọi IP fixture.
+setMacPublicIpLookup(async () => '203.0.113.250');
 import {
   safeNormalizeUrl,
   verifyBrowserExitIp,
@@ -113,6 +116,23 @@ test('verifyBrowserExitIp always blocks concurrent same-IP conflict even if chec
 
   // Dọn dẹp
   activeExitIpLocks.clear();
+});
+
+test('verifyBrowserExitIp không khóa luồng bù khi tab xác minh lỗi không chịu đóng', { timeout: 1000 }, async t => {
+  t.mock.method(globalThis, 'setTimeout', (callback, delay) => {
+    if (delay === 2000) queueMicrotask(callback);
+    return 1;
+  });
+  const browser = {
+    newPage: async () => ({
+      goto: async () => { throw new Error('net::ERR_PROXY_CONNECTION_FAILED'); },
+      close: () => new Promise(() => {}),
+    }),
+  };
+  await assert.rejects(
+    verifyBrowserExitIp(browser, new Set(), async () => {}, 'https://offer.test', true),
+    /Tất cả dịch vụ xác minh IP đều lỗi/
+  );
 });
 
 test('hideUntilLead mode keeps browser hidden until force=true on confirmed lead', async () => {

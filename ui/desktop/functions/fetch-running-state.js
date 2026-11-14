@@ -8,6 +8,12 @@ async function fetchRunningState() {
       const state = await api('/state');
       if (!state || state.error) return;
 
+      const noSlotRefillCheckbox = document.getElementById('cbxNoSlotRefill');
+      if (noSlotRefillCheckbox && !noSlotRefillCheckbox.disabled && typeof state.noSlotRefill === 'boolean' && noSlotRefillCheckbox.checked !== state.noSlotRefill) {
+        noSlotRefillCheckbox.checked = state.noSlotRefill;
+        syncOptionPills();
+      }
+
       if (state.leadStats) {
         window.cachedLeadStats = Object.assign(window.cachedLeadStats || {}, state.leadStats);
       }
@@ -198,9 +204,7 @@ async function fetchRunningState() {
         const __deviceKey = String(s.deviceProfile || '').toLowerCase().replace(/\s+/g, '-');
         const __deviceIcon = __deviceIcons[__deviceKey] ?? '🖥️';
         const __deviceVersion = s.deviceVersion || (s.deviceSummary ? s.deviceSummary.split(' · ')[0] : null) || s.deviceProfile || 'Windows 10';
-        const __chromeLabel = /SunBrowser/.test(s.version || '')
-          ? (s.version || 'Chrome')
-          : `Chrome ${String(s.version || '').replace(/^Chrome\s*/i, '') || s.version}`;
+        const __chromeLabel = getCleanBrowserVersion(s.version, s.engine);
         const deviceInfo = `<span class="run-device-info" title="${escHtml(s.deviceSummary || (__deviceVersion + ' · ' + (s.version || 'Chrome')))}">${__deviceIcon} <strong style="color:#f8fafc;">${escHtml(__deviceVersion)}</strong> · <span style="color:#38bdf8;font-weight:600;">${escHtml(__chromeLabel)}</span></span>`;
 
         const bwFormatted = s.bandwidthFormatted || '0 B';

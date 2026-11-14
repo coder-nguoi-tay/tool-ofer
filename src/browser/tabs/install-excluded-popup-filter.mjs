@@ -1,13 +1,14 @@
 import { excludedOfferPaths } from './is-excluded-offer-page-url.mjs';
+import { googleRootDomains } from './is-blocked-google-page-url.mjs';
 
 /**
  * Ngăn link/popup bị loại trừ trước khi browser mở tab, kể cả popup redirect trước lúc có frame.
- * @param {Array<Array>} routes Host và path do cấu hình Node truyền vào document.
- * @return {void} Giữ nguyên các lời gọi mở trang khác.
+ * @param {object} config Danh sách host/path và tên miền Google do Node truyền vào document.
+ * @return {void} Giữ nguyên các thao tác mở trang khác, trừ đích bị chặn.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-12
  */
-function blockExcludedPopups(routes) {
+function blockExcludedPopups({ routes, googleRoots }) {
   const marker = Symbol.for('autoleadpc.excludedPopupFilter');
   if (window[marker]) return;
   Object.defineProperty(window, marker, { value: true });
@@ -21,7 +22,10 @@ function blockExcludedPopups(routes) {
   const excluded = value => {
     try {
       const url = new URL(value, location.href);
-      return ['http:', 'https:'].includes(url.protocol) && routes.some(([host, paths]) => host === url.hostname && paths.includes(url.pathname.replace(/\/+$/, '')));
+      if (!['http:', 'https:'].includes(url.protocol)) return false;
+      const hostname = url.hostname.replace(/\.$/, '');
+      if (googleRoots.some(domain => hostname === domain || hostname.endsWith(`.${domain}`))) return true;
+      return routes.some(([host, paths]) => host === hostname && paths.includes(url.pathname.replace(/\/+$/, '')));
     } catch { return false; }
   };
   window.open = new Proxy(window.open, {
@@ -53,6 +57,7 @@ function blockExcludedPopups(routes) {
  * @since 2026-11-12
  */
 export async function installExcludedPopupFilter(context) {
-  await context.addInitScript(blockExcludedPopups, excludedOfferPaths);
-  await Promise.all(context.pages().map(page => page.evaluate(blockExcludedPopups, excludedOfferPaths).catch(() => {})));
+  const config = { routes: excludedOfferPaths, googleRoots: googleRootDomains };
+  await context.addInitScript(blockExcludedPopups, config);
+  await Promise.all(context.pages().map(page => page.evaluate(blockExcludedPopups, config).catch(() => {})));
 }

@@ -1,27 +1,41 @@
 /**
-     * Mở các luồng Google Chrome theo cấu hình trên giao diện.
-     * @return {Promise<void>} Hoàn tất khi API khởi chạy trả kết quả.
-     * @throws {Error} Khi giao diện không thể gửi yêu cầu mở trình duyệt.
+ * Mở phiên Chrome hoặc GoLogin theo lựa chọn và lịch chạy trên giao diện.
+ * @param {object} options Tùy chọn thực thi lịch hẹn và chỉ số offer được chọn.
+ * @return {Promise<void>} Hoàn tất khi API khởi chạy trả kết quả.
+ * @throws {Error} Khi giao diện không thể gửi yêu cầu mở trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-14
  */
-async function handleStart() {
+async function handleStart(options = {}) {
       const btnStart = document.getElementById('btnStart');
       if (btnStart && btnStart.disabled) return;
       if (window.cachedSessions && window.cachedSessions.length > 0) {
         showWinAlert('Đang có luồng chạy! Vui lòng dừng các luồng trước khi bắt đầu lại.');
         return;
       }
+
+      // 1. Kiểm tra hẹn giờ: Nếu chưa phải lượt kích hoạt từ timer và có offer hẹn giờ
+      const schedules = typeof getOfferScheduleSettings === 'function'
+        ? getOfferScheduleSettings().filter(s => s && s.enabled)
+        : [];
+
+      if (!options?.executeSchedule && schedules.length > 0) {
+        const scheduled = startOfferScheduler(schedules, async scheduledItem => {
+          await handleStart({ executeSchedule: true, targetOfferIndex: scheduledItem.offerIndex });
+        });
+        if (scheduled) return;
+      }
+
       if (btnStart) {
         btnStart.disabled = true;
         btnStart.textContent = '⏳ Đang khởi tạo...';
       }
       try {
         const offerUrls = [];
-        const raw1 = document.getElementById('txtLinkOffer')?.value.trim() || '';
-        const raw2 = document.getElementById('txtLinkOffer2')?.value.trim() || '';
-        const raw3 = document.getElementById('txtLinkOffer3')?.value.trim() || '';
-        const raw4 = document.getElementById('txtLinkOffer4')?.value.trim() || '';
+        const raw1 = document.getElementById('txtLinkOffer')?.value?.trim() || '';
+        const raw2 = document.getElementById('txtLinkOffer2')?.value?.trim() || '';
+        const raw3 = document.getElementById('txtLinkOffer3')?.value?.trim() || '';
+        const raw4 = document.getElementById('txtLinkOffer4')?.value?.trim() || '';
 
         if (raw1) {
           for (const line of raw1.split(/[\r\n,;]+/)) {
@@ -51,9 +65,12 @@ async function handleStart() {
 
         const concurrency = Math.min(30, Math.max(1, parseInt(document.getElementById('nudThread').value) || 1));
         const scriptPath = document.getElementById('cbbScript').value;
-        const timeLimit = parseInt(document.getElementById('txtTimeLimit').value) || 0;
+        // Ô Chờ tối đa (phút): phiên chạy quá thời gian này thì tự tắt và bù slot; 0 = không giới hạn.
+        const maxRunMinutes = Math.max(0, parseFloat(document.getElementById('txtTimeLimit').value) || 0);
         const delayStart = parseInt(document.getElementById('nudDelayStart').value) || 0;
         const delayStop = parseInt(document.getElementById('nudDelayStop').value) || 0;
+        const enableChoiceDelay = Boolean(document.getElementById('cbxChoiceDelay')?.checked || document.getElementById('cbxChoiceDelayPill')?.checked);
+        const choiceDelay = enableChoiceDelay ? (parseInt(document.getElementById('nudChoiceDelay')?.value, 10) || 2) : 0;
         const completeText = document.getElementById('txtTextComplete').value.trim();
         const limitRun = parseInt(document.getElementById('nudLimitRun').value) || 0;
         const mode = document.getElementById('cbxAuto').value;
@@ -76,8 +93,8 @@ async function handleStart() {
 
         const checkDuplicate = document.getElementById('cbxCheckDuplicateIP') ? document.getElementById('cbxCheckDuplicateIP').checked : true;
         const dataSaver = document.getElementById('cbxDataSaver') ? document.getElementById('cbxDataSaver').checked : true;
-        const enableLeadCheck = document.getElementById('cbxCheckLead') ? document.getElementById('cbxCheckLead').checked : false;
-        const autoCloseNoLead = enableLeadCheck; // Khi bật Check Lead (2x30s): không có lead sẽ tự động đóng trình duyệt
+        const { enableLeadCheck, leadCheckInterval, stopAutofillOnLead } = getLeadCheckSettings();
+        const autoCloseNoLead = enableLeadCheck;
         const hideUntilTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
         const hideUntilLead = Boolean(document.getElementById('cbxHideUntilLead')?.checked);
         // "Chạy trong app": đọc trạng thái checkbox thật (bật = chạy ngầm thu nhỏ, tắt = mở cửa sổ Desktop thường)
@@ -110,9 +127,11 @@ async function handleStart() {
                 proxyList: proxyLines,
                 proxyType,
                 scriptPath,
-                timeLimit,
+                maxRunMinutes,
                 delayStart,
                 delayStop,
+                choiceDelay,
+                enableChoiceDelay,
                 completeText,
                 limitRun,
                 antiFpCanvas,
@@ -130,8 +149,9 @@ async function handleStart() {
                 checkDuplicate,
                 autoSubmitForm: true,
                 enableLeadCheck,
+                stopAutofillOnLead,
                 autoCloseNoLead,
-                leadCheckInterval: 30,
+                leadCheckInterval,
                 leadCheckMaxAttempts: 2,
                 leadCheckScreen: 4,
                 hideUntilTarget,
@@ -139,7 +159,9 @@ async function handleStart() {
                 hideUntilLead,
                 runInApp,
                 screenPreviewOnly: runInApp,
-                useCloakBrowser: Boolean(document.getElementById('cbxCloakBrowser')?.checked || document.getElementById('chkUseCloakBrowser')?.checked),
+                useGoLogin: Boolean(document.getElementById('cbxGoLogin')?.checked),
+                gologinDevices: document.getElementById('cbxGoLogin')?.checked && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,
+                browserMode: Boolean(document.getElementById('cbxGoLogin')?.checked) ? 'GoLogin' : 'Chrome',
                 dataSaver,
               }
             })
@@ -160,9 +182,11 @@ async function handleStart() {
               proxyList: proxyLines,
               proxyType,
               scriptPath,
-              timeLimit,
+              maxRunMinutes,
               delayStart,
               delayStop,
+              choiceDelay,
+              enableChoiceDelay,
               completeText,
               limitRun,
               antiFpCanvas,
@@ -180,8 +204,9 @@ async function handleStart() {
               checkDuplicate,
               autoSubmitForm: true,
               enableLeadCheck,
+              stopAutofillOnLead,
               autoCloseNoLead,
-              leadCheckInterval: 30,
+              leadCheckInterval,
               leadCheckMaxAttempts: 2,
               leadCheckScreen: 4,
               hideUntilTarget,
@@ -190,7 +215,9 @@ async function handleStart() {
               runInApp,
               screenPreviewOnly: runInApp,
               multiTab: document.getElementById('cbxMultiTab') ? document.getElementById('cbxMultiTab').checked : true,
-              useCloakBrowser: Boolean(document.getElementById('cbxCloakBrowser')?.checked || document.getElementById('chkUseCloakBrowser')?.checked),
+              useGoLogin: Boolean(document.getElementById('cbxGoLogin')?.checked),
+                gologinDevices: document.getElementById('cbxGoLogin')?.checked && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,
+              browserMode: Boolean(document.getElementById('cbxGoLogin')?.checked) ? 'GoLogin' : 'Chrome',
               dataSaver,
             })
           });

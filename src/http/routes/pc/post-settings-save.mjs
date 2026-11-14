@@ -6,27 +6,39 @@ import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readRequestBody } from '../../actions/read-request-body.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
+import { saveGoLoginConfig } from '../../../runtime/actions/save-gologin-config.mjs';
 import { saveAdsPowerApiKey } from '../../../runtime/actions/save-ads-power-api-key.mjs';
+import { saveMultiloginConfig } from '../../../runtime/actions/save-multilogin-config.mjs';
 import { writeFileSync } from 'node:fs';
 
 /**
- * Xử lý API pc-settings-save.
+ * Lưu cài đặt PC và token GoLogin vào kho cấu hình riêng khi người dùng nhập token mới.
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-14
  */
 export async function handlePostPcSettingsSave(request, response) {
   if (request.method === 'POST' && request.url === '/pc/settings/save') {
     try {
       const body = JSON.parse(await readRequestBody(request));
+      if (body.gologinToken?.trim() || body.gologinDevices !== undefined) {
+        await saveGoLoginConfig({ token: body.gologinToken?.trim() || undefined, devices: body.gologinDevices });
+      }
       if (body.AdsPowerApiKey !== undefined) await saveAdsPowerApiKey(body.AdsPowerApiKey);
+      if (body.multiloginToken !== undefined || body.multiloginFolderId !== undefined || body.multiloginLauncherUrl !== undefined) {
+        await saveMultiloginConfig({
+          token: body.multiloginToken,
+          folderId: body.multiloginFolderId,
+          launcherUrl: body.multiloginLauncherUrl
+        });
+      }
       const baseDir = getAutoLeadPCDir();
       const filePath = join(baseDir, 'Config', 'Settings', 'Settings.ini');
       const b = val => val ? 'True' : 'False';
       const bm = body.browserMode || 'Chrome';
-      const content = `[Browser]\nChrome=${b(bm === 'Chrome')}\nChromeAdsPower=${b(bm === 'AdsPower')}\nChromeFirefox=${b(bm === 'Firefox')}\n[Setting]\nCloakBrowser=${b(body.CloakBrowser)}\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\niPhone=${b(body.iPhone)}\niPad=${b(body.iPad)}\n`;
+      const content = `[Browser]\nChrome=${b(bm === 'Chrome')}\nChromeAdsPower=${b(bm === 'AdsPower')}\nChromeFirefox=${b(bm === 'Firefox')}\n[Setting]\nCanvas=${b(body.Canvas)}\nClientRects=${b(body.ClientRects)}\nWebGLImage=${b(body.WebGLImage)}\nFonts=${b(body.Fonts)}\nWebRTC=${b(body.WebRTC)}\nApiFakeIP=${b(body.ApiFakeIP)}\n[OperatingSystem]\nWindows=${b(body.Windows)}\nMac=${b(body.Mac)}\nLinux=${b(body.Linux)}\nAndroid=${b(body.Android)}\niPhone=${b(body.iPhone)}\niPad=${b(body.iPad)}\n`;
       const dir = dirname(filePath);
       if (!existsSync(dir)) {
         mkdirSync(dir, {

@@ -1,4 +1,5 @@
 import { inspectInteractionReadiness } from '../browser/locators/inspect-interaction-readiness.mjs';
+import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { resolveVisibleControlLabel } from '../browser/locators/resolve-visible-control-label.mjs';
 import { scrollToFormControl } from './form-scope/scroll-to-form-control.mjs';
 import { humanMouseMove } from './human-mouse-move.mjs';
@@ -19,11 +20,12 @@ import { renderBrowserMousePointer } from './interaction/render-browser-mouse-po
  * @param {object} target Locator hoặc ElementHandle cần click.
  * @return {Promise<boolean>} True khi đã dispatch click qua input trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 async function humanClick(page, target) {
   if (!target) return false;
   const activePage = page || (typeof target?.page === 'function' ? target.page() : null);
+  if (shouldStopAfterLead(activePage?._autofillSession)) return false;
   if (typeof target.evaluate === 'function') {
     const readiness = await target.evaluate(inspectInteractionReadiness, null, { timeout: 300 }).catch(() => ({ ready: false }));
     if (!readiness?.ready) return false;
@@ -46,6 +48,7 @@ async function humanClick(page, target) {
         await humanMouseMove(activePage, clickX, clickY);
         const preDwell = Math.floor(Math.random() * 40) + 30;
         await new Promise(r => setTimeout(r, preDwell));
+        if (shouldStopAfterLead(activePage?._autofillSession)) return false;
         let pressed = false;
         try {
           await renderBrowserMousePointer(activePage, clickX, clickY, true);
@@ -66,6 +69,7 @@ async function humanClick(page, target) {
   } catch { if (inputStarted) return false; }
 
   // Giữ click dự phòng của Playwright khi không lấy được tọa độ.
+  if (shouldStopAfterLead(activePage?._autofillSession)) return false;
   try {
     if (typeof target.click === 'function') {
       await target.click({

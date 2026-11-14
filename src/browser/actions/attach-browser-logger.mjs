@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { isAccessOnlyLogging } from '../../logging/is-access-only-logging.mjs';
+import { attachPageAccessLogger } from '../../logging/attach-page-access-logger.mjs';
 import { browserSessionLogs, persistedBrowserLogs, queueSaveBrowserLogs } from '../../logging/browser-logs.mjs';
 import { createSnapshotRecorder } from '../../logging/recorder/create-snapshot-recorder.mjs';
 import { attachPageDiagnostics } from '../../logging/recorder/attach-page-diagnostics.mjs';
@@ -7,6 +9,7 @@ import { createLogCoalescer } from '../../logging/recorder/create-log-coalescer.
 import { stampLogSeq } from '../../logging/browser-logs/stamp-log-seq.mjs';
 import { isDetailedRecording, isDiagnosticEvent, shouldCaptureEvent } from '../../logging/recorder/recording-policy.mjs';
 import { limitSessionEvents } from '../../logging/recorder/limit-session-events.mjs';
+import { syncBrowserLogSessionMetadata } from '../../logging/browser-logs/sync-session-metadata.mjs';
 
 /**
  * Ghi tiến trình, gộp lỗi lặp và giữ ngữ cảnh thao tác gần nhất để chẩn đoán theo phiên/IP.
@@ -14,7 +17,7 @@ import { limitSessionEvents } from '../../logging/recorder/limit-session-events.
  * @param {object} session Phiên sở hữu các tab trình duyệt.
  * @return {void} Gắn bộ ghi nhận dùng chung cho bot, Screen View và observer.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-13
  */
 export function attachBrowserLogger(context, session) {
   const sessionItem = {
@@ -23,9 +26,11 @@ export function attachBrowserLogger(context, session) {
     ip: session.exitIp ?? '?', version: session.chromeVersion ?? 'stable',
     startedAt: new Date().toISOString(), logs: [], feedback: [],
   };
+  syncBrowserLogSessionMetadata(sessionItem, session);
   session.recordingId = sessionItem.id;
   persistedBrowserLogs.unshift(sessionItem);
   browserSessionLogs.set(session, sessionItem.logs);
+  if (isAccessOnlyLogging()) { attachPageAccessLogger(context, session, sessionItem); return; }
   const snapshots = createSnapshotRecorder(session);
   const pageIds = new WeakMap();
   let nextPageNumber = 0;
@@ -43,9 +48,7 @@ export function attachBrowserLogger(context, session) {
    * @since 2026-11-11
    */
   function addLog(entry, eventPage = null) {
-    sessionItem.ip = session.exitIp ?? sessionItem.ip;
-    sessionItem.offer = session.offerNumber ?? sessionItem.offer;
-    sessionItem.offerUrl = session.websiteUrl ?? sessionItem.offerUrl;
+    syncBrowserLogSessionMetadata(sessionItem, session);
     if (!persistedBrowserLogs.includes(sessionItem)) persistedBrowserLogs.unshift(sessionItem);
     const page = eventPage || (session.mainPage && !session.mainPage.isClosed() ? session.mainPage : context.pages().find(candidate => !candidate.isClosed()));
     if (page && !pageIds.has(page)) pageIds.set(page, ++nextPageNumber);

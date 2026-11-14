@@ -50,7 +50,10 @@ export function watchTrafficBlockedPage(session) {
    * @since 2026-11-12
    */
   const closeSessionAndRefill = async (options = {}) => {
-    if (session.isClosed || protectConfirmedLeadSession(session) && !options.completedFinancialFlow) return;
+    if (session.isClosed || protectConfirmedLeadSession(session) && !options.completedFinancialFlow) {
+      console.log(`[ProtectLead] Không tắt trình duyệt Slot ${session.slot || '?'}: IP ${session.confirmedLeadIp || session.exitIp} đã có lead.`);
+      return;
+    }
     blocked = true;
     clearInterval(timer);
     session.closingDueToTrafficBlocked = !options.completedFinancialFlow;
@@ -62,8 +65,8 @@ export function watchTrafficBlockedPage(session) {
       if (options.page) await options.page.close().catch(() => {});
       await session.browser?.close?.().catch(() => {});
       if (session._cdpBrowser) await session._cdpBrowser?.close?.().catch(() => {});
-      if (session.isAdsPower) void requestManagedProfileStop(session);
-      if (session.proxyKey) {
+      if (session.isManagedProfile) void requestManagedProfileStop(session);
+      else if (session.proxyKey) {
         await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
       }
       return;
@@ -74,8 +77,10 @@ export function watchTrafficBlockedPage(session) {
     if (options.page) await options.page.close().catch(() => {});
     await session.browser?.close?.().catch(() => {});
     if (session._cdpBrowser) await session._cdpBrowser?.close?.().catch(() => {});
-    if (session.isAdsPower) void requestManagedProfileStop(session);
-    if (session.proxyKey) {
+    // Profile quản lý (GoLogin/AdsPower/Multilogin) dừng đúng tiến trình của nó; pkill theo proxy sẽ khớp mọi
+    // Orbita dùng chung cổng proxy (vd. TrustSource cùng host:port, khác user) và giết cả các phiên song song.
+    if (session.isManagedProfile) void requestManagedProfileStop(session);
+    else if (session.proxyKey) {
       await executeFile('pkill', ['-9', '-f', `user-data-dir.*${session.proxyKey}`]).catch(() => {});
     }
 
@@ -85,17 +90,18 @@ export function watchTrafficBlockedPage(session) {
   };
 
   /**
-   * Phát hiện lỗi duplicate; IP có lead phục hồi bằng Back, IP chưa có lead dùng luồng đóng/bù.
+   * Phát hiện lỗi duplicate; giữ lỗi mạng offer phụ cho nhánh đóng tab, tab chính có lead vẫn phục hồi Back.
    * @param {object} p Tab vừa điều hướng.
    * @return {Promise<void>} Hoàn tất kiểm tra hoặc yêu cầu phục hồi.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-12
+   * @since 2026-11-13
    */
   const checkInstantToffersDup = async p => {
     try {
       if (blocked || checking || !p || (typeof p.isClosed === 'function' && p.isClosed())) return;
-      if (protectConfirmedLeadSession(session)) { await recoverConfirmedLeadErrorPage(session, p); return; }
       const u = typeof p.url === 'function' ? p.url() : '';
+      if (p !== session.mainPage && !p._uxOriginTab && /^chrome-error:\/\/chromewebdata(?:\/|$)/i.test(u)) return;
+      if (protectConfirmedLeadSession(session)) { await recoverConfirmedLeadErrorPage(session, p); return; }
       if (isToffersDuplicateOfferUrl(u)) {
         const slotNum = session.slot ?? (session.tileIndex ?? 0) + 1;
         const label = sessionLabel(session);
@@ -277,6 +283,10 @@ export function watchTrafficBlockedPage(session) {
           if (protectConfirmedLeadSession(session)) return;
 
           if (deadReason) {
+            if (protectConfirmedLeadSession(session)) {
+              await recoverConfirmedLeadErrorPage(session, page);
+              continue;
+            }
             const isToffersDup = deadReason.includes('Toffers Duplicate IP') || deadReason.includes('click offer');
             // Tab phụ là tab cuối: đóng cả phiên (bên dưới) để bù slot. Trước đây chỉ đóng tab, rồi
             // closeChromeWhenLastTabCloses hiểu nhầm là người dùng bấm X nên không bù và còn trừ target.
@@ -316,6 +326,10 @@ export function watchTrafficBlockedPage(session) {
           if (isAdtrapper) {
             const isDisabledLanding = /\/disabled(\.html)?(\?|\/|$)/i.test(currentUrl);
             if (isDisabledLanding) {
+              if (protectConfirmedLeadSession(session)) {
+                await recoverConfirmedLeadErrorPage(session, page);
+                continue;
+              }
               const label = sessionLabel(session);
               const disabledReason = 'Landing báo DISABLED (offer từ chối traffic/IP-geo)';
               if (await recordProxyOutcome(session, 'failed', disabledReason)) return;
@@ -374,6 +388,10 @@ export function watchTrafficBlockedPage(session) {
                       tracker.lastReloadAt = Date.now();
                     }
                   } else {
+                    if (protectConfirmedLeadSession(session)) {
+                      await recoverConfirmedLeadErrorPage(session, page);
+                      continue;
+                    }
                     const reason = 'Kẹt tại adtrapper không chuyển hướng sau 2 lần tải lại';
                     console.log(`[Adtrapper] ${label}: ${reason}. Đang đóng cửa sổ và mở sock khác.`);
                     if (await recordProxyOutcome(session, 'failed', reason)) return;

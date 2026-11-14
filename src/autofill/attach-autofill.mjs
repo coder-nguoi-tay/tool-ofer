@@ -47,6 +47,7 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
   const offerMethod = Number(strategy.offerMethod || strategy.methodNumber || 1);
   const offerMode = (strategy.mode || 'auto_full').toString();
   session.offerStrategy = strategy;
+  if (options.choiceDelay !== undefined) session.choiceDelay = Number(options.choiceDelay) || 0;
 
   // Ánh xạ Cách giải -> mode (nếu strategy chưa có mode):
   // Cách 1 = auto_full (điền toàn bộ form + submit), Cách 2 = consent_only (chỉ tick consent),

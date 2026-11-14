@@ -1,4 +1,5 @@
 import { buildSelectCandidates } from '../autofill/select/build-select-candidates.mjs';
+import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
 import { Codex } from '@openai/codex-sdk';
 import { humanWrapperPath } from './state/human-wrapper-path.mjs';
 import { redactSecrets } from './redact-secrets.mjs';
@@ -21,7 +22,7 @@ import { validateTargetUrl } from './validate-target-url.mjs';
  * @returns {Promise<object>} Kết quả thực thi hoặc timeout.
  * @throws {Error} Khi thiếu CDP endpoint hoặc URL đích không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-13
  */
 async function runCodexFormAgent({
   endpoint,
@@ -35,6 +36,7 @@ async function runCodexFormAgent({
   session = null,
   logger = console.log
 }) {
+  if (shouldStopAfterLead(session)) return { success: false, status: 'lead_confirmed_paused', toolCalls: [] };
   if (!endpoint) {
     throw new Error('Thiếu CDP WebSocket endpoint để kết nối Playwright MCP.');
   }
@@ -137,6 +139,10 @@ Bắt đầu bằng việc đọc snapshot của trang hiện tại.
   const abortController = new AbortController();
   const agentTimer = setTimeout(() => abortController.abort(), timeoutMs);
   agentTimer.unref?.();
+  const leadStopTimer = session?.stopAutofillOnLead ? setInterval(() => {
+    if (shouldStopAfterLead(session)) abortController.abort();
+  }, 100) : null;
+  leadStopTimer?.unref?.();
   try {
     const {
       events
@@ -168,6 +174,7 @@ Bắt đầu bằng việc đọc snapshot của trang hiện tại.
     clearTimeout(agentTimer);
     const safeError = redactSecrets(err.message);
     if (abortController.signal.aborted) {
+      if (shouldStopAfterLead(session)) return { success: false, status: 'lead_confirmed_paused', toolCalls };
       logMsg(`Dừng lượt xử lý vì vượt quá ${Math.ceil(timeoutMs / 1000)} giây.`);
       return {
         success: false,
@@ -186,8 +193,9 @@ Bắt đầu bằng việc đọc snapshot của trang hiện tại.
       toolCalls,
       finalResponse: redactSecrets(finalResponse)
     };
-  }
+  } finally { clearInterval(leadStopTimer); }
   clearTimeout(agentTimer);
+  if (shouldStopAfterLead(session)) return { success: false, status: 'lead_confirmed_paused', toolCalls };
   let submitStatus = allowSubmit ? 'submitted' : 'completed_unsubmitted';
   if (allowSubmit && approvalGate) {
     const isApproved = await approvalGate({

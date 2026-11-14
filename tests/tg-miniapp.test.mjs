@@ -44,15 +44,16 @@ test('Telegram Mini App & Remote Control Test Suite', async (t) => {
     // 6. Execution Options & Mode Checkboxes
     assert.match(content, /id="cbxRunInApp"/, 'Phải có checkbox Chạy trong app');
     assert.match(content, /id="cbxMultiTab"/, 'Phải có checkbox Đa luồng đa tab');
-    assert.match(content, /id="cbxCloakBrowser"/, 'Phải có checkbox CloakBrowser');
+    assert.doesNotMatch(content, /cbxCloakBrowser/, 'Đã bỏ CloakBrowser');
     assert.match(content, /id="cbxDataSaver"/, 'Phải có checkbox Tiết kiệm data');
     assert.match(content, /id="cbxCheckDuplicateIP"/, 'Phải có checkbox Check duplicate IP');
     assert.match(content, /id="cbxHideUntilTarget"/, 'Phải có checkbox Ẩn đến trang đích');
     assert.match(content, /id="cbxHideUntilLead"/, 'Phải có checkbox Chỉ hiện khi có Lead');
     assert.match(content, /id="cbxCheckLead"/, 'Phải có checkbox Check Lead (20s)');
     assert.match(content, /id="cbxAiAssist"/, 'Phải có checkbox AI Assist');
-    assert.match(content, /id="cbxRRS"/, 'Phải có checkbox Save RRS');
-    assert.match(content, /id="chkAutoRefill"/, 'Phải có checkbox Tự bù luồng');
+    assert.doesNotMatch(content, /id="cbxRRS"/, 'Đã gỡ Save RRS (server không dùng)');
+    assert.doesNotMatch(content, /id="chkAutoRefill"/, 'Đã gỡ Tự bù luồng (không có tác dụng)');
+    assert.match(content, /id="cbxNoSlotRefill"/, 'Phải có Không bù slot');
     assert.match(content, /id="cbxAutoSubmit"/, 'Phải có checkbox Tự submit form');
 
     // 7. Platform Checkboxes
@@ -64,7 +65,8 @@ test('Telegram Mini App & Remote Control Test Suite', async (t) => {
     assert.match(content, /id="chkIpad"/, 'Phải có platform iPad');
 
     // 8. Advanced Parity Features
-    assert.match(content, /id="pillBrowserAdsPower"/, 'Phải có chọn AdsPower');
+    assert.doesNotMatch(content, /id="pillBrowserAdsPower"/, 'Đã gỡ AdsPower (server luôn chạy Chrome)');
+    assert.match(content, /id="pillBrowserGoLogin"/, 'Phải có chọn GoLogin');
     assert.match(content, /id="pillBrowserChrome"/, 'Phải có chọn Chrome');
     assert.match(content, /id="inputWebsiteUrl2"/, 'Phải có Link Offer 2');
     assert.match(content, /id="btnSaveOffer"/, 'Phải có nút Lưu Offer');

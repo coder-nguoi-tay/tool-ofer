@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { startAgentMode } from './src/agents/actions/start-agent-mode.mjs';
 import { startLocalInterface } from './src/http/actions/start-local-interface.mjs';
+import { installAccessOnlyConsole } from './src/logging/install-access-only-console.mjs';
 
 export { proxy711, getCached711Balance, get711Balance, start711BalanceBackgroundPolling, loadProxy711Config, saveProxy711Config, ensure711Token, fetch711WapiToken, ensure711WapiToken, get711ConsumptionChart, add711IpWhitelist, generate711SubuserProxies, fetch711Token, record711BalanceSample } from './src/proxy/provider711.mjs';
 export { latestToffersOverview, loadToffersConfig, saveToffersConfig, refreshToffersOverview, startToffersBackgroundPolling } from './src/leads/toffers-overview.mjs';
@@ -96,10 +97,11 @@ process.on('unhandledRejection', (reason) => {
 });
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  installAccessOnlyConsole();
   const hubArg = process.argv.find((a) => a.startsWith('--hub='));
   if (hubArg) {
-    startAgentMode(hubArg.slice(6)).catch((e) => { console.error(e.message); process.exitCode = 1; });
+    startAgentMode(hubArg.slice(6)).catch((e) => { console.error('[Process]', e.message); process.exitCode = 1; });
   } else {
-    startLocalInterface().catch((error) => { console.error(error.message); process.exitCode = 1; });
+    startLocalInterface().catch((error) => { console.error('[Process]', error.message); process.exitCode = 1; });
   }
 }

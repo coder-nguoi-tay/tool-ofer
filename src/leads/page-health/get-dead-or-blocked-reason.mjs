@@ -1,9 +1,33 @@
 import { isToffersDuplicateOfferUrl } from "../actions/is-toffers-duplicate-offer-url.mjs";
 
 const pendingFrameEvaluations = new WeakSet();
+const ignoredFrameErrors = new WeakSet();
+const ALWAYS_FATAL_FRAME_REASON = /Toffers Duplicate IP|Traffic Blocked/i;
+// Iframe chứa form/nội dung chính thường chiếm phần lớn khung nhìn; iframe tracking/quảng cáo ẩn hoặc rất nhỏ.
+const PRIMARY_FRAME_MIN_WIDTH = 300;
+const PRIMARY_FRAME_MIN_HEIGHT = 250;
 
 /**
- * Nhận diện lỗi mạng, trang blocked và duplicate IP trên tab và các frame con.
+ * Iframe có phải nội dung chính không: đang là frame form autofill điền, hoặc là iframe lớn đang hiện trên trang.
+ * @param {object} page Tab chứa iframe.
+ * @param {object} frame Frame con.
+ * @return {Promise<boolean>}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-15
+ */
+async function isPrimaryFrame(page, frame) {
+  if (frame === page._activeAutofillFrame) return true;
+  try {
+    const box = await (await frame.frameElement?.())?.boundingBox?.();
+    return Boolean(box && box.width >= PRIMARY_FRAME_MIN_WIDTH && box.height >= PRIMARY_FRAME_MIN_HEIGHT);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Nhận diện lỗi mạng, trang blocked và duplicate IP trên tab và các frame con. Lỗi mạng ở iframe phụ (không phải iframe
+ * form/nội dung chính) không tính, để iframe tracking/quảng cáo lỗi không làm đóng cả phiên.
  *
  * @param {object} page Tab của Playwright hoặc Puppeteer.
  * @return {Promise<string|null>} Lý do lỗi đã xác nhận hoặc null nếu chưa thấy lỗi.
@@ -83,28 +107,6 @@ export async function getDeadOrBlockedReason(page) {
             return 'Lỗi kết nối proxy';
           }
 
-          // Kiểm tra xem có bất kỳ iframe con nào trong DOM có sub-frame-error không
-          try {
-            if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
-              const iframes = document.querySelectorAll('iframe');
-              for (const ifr of iframes) {
-                try {
-                  const idoc = ifr.contentDocument || ifr.contentWindow?.document;
-                  if (idoc) {
-                    const sub = idoc.getElementById('sub-frame-error') || idoc.querySelector?.('#sub-frame-error, #sub-frame-error-details');
-                    if (sub) {
-                      const txt = (sub.innerText || sub.textContent || '').trim();
-                      return txt ? `ERR_CONNECTION_REFUSED: ${txt}` : 'ERR_CONNECTION_REFUSED';
-                    }
-                    const ifrText = `${idoc.title || ''} ${idoc.body ? idoc.body.innerText || '' : ''}`;
-                    if (/refused to connect|từ chối kết nối/i.test(ifrText)) {
-                      return 'ERR_CONNECTION_REFUSED';
-                    }
-                  }
-                } catch {}
-              }
-            }
-          } catch {}
           return null;
         })).finally(() => pendingFrameEvaluations.delete(frame));
         let timeoutId;
@@ -132,7 +134,14 @@ export async function getDeadOrBlockedReason(page) {
         for (const frame of frames) {
           if (frame === page.mainFrame?.()) continue;
           reason = await checkFrame(frame);
-          if (reason) return reason;
+          if (!reason) continue;
+          // Trùng IP toffers / Traffic Blocked là tín hiệu nghiệp vụ ở bất kỳ frame nào; lỗi mạng chỉ tính khi là iframe
+          // form/nội dung chính. Iframe phụ (tracking, push, định danh thiết bị) lỗi thì bỏ qua, không đóng cả phiên.
+          if (ALWAYS_FATAL_FRAME_REASON.test(reason) || await isPrimaryFrame(page, frame)) return reason;
+          if (!ignoredFrameErrors.has(frame)) {
+            ignoredFrameErrors.add(frame);
+            console.log(`[DeadFrame] Bỏ qua lỗi iframe phụ "${reason}" (${frame.url?.() || '?'}); không đóng phiên.`);
+          }
         }
       } catch {}
     }

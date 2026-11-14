@@ -4,14 +4,59 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_VERSION="$(node -p "require('./package.json').version")"
-BUILD_NUMBER="25"
+BUILD_NUMBER="64"
 
 APP_NAME="AutoLeadPC Mac 2 AdsPower.app"
 INSTALLED_APP="/Applications/$APP_NAME"
-if pgrep -f "^$INSTALLED_APP/Contents/MacOS/AutoLeadPCMac$" >/dev/null; then
-  echo "Hãy thoát AutoLeadPC trước khi build để cập nhật đúng app đang sử dụng." >&2
-  exit 1
-fi
+APP_PROCESSES="^$INSTALLED_APP/Contents/"
+# LaunchAgent giữ app chạy 24/24: hub (KeepAlive, tự mở lại app khi bị tắt) và watchdog (60 giây/lần, nạp lại hub khi
+# cổng 3211 không phản hồi). Phải gỡ cả hai trước khi build, nếu không launchd mở lại app giữa chừng thành hai cửa sổ.
+LAUNCH_AGENTS=${AUTOLEADPC_LAUNCH_AGENTS:-~/Library/LaunchAgents}
+LAUNCH_DOMAIN="gui/$(id -u)"
+AGENT_LABELS="com.autoleadpc.watchdog com.autoleadpc.hub"
+STOPPED_AGENTS=""
+
+# Gỡ watchdog/hub khỏi launchd rồi tắt mọi bản app còn lại (kể cả bản thừa kẹt hộp thoại), chờ node dọn Orbita/profile.
+# SIGTERM vào app Swift làm nó thoát ngay; node nhận SIGTERM hoặc thấy app cha mất thì dừng Orbita, xoá profile rồi thoát.
+# @return Không còn tiến trình nào chạy từ app đã cài; quá 30 giây thì buộc dừng.
+# @author ductv <ductv@getflycrm.com>
+# @since 2026-11-14
+quit_installed_app() {
+  local label
+  for label in $AGENT_LABELS; do
+    if [ -f "$LAUNCH_AGENTS/$label.plist" ] && launchctl print "$LAUNCH_DOMAIN/$label" >/dev/null 2>&1; then
+      launchctl bootout "$LAUNCH_DOMAIN/$label" 2>/dev/null || true
+      case " $STOPPED_AGENTS " in *" $label "*) ;; *) STOPPED_AGENTS="$STOPPED_AGENTS $label" ;; esac
+    fi
+  done
+  pgrep -f "$APP_PROCESSES" >/dev/null || return 0
+  echo "=== Tắt AutoLeadPC đang chạy ==="
+  pkill -TERM -f "^$INSTALLED_APP/Contents/MacOS/AutoLeadPCMac$" || true
+  for _ in $(seq 60); do
+    pgrep -f "$APP_PROCESSES" >/dev/null || return 0
+    sleep 0.5
+  done
+  echo "App chưa tự thoát sau 30 giây, buộc dừng." >&2
+  pkill -KILL -f "$APP_PROCESSES" || true
+  sleep 1
+}
+
+# Mở lại đúng một bản app: nạp lại hub/watchdog đã gỡ (hub RunAtLoad tự mở app, launchd nhận chữ ký mới của bản build),
+# máy không dùng LaunchAgent thì mở trực tiếp. Chạy cả khi build lỗi để app 24/24 không bị tắt luôn. NO_OPEN=1 để chỉ build.
+# @return App đang chạy một cửa sổ, hoặc giữ nguyên trạng thái tắt khi NO_OPEN=1 và không có agent.
+# @author ductv <ductv@getflycrm.com>
+# @since 2026-11-14
+reopen_installed_app() {
+  local label
+  if [ -n "$STOPPED_AGENTS" ]; then
+    for label in com.autoleadpc.hub com.autoleadpc.watchdog; do
+      case " $STOPPED_AGENTS " in *" $label "*) launchctl bootstrap "$LAUNCH_DOMAIN" "$LAUNCH_AGENTS/$label.plist" || echo "Chưa nạp lại được $label" >&2 ;; esac
+    done
+  elif [ "${NO_OPEN:-0}" != "1" ] && [ -d "$INSTALLED_APP" ]; then
+    open "$INSTALLED_APP"
+  fi
+}
+quit_installed_app
 BUILD_DIRECTORY="$(mktemp -d "/Applications/.AutoLeadPC-build.XXXXXX")"
 
 # Dọn staging sau khi build; phục hồi app cũ nếu thao tác thay bản mới bị gián đoạn.
@@ -27,7 +72,7 @@ cleanup_app_build() {
   fi
   rm -rf "$BUILD_DIRECTORY"
 }
-trap cleanup_app_build EXIT
+trap 'cleanup_app_build; reopen_installed_app' EXIT
 
 echo "=== Compiling native Swift binary ==="
 TMP_BIN="$BUILD_DIRECTORY/AutoLeadPCMac_bin"
@@ -127,7 +172,7 @@ EOF
   cp -R tests mock-pages "$LAUNCHER_DIR/"
   # Test đóng gói cần source compiler và script thật, kể cả khi chạy trong bundle.
   cp -p build-app.sh AutoLeadPCMacApp.swift AutoLeadPC2.icns autoleadpc-icon.svg "$LAUNCHER_DIR/"
-  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs cloakbrowser-engine.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs codex-form-agent.mjs local-profile-engine.mjs playwright-mcp-human.cjs pc-app.png package.json package-lock.json relay.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs tunnel.mjs mcp-server.mjs "$LAUNCHER_DIR/"
+  cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs multilogin-profile.mjs gologin-profile.mjs codex-form-agent.mjs local-profile-engine.mjs playwright-mcp-human.cjs pc-app.png package.json package-lock.json relay.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs tunnel.mjs mcp-server.mjs "$LAUNCHER_DIR/"
   cp -R src ui "$LAUNCHER_DIR/"
   # Chỉ chép Config/Browser: Config/Settings có thể chứa token, không được vào bundle.
   mkdir -p "$LAUNCHER_DIR/Config"
@@ -162,6 +207,8 @@ EOF
 # Chỉ phát hành một app cố định; staging được dọn, không tạo ZIP hoặc backup lưu lâu dài.
 build_app_bundle "$APP_NAME" "2" 3211 "com.autolead.mac2.adspower" "AutoLeadPC Mac 2 AdsPower"
 
+# Lỡ mở app trong lúc build thì tắt lại trước khi thay bản, để không còn bản cũ chạy song song.
+quit_installed_app
 if [ -d "$INSTALLED_APP" ]; then
   mv "$INSTALLED_APP" "$BUILD_DIRECTORY/previous.app"
 fi

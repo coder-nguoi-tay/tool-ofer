@@ -28,7 +28,8 @@ async function loadOfferConfig() {
         if (data.LinkOffer3 !== undefined && data.LinkOffer3 !== '') document.getElementById('txtLinkOffer3').value = data.LinkOffer3;
         if (data.LinkOffer4 !== undefined && data.LinkOffer4 !== '') document.getElementById('txtLinkOffer4').value = data.LinkOffer4;
         if (data.LinkOffer2 || data.LinkOffer3 || data.LinkOffer4) toggleExtraOfferLinks(true);
-        if (data.TimeLimit) document.getElementById('txtTimeLimit').value = data.TimeLimit;
+        // TimeLimit cũ tính bằng giây và không còn dùng; ô Chờ tối đa đọc khoá mới (phút), thiếu thì 10.
+        document.getElementById('txtTimeLimit').value = data.MaxRunMinutes ?? '10';
         if (data.Complete && data.Complete !== 'id') {
           document.getElementById('txtTextComplete').value = data.Complete;
         } else {
@@ -46,6 +47,20 @@ async function loadOfferConfig() {
         if (Array.isArray(data.savedList)) {
           currentSavedOffers = data.savedList;
           renderSavedOffersDropdown(currentSavedOffers, data.NameOffer);
+        }
+
+        if (Array.isArray(data.schedules)) {
+          data.schedules.forEach(s => {
+            if (s && s.offerIndex) {
+              const cbx = document.getElementById(`cbxScheduleOffer${s.offerIndex}`);
+              const timeInput = document.getElementById(`timeScheduleOffer${s.offerIndex}`);
+              if (cbx) cbx.checked = Boolean(s.enabled);
+              if (timeInput) {
+                if (s.time) timeInput.value = s.time;
+                timeInput.style.display = s.enabled ? 'inline-block' : 'none';
+              }
+            }
+          });
         }
 
         applyOfferMethods(Array.isArray(data.methodConfigs) ? data.methodConfigs : []);

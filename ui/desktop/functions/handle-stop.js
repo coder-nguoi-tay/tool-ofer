@@ -5,6 +5,9 @@
  * @since 2026-11-10
  */
 async function handleStop() {
+      if (typeof cancelOfferSchedule === 'function') {
+        cancelOfferSchedule();
+      }
       const btnStart = document.getElementById('btnStart');
       if (btnStart) {
         btnStart.disabled = true;

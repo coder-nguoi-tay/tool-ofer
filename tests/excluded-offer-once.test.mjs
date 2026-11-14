@@ -45,6 +45,8 @@ test('loại trừ đúng host/path, không phụ thuộc tracking và không đ
   assert.equal(normalizeOfferUrl('https://offer.test/?offer=1&utm_source=first#step'), normalizeOfferUrl('https://offer.test/?utm_source=second&offer=1'));
   assert.notEqual(normalizeOfferUrl('https://offer.test/?offer=1'), normalizeOfferUrl('https://offer.test/?offer=2'));
   for (const url of ['https://account.yougov.com/us-en/join/new/question-2', 'https://yougov.com/survey', 'https://www.super.com/home/landings/other', 'https://yougov.com.evil.test/', 'https://www.super.com.evil.test/home/landings/earn']) assert.equal(isExcludedOfferPageUrl(url), false);
+  for (const url of ['https://accounts.google.com/signin', 'https://www.google.com/search?q=offer', 'https://google.com/', 'http://accounts.google.com./ServiceLogin']) assert.equal(isExcludedOfferPageUrl(url), true);
+  for (const url of ['https://accounts.google.com.evil.test/signin', 'https://notgoogle.com/', 'https://google.com@offer.test/', 'https://offer.test/?next=https://accounts.google.com/signin']) assert.equal(isExcludedOfferPageUrl(url), false);
 });
 
 test('mouse.down lỗi sau khi bắt đầu input không chạy thêm click fallback', async () => {
@@ -72,6 +74,24 @@ test('tab policy/gold bị đóng trên IP confirmed, giữ tab câu hỏi', { s
     assert.equal(page.isClosed(), false);
   }
   assert.equal(session.leadCheckStatus, 'confirmed');
+});
+
+test('tab accounts.google.com bị đóng ngay và window.open Google bị chặn trước khi tạo tab', { skip }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const { context, page } = await createFormScopeFixture(browser, '<form><input name="answer"></form>');
+  t.after(() => context.close());
+  const logs = [];
+  await context.route('https://accounts.google.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Google sign in</title>' }));
+  attachUniqueOfferTabs(context, { mainPage: page, addBrowserLog: entry => logs.push(entry) });
+  const popup = await context.newPage();
+  await popup.goto('https://accounts.google.com/signin').catch(() => {});
+  await waitFor(() => popup.isClosed());
+  assert.equal(page.isClosed(), false);
+  assert.equal(await page.evaluate(() => window.open('https://accounts.google.com/ServiceLogin') === null), true);
+  assert.equal(await page.evaluate(() => window.open('https://www.google.com/search?q=offer') === null), true);
+  assert.deepEqual(context.pages(), [page]);
+  assert.ok(logs.some(entry => entry.type === 'excluded_tab_closed' && entry.detail.includes('accounts.google.com')));
 });
 
 test('policy là tab cuối của IP có lead: đóng policy, giữ browser bằng tab trống', { skip }, async t => {

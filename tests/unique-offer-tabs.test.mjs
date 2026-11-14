@@ -44,6 +44,37 @@ test('khóa link trước await, lịch sử qua reload và IP/context khác đ�
 });
 
 const skip = !existsSync(chromium.executablePath());
+
+test('nhiều popup cùng link mở đồng thời chỉ giữ một tab, khác IP/context vẫn được giữ', { skip }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const { context, page } = await createFormScopeFixture(browser, '<form><input name="answer"></form>');
+  t.after(() => context.close());
+  attachUniqueOfferTabs(context, { mainPage: page });
+  const duplicates = await Promise.all(Array.from({ length: 5 }, () => context.newPage()));
+  await Promise.all(duplicates.map((popup, index) => popup.goto(`${page.url()}?utm_source=${index}#step-${index}`).catch(() => {})));
+  await waitFor(() => duplicates.every(popup => popup.isClosed()));
+  assert.equal(context.pages().length, 1);
+  assert.equal(page.isClosed(), false);
+  const other = await createFormScopeFixture(browser, '<form><input name="answer"></form>');
+  t.after(() => other.context.close());
+  attachUniqueOfferTabs(other.context, { mainPage: other.page });
+  assert.equal(other.page.isClosed(), false);
+});
+
+test('dọn cả link trùng đã tồn tại trước khi gắn watcher, giữ lại đúng một tab', { skip }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const { context, page } = await createFormScopeFixture(browser, '<form><input name="answer"></form>');
+  t.after(() => context.close());
+  const duplicate = await context.newPage();
+  await duplicate.goto(page.url());
+  attachUniqueOfferTabs(context, { mainPage: page });
+  await waitFor(() => duplicate.isClosed());
+  assert.equal(context.pages().length, 1);
+  assert.equal(page.isClosed(), false);
+});
+
 test('IP confirmed: tab gốc/popup trùng bị đóng, reload tab giữ lại không bị đóng, không mở lại link đã đóng', { skip }, async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
@@ -92,7 +123,7 @@ test('nhận diện offer giữ form iframe, checkbox có nhãn, nút Continue; 
   const { context, page } = await createFormScopeFixture(browser, '<div hidden><input name="old"></div><div style="opacity:0"><button>Yes</button><button>No</button></div>');
   t.after(() => context.close());
   assert.equal(await hasUnfinishedOfferWork(page), false);
-  for (const html of ['<label><input type="checkbox" style="display:none">Yes</label>', '<button disabled>Continue</button>', '<iframe srcdoc="<form><input name=answer></form>"></iframe>']) {
+  for (const html of ['<main><label><input type="checkbox" style="display:none">Yes</label></main>', '<main><button disabled>Continue</button></main>', '<main><iframe srcdoc="<form><input name=answer></form>"></iframe></main>']) {
     await page.setContent(html);
     assert.equal(await hasUnfinishedOfferWork(page), true);
   }

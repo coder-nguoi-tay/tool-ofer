@@ -17,7 +17,7 @@ AutoLeadPC Mac là ứng dụng macOS điều khiển nhiều phiên trình duy�
 
 - `package.json`: Node `^20.19.0 || >=22.12.0`; các script `start`, `test`, `relay`.
 - `package-lock.json`: khóa dependency; CI cài bằng `npm ci`.
-- Dependency trực tiếp: `playwright`, `cloakbrowser`, `@openai/codex-sdk`, `@playwright/mcp`, `https-proxy-agent`, `socks-proxy-agent`.
+- Dependency trực tiếp: `playwright`, `@openai/codex-sdk`, `@playwright/mcp`, `https-proxy-agent`, `socks-proxy-agent`.
 - `AutoLeadPCMacApp.swift`: vòng đời app native, `WKWebView`, lưu cấu hình bằng SQLite3 và tương thích đọc Keychain cũ.
 - `Info.plist`: mẫu plist; bản build thật được `build-app.sh` tạo với instance và cổng riêng.
 - `build-app.sh`: biên dịch Swift, đóng gói và ký `.app`.
@@ -114,9 +114,9 @@ Tab **Thông tin → Hàng đợi Proxy** của desktop có nút **Thêm vào h�
 
 `src/http/read-ui-asset.mjs` ghép các phần theo `ui/bundles.json` và phục vụ ở runtime. JavaScript giao diện là script thường, không phải ES module: các hàm/biến global và handler inline vẫn phụ thuộc nhau, thứ tự ghép là một phần của hành vi. Mỗi giao diện được ghép thành một JS và một CSS. Toolbar preview Desktop dùng `ui/desktop/styles/screen-preview-responsive.css`: nút xuống dòng ở màn hẹp, chuyển lưới 3 cột dưới 520px và 2 cột dưới 360px, không được cắt nút hoặc tạo tràn ngang.
 
-Recorder mặc định chỉ ghi tiến trình/lỗi; event thô giữ trong bộ đệm 100 thao tác/60 giây và chỉ ghi JSONL khi bật debug tối đa 10 phút. Input/cuộn và request nền không tạo event riêng; log phiên tối đa 2.000 event, ảnh chụp tối đa hai lượt toàn app; lưu trữ dọn artifact khi vượt 500 MB/200 file nhưng giữ tóm tắt 100 mốc (tối đa 1.000 bản, 7 ngày), giữ phiên active/chưa endedAt/có feedback; orphan có grace 15 phút khi vượt trần file. HTML toàn trang mặc định tắt, debug chủ động giới hạn 10 phút/10 MB.
+Tạm thời app mặc định `AUTOLEADPC_LOG_MODE=access`: trang vào được không ghi log; mỗi tab chỉ ghi tối đa một lỗi mở trang đích, bỏ probe IP/Toffers click và query nhạy cảm; không tạo snapshot/HTML/JSONL hoặc log thao tác/AI/HTTP. Riêng mốc lead và đóng tab/phiên vẫn được ghi cùng IP, confirmedLeadIp, trạng thái lead và lý do đóng; mất CDP không đủ bằng chứng thì ghi chưa xác định. Console giữ `[PageAccess]`, `[Lifecycle]` và `[Process]`. Đặt `AUTOLEADPC_LOG_MODE=full` trước khởi động để khôi phục recorder. Trong chế độ full, recorder chỉ ghi tiến trình/lỗi; event thô giữ trong bộ đệm 100 thao tác/60 giây và chỉ ghi JSONL khi bật debug tối đa 10 phút. Input/cuộn và request nền không tạo event riêng; log phiên tối đa 2.000 event, ảnh chụp tối đa hai lượt toàn app; lưu trữ dọn artifact khi vượt 500 MB/200 file nhưng giữ tóm tắt 100 mốc (tối đa 1.000 bản, 7 ngày), giữ phiên active/chưa endedAt/có feedback; orphan có grace 15 phút khi vượt trần file. HTML toàn trang mặc định tắt, debug chủ động giới hạn 10 phút/10 MB.
 
-Thumbnail desktop chỉ tải ô nhìn thấy mỗi 5 giây; cache 10 giây và tối đa hai lượt chụp toàn app. Watcher health cache DOM 3 giây, vô hiệu khi điều hướng; URL lỗi vẫn kiểm tra ngay. Offerwall dùng chung trần MAX_OFFER_TABS=10 và đặt chỗ context trước await khi mở popup. Phiên im lâu chỉ cảnh báo, không áp thời gian sống cứng.
+Thumbnail desktop chỉ tải ô nhìn thấy mỗi 5 giây; cache 10 giây và tối đa hai lượt chụp toàn app. Watcher health cache DOM 3 giây, vô hiệu khi điều hướng; URL lỗi vẫn kiểm tra ngay. Mỗi BrowserContext giữ tối đa MAX_OFFER_TABS=10 tab trên mọi đường mở tab, không chỉ offerwall; tab mới nhất vượt trần bị đóng, 10 tab đầu không bị dọn. Offerwall đặt chỗ context trước await khi mở popup. Phiên im lâu chỉ cảnh báo, không áp thời gian sống cứng.
 
 Watchdog autofill phải phân biệt script captcha nền với challenge thực sự, thử repair bằng record trước AI và giãn scan khi không tiến triển (tối đa 5 giây). CLI và sửa form/SDK dùng chung `waitForAiCapacity()`: ưu tiên IP confirmed, FIFO trong từng nhóm, chờ tối đa 15 giây; caller chỉ nhả chỗ sau acquired, không tiêu retry khi hết hạn hàng. Data Saver có danh sách hẹp video/replay bên thứ ba, vẫn giữ captcha, ảnh, tài liệu và API của form.
 
@@ -126,16 +126,16 @@ Ngoại lệ đáp án No nằm riêng trong `src/autofill/adsmith/`: chỉ AS_I
 
 ### Browser, proxy và vòng đời phiên
 
-Các file facade ở thư mục gốc như `autofill.mjs`, `stealth.mjs`, `adspower-profile.mjs`, `cloakbrowser-engine.mjs` chủ yếu re-export implementation từ `src/` để giữ API cũ.
+Các file facade ở thư mục gốc như `autofill.mjs`, `stealth.mjs`, `adspower-profile.mjs` chủ yếu re-export implementation từ `src/` để giữ API cũ.
 
 Các nhánh trình duyệt chính:
 
 - Chrome đã cài/Chrome for Testing: `src/browser/actions/launch-requested-browsers.mjs`, `open-browser-with-installed-chrome.mjs`, các module `chrome-installations`, `chrome-profiles`, `chrome-paths`.
 - AdsPower SunBrowser: `src/adspower-profile/` và `src/browser/actions/launch-ads-power-browsers.mjs`, `open-ads-power-browser.mjs`; dùng Local API/API key, tạo profile theo slot và kết nối Playwright qua CDP.
-- CloakBrowser: `src/cloakbrowser-engine/`; được chọn trong luồng mở Chrome bằng `useCloakBrowser`, có profile tách theo phiên bản engine.
+- GoLogin Orbita: `src/gologin-profile/`, `src/browser/actions/launch-gologin-browsers.mjs`, `open-gologin-browser.mjs`, `src/browser/gologin/`. Cài đặt có sáu lựa chọn riêng trong `device-choices.mjs`: Windows 10/11, Mac Intel/ARM, Linux, Android; mặc định đủ sáu và phân phối luân phiên theo slot, dùng đúng `os`/`osSpec`, giữ lựa chọn khi bù. Profile mới random Orbita 148–154 và 156 (không có 155); chỉ thay đổi profile mới, không đổi profile cũ. Token lưu riêng, API GET chỉ trả trạng thái và lựa chọn, không trả token. Chỉ tái dùng profile AutoLeadPC đã dừng và cùng OS/osSpec. SDK stop() chỉ commit: phải dừng processSpawned thuộc chính SDK trước khi commit/dọn; giữ khóa khi dừng thất bại. Orbita Android dùng lớp touch trong `attach-android-touch-input.mjs` vì mousePressed có thể treo; giữ các engine khác. iPhone/iPad legacy là giả lập Chromium, không phải profile GoLogin chính thức hay Safari/iOS thật. Chạy trong app truyền headless vào SDK từ đầu; headful ẩn tới lead dùng startup flags. Recording dùng relay từ trước SDK và giữ id khi reconnect; chỉ kết thúc khi đóng thật/lỗi khởi tạo đã dọn. CDP mất nhưng processSpawned còn sống: giữ IP/lead/record, thử nối lại ba lần, không cho prune/tab cuối kill hoặc bù.
 - `src/local-profile-engine/`: helper mở Chrome/Chromium với `zero_profile`, `DevToolsActivePort` và CDP; đây là engine profile cục bộ độc lập, không phải facade chung cho mọi luồng ở trên.
 
-Chính sách đóng và bù: luồng `enableLeadCheck === false` giữ target và tự bù khi bấm X cửa sổ/tab cuối hoặc X trong app nếu tự bù đang bật. Dừng/Đóng tất cả và suppress chủ động luôn thắng. Luồng check lead giữ hành vi đóng chủ động giảm target, không bù; bảo vệ IP confirmed vẫn áp dụng cho các nhánh tự đóng. Theo dõi lead thụ động cũng khóa confirmedLeadIp khi thấy lead, không bật chế độ chờ và không ghi thống kê lead. Queue phải chọn đúng engine từ settings; AdsPower dùng launcher với `isAutomaticRefill=true` để không reset target.
+Chính sách đóng và bù: luồng `enableLeadCheck === false` giữ target và tự bù khi bấm X cửa sổ/tab cuối hoặc X trong app nếu tự bù đang bật. Checkbox desktop **Không bù slot** đặt `autoRefill.noSlotRefill` qua `/auto-refill/no-slot-refill`; queue kiểm tra cờ trước enqueue, đầu job và sau delay, giữ browser/target/settings nhưng không mở thay thế. Lựa chọn được nạp/lưu riêng trong `no-slot-refill-settings.json`, không reset theo Start/Stop. Dừng/Đóng tất cả và suppress chủ động luôn thắng. Luồng check lead giữ hành vi đóng chủ động giảm target, không bù; bảo vệ IP confirmed vẫn áp dụng cho các nhánh tự đóng. Theo dõi lead thụ động cũng khóa confirmedLeadIp khi thấy lead, không bật chế độ chờ và không ghi thống kê lead. Queue phải chọn đúng engine từ settings; AdsPower dùng launcher với `isAutomaticRefill=true` để không reset target.
 
 Sau khi mở context, phiên đi qua các lớp: xác minh proxy/IP exit, chống trùng IP theo offer, áp fingerprint/locale/timezone, mở trang đích, gắn autofill/script/AI/captcha, ghi log, screencast, theo dõi lead và quản lý đóng/tự bù.
 
@@ -176,6 +176,8 @@ Chuột mô phỏng của autofill chạy riêng trên mọi tab/IP. Policy nằ
 - Khi thêm facade runtime ở thư mục gốc, phải thêm tên file vào danh sách `cp -p` trong `build-app.sh`; `src/`, `ui/`, `tests/`, `mock-pages/` được chép đệ quy nhưng facade gốc dùng danh sách tường minh.
 - Giữ các invariant nghiệp vụ quan trọng: form iframe không mượn CTA trang cha; không submit form ẩn/disabled/busy/invalid; IP đã xác nhận lead được bảo vệ; trang lỗi của phiên có lead quay lại trang trước và đánh thức autofill (tối đa 3 lần/URL, cooldown 15s), không tự đóng khi phục hồi thất bại; đóng phiên thủ công không được tự bù ngoài ý muốn; proxy/IP không bị dùng xung đột.
 - Chờ lead phải bật chủ động qua `isLeadWaitEnabled`; cờ tắt trong session hoặc options luôn thắng. Các guard autofill dùng `shouldPauseForLead`, không chặn chỉ vì còn trạng thái checking/failed khi checkbox đã tắt.
+- Desktop chọn một trong hai checkbox chờ lead 2×30s hoặc 2×20s qua `getLeadCheckSettings`/`selectLeadCheckInterval`; hai nhánh Start thường/tuần tự truyền cùng lựa chọn. Không tick thì không chờ. “Chỉ hiện khi có Lead” giữ thời gian đang chọn hoặc bật 30s nếu chưa có; tắt cả hai ô chờ phải tắt chế độ ẩn chờ lead.
+- `stopAutofillOnLead` là opt-in cho phiên mới: chọn checkbox tự bật chờ 30s nếu chưa chọn 20s/30s. `shouldStopAfterLead` giữ mọi tab của IP confirmed không autofill/AI/chuột tự động, kể cả qua reload; primitives đọc session từ `page._autofillSession`. Giữ browser, không hoàn tất/tự đóng FinancialHelpFinder khi chế độ này đang dừng. Không bật thì tiếp tục sau lead như cũ; thao tác thủ công không bị chặn.
 - Khi cần chọn phiên để AI hỗ trợ/xử lý, ưu tiên các trình duyệt có IP đã về lead. Không vì ưu tiên này mà bỏ qua guard bảo vệ IP đã xác nhận lead hoặc quy tắc chống dùng xung đột proxy/IP.
 - Chỉ xóa profile qua các guard như `isManagedChromeProfilePath`; không nới kiểm tra đường dẫn để tiện cleanup. Profile Chrome tạm và cache được xóa khi phiên đóng, còn profile mẫu được giữ riêng.
 - Nếu sửa quy tắc câu hỏi age/preference/vehicle, đối chiếu §17 trong `PLAYWRIGHT_CORE_INTEGRATION_RESEARCH.md` và cập nhật tài liệu cùng code/test.
@@ -199,7 +201,6 @@ node --check app.mjs
 node --check ai-assist.mjs
 node --check autofill.mjs
 node --check option-scorer.mjs
-node --check cloakbrowser-engine.mjs
 node --check tests/run-tests.mjs
 ```
 
@@ -309,7 +310,7 @@ Dữ liệu thường nằm ngoài repository:
 6. Nếu sửa UI, kiểm tra asset được phục vụ và thứ tự global script; nếu sửa đóng gói, kiểm tra artifact `.app` thật.
 7. Cập nhật `README.md`, `QA_TEST_CASES.md`, tài liệu nghiên cứu liên quan và file này khi hành vi/quy ước được mô tả đã thay đổi.
 
-Ngoại lệ hoàn tất do người dùng yêu cầu: HTTPS financialhelpfinder.com/thankyou.php chỉ đóng browser khi các tab ổn định và hết form/câu hỏi/offer chưa mở, AI hoặc popup đang xử lý. Áp dụng cả IP confirmed; tab lỗi vẫn phục hồi Back. Form iframe FinancialHelpFinder khóa phạm vi theo sign_up_step* và class nút sign_up_btn.
+Ngoại lệ hoàn tất do người dùng yêu cầu: HTTPS financialhelpfinder.com/thankyou.php chỉ đóng browser khi các tab ổn định và hết form/câu hỏi/offer chưa mở, AI hoặc popup đang xử lý. Áp dụng cả IP confirmed; tab lỗi vẫn phục hồi Back. `blog.financialhelpfinder.com/paththankyou.php` là trang trung gian (còn nút `a.thankyou-button` "Return to Financial Help Finder" để autofill bấm), không áp luật thank-you chung lẫn hoàn tất. Form iframe FinancialHelpFinder khóa phạm vi theo sign_up_step* và class nút sign_up_btn.
 
 Nhóm Yes/No hiển thị dùng `handleYesNoStep`: Yes trước, hai Continue không đổi bước thì No; cooldown 1,5 giây, tối đa hai Continue sau No, không chọn bước ẩn hoặc bỏ qua subform/consent bắt buộc.
 
@@ -319,12 +320,14 @@ Logic Yes/No/Save chia theo trách nhiệm trong `src/autofill/yes-no/`; hai han
 
 Màn 80–99% trống control: `src/autofill/late-progress/` chờ 60s mỗi lượt, reload tối đa hai lần cùng path rồi chẩn đoán AI một lần. Kiểm mọi iframe hiển thị; không áp dụng thankyou/100%/captcha/manual/skip/consent. `_lateProgressRecoveryActive` giữ tab khỏi nhánh non-offer trong thời gian phục hồi, không thay cờ lead.
 
-Tự đóng non-offer nói chung vẫn tắt: watchTrafficBlockedPage không gọi getNonOfferReason; limitOfferTabs giữ API tương thích nhưng không gắn listener quét/đóng. Ngoại lệ `getEmptyOfferPageReason` đóng trang trắng sau 20 giây và trang một dòng ngắn không tương tác sau 30 giây; giữ loading/challenge/form/iframe offer, phiên vừa thao tác, đang check lead và IP confirmed. Trần đặt chỗ offerwall trước khi mở tab vẫn hoạt động. Các rule lỗi trang và hoàn tất thankyou là độc lập.
+Tự đóng non-offer nói chung vẫn tắt cho tab chính: watchTrafficBlockedPage không gọi getNonOfferReason; limitOfferTabs chỉ gắn listener đếm tab và đóng tab mới nhất vượt trần 10, không quét DOM hoặc phân loại non-offer. `getEmptyOfferPageReason` đóng trang trắng sau 20 giây, trang một dòng ngắn không tương tác sau 30 giây và tab phụ không có công việc offer sau 30 giây; giữ loading/challenge/form/iframe offer, phiên vừa thao tác, đang check lead và IP confirmed theo phạm vi từng nhánh. `detectOfferContentInPage` chỉ nhận form/câu hỏi/CTA trong main ngữ nghĩa hoặc cột trung tâm, loại search/header/nav/footer/aside/sidebar; link Next/Continue thường không phải offer, link/media chỉ ngăn phân loại trắng. Offerwall link-only cần card/metadata offer và được trả qua `hasOfferWorkEvidence` cho watcher, thankyou/completion. Trần đặt chỗ offerwall trước khi mở tab vẫn hoạt động. Các rule lỗi trang và hoàn tất thankyou là độc lập.
 
 Sau lượt AI, cả Chrome và AdsPower gọi `resumeAutofillAfterAi`; không đặt nhánh tự đóng theo chữ Thank you trong callback AI. Nhóm checkbox nhiều đáp án chọn tối đa 2 ô ngẫu nhiên qua `src/survey-solver/pick-random-checkbox-items.mjs`; generic handler/lượt quét cuối chỉ xử lý checkbox đơn/consent. Khi `pickRandom=false`, giữ chế độ tuần tự tối đa 2 ô. Widget Twy phải giữ scope ngoài cùng chứa câu hỏi và Continue. Nhóm checkbox chưa đủ yêu cầu và select còn placeholder vẫn là công việc chưa hoàn tất; dropdown đi qua primitive chuột chung, lỗi ghi log khi trạng thái đổi.
 
 Link offer duy nhất theo BrowserContext/IP: `selectUniqueOfferUrls` loại link lặp từ hai launcher; `reserveOfferLink` khóa mở trước await và giữ lịch sử qua reload; `attachUniqueOfferTabs` dọn tab trùng theo điều hướng, kể cả tab gốc/confirmed. Ngoại lệ đóng tab trùng không được đóng browser/tab cuối và phải ưu tiên giữ tab có form/câu hỏi. Thankyou chung phải kiểm tra `hasUnfinishedOfferWork`; tab chính còn tab khác thì giữ phiên.
 
+Offer phụ vào `chrome-error://chromewebdata/` được nhận diện trực tiếp theo protocol/host tại `matchSubOfferCloseReason`, không đợi DOM lỗi. Đóng riêng tab phụ trước nhánh bảo vệ lead; giữ guard tab chính/gốc và tab cuối của browser. Không đổi quy tắc Back/phục hồi trang lỗi của tab chính có lead.
+
 Recorder không xóa nhật ký phiên gần đây chỉ do trần artifact: dùng `summarizeRecordingSession` và lưu metadata thành công trước khi unlink. Snapshot tự động dùng `prepareSnapshotHtml` (512 KB, bỏ script/data URI lớn) và so DOM/form/iframe trước khi screenshot; canvas/video hiển thị không dùng so DOM để bỏ chụp. HTTP polling thành công được lọc tại `attachRequestLogging`, giữ lỗi/abort/lệnh và không log query.
 
-Rule tab loại trừ tại `is-excluded-offer-page-url.mjs` bắt từ request main frame để không lọt redirect; `closeExcludedOfferTab` giữ browser có lead bằng tab trống khi cần. Offerwall dùng `readOfferwallCards` và `reserveOfferwallCard` để khóa định danh offer trước await và giữ lịch sử qua dựng lại DOM; CTA đã xử lý không đi qua readiness/AI lần nữa. Không chạy fallback click cộng form.submit sau timeout.
+Rule tab loại trừ tại `is-excluded-offer-page-url.mjs` bắt từ request main frame để không lọt redirect; `is-blocked-google-page-url.mjs` chặn `google.com` và mọi subdomain, còn `install-excluded-popup-filter.mjs` ngăn link/`window.open` Google trước khi tạo tab nhưng không chặn tài nguyên captcha trong iframe. `closeExcludedOfferTab` giữ browser có lead bằng tab trống khi cần. Offerwall dùng `readOfferwallCards` và `reserveOfferwallCard` để khóa định danh offer trước await và giữ lịch sử qua dựng lại DOM; CTA đã xử lý không đi qua readiness/AI lần nữa. Không chạy fallback click cộng form.submit sau timeout.

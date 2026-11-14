@@ -29,6 +29,7 @@ async function init() {
         loadAiConfigUi(),
         fetchLogs(),
         fetchToffersLeads(false),
+        fetchRunningState(),
       ]);
       syncOptionPills();
       setInterval(fetchRunningState, 1500);

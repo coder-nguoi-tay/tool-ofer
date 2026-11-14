@@ -1,4 +1,5 @@
 import { moduleState } from './state/module-state.mjs';
+import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
 import { MAX_CONCURRENT_AGT } from './state/max-concurrent-agt.mjs';
 import { readVisiblePageState } from './visible-state/read-visible-page-state.mjs';
 import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-lead-session.mjs';
@@ -13,7 +14,7 @@ import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-
  * @param {Function|null} onQueued Thông báo khi vị trí/ưu tiên đổi, tránh ghi log mỗi nhịp poll.
  * @return {Promise<string>} acquired, page_changed, queue_timeout hoặc closed.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export async function waitForAiCapacity(page, session, signature, maxWaitMs = 15000, onQueued = null) {
   const ticket = { page, session, deadline: Date.now() + maxWaitMs };
@@ -29,6 +30,7 @@ export async function waitForAiCapacity(page, session, signature, maxWaitMs = 15
     .sort((first, second) => Number(protectConfirmedLeadSession(second.session)) - Number(protectConfirmedLeadSession(first.session)));
   try {
     while (!page.isClosed() && !session.isClosed) {
+      if (shouldStopAfterLead(session)) return 'page_changed';
       if (page._leadRecoveryInProgress) return 'page_changed';
       if (Date.now() >= ticket.deadline) return 'queue_timeout';
       const queue = ordered();

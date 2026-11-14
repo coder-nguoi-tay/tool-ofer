@@ -41,9 +41,8 @@ async function loadSavedOffers() {
             if (chosen.LimitRun !== undefined) {
               document.getElementById('inputLimitRun').value = chosen.LimitRun;
             }
-            if (chosen.TimeLimit) {
-              document.getElementById('inputTimeLimit').value = chosen.TimeLimit;
-            }
+            // TimeLimit cũ tính bằng giây và không còn dùng; ô Chờ tối đa đọc khoá mới (phút), thiếu thì 10.
+            document.getElementById('inputTimeLimit').value = chosen.MaxRunMinutes ?? '10';
             if (chosen.Complete) {
               document.getElementById('inputCompleteText').value = chosen.Complete;
             }
@@ -53,6 +52,11 @@ async function loadSavedOffers() {
             if (chosen.delayStop) {
               document.getElementById('inputDelayStop').value = chosen.delayStop;
             }
+            if (chosen.CheckDuplicate !== undefined) document.getElementById('cbxCheckDuplicateIP').checked = chosen.CheckDuplicate !== false && chosen.CheckDuplicate !== 'False';
+            if (chosen.HideUntilTarget !== undefined) document.getElementById('cbxHideUntilTarget').checked = chosen.HideUntilTarget === true;
+            if (chosen.HideUntilLead !== undefined) document.getElementById('cbxHideUntilLead').checked = chosen.HideUntilLead === true;
+            miniRunApplySchedules(chosen.schedules);
+            syncOptionPills();
             showToast(`Đã chọn: ${chosen.NameOffer}`);
           }
         });

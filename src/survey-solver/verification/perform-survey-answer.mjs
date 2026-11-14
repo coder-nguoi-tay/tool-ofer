@@ -22,6 +22,12 @@ export async function performSurveyAnswer(frame, locator, options = {}) {
     return true;
   }, undefined, { timeout: 250 }).catch(() => false);
   if (!canAttempt) return { dispatched: false, verified: false, advanced: false, reason: 'cooldown_or_detached' };
+  const page = typeof frame?.page === 'function' ? frame.page() : null;
+  const choiceDelay = Number(page?._autofillSession?.choiceDelay || options.choiceDelay || 0);
+  if (choiceDelay > 0) {
+    const jitterMs = Math.round(choiceDelay * 1000 * (0.8 + Math.random() * 0.4));
+    await new Promise(resolve => setTimeout(resolve, jitterMs));
+  }
   const dispatched = await safeSurveyClick(frame, locator);
   if (!dispatched) {
     options.onAnswerAttempt?.({ dispatched: false, verified: false });

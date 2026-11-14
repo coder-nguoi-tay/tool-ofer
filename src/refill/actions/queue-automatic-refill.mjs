@@ -19,11 +19,11 @@ import { remoteAgents } from '../../runtime/constants/remote-agents.mjs';
  * @since 2026-11-11
  */
 export function queueAutomaticRefill(delayMs = 0) {
-  if (autoRefill.stopRequested || !autoRefill.enabled || !autoRefill.settings || autoRefill.queued) return;
+  if (autoRefill.stopRequested || autoRefill.noSlotRefill || !autoRefill.enabled || !autoRefill.settings || autoRefill.queued) return;
   autoRefill.queued = true;
   void enqueueExclusively(async () => {
     autoRefill.queued = false;
-    if (autoRefill.stopRequested || !autoRefill.enabled || !autoRefill.settings) return;
+    if (autoRefill.stopRequested || autoRefill.noSlotRefill || !autoRefill.enabled || !autoRefill.settings) return;
 
     // Dọn các phiên đã đóng hoặc mất kết nối khỏi activeBrowsers
     for (const session of [...activeBrowsers]) {
@@ -49,7 +49,7 @@ export function queueAutomaticRefill(delayMs = 0) {
     if (waitMs > 0) {
       autoRefill.message = `Chế độ tuần tự: chờ ${waitMs / 1000}s trước khi mở phiên tiếp theo…`;
       await new Promise(resolve => setTimeout(resolve, waitMs));
-      if (autoRefill.stopRequested || !autoRefill.enabled || !autoRefill.settings) return;
+      if (autoRefill.stopRequested || autoRefill.noSlotRefill || !autoRefill.enabled || !autoRefill.settings) return;
     }
     const activeSettings = autoRefill.settings;
     const configuredOffers = [];

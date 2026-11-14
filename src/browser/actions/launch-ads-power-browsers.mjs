@@ -46,7 +46,7 @@ import { stopAdsPowerProfile } from '../../../adspower-profile.mjs';
  * @return {Promise<{results: object[], warnings: string[]}>} Kết quả mở các slot.
  * @throws {Error} Khi thiếu API key hoặc không thể chuẩn bị profile.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-13
  */
 export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
@@ -61,7 +61,6 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
   const websiteUrl = body.websiteUrl || '';
   const offerUrls = body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 || body.websiteUrl2 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : [websiteUrl].filter(Boolean));
   const multiTab = body.multiTab !== false; // Mặc định chạy đa luồng là đa tab trong 1 trình duyệt
-  const useCloakBrowser = Boolean(body.useCloakBrowser ?? body.cloakBrowser);
   const screenPreviewOnly = Boolean(body.screenPreviewOnly ?? body.runInApp ?? true); // "Chạy trong app": false = mở cửa sổ thường
 
   // Lưu mục tiêu của lượt Start; lần bù chỉ mở số slot còn thiếu.
@@ -69,8 +68,7 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
     autoRefill.settings = {
       ...body,
       browserMode: 'AdsPower',
-      screenPreviewOnly,
-      useCloakBrowser
+      screenPreviewOnly
     };
     autoRefill.targetCount = concurrency;
     void saveAutoRefillSettings();
@@ -85,8 +83,10 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
   const captchaApiKey = body.captchaApiKey ?? '';
   const completeText = body.completeText ?? '';
   const timeLimit = Math.max(0, Number(body.timeLimit) || 0);
+  const maxRunMinutes = Math.max(0, Number(body.maxRunMinutes) || 0);
   const delayStart = Math.max(0, Number(body.delayStart) || 0);
   const delayStop = Math.max(0, Number(body.delayStop) || 0);
+  const choiceDelay = body.enableChoiceDelay !== false && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0;
   const antiFingerprint = {
     canvas: Boolean(body.antiFpCanvas),
     clientRects: Boolean(body.antiFpClientRects),
@@ -110,6 +110,7 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
   }
   const leadConfig = {
     enabled: body.enableLeadCheck === true,
+    stopAutofillOnLead: body.stopAutofillOnLead === true,
     apiUrl: body.leadCheckApiUrl || DEFAULT_LEAD_CONFIG.apiUrl,
     cookie: body.leadCheckCookie || DEFAULT_LEAD_CONFIG.cookie,
     datas: body.leadCheckDatas || DEFAULT_LEAD_CONFIG.datas,
@@ -307,7 +308,9 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
         captchaApiKey,
         completeText,
         timeLimit,
+        maxRunMinutes,
         delayStop,
+        choiceDelay,
         scriptPath,
         hideUntilTarget,
         hideUntilLead,
@@ -319,7 +322,6 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
         stopProfile: () => stopAdsPowerProfile(apiToken, profileId),
         totalCount: concurrency,
         screenPreviewOnly,
-        useCloakBrowser,
         dataSaver: body.dataSaver !== false
       });
       results.push({

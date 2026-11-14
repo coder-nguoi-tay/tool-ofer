@@ -1,5 +1,6 @@
 import { NON_OFFER_WAIT_MS } from '../../runtime/constants/non-offer-wait-ms.mjs';
 import { detectOfferContentInPage } from './detect-offer-content-in-page.mjs';
+import { hasOfferWorkEvidence } from './has-offer-work-evidence.mjs';
 
 /**
  * Nhận diện tab không phải trang offer: offer hết hạn (404offer/unavailable), trang trắng,
@@ -42,7 +43,7 @@ export async function getNonOfferReason(page, tracker) {
   const results = await Promise.all(frames.map(f => f.evaluate(detectOfferContentInPage).catch(() => null)));
   const found = results.filter(Boolean);
   if (found.length === 0) return null; // không đọc được trang: không đóng nhầm
-  if (found.some(r => r.challenge || r.worked || r.hasForm || r.hasChoices)) {
+  if (found.some(r => r.challenge || r.worked || hasOfferWorkEvidence(r))) {
     // Giữ trang có câu hỏi/form kể cả HTTP lỗi; SPA cùng path có thể loading ngắn giữa hai bước.
     tracker.since = Date.now();
     return null;

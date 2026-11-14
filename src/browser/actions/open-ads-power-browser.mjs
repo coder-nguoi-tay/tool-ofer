@@ -8,7 +8,6 @@ import { activeBrowsers } from '../sessions.mjs';
 import { activeExitIpLocks } from '../../runtime/constants/active-exit-ip-locks.mjs';
 import { appDataDirectory } from '../../config/paths.mjs';
 import { applicationState } from '../../runtime/application-state.mjs';
-import { applyCloakHumanize } from '../../../cloakbrowser-engine.mjs';
 import { applyNativeOverrides } from '../../../stealth.mjs';
 import { attachAutofill } from '../../../autofill.mjs';
 import { attachBandwidthTracker } from '../../monitoring/bandwidth.mjs';
@@ -54,6 +53,7 @@ import { tgNotify } from '../../../tgbot.mjs';
 import { tileAt } from './tile-at.mjs';
 import { watchTrafficBlockedPage } from '../../leads/actions/watch-traffic-blocked-page.mjs';
 import { withoutSessionEmail } from '../../records/actions/without-session-email.mjs';
+import { attachMaxRunTimer } from './attach-max-run-timer.mjs';
 
 /**
  * Mở profile AdsPower, xác minh IP rồi gắn luồng Playwright hiện có.
@@ -62,7 +62,7 @@ import { withoutSessionEmail } from '../../records/actions/without-session-email
  * @return {Promise<object>} Session trình duyệt đã kết nối.
  * @throws {Error} Khi trình duyệt, CDP hoặc IP proxy không khớp.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export async function openAdsPowerBrowser({
   tileIndex,
@@ -79,6 +79,7 @@ export async function openAdsPowerBrowser({
   captchaApiKey = '',
   completeText = '',
   timeLimit = 0,
+  maxRunMinutes = 0,
   delayStop = 0,
   scriptPath = '',
   hideUntilTarget = false,
@@ -94,7 +95,7 @@ export async function openAdsPowerBrowser({
   offerUrls = [],
   threadCount = 1,
   multiTab = true,
-  useCloakBrowser = false,
+  choiceDelay = 0,
   dataSaver = true
 }) {
   const assignedSlot = slot ?? tileIndex + 1;
@@ -125,15 +126,6 @@ export async function openAdsPowerBrowser({
     await cdpBrowser.close().catch(() => {});
     await stopProfile(profileId).catch(() => {});
     throw new Error('SunBrowser không có profile mặc định để kết nối.');
-  }
-  let cloakHumanizeApplied = false;
-  if (useCloakBrowser) {
-    try {
-      cloakHumanizeApplied = await applyCloakHumanize(context);
-      console.log(cloakHumanizeApplied ? `[AdsPower] Đã gắn lớp Humanize của CloakBrowser cho profile ${profileId}` : `[AdsPower] Không gắn được lớp Humanize của CloakBrowser cho profile ${profileId}`);
-    } catch (err) {
-      console.warn(`[AdsPower] Lỗi gắn CloakBrowser Humanize: ${err.message}`);
-    }
   }
 
   // Thu nhỏ và ẩn ngay lập tức qua CDP và AppleScript để đảm bảo không hiện trên màn hình lúc khởi chạy
@@ -207,11 +199,11 @@ export async function openAdsPowerBrowser({
     tileIndex: tileIndex ?? assignedSlot - 1,
     slot: assignedSlot,
     enableLeadCheck: leadConfig.enabled === true,
+    stopAutofillOnLead: leadConfig.enabled === true && leadConfig.stopAutofillOnLead === true,
     chromeVersion: chromeVer,
     deviceProfile: osDisplay,
     deviceVersion: osDisplay,
-    deviceSummary: useCloakBrowser ? `${osDisplay} · ${chromeVer} · CloakBrowser Humanize` : `${osDisplay} · ${chromeVer} · Anti-Detect Active`,
-    useCloakBrowser: Boolean(useCloakBrowser),
+    deviceSummary: `${osDisplay} · ${chromeVer} · Anti-Detect Active`,
     suppressAutoRefill: false,
     proxy: proxy ?? null,
     proxyKey: proxyUrl ?? profileId,
@@ -236,6 +228,7 @@ export async function openAdsPowerBrowser({
     confirmedLeadIp: null,
     leadCheckStatus: null,
     leadCheckMessage: null,
+    choiceDelay: Number(choiceDelay) || 0,
     bandwidthBytes: 0,
     bytesSent: 0,
     bytesReceived: 0,
@@ -510,14 +503,6 @@ export async function openAdsPowerBrowser({
   if (session.dataSaver !== false) {
     void attachDataSaver(context, session);
   }
-  if (useCloakBrowser) {
-    // AdsPower chạy SunBrowser (Chromium thường) — chỉ có lớp Humanize (JS) được gắn,
-    // KHÔNG phải nhân Chromium vá C++ của CloakBrowser. Không được ghi "C++ Patched".
-    session.addLog({
-      type: 'cloakbrowser_active',
-      detail: cloakHumanizeApplied ? 'Kích hoạt lớp Humanize (mô phỏng chuột/phím) trên SunBrowser của AdsPower.' : 'Yêu cầu bật Humanize trên AdsPower nhưng lớp Humanize không gắn được (xem log cảnh báo).'
-    });
-  }
   const handleSessionClosed = () => {
     if (session._hasCleanedUp) return;
     session._hasCleanedUp = true;
@@ -593,7 +578,7 @@ export async function openAdsPowerBrowser({
     for (let t = 1; t < tabUrlsToOpen.length; t++) {
       const tabUrl = tabUrlsToOpen[t];
       try {
-        // Tab gốc app tự mở: đánh dấu trước khi mở để limitOfferTabs không đóng nhầm.
+        // Tab gốc app tự mở: đánh dấu để các watcher không xử lý như popup ngoài luồng.
         session._uxOpeningOriginTabs = (session._uxOpeningOriginTabs || 0) + 1;
         const extraPage = await context.newPage().finally(() => {
           session._uxOpeningOriginTabs -= 1;
@@ -643,16 +628,9 @@ export async function openAdsPowerBrowser({
     }, 2000);
     context.on('close', () => clearInterval(completeTimer));
   }
-  if (timeLimit > 0) {
-    const timeLimitTimer = setTimeout(() => {
-      session.addLog?.({
-        time: new Date().toISOString(),
-        type: 'time_limit',
-        detail: `Đã chạy ${timeLimit}s; giữ trình duyệt mở khi tác vụ vẫn đang hoạt động.`
-      });
-    }, timeLimit * 1000);
-    context.on('close', () => clearTimeout(timeLimitTimer));
-  }
+  // Ô Chờ tối đa: chạy quá N phút thì tự tắt và bù slot (không tắt phiên đã có lead).
+  const cancelMaxRunTimer = attachMaxRunTimer(session, maxRunMinutes);
+  context.on('close', cancelMaxRunTimer);
   if (scriptSteps?.length > 0) {
     void (async () => {
       await page.waitForLoadState('domcontentloaded', {
@@ -685,6 +663,7 @@ export async function openAdsPowerBrowser({
     await manualOpsRecorder.ready;
     attachAutofill(context, recordPool, new URL(websiteUrl).origin, session, {
       manualOpsRecorder,
+      choiceDelay: session.choiceDelay,
       offerStrategy: offerStrategyState.get(session.offerNumber ?? session.streamRole ?? 1) ?? null,
       autoSubmit,
       enableLeadCheck: leadConfig.enabled === true,

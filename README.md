@@ -59,7 +59,7 @@ Trong **Thông tin → Hàng đợi Proxy**, dán danh sách, chọn SOCKS5 ho�
 
 ## Chạy từ mã nguồn
 
-Yêu cầu Node.js 20.19+ hoặc 22.12+ (theo yêu cầu của `cloakbrowser`).
+Yêu cầu Node.js 20.19+ hoặc 22.12+.
 
 ```sh
 npm install
@@ -98,6 +98,12 @@ Các kịch bản kiểm tra thủ công với website thật nằm trong `tests
 
 Module mới nên import trực tiếp chức năng cần dùng trong `src/`. Các file tương thích ở gốc dành cho các nơi đang gọi API cũ; tránh import ngược `app.mjs`. Trạng thái dùng chung nằm trong các file `state/` hoặc `src/runtime/application-state.mjs` để các hàm dùng cùng một bản dữ liệu. Callback truyền vào `page.evaluate()` phải tự chứa và không truy cập closure của Node.
 
+Desktop có hai lựa chọn chờ lead: **Check Lead (2×30s)** và **Check Lead (2×20s)**, chỉ chọn một. Không chọn ô nào thì chạy hết luồng và chỉ hiển thị lead thụ động. Cả Start thường và tuần tự đều dùng thời gian đã chọn; “Chỉ hiện khi có Lead” giữ lựa chọn hiện tại, mặc định bật 2×30s nếu chưa chọn. Tắt cả hai ô chờ sẽ tắt cả “Chỉ hiện khi có Lead”.
+
+Checkbox **Dừng autofill khi có lead** áp dụng cho phiên mở bằng Start: tự làm đến lúc chờ lead, xác nhận có lead thì dừng nhập liệu/click/rê/cuộn và AI trên mọi tab của cùng IP, giữ browser mở. Giữ thời gian 20s/30s đang chọn; nếu chưa chọn thì bật 2×30s. Không bật checkbox này vẫn tiếp tục làm sau lead như hiện tại. Bỏ cả hai ô chờ lead cũng bỏ chế độ dừng. Cờ confirmed giữ qua reload; phiên đang dừng không bị nhánh hoàn tất FinancialHelpFinder tự đóng. Thao tác thủ công vẫn dùng được.
+
+Tạm thời khi chạy app, `AUTOLEADPC_LOG_MODE` mặc định là `access`: trang vào được không ghi log; mỗi tab chỉ ghi tối đa một lỗi `page_access_failed` nếu mở trang đích thất bại, bỏ probe IP và Toffers click, bỏ query/fragment khỏi URL. Không ghi tiếp thao tác/AI/mạng, không chụp ảnh/HTML/JSONL tự động. Riêng mốc lead và đóng tab/phiên vẫn được ghi cùng IP, confirmedLeadIp và trạng thái lead; kết thúc phiên lưu lý do đóng hoặc ghi rõ chưa xác định khi chỉ mất CDP. Console giữ `[PageAccess]`, `[Lifecycle]` và lỗi tiến trình `[Process]`. Autofill/AI và xuất HTML thủ công vẫn hoạt động. Muốn khôi phục recorder đầy đủ: đặt `AUTOLEADPC_LOG_MODE=full` trước khi chạy app. Nhật ký cũ được giữ nguyên.
+
 `./build-app.sh` chép toàn bộ `src/` và `ui/` vào bundle, ký và cập nhật duy nhất `/Applications/AutoLeadPC Mac 2 AdsPower.app`. Thoát app trước khi build. Script dùng staging tạm và phục hồi bản cũ khi cài thất bại; khi hoàn tất không giữ backup, ZIP hoặc bản sao trong workspace. Các lần build sau tiếp tục dùng đúng đường dẫn này. Chạy từ source vẫn dùng `npm start`; không có bước build JavaScript bổ sung.
 
 Khi widget chưa hiển thị bước tiếp hoặc AI đã thử nhưng giao diện không đổi, app ghi `ai_waiting_state`. App tự kiểm tra lại khi dữ liệu hiển thị đổi; thao tác gọi AI thủ công cho phép thử lại trạng thái đã bị khóa. Nút ẩn hoặc disabled vẫn phải chờ website mở khóa. Các kiểm thử tương ứng nằm ở `tests/ai-visible-state.test.mjs`, `tests/ai-action-target.test.mjs`, `tests/twy-scoped-survey.test.mjs` và `tests/scoped-question-widgets.test.mjs`.
@@ -128,13 +134,15 @@ Autofill bật quỹ đạo rê chuột, drift, cuộn mô phỏng và dấu con
 
 ### Tự bù khi không kiểm tra lead
 
-Khi **Tự bù** đang bật và luồng **không check lead**, đóng cửa sổ bằng X, đóng tab cuối hoặc bấm X trong bảng vẫn giữ số cửa sổ mục tiêu và bù slot trống. Trình duyệt bị đóng/mất kết nối cũng được dọn một lần rồi bù bằng đúng engine đã chọn (Chrome/CloakBrowser hoặc AdsPower).
+Khi **Tự bù** đang bật và luồng **không check lead**, đóng cửa sổ bằng X, đóng tab cuối hoặc bấm X trong bảng vẫn giữ số cửa sổ mục tiêu và bù slot trống. Trình duyệt bị đóng/mất kết nối cũng được dọn một lần rồi bù bằng đúng engine đã chọn (Chrome, GoLogin hoặc AdsPower).
 
 **Dừng/Đóng tất cả** hoặc tắt tự bù không mở lại browser. Luồng check lead giữ chính sách đóng chủ động không bù slot đó; IP đã xác nhận lead không bị tự đóng để phục vụ việc thay phiên. Cần còn proxy/cấu hình hợp lệ để mở được phiên thay thế.
 
+Checkbox **Không bù slot** trong nhóm tùy chọn thực thi giữ các trình duyệt đang mở nhưng chặn mọi lần mở profile thay thế, kể cả hàng đợi đang delay. Trạng thái được lưu trong `no-slot-refill-settings.json`, không bị Start/Stop xóa; bỏ tích sẽ cho phép bù lại theo target và cấu hình hiện có.
+
 ### Giảm tải khi chạy nhiều trình duyệt
 
-Thumbnail desktop chỉ tải các ô đang nhìn thấy mỗi 5 giây, dùng cache 10 giây và giới hạn hai lượt chụp đồng thời toàn app. Screen View giảm nhịp gửi frame/chụp bù; watcher lỗi DOM giãn còn 3 giây nhưng vẫn kiểm tra URL lỗi tức thì. Offerwall dùng chung trần 3 tab/phiên, không cố mở 8 tab rồi bị đóng. Phiên im 5 phút chỉ ghi cảnh báo, không tự đóng theo thời gian.
+Thumbnail desktop chỉ tải các ô đang nhìn thấy mỗi 5 giây, dùng cache 10 giây và giới hạn hai lượt chụp đồng thời toàn app. Screen View giảm nhịp gửi frame/chụp bù; watcher lỗi DOM giãn còn 3 giây nhưng vẫn kiểm tra URL lỗi tức thì. Mỗi trình duyệt giữ tối đa 10 tab tổng, tính cả tab đầu và mọi tab mở trực tiếp hoặc từ offerwall; tab thứ 11 trở đi bị đóng, không đóng bớt 10 tab đầu. Giới hạn này áp dụng riêng từng trình duyệt, không phải toàn app. Phiên im 5 phút chỉ ghi cảnh báo, không tự đóng theo thời gian.
 
 Máy RAM 16 GB nên bắt đầu với 10 trình duyệt và tăng sau khi đo trên offer thực tế; benchmark offline không bảo đảm 20 phiên website thật sẽ mượt. Hướng dẫn đo: [docs/BROWSER_PERFORMANCE.md](docs/BROWSER_PERFORMANCE.md).
 
@@ -160,7 +168,7 @@ Nút **HTML** mở trực tiếp bảng mã; chọn **Trang chính/Iframe**, b�
 
 Hàng đợi AI dùng chung cho CLI và sửa form/SDK: IP có lead được chọn trước, FIFO trong từng nhóm; giới hạn bốn lượt đồng thời, chờ tối đa 15 giây rồi nhả quyền cho autofill. Badge/log phân biệt đang xếp hàng, chờ phản hồi và chờ giao diện/dữ liệu thay đổi.
 
-Form `reg-data` trong iframe Adsmith được khóa theo từng `sign_up_step*`, nhận các nút `sign_up_btn`; không điền bước sau hoặc mượn nút trang cha. Riêng `https://financialhelpfinder.com/thankyou.php`, app hoàn tất browser khi không còn tab offer/AI/popup đang xử lý, kể cả IP có lead. Form/câu hỏi đang hiện, trang chưa đọc được hoặc đang tải vẫn được giữ; quy tắc Back khi lỗi không đổi. Xem `docs/debug/financialhelp-autofill-analysis.md`.
+Form `reg-data` trong iframe Adsmith được khóa theo từng `sign_up_step*`, nhận các nút `sign_up_btn`; không điền bước sau hoặc mượn nút trang cha. Riêng `https://financialhelpfinder.com/thankyou.php`, app hoàn tất browser khi không còn tab offer/AI/popup đang xử lý, kể cả IP có lead. Trang `blog.financialhelpfinder.com/paththankyou.php` chỉ là bước trung gian: app không đóng mà để autofill bấm nút "Return to Financial Help Finder" sang bước tiếp. Form/câu hỏi đang hiện, trang chưa đọc được hoặc đang tải vẫn được giữ; quy tắc Back khi lỗi không đổi. Xem `docs/debug/financialhelp-autofill-analysis.md`.
 
 Nhóm khảo sát Yes/No đang hiển thị được chọn Yes trước. Nếu đã click Tiếp tục hai lần mà vẫn cùng câu hỏi, app chuyển các nhóm sang No rồi thử lại tối đa hai lần; mỗi lần Continue chờ ít nhất 1,5 giây để trang phản hồi. Không đụng nhóm ẩn hoặc lách các ô nhập/consent bắt buộc. Chuyển bước thực sự sẽ reset bộ đếm.
 
@@ -189,3 +197,23 @@ Danh sách loại trừ tab nằm trong `src/browser/tabs/is-excluded-offer-page
 Bộ lọc popup loại trừ được gắn qua init script để chặn sẵn window.open/link policy đã biết trước khi popup có frame; các link khác vẫn dùng hành vi native. Rule đóng tab vẫn chạy cho điều hướng trực tiếp và các tab đã tồn tại.
 
 Danh sách loại trừ cũng gồm trang gốc `yougov.com/` (kể cả `www`) và `super.com/home/landings/earn` (kể cả `www`, dấu `/` cuối và query tracking). Chỉ đóng đúng host/path này; form khảo sát trên `account.yougov.com` và các đường dẫn khác vẫn được giữ.
+
+Tab offer phụ gặp `chrome-error://chromewebdata/` được đóng bằng quy tắc URL, không đợi đọc DOM lỗi, kể cả phiên đã có lead; giữ các tab đang làm việc. Tab chính/gốc vẫn theo chính sách phục hồi lỗi hiện có. Link trùng được dọn trong từng BrowserContext/IP, kể cả nhiều popup mở đồng thời hoặc tab trùng đã tồn tại trước lúc gắn watcher; không gộp tab của hai IP khác nhau.
+
+
+### GoLogin Orbita
+
+Mở **Cài đặt & Logs → Cài đặt hệ thống → GoLogin Orbita**, nhập **API Token** rồi bấm **Lưu cài đặt**. Sau đó tick **GoLogin Orbita** trên màn chạy và bấm Start. Ô token trống giữ cấu hình cũ; giao diện chỉ báo đã cấu hình, không tải token đã lưu về. Token được lưu riêng trong `gologin-config.json` của instance với quyền 0600; không ghi vào cấu hình lượt chạy hoặc localStorage. Không còn token dự phòng trong source. Token từng nằm trong source cần được chủ tài khoản thu hồi/thay mới.
+
+GoLogin chỉ mở khi có proxy hợp lệ và IP trong Orbita khớp IP đã khóa; thiếu proxy, proxy lỗi hoặc trùng IP thì bỏ slot, không chuyển sang IP trực tiếp. Mỗi phiên có log lead/đóng, record riêng trên từng tab, chuột, autofill/AI và watcher dùng chung. Check lead chỉ chạy sau email hợp lệ nếu đã tick; thời gian 2×20s/2×30s được giữ khi tự bù.
+
+Trong phần GoLogin có sáu lựa chọn profile chính thức: **Windows 10, Windows 11, Mac Intel, Mac ARM (M2), Linux và Android**, mặc định chọn cả sáu để phân phối luân phiên theo slot. Lựa chọn được lưu riêng với token, truyền qua Start thường/tuần tự và giữ khi bù slot. Mỗi profile mới chọn ngẫu nhiên Orbita **148, 149, 150, 151, 152, 153, 154 hoặc 156**; 155 không có trên CDN. Nhóm hệ điều hành Chrome độc lập; iPhone/iPad giả lập không được liệt kê như profile GoLogin chính thức. Thay đổi chỉ áp dụng cho profile mới, không đổi OS/nhân của profile đã tạo.
+
+Chỉ tái sử dụng profile AutoLeadPC đã dừng (`status=stopped` hoặc `isRunning=false`) có cùng `os`/`osSpec`. Không đổi OS của profile đã tồn tại, không sửa/xóa profile cá nhân. Khi đóng, app dừng đúng tiến trình Orbita do SDK sinh ra trước khi gọi `stop()` để lưu/dọn dữ liệu, tránh browser mồ côi. Nếu chưa xác nhận dừng thành công, giữ khóa profile/proxy/IP.
+
+Orbita Android được thử thực tế có thể treo với `mousePressed`; lớp input riêng chuyển nhấn/thả thành touch event và giữ chuyển động/con trỏ. Các engine khác giữ nguyên primitive chuột. Script `tests/manual/gologin-supported-devices.mjs --live` chạy chủ động bằng token của instance, tạo profile QA riêng cho từng loại, kiểm tra IP và form offline rồi dừng/xóa chỉ profile vừa tạo; không thuộc npm test và không gửi form offer.
+
+
+GoLogin bật **Chạy trong app** được khởi chạy bằng `--headless=new` ngay từ SDK, không mở cửa sổ Orbita rồi mới thu nhỏ. Screen View/HTML vẫn hoạt động; nút Hiện không tạo cửa sổ Desktop cho phiên headless. Chế độ chỉ ẩn tới lead/target dùng cửa sổ headful khởi động ngoài màn hình và thu nhỏ, theo dõi cả popup.
+
+Nhật ký GoLogin bắt đầu trước tạo profile/SDK/CDP/IP, giữ pha khởi tạo và mã lỗi an toàn trong chế độ log tối giản. Mất CDP khi tiến trình còn sống không được kill hoặc nhả IP: thử nối lại ba lần vào Orbita cũ, giữ lead/record/lịch sử link và dựng lại Screen View/autofill. Nếu chưa nối được thì giữ browser và ghi một mốc lỗi; chỉ dọn khi có lệnh đóng hoặc tiến trình đã thoát. Bộ prune và tab cuối cũng áp dụng guard này.

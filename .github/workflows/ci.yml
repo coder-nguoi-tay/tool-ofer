@@ -47,7 +47,6 @@ jobs:
           node --check ai-assist.mjs
           node --check autofill.mjs
           node --check option-scorer.mjs
-          node --check cloakbrowser-engine.mjs
           node --check tests/run-tests.mjs
 
       # tests/run-tests.mjs tự kiểm tra mọi file test tồn tại trước khi chạy, nên file test

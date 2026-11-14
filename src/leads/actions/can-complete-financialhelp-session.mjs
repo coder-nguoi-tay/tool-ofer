@@ -1,6 +1,7 @@
 import { isSessionWorkingOnOffer } from './is-session-working-on-offer.mjs';
 import { isFinancialhelpThankyouUrl } from './is-financialhelp-thankyou-url.mjs';
 import { detectOfferContentInPage } from './detect-offer-content-in-page.mjs';
+import { hasOfferWorkEvidence } from './has-offer-work-evidence.mjs';
 import { readThrottledPageHealth } from '../page-health/read-throttled-page-health.mjs';
 import { readEvidenceWithTimeout } from '../../logging/recorder/read-evidence-with-timeout.mjs';
 import { hasPendingOfferwallOpenings } from '../../autofill/reserve-offerwall-tab-slot.mjs';
@@ -41,7 +42,7 @@ export async function canCompleteFinancialhelpSession(session) {
           } finally { await element.dispose(); }
         }
         const content = await readEvidenceWithTimeout(frame, 'completion', () => frame.evaluate(detectOfferContentInPage));
-        if (!content || content.loading || content.challenge || content.hasForm || content.hasChoices) return false;
+        if (!content || content.loading || content.challenge || hasOfferWorkEvidence(content)) return false;
         const pending = await readEvidenceWithTimeout(frame, 'completion-cards', () => frame.evaluate(selector => {
           if (document.readyState !== 'complete') return true;
           return Array.from(document.querySelectorAll(selector)).some(card => card.getClientRects().length > 0 && card.getAttribute('data-ux-opened') !== '1' && card.closest('form')?.getAttribute('data-ux-opened') !== '1' && card.getAttribute('data-ux-soi-done') !== '1');

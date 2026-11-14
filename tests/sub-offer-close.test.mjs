@@ -1,12 +1,35 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
-import { matchSubOfferCloseReason } from '../src/leads/actions/get-sub-offer-close-reason.mjs';
+import { matchSubOfferCloseReason, readSubOfferCloseReason } from '../src/leads/actions/get-sub-offer-close-reason.mjs';
 import { watchTrafficBlockedPage } from '../src/leads/actions/watch-traffic-blocked-page.mjs';
 import { createLeadTestSession, captureLeadWatcherTicks } from './helpers/lead-session-fixture.mjs';
 import { activeBrowsers } from '../src/browser/sessions.mjs';
 import { autoRefill } from '../src/runtime/constants/auto-refill.mjs';
 
 afterEach(() => { activeBrowsers.clear(); autoRefill.enabled = false; });
+
+test('chrome-error của offer phụ nhận diện từ URL, không đợi đọc DOM bị lỗi', async () => {
+  assert.match(await readSubOfferCloseReason({ url: () => 'chrome-error://chromewebdata/', evaluate: () => assert.fail('Không đọc DOM của trang lỗi') }), /chrome-error/);
+  for (const url of ['https://chromewebdata/', 'chrome-error://other/', 'https://offer.test/?next=chrome-error://chromewebdata/']) assert.equal(matchSubOfferCloseReason({ url }), null);
+});
+
+test('offer phụ chrome-error của IP có lead được đóng, không bị nhánh Back tức thời giành xử lý', async t => {
+  const ticks = captureLeadWatcherTicks(t);
+  const { session, browser, page, counters } = createLeadTestSession('198.51.100.124');
+  session.leadCheckStatus = 'confirmed';
+  const popup = await browser.newPage();
+  popup.currentUrl = 'chrome-error://chromewebdata/';
+  let backs = 0;
+  popup.goBack = async () => { backs++; popup.currentUrl = 'https://offer.test/previous'; return null; };
+  watchTrafficBlockedPage(session);
+  for (let index = 0; index < 15; index++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(backs, 0);
+  ticks[0]();
+  for (let index = 0; index < 20; index++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(popup.closed, true);
+  assert.equal(page.closed, false);
+  assert.equal(counters.browserCloses, 0);
+});
 
 test('quy tắc đóng tab offer phụ: hết offer, chờ xác minh email, lifepointspanel', () => {
   assert.match(matchSubOfferCloseReason({ url: 'https://www.searchcactus.com/x', text: 'This offer is no longer available.' }), /no longer available/i);
@@ -41,6 +64,7 @@ async function openPopup(browser, url, text) {
 }
 
 for (const [name, url, text] of [
+  ['chrome-error', 'chrome-error://chromewebdata/', ''],
   ['hết offer', 'https://www.searchcactus.com/offer', 'This offer is no longer available.'],
   ['chờ xác minh email', 'https://app.example.com/verify', 'Please check your email'],
   ['lifepointspanel', 'https://start.lifepointspanel.com/aff_c?offer_id=1807&aff_id=1610', ''],
@@ -83,12 +107,14 @@ test('watcher: phiên ĐÃ CÓ LEAD vẫn đóng tab offer phụ (lifepointspane
   page.evaluate = async fn => (fn?.name === 'readSubOfferText' ? 'Thank you' : null);
   const lifepoints = await openPopup(browser, 'https://start.lifepointspanel.com/aff_c?offer_id=1807&aff_id=1610', '');
   const gone = await openPopup(browser, 'https://www.searchcactus.com/publisher/trackofr.asp?chnl=221341&ofr=1089163', 'This offer is no longer available.');
+  const networkError = await openPopup(browser, 'chrome-error://chromewebdata/', '');
   const live = await openPopup(browser, 'https://account.yougov.com/us-en/join/new/question-2', 'What is your gender?');
   watchTrafficBlockedPage(session);
   ticks[0]();
   for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(lifepoints.closed, true, 'lifepointspanel bị đóng');
   assert.equal(gone.closed, true, 'trang hết offer bị đóng');
+  assert.equal(networkError.closed, true, 'tab phụ chrome-error bị đóng dù IP có lead');
   assert.equal(live.closed, false, 'offer phụ đang làm giữ nguyên');
   assert.equal(page.closed, false, 'tab đầu giữ nguyên');
   assert.equal(counters.browserCloses, 0);

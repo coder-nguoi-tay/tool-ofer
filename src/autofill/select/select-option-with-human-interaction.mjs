@@ -1,4 +1,5 @@
 import { findMatchingSelectOption } from './find-matching-select-option.mjs';
+import { shouldStopAfterLead } from '../should-stop-after-lead.mjs';
 import { findVisibleCustomSelectTrigger } from './find-visible-custom-select-trigger.mjs';
 import { selectCustomOptionWithHumanInteraction } from './select-custom-option-with-human-interaction.mjs';
 import { selectMatchingOption } from './select-matching-option.mjs';
@@ -9,9 +10,10 @@ import { selectNativeOptionWithHumanInteraction } from './select-native-option-w
  * @param {object} context Page, field và các candidate đã được so khớp theo record.
  * @return {Promise<object>} Kết quả chọn và xác minh giá trị giữ được sau thao tác.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export async function selectOptionWithHumanInteraction({ page, field, candidates }) {
+  if (shouldStopAfterLead(page?._autofillSession)) return { matched: false, verified: false, reason: 'lead_confirmed_paused' };
   const target = await field.evaluate(findMatchingSelectOption, candidates);
   if (!target.matched) return target;
   const state = await field.evaluate(select => ({
@@ -22,6 +24,7 @@ export async function selectOptionWithHumanInteraction({ page, field, candidates
   if (state.currentValue === target.value) return { ...target, verified: true, reason: 'option_verified' };
 
   // Select dạng danh sách không có popup; giữ cách chọn tương thích cho multiple/size > 1.
+  if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
   if (state.multiple || state.size > 1) return field.evaluate(selectMatchingOption, candidates);
 
   const triggerHandle = await field.evaluateHandle(findVisibleCustomSelectTrigger);

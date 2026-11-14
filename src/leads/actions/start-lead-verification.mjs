@@ -1,4 +1,5 @@
 import { protectConfirmedLeadSession } from './protect-confirmed-lead-session.mjs';
+import { shouldStopAfterLead } from '../../autofill/should-stop-after-lead.mjs';
 import { DEFAULT_LEAD_CONFIG } from '../../../lead-check.mjs';
 import { activeBrowsers } from '../../browser/sessions.mjs';
 import { browserSessionLogs } from '../../logging/browser-logs.mjs';
@@ -8,6 +9,9 @@ import { normalizeIpAddress } from '../../../lead-check.mjs';
 import { queueSaveBrowserLogs } from '../../logging/browser-logs.mjs';
 import { saveAndRecordLeadIpStats } from "../statistics/save-and-record-lead-ip-stats.mjs";
 import { tgNotify } from '../../../tgbot.mjs';
+import { findSessionLead } from '../../lead-check/find-session-lead.mjs';
+import { checkProxyExitIp } from '../../proxy/actions/check-proxy-exit-ip.mjs';
+import { recordObservedExitIp } from '../../proxy/actions/record-observed-exit-ip.mjs';
 
 /**
  * Bắt đầu quy trình kiểm tra lead khi đến/hoàn thành màn đích (mặc định màn 5: DOB/Gender).
@@ -19,7 +23,7 @@ import { tgNotify } from '../../../tgbot.mjs';
  * @param {object} leadConfig Cấu hình API và thời gian chờ.
  * @return {Promise<void>} Hoàn tất quy trình kiểm tra lead.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-13
  */
 export async function startLeadVerification(session, leadConfig) {
   // Chỉ check lead khi người dùng tick ô "Check Lead" (leadConfig.enabled === true).
@@ -32,9 +36,13 @@ export async function startLeadVerification(session, leadConfig) {
   }
   session.leadCheckRunning = true;
   session.leadCheckStatus = 'checking';
-  const exitIp = session.exitIp;
+  let exitIp = session.exitIp;
   const proxyHost = session.proxyServer ? normalizeIpAddress(session.proxyServer) : null;
   const targetIps = [exitIp || proxyHost].filter(Boolean);
+  // Phiên GoLogin có exitIps: kiểm lại IP proxy mỗi lượt vì proxy xoay có thể đổi IP giữa chừng.
+  const observeProxyIp = async () => {
+    if (session.exitIps && session.proxy) await recordObservedExitIp(session, await checkProxyExitIp(session.proxy).catch(() => null));
+  };
   const targetDesc = session.completedScreens ? `Màn ${session.completedScreens}` : session.emailScreenNumber ? `màn điền email (Màn ${session.emailScreenNumber})` : leadConfig.checkScreen ? `Màn ${leadConfig.checkScreen}` : 'sau khi điền form';
   const slotNum = session.tileIndex !== undefined ? session.tileIndex + 1 : session.slot || 1;
   const label = `Slot ${slotNum} [IP: ${exitIp}]`;
@@ -88,7 +96,14 @@ export async function startLeadVerification(session, leadConfig) {
 
     // 2 lần x 30s: Mỗi lượt chờ 30s, gọi API kiểm tra lead (lead về giữa chừng ở các nhịp 10s là tiếp tục ngay)
     const pollIntervalSec = 10;
+    let matchedLead = null;
+    await observeProxyIp();
+    session.addBrowserLog?.({
+      type: 'lead_check_targets', ip: exitIp,
+      detail: `Kiểm lead theo ${session.clickIds?.size || 0} mã clickid bắt được lúc click và IP của phiên: ${[...(session.exitIps || targetIps)].join(', ')}.`
+    });
     for (attempt = 1; attempt <= maxAttempts && !leadFound; attempt++) {
+      if (attempt > 1) await observeProxyIp();
       console.log(`[LeadCheck] ${label}: Bắt đầu lượt kiểm tra lead ${attempt}/${maxAttempts} (${intervalSeconds}s)...`);
       let attemptSecondsLeft = intervalSeconds;
       while (attemptSecondsLeft > 0) {
@@ -114,8 +129,9 @@ export async function startLeadVerification(session, leadConfig) {
           if (protectConfirmedLeadSession(session)) return;
           latestLeadData = leadData;
           latestAttemptHadApiError = false;
-          const isPresent = isLeadPresent(leadData, targetIps);
-          if (isPresent) {
+          matchedLead = findSessionLead(leadData, { clickIds: session.clickIds || [], ips: [...(session.exitIps || []), ...targetIps] })
+            || (isLeadPresent(leadData, targetIps) ? { record: null, ip: null, by: 'ip' } : null);
+          if (matchedLead) {
             leadFound = true;
             console.log(`[LeadCheck] ${label}: ✅ Tìm thấy lead cho IP ${exitIp} ở lượt ${attempt}/${maxAttempts}! Tiếp tục làm tiếp.`);
             break;
@@ -133,6 +149,15 @@ export async function startLeadVerification(session, leadConfig) {
     }
     if (protectConfirmedLeadSession(session)) return;
     if (leadFound) {
+      const leadIp = matchedLead?.ip;
+      if (leadIp && leadIp !== normalizeIpAddress(exitIp)) {
+        // Toffers ghi IP khác IP app đang hiển thị (proxy đổi IP): lấy đúng IP của lead để thống kê và khoá.
+        await recordObservedExitIp(session, leadIp);
+        session.addBrowserLog?.({ type: 'lead_ip_resolved', ip: leadIp,
+          detail: `Lead khớp theo ${matchedLead.by === 'clickid' ? 'clickid' : 'IP phụ của phiên'}; toffers ghi IP ${leadIp} thay vì ${exitIp}. Dùng IP ${leadIp} cho phiên.` });
+        session.exitIp = exitIp = leadIp;
+        session.onExitIpChanged?.(leadIp);
+      }
       session.confirmedLeadIp = normalizeIpAddress(exitIp);
       session.leadCheckStatus = 'confirmed';
       session.screen5LeadVerified = true;
@@ -151,8 +176,11 @@ export async function startLeadVerification(session, leadConfig) {
         confirmedAt: new Date().toISOString(),
         leadAttempt: attempt
       });
-      session.leadCheckMessage = `✅ Đã có lead về cho IP ${exitIp}! Đã làm đến Màn ${currentScreen}, đã nhảy trang ${jumpCount} lần. Đang tiếp tục tự điền các bước tiếp theo...`;
-      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead (Màn ${currentScreen}, nhảy ${jumpCount})</span>`);
+      const stopAfterLead = shouldStopAfterLead(session);
+      session.leadCheckMessage = stopAfterLead
+        ? `✅ IP ${exitIp} đã có lead; đã dừng autofill, AI và chuột tự động. Giữ trình duyệt mở.`
+        : `✅ Đã có lead về cho IP ${exitIp}! Đã làm đến Màn ${currentScreen}, đã nhảy trang ${jumpCount} lần. Đang tiếp tục tự điền các bước tiếp theo...`;
+      updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#22c55e;">✅ Có lead${stopAfterLead ? ' — đã dừng tự động' : ` (Màn ${currentScreen}, nhảy ${jumpCount})`}</span>`);
       void tgNotify(`🎉 <b>CÓ LEAD!</b>\n🌐 IP: <code>${exitIp}</code>\n📄 Đã làm đến: <b>Màn ${currentScreen}</b>\n🔀 Đã nhảy trang: <b>${jumpCount} lần</b>\n🏷️ Offer: ${session.offerNumber ?? 1}`);
 
       // Nếu đang bật chế độ ẩn chờ lead: hiển thị trình duyệt lên màn hình ngay khi có lead
@@ -163,12 +191,12 @@ export async function startLeadVerification(session, leadConfig) {
         offer: session.offerNumber ?? session.streamRole ?? 1,
         type: 'lead_confirmed',
         ip: exitIp,
-        detail: `Đã xác nhận có lead trên toffers.top ở lần kiểm tra thứ ${attempt} (Màn ${targetScreen}). Đã làm đến Màn ${currentScreen}, đã nhảy trang ${jumpCount} lần.`
+        detail: `Đã xác nhận có lead trên toffers.top (khớp theo ${matchedLead?.by === 'clickid' ? 'clickid' : 'IP'}) ở lần kiểm tra thứ ${attempt} (Màn ${targetScreen}). Đã làm đến Màn ${currentScreen}, đã nhảy trang ${jumpCount} lần.`
       });
 
       // Kích hoạt ngay lượt quét autofill tiếp theo để tiếp tục Jump Page / Rewards / Offerwall
       try {
-        session.triggerAutofillScan?.();
+        if (!stopAfterLead) session.triggerAutofillScan?.();
       } catch {}
     } else if (latestAttemptHadApiError) {
       session.leadCheckStatus = 'api_error';
@@ -185,7 +213,7 @@ export async function startLeadVerification(session, leadConfig) {
       const returnedLeadIps = latestLeadData.results.slice(0, 5).map(lead => `ID ${lead.id || '?'} / IP ${normalizeIpAddress(lead.ip) || '?'}`).join('; ');
       session.leadCheckStatus = 'unmatched';
       session.screen5LeadVerified = false;
-      const mismatchText = `Có ${latestLeadData.results.length} lead trong API nhưng chưa khớp IP ${exitIp}`;
+      const mismatchText = `Có ${latestLeadData.results.length} lead trong API nhưng chưa khớp clickid (${session.clickIds?.size || 0} mã) hay IP ${[...(session.exitIps || [exitIp])].join(', ')}`;
       session.addBrowserLog?.({
         type: 'lead_ip_mismatch',
         ip: exitIp,

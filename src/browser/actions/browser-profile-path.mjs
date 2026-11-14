@@ -2,16 +2,15 @@ import { chromeProfileDirectory } from '../chrome-paths.mjs';
 import { join } from 'node:path';
 
 /**
- * Tách profile CloakBrowser khỏi profile Chrome thường theo phiên bản engine thực tế.
+ * Profile Chrome riêng theo kênh và phiên bản Chrome thực tế của slot.
  *
  * @param {{channel: string, version: string}} build Bản Chrome được phân bổ cho slot.
  * @param {string} proxyKey Khóa profile gắn với proxy và offer.
- * @param {string|null} cloakVersion Phiên bản engine CloakBrowser, hoặc null khi dùng Chrome thường.
- * @return {string} Đường dẫn profile độc lập với engine còn lại.
+ * @return {string} Đường dẫn profile theo kênh/phiên bản Chrome và proxy.
  * @throws {never} Hàm chỉ nối các thành phần đường dẫn hợp lệ.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-10
  */
-export function browserProfilePath(build, proxyKey, cloakVersion = null) {
-  return join(chromeProfileDirectory, cloakVersion !== null ? 'cloakbrowser' : build.channel, cloakVersion ?? build.version, proxyKey);
+export function browserProfilePath(build, proxyKey) {
+  return join(chromeProfileDirectory, build.channel, build.version, proxyKey);
 }

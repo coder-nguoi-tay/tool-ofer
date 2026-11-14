@@ -21,7 +21,7 @@ async function loadLastLaunchSettings() {
             document.getElementById('detailsMultiLinks').open = true;
           }
 
-          if (s.timeLimit) document.getElementById('inputTimeLimit').value = s.timeLimit;
+          if (s.maxRunMinutes !== undefined) document.getElementById('inputTimeLimit').value = s.maxRunMinutes;
           if (s.completeText) document.getElementById('inputCompleteText').value = s.completeText;
           if (s.delayStart) document.getElementById('inputDelayStart').value = s.delayStart;
           if (s.delayStop) document.getElementById('inputDelayStop').value = s.delayStop;
@@ -38,14 +38,12 @@ async function loadLastLaunchSettings() {
           // Đồng bộ các checkbox tuỳ chọn thực thi & chế độ ngầm
           if (s.runInApp !== undefined) document.getElementById('cbxRunInApp').checked = Boolean(s.runInApp);
           if (s.multiTab !== undefined) document.getElementById('cbxMultiTab').checked = Boolean(s.multiTab);
-          if (s.useCloakBrowser !== undefined) document.getElementById('cbxCloakBrowser').checked = Boolean(s.useCloakBrowser);
           if (s.dataSaver !== undefined) document.getElementById('cbxDataSaver').checked = Boolean(s.dataSaver);
           if (s.checkDuplicate !== undefined) document.getElementById('cbxCheckDuplicateIP').checked = Boolean(s.checkDuplicate);
           if (s.hideUntilTarget !== undefined) document.getElementById('cbxHideUntilTarget').checked = Boolean(s.hideUntilTarget);
           if (s.hideUntilLead !== undefined) document.getElementById('cbxHideUntilLead').checked = Boolean(s.hideUntilLead);
           if (s.enableLeadCheck !== undefined) document.getElementById('cbxCheckLead').checked = Boolean(s.enableLeadCheck);
-          if (s.aiAssist !== undefined) document.getElementById('cbxAiAssist').checked = Boolean(s.aiAssist);
-          if (s.saveRRS !== undefined) document.getElementById('cbxRRS').checked = Boolean(s.saveRRS);
+          if (s.stopAutofillOnLead !== undefined) document.getElementById('cbxStopAutofillOnLead').checked = Boolean(s.stopAutofillOnLead);
           if (s.autoSubmitForm !== undefined) document.getElementById('cbxAutoSubmit').checked = Boolean(s.autoSubmitForm);
 
           // Đồng bộ các hệ điều hành giả lập

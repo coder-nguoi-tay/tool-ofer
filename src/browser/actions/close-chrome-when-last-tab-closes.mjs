@@ -11,7 +11,7 @@ import { prepareManualBrowserClose } from './prepare-manual-browser-close.mjs';
  * @return {void} Đăng ký theo dõi thao tác đóng tab cuối.
  * @throws {never} Đăng ký callback đóng tab không thực thi thao tác trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-14
  */
 export function closeChromeWhenLastTabCloses(session) {
   const watchedPages = new WeakSet();
@@ -23,9 +23,13 @@ export function closeChromeWhenLastTabCloses(session) {
    * @return {Promise<void>} Kết thúc sau khi đóng phiên hoặc bỏ qua nếu còn tab.
    * @throws {never} Lỗi khi đóng phiên được xử lý tại callback.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-11
+   * @since 2026-11-14
    */
   async function closeEmptyChromeSession(closedPage) {
+    if (session.isGoLogin) {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      if (session._cdpBrowser?.isConnected?.() === false) return;
+    }
     if (session.suppressAutoRefill || session.isClosed || session.closingDueToTrafficBlocked || session.closingDueToNoLead || session.leadCheckStatus === 'failed') return;
     try {
       for (const page of session.browser.pages()) {

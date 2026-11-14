@@ -12,7 +12,8 @@ async function handleResetBandwidth(scope) {
       if (!confirm(confirmMsg)) return;
 
       try {
-        const res = await api('/bandwidth/reset', { scope });
+        // Route chỉ nhận POST kèm JSON; trước đây gửi nhầm GET nên luôn lỗi 404.
+        const res = await api('/bandwidth/reset', { method: 'POST', body: JSON.stringify({ scope }) });
         if (res && res.ok) {
           alert(res.message || 'Đã đặt lại dữ liệu băng thông.');
           fetchBandwidthStats();

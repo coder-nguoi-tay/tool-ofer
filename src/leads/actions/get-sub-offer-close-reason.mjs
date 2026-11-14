@@ -19,13 +19,19 @@ const PATH_RULES = [
  * @param {{url?: string, text?: string}} pageInfo URL và chữ hiển thị của tab.
  * @return {string|null} Lý do đóng.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 export function matchSubOfferCloseReason({ url = '', text = '' } = {}) {
   let host = '';
-  try { host = new URL(url).hostname; } catch {}
   let path = '';
-  try { path = new URL(url).pathname; } catch {}
+  let protocol = '';
+  try {
+    const parsedUrl = new URL(url);
+    host = parsedUrl.hostname;
+    path = parsedUrl.pathname;
+    protocol = parsedUrl.protocol;
+  } catch {}
+  if (protocol === 'chrome-error:' && host === 'chromewebdata') return 'Offer phụ lỗi mạng trình duyệt (chrome-error://chromewebdata/)';
   for (const [pattern, reason] of HOST_RULES) if (host && pattern.test(host)) return reason;
   for (const [hostPattern, pathPattern, reason] of PATH_RULES) if (host && hostPattern.test(host) && pathPattern.test(path)) return reason;
   for (const [pattern, reason] of TEXT_RULES) if (pattern.test(text)) return reason;

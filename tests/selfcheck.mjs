@@ -357,12 +357,42 @@ assert.equal(
     frames: () => [
       { url: () => 'https://insurancehelpguru.com' },
       {
+        // Iframe form chính (lớn, đang hiện) bị từ chối kết nối: vẫn tính là trang chết.
         url: () => 'chrome-error://chromewebdata/',
         evaluate: async () => 'locotomato.com refused to connect.',
+        frameElement: async () => ({ boundingBox: async () => ({ x: 0, y: 0, width: 600, height: 700 }) }),
       },
     ],
   }),
   'Lỗi kết nối (locotomato.com refused to connect.)',
+);
+// Iframe phụ (tracking/định danh thiết bị, ẩn hoặc nhỏ) lỗi mạng: không đóng cả phiên.
+assert.equal(
+  await getDeadOrBlockedReason({
+    isClosed: () => false,
+    url: () => 'https://insurancehelpguru.com',
+    evaluate: () => null,
+    mainFrame: () => ({ url: () => 'https://insurancehelpguru.com' }),
+    frames: () => [
+      {
+        url: () => 'chrome-error://chromewebdata/',
+        evaluate: async () => 'deviceid.trueleadid.com unexpectedly closed the connection.',
+        frameElement: async () => ({ boundingBox: async () => ({ x: 0, y: 0, width: 1, height: 1 }) }),
+      },
+    ],
+  }),
+  null,
+);
+// Iframe phụ báo trùng IP toffers: vẫn là tín hiệu nghiệp vụ, phải tính.
+assert.equal(
+  await getDeadOrBlockedReason({
+    isClosed: () => false,
+    url: () => 'https://insurancehelpguru.com',
+    evaluate: () => null,
+    mainFrame: () => ({ url: () => 'https://insurancehelpguru.com' }),
+    frames: () => [{ url: () => 'https://toffers.top/error.php?error=ip_1.2.3.4_clicked_offer_1', frameElement: async () => null }],
+  }),
+  'IP đã click offer trước đó (Toffers Duplicate IP)',
 );
 
 // Test parseAutofillRecords: hỗ trợ đầy đủ các trường SSN, Email, Banking và tự phục hồi JSON cắt cụt

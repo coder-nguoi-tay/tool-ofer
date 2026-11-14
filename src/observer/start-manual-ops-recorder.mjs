@@ -1,4 +1,5 @@
 import { OBSERVER_INIT_SCRIPT } from './state/observer-init-script.mjs';
+import { isAccessOnlyLogging } from '../logging/is-access-only-logging.mjs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createBatchedActionWriter } from './create-batched-action-writer.mjs';
@@ -13,9 +14,10 @@ import { isDetailedRecording } from '../logging/recorder/recording-policy.mjs';
  * @param {object} options Callback onLog và chu kỳ poll dự phòng.
  * @return {object} Đường dẫn debug JSONL, Promise ready, flush và stop bất đồng bộ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-13
  */
 export function startManualOpsRecorder(context, session, appDataDirectory, options = {}) {
+  if (isAccessOnlyLogging()) return { filePath: null, ready: Promise.resolve(), stop: async () => {}, flush: async () => {} };
   const directory = join(appDataDirectory, 'logs');
   const filePath = join(directory, `manual-ops-${session.recordingId || randomUUID()}.jsonl`);
   const writer = createBatchedActionWriter(filePath, detail => options.onLog?.({ type: 'recorder_error', source: 'system', detail }));

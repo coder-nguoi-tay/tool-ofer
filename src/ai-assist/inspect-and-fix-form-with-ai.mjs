@@ -1,4 +1,5 @@
 import { waitForAiCapacity } from './wait-for-ai-capacity.mjs';
+import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
 import { buildRepairActions } from './repair/build-repair-actions.mjs';
 import { resolveRecordCity } from '../autofill/record-values/resolve-record-city.mjs';
 import { readVisiblePageState } from './visible-state/read-visible-page-state.mjs';
@@ -25,9 +26,10 @@ import { resolveAiTimeoutSeconds } from './resolve-ai-timeout-seconds.mjs';
  * @param {object} [options={}] Tùy chọn mở rộng.
  * @return {Promise<{status: string, fixed: boolean, errors: string[], actionsCount: number}>} Trạng thái sửa form đã được xác minh hoặc lý do chưa sửa được.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-13
  */
 async function inspectAndFixFormWithAi(page, record, session = {}, options = {}) {
+  if (shouldStopAfterLead(session)) return { status: 'lead_confirmed_paused', fixed: false, errors: [], actionsCount: 0 };
   if (!page || typeof page.isClosed === 'function' && page.isClosed()) {
     return {
       status: 'closed',
@@ -209,6 +211,7 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
           session,
           logger: m => console.log(`[Slot ${slotNum}] ${m}`)
         });
+        if (shouldStopAfterLead(session)) return { status: 'lead_confirmed_paused', fixed: false, errors: [], actionsCount: 0 };
         if (agentResult?.status === 'timeout') {
           updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#f59e0b;font-weight:600;">🤖 AI hết giờ; autofill tiếp tục</span>`);
           addLog({
@@ -308,6 +311,7 @@ ${cleanedHtml}`;
     let actionsCount = 0;
     let actionsDispatchedCount = 0;
     for (const act of actions) {
+      if (shouldStopAfterLead(session)) break;
       if (page.isClosed() || session.isClosed) break;
       try {
         const actionResult = await executeAction(page, act, session, { repairOnly: true, allowSubmit: false, record });

@@ -71,7 +71,7 @@ function renderLogs() {
           : '';
         return `<tr class="${escHtml(entry.type)}">`
           + `<td>${fmtTime(entry.time)}</td>`
-          + `<td>Slot ${session.slot} · ${escHtml(session.ip)}</td>`
+          + `<td>Slot ${session.slot} · ${escHtml(session.ip)}<br><span style="color:#64748b;font-size:10px;" title="${escHtml(session.goLoginUserAgent || session.deviceSummary || '')}">${escHtml(session.deviceVersion || session.deviceProfile || 'Chưa rõ thiết bị')}</span></td>`
           + `<td>${typeLabel}</td>`
           + `<td style="cursor:${hasHtml ? 'pointer' : 'default'}" `
           + `${hasHtml ? `data-html="${escHtml(entry.html)}" data-title="${escHtml(entry.url)}" data-filepath="${escHtml(entry.htmlPath || '')}"` : ''}>`

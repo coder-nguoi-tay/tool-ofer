@@ -30,7 +30,7 @@ async function saveOfferConfig(silent = false) {
         LinkOffer2: link2,
         LinkOffer3: link3,
         LinkOffer4: link4,
-        TimeLimit: document.getElementById('txtTimeLimit')?.value || '30',
+        MaxRunMinutes: document.getElementById('txtTimeLimit')?.value ?? '10',
         Complete: document.getElementById('txtTextComplete')?.value || '',
         delayStart: document.getElementById('nudDelayStart')?.value || '1',
         delayStop: document.getElementById('nudDelayStop')?.value || '1',
@@ -39,6 +39,7 @@ async function saveOfferConfig(silent = false) {
         CheckDuplicate: document.getElementById('cbxCheckDuplicateIP')?.checked ?? true,
         HideUntilTarget: document.getElementById('cbxHideUntilTarget')?.checked ?? false,
         HideUntilLead: document.getElementById('cbxHideUntilLead')?.checked ?? false,
+        schedules: typeof getOfferScheduleSettings === 'function' ? getOfferScheduleSettings() : [],
         methodConfigs: methodConfigs,
       };
 
