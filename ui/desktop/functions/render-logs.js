@@ -2,7 +2,7 @@
  * Render logs.
  * @return {void} Kết quả xử lý render logs.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-15
  */
 function renderLogs() {
       const slotFilterEl = document.getElementById('logFilterSlot');
@@ -171,6 +171,9 @@ function renderLogs() {
         } else if (entry.type === 'checkbox_checked') {
           typeBadge = '<span class="badge-log badge-checkbox">☑️ Checkbox</span>';
           detail = `Đã tích ô điều khoản: <strong style="color:#1d4ed8;">${escHtml(entry.id || entry.name || 'consent')}</strong> (${escHtml(entry.text || '')})`;
+        } else if (entry.type === 'input_fill_html') {
+          typeBadge = '<span class="badge-log badge-field">📄 HTML input</span>';
+          detail = escHtml(entry.detail || entry.fieldId || entry.fieldName || 'Ô nhập');
         } else if (entry.type === 'field_filled') {
           typeBadge = '<span class="badge-log badge-field">✍️ Điền ô</span>';
           detail = `[${escHtml(entry.id || entry.name || '')}] = <strong>${escHtml(entry.text || entry.value || '')}</strong>`;

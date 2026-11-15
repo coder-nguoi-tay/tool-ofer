@@ -14,14 +14,37 @@ import { semanticCategories } from './state/semantic-categories.mjs';
  *
  * @param {string[]} candidateNames Danh sách tên, id, nhãn, placeholder, autocomplete của ô.
  * @param {Record<string, string>} record Bản ghi dữ liệu đã chuẩn hóa tên trường.
- * @param {object} metadata Thông tin cấu trúc của ô input (type, kind, maxLength).
+ * @param {object} metadata Nhãn, placeholder, ariaLabel và cấu trúc của ô input.
  * @return {string|null} Giá trị cần điền hoặc null nếu không khớp.
+ * @throws {never} Nhãn địa chỉ không có dữ liệu phù hợp trả về null, không mượn phone.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-15
  */
 function matchFieldValue(candidateNames, record, metadata = {}) {
+  const accessibleName = metadata.accessibleName || metadata.ariaLabelledByText || metadata.ariaLabel;
+  if (accessibleName && accessibleName.length <= 60) {
+    const normalizedAccessibleName = normalizeFieldName(accessibleName.replace(/đ/gi, 'd'));
+    const category = semanticCategories.find(candidate => candidate.patterns.some(pattern => pattern.test(normalizedAccessibleName)));
+    const splitPhoneField = category?.type === 'phone' && [metadata.name, metadata.id].some(name => /^(areacode|phone[123]|tel[123]|prefix|phoneprefix|linenumber|phoneline)$/i.test(name || ''));
+    if (category && normalizedAccessibleName.length <= 40 && !splitPhoneField) {
+      // Chạy lại bộ so khớp hiện có với tên nghiệp vụ đã xác minh, bỏ các định danh mâu thuẫn.
+      return matchFieldValue([normalizedAccessibleName], record, {
+        ...metadata, accessibleName: '', ariaLabelledByText: '', ariaLabel: '', label: '', placeholder: '', name: '', id: '',
+        names: [normalizedAccessibleName], type: category.type === 'email' ? 'email' : metadata.type === 'date' && category.type === 'dob' ? 'date' : 'text'
+      });
+    }
+  }
+  const visibleHints = [metadata.label, metadata.ariaLabelledByText, metadata.ariaLabel, metadata.placeholder]
+    .filter(text => typeof text === 'string' && text.trim() && text.length <= 120)
+    .map(text => normalizeFieldName(text.replace(/đ/gi, 'd')));
+  const addressHints = visibleHints.filter(hint => !/email/.test(hint) && /address|street|diachi|^addr|^apt|^suite|^unit/.test(hint));
+  if (addressHints.length) {
+    const addressCategory = semanticCategories.find(category => ['address2', 'address'].includes(category.type) && addressHints.some(hint => category.patterns.some(pattern => pattern.test(hint))))
+      || semanticCategories.find(category => category.type === 'address');
+    if (addressCategory) return formatMatchedValue(addressCategory.resolve(record, metadata) || null, { ...metadata, type: 'text', names: addressHints });
+  }
   // Lọc chỉ giữ các candidate thực sự là tên trường (bỏ các chuỗi văn bản dài > 60 ký tự)
-  const normalizedCandidates = candidateNames.filter(n => typeof n === 'string' && n.trim().length > 0 && n.trim().length <= 60).map(normalizeFieldName).filter(n => n.length > 0 && n.length <= 40);
+  let normalizedCandidates = candidateNames.filter(n => typeof n === 'string' && n.trim().length > 0 && n.trim().length <= 60).map(normalizeFieldName).filter(n => n.length > 0 && n.length <= 40);
 
   // Nhận diện rõ ràng các trường phi-phone (Non-Phone) TRƯỚC khi can thiệp phone
   const nameLc = String(metadata.name || '').toLowerCase();
@@ -40,6 +63,7 @@ function matchFieldValue(candidateNames, record, metadata = {}) {
   // Ô tuổi (type=tel, maxlength=3) trước đây bị đẩy 'phone' lên đầu nên gõ 3 số đầu của SĐT (vd 814).
   const isExplicitAge = candidateNames.some(n => typeof n === 'string' && /(^|[^a-z])(age|tuoi)([^a-z]|$)/i.test(n) && n.length <= 60);
   const blockPhone = isExplicitAddress || isExplicitZip || isExplicitCity || isExplicitState || isExplicitAge;
+  if (blockPhone) normalizedCandidates = normalizedCandidates.filter(candidate => !/phone|mobile|^tel|^cell|^sdt$|dienthoai/.test(candidate));
   if (metadata.type === 'email' && !normalizedCandidates.includes('email')) {
     normalizedCandidates.unshift('email');
   }

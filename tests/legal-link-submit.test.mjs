@@ -68,3 +68,20 @@ test('không chọn nút quay lại có class back-arrow dù chữ là "Submit" 
     });
   }
 });
+
+test('submit và primitive click từ chối header/footer/aside/attribution dù nằm trong form đang chọn', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { inspectInteractionReadiness } = await import('../src/browser/locators/inspect-interaction-readiness.mjs');
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  for (const region of ['header', 'footer', 'nav', 'aside', 'div class="ow-attribution"']) {
+    const tag = region.split(' ')[0];
+    const { context, page } = await createFormScopeFixture(browser, `<form><input name="email"><${region}><a class="btn" href="https://noise.test" id="noise">Continue</a></${tag}><main><button type="submit" id="central">Next</button></main></form>`);
+    try {
+      assert.equal(await (await findSubmitButton(page)).getAttribute('id'), 'central');
+      assert.equal((await page.locator('#noise').evaluate(inspectInteractionReadiness, null)).ready, false);
+      assert.equal((await page.locator('#central').evaluate(inspectInteractionReadiness, null)).ready, true);
+      await page.locator('#central').evaluate(element => element.remove());
+      assert.equal(await findSubmitButton(page), null, 'không fallback sang link ngoài vùng nghiệp vụ');
+    } finally { await context.close(); }
+  }
+});

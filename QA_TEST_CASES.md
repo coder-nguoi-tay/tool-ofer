@@ -385,3 +385,22 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - Chủ động ngắt CDP khi Orbita còn sống: không SIGTERM, không nhả khóa, không giảm active count; kết nối lại cùng process, giữ lead/record/id recording và không mở lại offer hoặc chạy lại script.
 - Nối lại ba lần không được: giữ browser và log một mốc gologin_reconnect_failed, không tự bù browser trùng IP. Process thoát hoặc Stop chủ động: dọn một lần theo chính sách cũ.
 - Chạy chủ động `node tests/manual/gologin-in-app-recovery.mjs --live`: proxy QA loopback thật, form riêng, Windows/Android chạy headless, kiểm tra cửa sổ bằng CoreGraphics, ngắt CDP rồi xác minh cùng process/lead/record và screenshot; dọn chỉ profile QA.
+# SweepstakesAlerts: giữ trang card và mở offer con (2026-11-15)
+
+- Màn 98–100% phải có card/link hiển thị; chỉ phần trăm, card ẩn hoặc trang khác không kích hoạt dọn tab.
+- Có nhiều tab cũ trong một IP: tới màn card thì giữ chính tab đó, đóng tab cũ trong cùng context; browser/IP khác không đổi, cờ lead vẫn giữ.
+- Card lồng form/wrapper vẫn mở đủ link riêng; link trùng/đã mở và URL bị loại trừ không mở lại. Trang card không điều hướng theo offer con.
+- Có 12 card: mở tối đa 9 tab con; đóng một tab thì mở card tiếp theo, không vượt 10 tab tính cả trang gốc. Link tải chậm không khóa các card sau.
+- Reload trang card hoặc hai lượt quét đồng thời không dọn tab con vừa mở và không mở trùng. Watchdog không gọi AI/F5 trang gốc khi chờ chỗ trống.
+- Bật dừng sau lead hoặc đang chờ lead: không dọn/mở thêm tab. Stop/lead về trong lúc tạo tab phải chặn điều hướng tiếp.
+- Test offline: `node --test tests/sweepstakes-card-page.test.mjs`; test được đăng ký trong runner chính thức.
+
+- SweepstakesAlerts 98% nhúng Addept: iframe đang tải không bấm Powered by/Privacy và không dọn tab; khi có card thì dọn tab cũ một lần, chọn từng task → CTA → Skip. CTA DOM dùng lại vẫn mở task tiếp; đủ 10 tab thì chờ. Chờ lead/dừng sau lead vẫn chặn thao tác.
+
+- Đặt các card/link Continue giả ở header, footer, sidebar và Powered by; chỉ card/nút trong main được chọn. Card ngoài main không được mở dù dùng cùng class. Main chưa có card không được dọn tab dựa trên card footer. Form chỉ còn link attribution/footer phải trả về không có submit; kiểm tra cả primitive click và CTA hợp lệ trong main.
+
+- Ô `name=phone`, `type=tel` nhưng label/aria-labelledby/placeholder là Street Address/Địa chỉ: điền địa chỉ, không điền phone. Thiếu địa chỉ phải để trống; Address Line 2 lấy address2; Email Address vẫn lấy email. Hai ô dùng chung wrapper không được mượn nhãn của nhau.
+
+- ARIA: ghép `aria-labelledby="first-word name-word"` thành First Name; ưu tiên hơn aria-label Phone Number và label native khi mâu thuẫn. ID thiếu được bỏ qua, không còn nhãn tham chiếu hợp lệ thì dùng aria-label. Kiểm tra tên/email/phone/address/zip với name/id/type bị đặt sai và phone2 lấy đúng ba số giữa. Nhánh nhập nhanh không được điền trước dữ liệu trái với ARIA.
+
+- Trang cuối: card 0→1→2→3 có URL 1 trùng 0 chỉ click URL 0,2,3 đúng thứ tự. Chạy hai lượt quét đồng thời, CSS đảo DOM, reload và đóng tab con vẫn không click lại. CTA lỗi input không thử lần hai. Link đầu pending hoặc đủ trần 10 tab phải chờ; khi có chỗ/nhả pending thì mở tiếp đúng thứ tự.

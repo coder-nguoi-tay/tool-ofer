@@ -53,6 +53,7 @@ test('Alpha Intent / SweepstakesAlerts: fillAlphaIntentSpecialFields handles #ai
 
   const createMockLocator = (fieldKey, count = 1, isVisible = true) => ({
     count: async () => count,
+    all: async () => count ? [createMockLocator(fieldKey, count, isVisible)] : [],
     isVisible: async () => isVisible,
     isEditable: async () => isVisible,
     isEnabled: async () => true,
@@ -62,6 +63,7 @@ test('Alpha Intent / SweepstakesAlerts: fillAlphaIntentSpecialFields handles #ai
     check: async () => { values[fieldKey] = 'checked'; },
     isChecked: async () => values[fieldKey] === 'checked',
     evaluate: async (fn) => {
+      if (fn.name === 'collectFieldMetadata') return { names: [fieldKey], name: fieldKey, type: fieldKey === 'phone' ? 'tel' : 'text' };
       const el = {
         dataset: {},
         value: values[fieldKey] || '',
@@ -95,7 +97,7 @@ test('Alpha Intent / SweepstakesAlerts: fillAlphaIntentSpecialFields handles #ai
       if (selector.includes('button-save-phone')) {
         return { count: async () => 0 };
       }
-      return { count: async () => 0, first() { return this; } };
+      return { count: async () => 0, all: async () => [], first() { return this; } };
     },
     evaluate: async (fn, arg) => {
       // Giả lập document.getElementById cho các hidden inputs

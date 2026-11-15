@@ -1,5 +1,5 @@
 import { humanClick } from './human-click.mjs';
-import { tryFastTextInput } from './interaction/try-fast-text-input.mjs';
+import { fillIdentifiedAlphaField } from './alpha-intent/fill-identified-alpha-field.mjs';
 import { syncAlphaHiddenFullName } from './alpha-intent/sync-alpha-hidden-full-name.mjs';
 import { syncAlphaHiddenGender } from './alpha-intent/sync-alpha-hidden-gender.mjs';
 import { syncAlphaTcpaConsent } from './alpha-intent/sync-alpha-tcpa-consent.mjs';
@@ -9,6 +9,8 @@ import { locateFormElements } from './form-scope/locate-form-elements.mjs';
 import { fillAlphaIntentFullName } from './fill-alpha-intent-full-name.mjs';
 import { getNormalizedPhone } from './get-normalized-phone.mjs';
 import { selectFirstAddressSuggestion } from './select-first-address-suggestion.mjs';
+import { collectFieldMetadata } from './collect-field-metadata.mjs';
+import { matchFieldValue } from './match-field-value.mjs';
 
 /**
  * Điền và đồng bộ toàn diện các trường đặc thù của Alpha Intent:
@@ -24,7 +26,7 @@ import { selectFirstAddressSuggestion } from './select-first-address-suggestion.
  * @return {Promise<number>} Số trường/hành động đã hoàn thành trong pass này.
  * @throws {never} Lỗi xử lý an toàn không gián đoạn luồng chính.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-15
  */
 async function fillAlphaIntentSpecialFields(frame, record = {}) {
   let filledCount = 0;
@@ -42,7 +44,7 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
         const curVal = (await fallbackNameField.inputValue({ timeout: 1000 }).catch(() => '')).trim();
         const combinedName = [record.firstname, record.lastname].filter(Boolean).join(' ').trim() || record.fullname || (record.email ? record.email.split('@')[0] : 'James Smith');
         if (combinedName && curVal !== combinedName) {
-          if (await tryFastTextInput(fallbackNameField, combinedName, page)) {
+          if (await fillIdentifiedAlphaField(fallbackNameField, combinedName, page, record)) {
             await fallbackNameField.evaluate(el => {
               el.dataset.uxFilled = '1';
             }, undefined, { timeout: 1000 }).catch(() => {});
@@ -82,7 +84,7 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
       const curAddr = (await addrField.inputValue({ timeout: 1000 }).catch(() => '')).trim();
       const targetAddr = record.address || '4125 N Inspiration Loop';
       if (!curAddr || curAddr.length < 3) {
-        if (await tryFastTextInput(addrField, targetAddr, page)) {
+        if (await fillIdentifiedAlphaField(addrField, targetAddr, page, record)) {
           await addrField.evaluate(el => {
             el.dispatchEvent(new Event('input', {
               bubbles: true
@@ -126,7 +128,7 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
         } else if (record.dob && /^\d{2}\/\d{2}\/\d{4}$/.test(record.dob)) {
           formattedDob = record.dob;
         }
-        if (await tryFastTextInput(dobField, formattedDob, page)) {
+        if (await fillIdentifiedAlphaField(dobField, formattedDob, page, record)) {
           await dobField.evaluate(el => {
             el.dataset.uxFilled = '1';
           }, undefined, { timeout: 1000 }).catch(() => {});
@@ -136,17 +138,19 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
     }
 
     // 4.3 Điền và đồng bộ ô Số điện thoại Alpha Intent (#phone, input[data-testid="phone-input"])
-    const phoneField = locateFormElements(frame, '#phone, input[data-testid="phone-input"], #ai-funnel input#phone, #ai-funnel input[name="phone"], #alpha-intent-content input#phone, input[name="phoneNumber"], input[type="tel"]:not([name*="zip" i]):not([id*="zip" i]):not([name*="postal" i]):not([id*="postal" i]):not([name="age"]):not([id="age"]):not([id$="-age"])').first();
-    // Ô tel của zip/age bị loại: trước đây `.first()` trúng ô Zip đầu tiên và gõ SĐT vào đó.
-    if ((await phoneField.count().catch(() => 0)) > 0 && (await phoneField.isVisible().catch(() => false)) && (await phoneField.isEditable({ timeout: 1000 }).catch(() => false))) {
+    const phoneFields = await locateFormElements(frame, '#phone, input[data-testid="phone-input"], #ai-funnel input#phone, #ai-funnel input[name="phone"], #alpha-intent-content input#phone, input[name="phoneNumber"], input[type="tel"]:not([name*="zip" i]):not([id*="zip" i]):not([name*="postal" i]):not([id*="postal" i]):not([name="age"]):not([id="age"]):not([id$="-age"])').all();
+    const rawPhone = getNormalizedPhone(record);
+    for (const phoneField of phoneFields) {
+      if (!(await phoneField.isVisible().catch(() => false)) || !(await phoneField.isEditable({ timeout: 1000 }).catch(() => false))) continue;
+      const metadata = await phoneField.evaluate(collectFieldMetadata, undefined, { timeout: 1000 }).catch(() => null);
+      if (!metadata || rawPhone.length !== 10 || String(matchFieldValue(metadata.names, record, metadata) || '').replace(/\D/g, '') !== rawPhone) continue;
       const curPhone = (await phoneField.inputValue({ timeout: 1000 }).catch(() => '')).replace(/\D/g, '');
       if (curPhone.length < 10) {
-        const rawPhone = getNormalizedPhone(record);
         const area = rawPhone.slice(0, 3);
         const mid = rawPhone.slice(3, 6);
         const last = rawPhone.slice(6, 10);
         const formatted = `(${area}) ${mid}-${last}`;
-        if (await tryFastTextInput(phoneField, formatted, page)) {
+        if (await fillIdentifiedAlphaField(phoneField, formatted, page, record)) {
           await phoneField.evaluate(el => {
             el.dataset.uxFilled = '1';
           }, undefined, { timeout: 1000 }).catch(() => {});
@@ -161,7 +165,7 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
       const curCity = (await cityField.inputValue({ timeout: 1000 }).catch(() => '')).trim();
       const targetCity = record.city || record.town || 'Clifton';
       if (!curCity || curCity.length < 2) {
-        if (await tryFastTextInput(cityField, targetCity, page)) {
+        if (await fillIdentifiedAlphaField(cityField, targetCity, page, record)) {
           await cityField.evaluate(el => {
             el.dataset.uxFilled = '1';
           }, undefined, { timeout: 1000 }).catch(() => {});
@@ -174,7 +178,7 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
       const curZip = (await zipField.inputValue({ timeout: 1000 }).catch(() => '')).replace(/\D/g, '');
       const targetZip = String(record.zipcode || record.zip || '07055').replace(/\D/g, '').slice(0, 5);
       if (curZip.length !== 5 && targetZip.length === 5) {
-        if (await tryFastTextInput(zipField, targetZip, page)) {
+        if (await fillIdentifiedAlphaField(zipField, targetZip, page, record)) {
           await zipField.evaluate(el => {
             el.dataset.uxFilled = '1';
           }, undefined, { timeout: 1000 }).catch(() => {});
@@ -196,7 +200,7 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
         const mid = rawPhone.slice(3, 6);
         const last = rawPhone.slice(6, 10);
         const formatted = `(${area}) ${mid}-${last}`;
-        if (!await tryFastTextInput(telInput, formatted, page)) return filledCount;
+        if (!await fillIdentifiedAlphaField(telInput, formatted, page, record)) return filledCount;
       }
       const clicked = await humanClick(page, savePhoneBtn);
       if (clicked) {

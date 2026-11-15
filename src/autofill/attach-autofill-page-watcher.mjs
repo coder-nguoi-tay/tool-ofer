@@ -13,12 +13,13 @@ import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-
 import { inspectAndFixFormWithAi } from '../../ai-assist.mjs';
 
 /**
- * Theo dõi điều hướng, lên lịch quét và kiểm tra lead cho một tab.
+ * Theo dõi điều hướng, quét và lead; màn card đang điều phối không gọi AI hoặc reload vì chờ tab con.
  * @param {object} page Tab cần xử lý.
  * @param {object} context Dữ liệu phiên và callback điều phối được giữ bởi attachAutofill.
  * @return {void} Hoàn tất thao tác trên tab.
+ * @throws {Error} Khi không đăng ký được listener của tab.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-15
  */
 export function attachAutofillPageWatcher(page, {
   trackedPages,
@@ -134,6 +135,11 @@ export function attachAutofillPageWatcher(page, {
         void scan(true);
       }, 80);
     } else {
+      if (page._uxSweepstakesCardPageUrl === page.url()) {
+        noProgressRounds = 0;
+        scanDelayMs = 1500;
+        return;
+      }
       if (await isNoSurveyFrame(page._activeAutofillFrame)) {
         noProgressRounds = 0;
         scanDelayMs = 500;

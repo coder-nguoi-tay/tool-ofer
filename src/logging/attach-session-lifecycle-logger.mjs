@@ -21,13 +21,13 @@ const browserCloseTypes = new Set([
 ]);
 
 /**
- * Giữ bằng chứng lead/đóng phiên ngay cả khi tắt log thao tác, không tạo ảnh hoặc HTML.
+ * Giữ bằng chứng lead/đóng phiên và HTML từng ô nhập theo yêu cầu, không chụp toàn trang.
  * @param {object} context Context đang được ghi nhận.
  * @param {object} session Phiên sở hữu IP và trạng thái lead.
  * @param {object} recording Nhật ký phiên đã đăng ký trong lịch sử.
  * @return {Function} Callback nhận các mốc vòng đời, bỏ qua log thao tác thông thường.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-15
  */
 export function attachSessionLifecycleLogger(context, session, recording) {
   let ended = false;
@@ -38,10 +38,11 @@ export function attachSessionLifecycleLogger(context, session, recording) {
    * @param {object} entry Mốc lead hoặc lý do đóng từ luồng nghiệp vụ.
    * @return {object|null} Mốc đã lưu hoặc null nếu là log thao tác.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-13
+   * @since 2026-11-15
    */
   function recordLifecycle(entry) {
-    if (!lifecycleTypes.has(entry.type) && entry.type !== 'session_closed') return null;
+    const isInputHtml = entry.type === 'input_fill_html';
+    if (!lifecycleTypes.has(entry.type) && entry.type !== 'session_closed' && !isInputHtml) return null;
     const detail = String(entry.detail || '').replace(/https?:\/\/[^\s<>]+/g, value => {
       try { const url = new URL(value); url.search = ''; url.hash = ''; url.username = ''; url.password = ''; return url.href; }
       catch { return '[URL]'; }
@@ -63,14 +64,15 @@ export function attachSessionLifecycleLogger(context, session, recording) {
       platform: entry.platform ?? null, userAgent: entry.userAgent ?? null,
       uaPlatform: entry.uaPlatform ?? null, uaPlatformVersion: entry.uaPlatformVersion ?? null,
       uaMobile: entry.uaMobile ?? null, touchPoints: entry.touchPoints ?? null,
+      ...(isInputHtml ? { html: entry.html, fieldId: entry.fieldId, fieldName: entry.fieldName, fieldType: entry.fieldType, pageUrl: entry.pageUrl, frameUrl: entry.frameUrl } : {}),
     };
     recording.confirmedLeadIp = confirmedLeadIp;
     if (browserCloseTypes.has(entry.type) && (!closeRequest || entry.type !== 'gologin_close_requested')) closeRequest = event;
     recording.logs.push(event);
     limitSessionEvents(recording);
     stampLogSeq(event);
-    queueSaveBrowserLogs(250);
-    console.log(`[Lifecycle] Slot ${recording.slot} IP ${event.ip || '?'} lead=${confirmedLeadIp || 'chưa xác nhận'} ${event.type}: ${detail}`);
+    queueSaveBrowserLogs(isInputHtml ? 5000 : 250);
+    if (!isInputHtml) console.log(`[Lifecycle] Slot ${recording.slot} IP ${event.ip || '?'} lead=${confirmedLeadIp || 'chưa xác nhận'} ${event.type}: ${detail}`);
     return event;
   }
 

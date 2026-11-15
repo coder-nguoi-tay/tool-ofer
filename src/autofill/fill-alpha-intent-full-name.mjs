@@ -1,4 +1,4 @@
-import { tryFastTextInput } from './interaction/try-fast-text-input.mjs';
+import { fillIdentifiedAlphaField } from './alpha-intent/fill-identified-alpha-field.mjs';
 import { locateFormElements } from './form-scope/locate-form-elements.mjs';
 /**
  * Điền ô họ tên Alpha Intent bằng dữ liệu record rồi xác minh giá trị còn giữ sau blur.
@@ -8,7 +8,7 @@ import { locateFormElements } from './form-scope/locate-form-elements.mjs';
  * @return {Promise<boolean>} True nếu ô họ tên giữ được giá trị hợp lệ.
  * @throws {never} Lỗi locator được xử lý và trả về false.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-15
  */
 async function fillAlphaIntentFullName(frame, record = {}) {
   const fullName = String(record.fullname || '').trim();
@@ -22,7 +22,7 @@ async function fillAlphaIntentFullName(frame, record = {}) {
     if (current === name && (await field.getAttribute('data-ux-filled', { timeout: 1000 }).catch(() => null)) === '1') return false;
     if (current !== name) {
       const page = typeof frame.page === 'function' ? frame.page() : frame;
-      if (!await tryFastTextInput(field, name, page)) return false;
+      if (!await fillIdentifiedAlphaField(field, name, page, record)) return false;
     }
     await field.press('Tab', {
       timeout: 1000

@@ -17,7 +17,7 @@ import { syncBrowserLogSessionMetadata } from '../../logging/browser-logs/sync-s
  * @param {object} session Phiên sở hữu các tab trình duyệt.
  * @return {void} Gắn bộ ghi nhận dùng chung cho bot, Screen View và observer.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-15
  */
 export function attachBrowserLogger(context, session) {
   const sessionItem = {
@@ -45,7 +45,7 @@ export function attachBrowserLogger(context, session) {
    * @param {object|null} eventPage Tab phát sinh, nếu có.
    * @return {object} Sự kiện đã được gán định danh và lưu vào phiên.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-11
+   * @since 2026-11-15
    */
   function addLog(entry, eventPage = null) {
     syncBrowserLogSessionMetadata(sessionItem, session);
@@ -55,7 +55,7 @@ export function attachBrowserLogger(context, session) {
     const result = coalesce(entry, page, () => ({
       ...entry, id: randomUUID(), sequence: ++nextEventNumber,
       time: new Date().toISOString(), offer: entry.offer ?? sessionItem.offer,
-      tabId: page ? pageIds.get(page) : null, pageUrl: page?.url() || '',
+      tabId: page ? pageIds.get(page) : null, pageUrl: entry.type === 'input_fill_html' ? entry.pageUrl : page?.url() || '',
       source: entry.source || 'automation', screen: session.currentScreen ?? session.screenReached ?? 1,
       leadStatus: session.leadCheckStatus ?? null,
       autofillStep: session.autofillStep ?? null, offerMode: session.offerMode ?? null,

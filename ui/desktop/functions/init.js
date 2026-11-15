@@ -27,6 +27,7 @@ async function init() {
         loadAutofillList(),
         loadWindowsSettings(),
         loadAiConfigUi(),
+        loadAgentApiConfigUi(),
         fetchLogs(),
         fetchToffersLeads(false),
         fetchRunningState(),

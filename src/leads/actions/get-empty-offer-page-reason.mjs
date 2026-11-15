@@ -4,15 +4,18 @@ import { hasOfferWorkEvidence } from './has-offer-work-evidence.mjs';
 import { readEvidenceWithTimeout } from '../../logging/recorder/read-evidence-with-timeout.mjs';
 
 /**
- * Nhận diện trang trắng hoặc chỉ có một dòng ngắn sau thời gian chờ; không phân loại non-offer nói chung.
+ * Nhận diện trang trắng/một dòng ngắn; giữ trang card gốc đang điều phối offer con.
  * @param {object} page Tab cần kiểm tra.
  * @param {{key?: string, since?: number}} tracker Mốc bắt đầu của tài liệu hiện tại.
+ * @param {object} options Lựa chọn phân loại tab phụ.
  * @return {Promise<string|null>} Lý do đóng hoặc null nếu cần giữ/chờ thêm.
+ * @throws {Error} Khi API tab phát sinh lỗi ngoài quá trình đọc evidence.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-15
  */
 export async function getEmptyOfferPageReason(page, tracker, { subTab = false } = {}) {
   if (!page || page.isClosed?.() || page._aiAssistRunning || page._aiFormFixing || page._leadRecoveryInProgress) return null;
+  if (page._uxSweepstakesCardPageUrl && page._uxSweepstakesCardPageUrl === page.url()) { tracker.since = Date.now(); return null; }
   if (page._lateProgressRecoveryActive) { tracker.since = Date.now(); return null; }
   const url = page.url?.() || '';
   if (/api\.ipify\.org|toffers\.top|adtrapper|adswapper/i.test(url)) return null;

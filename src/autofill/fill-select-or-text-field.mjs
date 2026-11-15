@@ -10,13 +10,15 @@ import { humanClick } from './human-click.mjs';
 import { humanType } from './human-type.mjs';
 import { parseDobComponents } from './parse-dob-components.mjs';
 import { selectFirstAddressSuggestion } from './select-first-address-suggestion.mjs';
+import { recordInputFillHtml } from '../logging/record-input-fill-html.mjs';
 
 /**
  * Điền giá trị vào select hoặc ô nhập và xử lý chọn địa chỉ gợi ý.
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần bỏ qua trường hiện tại.
+ * @throws {never} Lỗi từng thao tác nhập được xử lý, HTML chỉ là bằng chứng bổ sung.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-15
  */
 export async function fillSelectOrTextField({
   metadata,
@@ -58,6 +60,7 @@ export async function fillSelectOrTextField({
       detail: `[DateFill] Thử điền ô ngày ${metadata.id || metadata.name} với ${isoDate}`
     });
     try {
+      await recordInputFillHtml(field, page);
       await field.fill(isoDate, {
         force: true,
         timeout: 2000
@@ -154,6 +157,7 @@ export async function fillSelectOrTextField({
         }
         if (retry === 3) break;
         if (retry === 2 && typeof field.fill === 'function') {
+          await recordInputFillHtml(field, page);
           await field.fill(expectVal, {
             force: true,
             timeout: 2000

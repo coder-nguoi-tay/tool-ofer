@@ -16,6 +16,11 @@ import { homedir } from 'node:os';
  * @since 2026-11-10
  */
 const TEST_FILES = [
+  'input-fill-html.test.mjs',
+  'sweepstakes-card-page.test.mjs',
+  'continuous-agent.test.mjs',
+  'continuous-agent-api.test.mjs',
+  'continuous-agent-ui.test.mjs',
   'stop-after-lead.test.mjs',
   'desktop-lead-check-options.test.mjs',
   'no-slot-refill.test.mjs',

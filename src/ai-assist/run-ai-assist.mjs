@@ -40,7 +40,7 @@ async function runAiAssist(page, record, session = {}, options = {}) {
     return;
   }
   if (!session.aiRunningPages) session.aiRunningPages = new Set();
-  if (session.aiRunningPages.has(page) || page._aiAssistRunning || page._aiFormFixing) return; // tab này đang chạy AI rồi
+  if (session.aiRunningPages.has(page) || page._aiAssistRunning || page._aiFormFixing || page._continuousAgent) return; // tab này đang chạy AI rồi
   session.aiRunningPages.add(page);
   page._aiAssistRunning = true;
   session.aiAssistRunning = session.aiRunningPages.size > 0;

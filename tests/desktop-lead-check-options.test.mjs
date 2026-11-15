@@ -106,3 +106,28 @@ for (const mode of ['parallel', 'sequential']) {
     assert.equal('timeLimit' in payload, false);
   });
 }
+
+test('hẹn giờ app chính: tới giờ Offer 2 chỉ chạy link Offer 2 bằng GoLogin; chạy tay vẫn chạy mọi link', async () => {
+  const scheduled = createDashboard();
+  scheduled.getElement('txtLinkOffer').value = 'https://a.test/1\nhttps://a.test/1b';
+  scheduled.getElement('txtLinkOffer2').value = 'https://a.test/2';
+  scheduled.getElement('cbxGoLogin').checked = true;
+  await scheduled.context.handleStart({ executeSchedule: true, targetOfferIndex: 2 });
+  const body = scheduled.requests.find(request => request.path === '/launch').body;
+  assert.deepEqual(JSON.parse(JSON.stringify(body.offerUrls)), ['https://a.test/2']);
+  assert.equal(body.websiteUrl, 'https://a.test/2');
+  assert.equal(body.useGoLogin, true);
+  assert.equal(body.browserMode, 'GoLogin');
+
+  const first = createDashboard();
+  first.getElement('txtLinkOffer').value = 'https://a.test/1\nhttps://a.test/1b';
+  first.getElement('txtLinkOffer2').value = 'https://a.test/2';
+  await first.context.handleStart({ executeSchedule: true, targetOfferIndex: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(first.requests.find(request => request.path === '/launch').body.offerUrls)), ['https://a.test/1', 'https://a.test/1b']);
+
+  const manual = createDashboard();
+  manual.getElement('txtLinkOffer').value = 'https://a.test/1';
+  manual.getElement('txtLinkOffer2').value = 'https://a.test/2';
+  await manual.context.handleStart();
+  assert.deepEqual(JSON.parse(JSON.stringify(manual.requests.find(request => request.path === '/launch').body.offerUrls)), ['https://a.test/1', 'https://a.test/2']);
+});

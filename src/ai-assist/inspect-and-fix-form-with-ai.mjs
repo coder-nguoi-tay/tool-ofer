@@ -51,7 +51,7 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
       actionsCount: 0
     };
   }
-  if (page._aiFormFixing || page._aiAssistRunning) {
+  if (page._aiFormFixing || page._aiAssistRunning || page._continuousAgent) {
     return {
       status: 'in_progress',
       fixed: false,

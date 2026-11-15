@@ -1424,7 +1424,7 @@ const alphaNameField = {
   getAttribute: async () => alphaNameMarked,
   fill: async (value) => { alphaNameValue = value; },
   press: async () => {},
-  evaluate: async (fn) => fn({ dataset: { set uxFilled(value) { alphaNameMarked = value; } } }),
+  evaluate: async (fn) => fn.name === 'collectFieldMetadata' ? { names: ['Full Name'], accessibleName: 'Full Name', type: 'text' } : fn({ dataset: { set uxFilled(value) { alphaNameMarked = value; } } }),
 };
 const alphaFrame = { locator: (selector) => {
   assert.ok(selector.includes('#alpha-intent-content input[data-testid="fullname-input"]') && selector.includes('#ai-funnel input[data-testid="fullname-input"]'), 'Selector phải bao gồm cả alpha-intent và ai-funnel');

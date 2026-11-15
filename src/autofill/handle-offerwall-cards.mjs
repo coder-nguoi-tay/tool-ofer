@@ -8,6 +8,9 @@ import { reserveOfferLink } from '../browser/tabs/reserve-offer-link.mjs';
 import { OFFERWALL_CARD_SELECTOR } from './state/offerwall-card-selector.mjs';
 import { reserveOfferwallTabSlot } from './reserve-offerwall-tab-slot.mjs';
 import { MAX_OFFER_TABS } from '../runtime/constants/max-offer-tabs.mjs';
+import { openCardLinkInNewTab } from './offerwall/open-card-link-in-new-tab.mjs';
+import { getOfferUrlState } from '../browser/tabs/get-offer-url-state.mjs';
+import { normalizeOfferUrl } from '../browser/tabs/normalize-offer-url.mjs';
 
 /**
  * Phát hiện và tự động mở tất cả các view/thẻ trên trang Offerwall cuối cùng.
@@ -18,10 +21,11 @@ import { MAX_OFFER_TABS } from '../runtime/constants/max-offer-tabs.mjs';
  *
  * @param {object} frame Frame Playwright đang quét.
  * @param {object} [page=null] Page Playwright hiện tại để điều hướng trang gốc khi thẻ chỉ có link.
- * @param {object} [options={}] Tùy chọn: maxConcurrentSubOffers (trần tab offer con đồng thời).
+ * @param {object} [options={}] Trần tab con, cardSelector, preserveCardPage và callback isCancelled.
  * @return {Promise<number>} Số lượng thẻ offerwall đã được kích hoạt mở.
+ * @throws {never} Lỗi tab/card được cô lập, giữ thẻ chưa mở cho lượt sau.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-15
  */
 async function handleOfferwallCards(frame, page = null, options = {}) {
   let openedCount = 0;
@@ -29,15 +33,18 @@ async function handleOfferwallCards(frame, page = null, options = {}) {
   try {
     // Trần tab đồng thời được check lại trước MỖI thẻ — đủ trần thì dừng, giữ thẻ
     // chưa đánh dấu data-ux-opened để vòng quét sau (khi có tab hoàn tất nhả slot) mở tiếp.
-    const cardsToOpen = await frame.evaluate(readOfferwallCards, OFFERWALL_CARD_SELECTOR).catch(() => []);
+    const cardSelector = options.cardSelector || OFFERWALL_CARD_SELECTOR;
+    const cardsToOpen = await frame.evaluate(readOfferwallCards, options.preserveCardPage ? { selector: cardSelector, preferLeafCards: true } : cardSelector).catch(() => []);
     if (!cardsToOpen || !cardsToOpen.length) return 0;
     for (const card of cardsToOpen) {
+      if (options.isCancelled?.()) break;
       let releaseTabSlot, finishOfferLink, finishOfferCard;
       try {
         if (!card.hasBtn && (!card.destUrl || !card.destUrl.startsWith('http'))) {
           await markOfferwallCardProcessed(frame, card);
           continue;
         }
+        if (options.preserveCardPage && !/^https?:/.test(card.destUrl)) continue;
 
         if (isExcludedOfferPageUrl(card.destUrl)) {
           await markOfferwallCardProcessed(frame, card);
@@ -45,12 +52,17 @@ async function handleOfferwallCards(frame, page = null, options = {}) {
         }
         finishOfferCard = reserveOfferwallCard(page, card);
         if (!finishOfferCard) {
-          if (finishOfferCard === false) continue;
+          if (finishOfferCard === false) {
+            finishOfferCard = null;
+            if (options.preserveCardPage) break;
+            continue;
+          }
           await markOfferwallCardProcessed(frame, card);
           continue;
         }
         finishOfferLink = reserveOfferLink(page, card.destUrl);
         if (!finishOfferLink) {
+          if (options.preserveCardPage && getOfferUrlState(page.context()).pending.has(normalizeOfferUrl(card.destUrl, page.url()))) break;
           await markOfferwallCardProcessed(frame, card);
           continue;
         }
@@ -59,11 +71,19 @@ async function handleOfferwallCards(frame, page = null, options = {}) {
         // thẻ này sẽ được mở ở vòng quét sau).
         releaseTabSlot = reserveOfferwallTabSlot(page, maxConcurrentSubOffers);
         if (!releaseTabSlot) break;
-        const cardLoc = frame.locator(`[data-ux-card-id="${card.uid}"]`).first();
+        const cardLoc = frame.locator(options.preserveCardPage ? `:is(${cardSelector})[data-ux-card-id="${card.uid}"]` : `[data-ux-card-id="${card.uid}"]`).first();
         if ((await cardLoc.count()) <= 0) continue;
+        if (options.preserveCardPage && !await cardLoc.isVisible().catch(() => false)) continue;
+        if (options.isCancelled?.()) break;
         let opened = false;
         const btn = cardLoc.locator(card.buttonUid ? `[data-ux-offer-cta-id="${card.buttonUid}"]` : '.offerwall-btn, button[type="submit"], button#btnSubmit, a.offerwall-btn, [data-tf-element-role="offer-btn"], ' + 'a[id^="ct-creative-submit-"], button[id^="ct-creative-submit-"], .ct-creative-submit, .ai-submit-button, ' + 'button.question-answer-button, button[id^="answer-"], .eligibility-btn, [data-mock-secondary-offer-action], ' + '.offer-button, .btn-offer, .claim-button, a[class*="offer"], button[class*="offer"]').first();
-        if ((await btn.count()) > 0 && (await btn.isVisible().catch(() => false))) {
+        if (options.preserveCardPage) {
+          opened = await openCardLinkInNewTab(page, card.destUrl, options.isCancelled);
+          if (opened) {
+            finishOfferCard?.(true);
+            await markOfferwallCardProcessed(frame, card);
+          }
+        } else if ((await btn.count()) > 0 && (await btn.isVisible().catch(() => false))) {
           const readiness = await btn.evaluate(inspectInteractionReadiness, null).catch(() => ({ ready: false }));
           if (!readiness?.ready) continue;
           // Một lần thử input được chốt trước await; không click/evaluate/form.submit lần hai nếu timeout.
@@ -93,6 +113,7 @@ async function handleOfferwallCards(frame, page = null, options = {}) {
           openedCount += 1;
           await new Promise(resolve => setTimeout(resolve, 500));
         }
+        if (options.preserveCardPage && !opened) break;
       } catch {} finally { finishOfferCard?.(false); finishOfferLink?.(false); releaseTabSlot?.(); }
     }
   } catch {}

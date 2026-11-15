@@ -3,6 +3,7 @@ import { configurePageMousePolicy } from './interaction/configure-page-mouse-pol
 import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-lead-session.mjs';
 import { attachAutofillPageWatcher } from './attach-autofill-page-watcher.mjs';
 import { fillPageForms } from './fill-page-forms.mjs';
+import { startContinuousAgent } from '../continuous-agent/index.mjs';
 import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
 
 /**
@@ -209,6 +210,8 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
    * @since 2026-10-21
    */
   function watchPage(page) {
+    // No-op trừ khi AI config ở mode 'continuous' (+ agy); các mode khác giữ nguyên luồng cũ.
+    startContinuousAgent(page, () => page._assignedRecord || session.currentRecord || record, session, options);
     return attachAutofillPageWatcher(page, {
       trackedPages,
       options,

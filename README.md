@@ -217,3 +217,20 @@ Orbita Android được thử thực tế có thể treo với `mousePressed`; l
 GoLogin bật **Chạy trong app** được khởi chạy bằng `--headless=new` ngay từ SDK, không mở cửa sổ Orbita rồi mới thu nhỏ. Screen View/HTML vẫn hoạt động; nút Hiện không tạo cửa sổ Desktop cho phiên headless. Chế độ chỉ ẩn tới lead/target dùng cửa sổ headful khởi động ngoài màn hình và thu nhỏ, theo dõi cả popup.
 
 Nhật ký GoLogin bắt đầu trước tạo profile/SDK/CDP/IP, giữ pha khởi tạo và mã lỗi an toàn trong chế độ log tối giản. Mất CDP khi tiến trình còn sống không được kill hoặc nhả IP: thử nối lại ba lần vào Orbita cũ, giữ lead/record/lịch sử link và dựng lại Screen View/autofill. Nếu chưa nối được thì giữ browser và ghi một mốc lỗi; chỉ dọn khi có lệnh đóng hoặc tiến trình đã thoát. Bộ prune và tab cuối cũng áp dụng guard này.
+# Màn card cuối SweepstakesAlerts
+
+Autofill chỉ bật luồng này khi tab `sweepstakesalerts.com`/`www.sweepstakesalerts.com` có tiến độ 98–100% và card có link hiển thị. App giữ tab card, dọn các tab cũ trong cùng browser một lần rồi mở URL của từng card trong tab riêng, giữ tham số tracking. Tối đa 10 tab gồm trang gốc; card còn lại đợi tab con đóng. Reload không dọn lại các tab mới hoặc mở lại card đã thử. Không áp dụng khi dừng/chờ lead, manual/skip/consent-only hoặc tắt autoSubmit. Trang gốc được giữ khỏi nhánh trang rỗng và không gọi AI/F5 chỉ vì đang chờ tab con. Những site khác giữ luồng offerwall hiện tại.
+
+Màn cuối SweepstakesAlerts có `#ow-placement iframe[data-content-iframe]` từ HTTPS `sdk.scrptk.com/content/render` được giữ trong lúc iframe tải; chỉ dọn tab cũ khi iframe có card. Đọc offer trong đúng frame, bỏ link Powered by/Privacy ở trang cha. Task Addept tái dùng luồng card → CTA → Skip, reset dấu CTA khi chọn task mới; đủ 10 tab thì chờ chỗ trống.
+
+Phạm vi click: màn card SweepstakesAlerts chỉ đọc trong vùng Alpha Intent/main hiển thị; khi có vùng main thì không mở card nằm ngoài vùng đó. Chỉ khi không có main mới nhận vùng form/offerwall. Iframe Addept được giới hạn theo placement; task chỉ lấy từ `.unit-stack`. Bộ chọn submit và primitive click từ chối header/footer/nav/aside/sidebar, vùng attribution và các role điều hướng; không fallback sang link ngoài vùng nghiệp vụ.
+
+Nhận diện ô địa chỉ phải đối chiếu label/aria-labelledby/aria-label và placeholder với name/id/type. Nhãn địa chỉ Anh–Việt rõ ràng thắng định danh phone/tel; thiếu địa chỉ trong record thì để trống, không fallback sang phone. Nhãn nổi chỉ đọc ở wrapper có một control; không lấy label của ô bên cạnh hoặc disclaimer làm nhãn. Không dùng giá trị cá nhân đang nhập làm tín hiệu phân loại.
+
+Nhánh nhập nhanh phone của Alpha Intent cũng phải gọi `collectFieldMetadata`/`matchFieldValue` trước khi điền; quét tiếp các ứng viên thay vì chọn `.first()` theo type tel. Ô địa chỉ type tel không được điền phone trước luồng chung.
+
+Nhãn accessible dùng cho fill: ghép nội dung `aria-labelledby` theo thứ tự ID trong cùng document/shadow root, bỏ ID không tồn tại; sau đó mới dùng `aria-label`, rồi label native. Nhãn ARIA nhận diện rõ nghiệp vụ được ưu tiên hơn name/id/type. Các nhánh nhập nhanh Alpha Intent đối chiếu giá trị qua cùng parser trước khi nhập; không nhận tên ID tham chiếu làm nội dung nhãn, vẫn giữ phone chia phần theo phone1/2/3.
+
+Trang cuối mở offer theo vị trí hiển thị (trên xuống dưới, trái sang phải), không chọn task Addept ngẫu nhiên. Các lượt quét trang gốc/frame không chạy chồng; CTA/link được chốt lần thử trước input và giữ lịch sử trong BrowserContext qua reload/dựng lại DOM/đóng tab con. Link đầu đang pending hoặc đủ trần tab thì chờ, không mở vượt sang link sau. Chỉ CTA HTTP(S) có đích xác định mới được bấm; task đã xử lý không bấm lại sau reload.
+
+Addept đã thử chọn card nhưng info panel chưa hiện thì giữ trạng thái chờ xác minh, không chọn lại card hoặc vượt sang card sau; panel xuất hiện muộn vẫn tiếp tục CTA của card đang chờ.

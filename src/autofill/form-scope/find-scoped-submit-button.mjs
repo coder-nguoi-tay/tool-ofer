@@ -5,8 +5,9 @@ import { SURVEY_LEGAL_NOISE_RE } from '../../survey-solver/state/survey-legal-no
  * @param {object} frame Frame chứa form đang điền.
  * @param {object} formScope Phạm vi hiện tại, không giới hạn theo vị trí đầu trang.
  * @return {Promise<object|null>} Locator nút gửi sẵn sàng hoặc null.
+ * @throws {never} Phạm vi không còn đọc được trả về null.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-15
  */
 export async function findScopedSubmitButton(frame, formScope) {
   const selector = await frame.evaluate(({ scope, legalNoiseSource }) => {
@@ -29,7 +30,7 @@ export async function findScopedSubmitButton(frame, formScope) {
       return bounds.width > 4 && bounds.height > 4;
     };
     const controls = Array.from(document.querySelectorAll(scope.memberSelector));
-    const buttons = controls.filter(element => element.matches('button, input[type="submit"], input[type="image"], input[type="button"], a, [role="button"], div.btn, div.button, .sbtn, #sub-btn') && (!scope.nativeForm || !element.form || element.form === root) && visible(element));
+    const buttons = controls.filter(element => !element.closest('header, footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="banner"], [role="contentinfo"], .site-header, .site-footer, .ow-attribution') && element.matches('button, input[type="submit"], input[type="image"], input[type="button"], a, [role="button"], div.btn, div.button, .sbtn, #sub-btn') && (!scope.nativeForm || !element.form || element.form === root) && visible(element));
     const native = buttons.filter(button => root.tagName === 'FORM' && button.form === root && ['submit', 'image'].includes(button.type));
     /**
      * Tôn trọng trạng thái khóa hoặc đang gửi dữ liệu của nút.

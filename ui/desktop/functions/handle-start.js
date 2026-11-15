@@ -37,20 +37,27 @@ async function handleStart(options = {}) {
         const raw3 = document.getElementById('txtLinkOffer3')?.value?.trim() || '';
         const raw4 = document.getElementById('txtLinkOffer4')?.value?.trim() || '';
 
-        if (raw1) {
+        // Tới giờ hẹn của một offer thì chỉ chạy link của offer đó (Offer 1 nhiều dòng thì chạy mọi dòng của Link 1);
+        // trước đây targetOfferIndex bị bỏ qua nên tới giờ hẹn Offer 2 lại chạy cả 4 link.
+        const target = options?.executeSchedule ? Number(options.targetOfferIndex) || 0 : 0;
+        if (raw1 && (!target || target === 1)) {
           for (const line of raw1.split(/[\r\n,;]+/)) {
             const u = line.trim();
             if (u && !offerUrls.includes(u)) offerUrls.push(u);
           }
         }
-        if (raw2 && !offerUrls.includes(raw2)) offerUrls.push(raw2);
-        if (raw3 && !offerUrls.includes(raw3)) offerUrls.push(raw3);
-        if (raw4 && !offerUrls.includes(raw4)) offerUrls.push(raw4);
+        if (raw2 && (!target || target === 2) && !offerUrls.includes(raw2)) offerUrls.push(raw2);
+        if (raw3 && (!target || target === 3) && !offerUrls.includes(raw3)) offerUrls.push(raw3);
+        if (raw4 && (!target || target === 4) && !offerUrls.includes(raw4)) offerUrls.push(raw4);
+        if (target && !offerUrls.length) {
+          showWinAlert(`Tới giờ hẹn Offer ${target} nhưng link của offer này đang trống.`);
+          return;
+        }
 
-        const websiteUrl = offerUrls[0] || raw1;
-        const websiteUrl2 = offerUrls[1] || raw2;
-        const websiteUrl3 = offerUrls[2] || raw3;
-        const websiteUrl4 = offerUrls[3] || raw4;
+        const websiteUrl = offerUrls[0] || (target ? '' : raw1);
+        const websiteUrl2 = offerUrls[1] || (target ? '' : raw2);
+        const websiteUrl3 = offerUrls[2] || (target ? '' : raw3);
+        const websiteUrl4 = offerUrls[3] || (target ? '' : raw4);
         if (!websiteUrl) {
           showWinAlert('Vui lòng nhập Link Offer!');
           return;

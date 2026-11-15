@@ -2,6 +2,7 @@ import { ADJACENT_KEYS } from './state/adjacent-keys.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { humanClick } from './human-click.mjs';
 import { tryFastTextInput } from './interaction/try-fast-text-input.mjs';
+import { recordInputFillHtml } from '../logging/record-input-fill-html.mjs';
 
 /**
  * Rê chuột và click thành công trước khi nhập; slot sau ưu tiên fill đã xác minh để giữ tốc độ.
@@ -10,8 +11,9 @@ import { tryFastTextInput } from './interaction/try-fast-text-input.mjs';
  * @param {object|null} page Tab Playwright sở hữu trường.
  * @param {object} options Tuỳ chọn nhịp gõ và mô phỏng lỗi gõ.
  * @return {Promise<void>} Hoàn tất điền hoặc trả về khi giá trị rỗng.
+ * @throws {never} Lỗi nhập được xử lý trong từng nhánh; lỗi ghi HTML không chặn autofill.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-15
  */
 async function humanTypeCore(field, text, page = null, options = {}) {
   const str = String(text ?? '');
@@ -55,6 +57,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
 
   // Xóa nội dung cũ tự nhiên qua tổ hợp phím (Select All + Backspace) nếu trường đã có chữ
   if (shouldStopAfterLead(activePage?._autofillSession)) return;
+  await recordInputFillHtml(field, activePage);
   try {
     const isMac = process.platform === 'darwin';
     const selectAllKey = isMac ? 'Meta+A' : 'Control+A';

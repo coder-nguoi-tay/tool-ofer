@@ -3,10 +3,12 @@
  * @param {Element} element Control cần thao tác.
  * @param {object|null} formScope Phạm vi form đang xử lý.
  * @return {object} Trạng thái ready và lý do từ chối thao tác.
+ * @throws {never} Phần tử ngoài vùng nghiệp vụ trả về trạng thái từ chối.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-15
  */
 export function inspectInteractionReadiness(element, formScope) {
+  if (element.closest?.('header, footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="banner"], [role="contentinfo"], .site-header, .site-footer, .ow-attribution')) return { ready: false, reason: 'outside_business_content' };
   const consumed = element.closest?.('[data-ux-offer-action-label]');
   if (consumed && (consumed.innerText || consumed.value || '').replace(/\s+/g, ' ').trim() === consumed.getAttribute('data-ux-offer-action-label')) return { ready: false, reason: 'offer_already_opened' };
   if (formScope && !element.matches?.(formScope.memberSelector)) return { ready: false, reason: 'outside_active_form' };

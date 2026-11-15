@@ -1,4 +1,5 @@
 import { isLeadWaitEnabled } from './is-lead-wait-enabled.mjs';
+import { handleSweepstakesCardPage } from './offerwall/handle-sweepstakes-card-page.mjs';
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
 import { selectPageFormFrames } from './form-scope/select-page-form-frames.mjs';
 import { configurePageMousePolicy } from './interaction/configure-page-mouse-policy.mjs';
@@ -21,12 +22,13 @@ import { naturalMouseDrift } from './natural-mouse-drift.mjs';
 import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
 
 /**
- * Điều phối quét form trên trang và các frame con theo dữ liệu của phiên.
+ * Xử lý màn card đặc thù trước rồi quét form/frame theo dữ liệu và chính sách lead của phiên.
  * @param {object} page Tab cần xử lý.
  * @param {object} context Dữ liệu phiên và callback điều phối được giữ bởi attachAutofill.
  * @return {Promise<void>} Hoàn tất thao tác trên tab.
+ * @throws {Error} Khi thao tác trình duyệt thất bại ngoài các nhánh phục hồi hiện có.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-15
  */
 export async function fillPageForms(page, {
   session,
@@ -75,6 +77,7 @@ export async function fillPageForms(page, {
     return;
   }
   if (shouldPauseForLead(session, options)) return;
+  if (await handleSweepstakesCardPage(page, session, options)) return;
 
   // PHÁT HIỆN EMAIL ĐIỀN NGOÀI (RoboForm/extension/tay) — nếu các cờ thường không bắt được,
   // quét nhanh các ô email hiển thị có giá trị trong page + frame con để bật cờ emailFilled,

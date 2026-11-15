@@ -8,6 +8,7 @@ import { cleanupOrphanedAdsPowerProfiles } from '../../../adspower-profile.mjs';
 import { executeFile } from '../../runtime/constants/execute-file.mjs';
 import { readAdsPowerApiKey } from '../../runtime/actions/read-ads-power-api-key.mjs';
 import { requestManagedProfileStop } from './request-managed-profile-stop.mjs';
+import { stopAllContinuousAgents } from '../../continuous-agent/index.mjs';
 import { writeFile } from 'node:fs/promises';
 
 /**
@@ -23,6 +24,7 @@ import { writeFile } from 'node:fs/promises';
  */
 export async function closeActiveBrowsers() {
   const sessions = [...activeBrowsers];
+  stopAllContinuousAgents('close_all'); // thu hồi quyền tab và giết agy/hủy request AI trước khi đóng browser
   autoRefill.stopRequested = true;
   autoRefill.enabled = false;
   autoRefill.sequential = false;

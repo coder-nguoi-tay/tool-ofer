@@ -1415,6 +1415,48 @@
             </div>
           </fieldset>
 
+          <!-- Group 3b: Agent API (Continuous) -->
+          <fieldset class="win-group" style="margin-bottom:8px;">
+            <legend class="win-legend">Agent liên tục — nguồn AI (dùng khi AI Mode = Continuous)</legend>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;">Nguồn:
+                <select id="cbbAgentTransport" class="win-select" style="flex:1;" onchange="syncAgentApiFormat()">
+                  <option value="agy">agy CLI</option>
+                  <option value="api">API (URL + key)</option>
+                </select>
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;">Giao thức:
+                <select id="cbbAgentApiFormat" class="win-select" style="flex:1;" onchange="syncAgentApiFormat()">
+                  <option value="openai">OpenAI-compatible</option>
+                  <option value="anthropic">Anthropic Messages</option>
+                  <option value="gemini">Google Gemini</option>
+                </select>
+              </label>
+            </div>
+            <div id="agentApiFields" style="margin-top:6px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;">API URL:
+                <input type="text" id="txtAgentApiUrl" class="win-input" style="flex:1;" autocomplete="off" spellcheck="false">
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;">Model:
+                  <input type="text" id="txtAgentApiModel" class="win-input" style="flex:1;" autocomplete="off" spellcheck="false">
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;">API key:
+                  <input type="password" id="txtAgentApiKey" class="win-input" style="flex:1;" autocomplete="off">
+                </label>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+              <button type="button" class="win-btn win-btn-primary" style="padding:3px 12px;" onclick="saveAgentApiConfigUi()">💾 Lưu cấu hình Agent</button>
+              <button type="button" class="win-btn" style="padding:3px 12px;" onclick="testAgentApiConfigUi()">🔌 Lưu &amp; thử kết nối</button>
+              <span id="agentApiStatus" style="font-size:11px;"></span>
+            </div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:5px;">
+              URL dán base (vd <code>https://api.openai.com/v1</code>) hoặc endpoint đầy đủ của gateway. Chỉ https (http cho localhost).
+              Key lưu cục bộ, không hiển thị lại; để trống ô key nghĩa là giữ key cũ. Cần chọn AI Mode = Continuous ở trên và Save AI Config.
+            </div>
+          </fieldset>
+
           <!-- Group 4: Live AI Activity Monitor -->
           <fieldset class="win-group" style="min-height:220px;display:flex;flex-direction:column;">
             <legend class="win-legend">Live AI Activity</legend>
@@ -1483,6 +1525,7 @@
                 <option value="submit_clicked">🚀 Submit</option>
                 <option value="checkbox_checked">☑️ Checkbox</option>
                 <option value="field_filled">✍️ Điền form</option>
+                <option value="input_fill_html">📄 HTML input</option>
                 <option value="click">🖱 Click chuột</option>
                 <option value="ai_started">🤖 AI phân tích</option>
                 <option value="ai_action">🤖 AI thực thi</option>
