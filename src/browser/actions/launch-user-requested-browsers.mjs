@@ -8,6 +8,7 @@ import { maxAliveBrowsers } from '../../runtime/constants/max-alive-browsers.mjs
 import { queueAutomaticRefill } from '../../refill/actions/queue-automatic-refill.mjs';
 import { saveAutoRefillSettings } from '../../refill/actions/save-auto-refill-settings.mjs';
 import { selectProxies } from '../../proxy/configuration.mjs';
+import { applyRunMode } from '../../runtime/constants/run-mode-state.mjs';
 import { writeFile } from 'node:fs/promises';
 
 /**
@@ -18,9 +19,12 @@ import { writeFile } from 'node:fs/promises';
  * @since 2026-11-14
  */
 export async function launchUserRequestedBrowsers(requestBody) {
+  const body = JSON.parse(requestBody);
+  // Làm thủ công: chỉ tắt autofill/AI (xem attachAutofill); tự bù slot giữ nguyên để trình duyệt chết vẫn được thay.
+  // Cờ được đặt lại ở mỗi lần Start nên không dính sang lần auto; các phiên bù mở sau vẫn theo cờ này.
+  applyRunMode(body.runMode);
   autoRefill.stopRequested = false;
   autoRefill.enabled = true;
-  const body = JSON.parse(requestBody);
   const isGoLogin = body.useGoLogin === true || String(body.browserMode).toLowerCase() === 'gologin';
   if (!isGoLogin) {
     body.browserMode = 'Chrome';

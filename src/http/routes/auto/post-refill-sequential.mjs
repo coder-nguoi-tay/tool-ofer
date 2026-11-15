@@ -1,3 +1,4 @@
+import { applyRunMode } from '../../../runtime/constants/run-mode-state.mjs';
 import { autoRefill } from '../../../runtime/constants/auto-refill.mjs';
 import { normalizeUrl } from '../../../proxy/configuration.mjs';
 import { queueAutomaticRefill } from '../../../refill/actions/queue-automatic-refill.mjs';
@@ -17,6 +18,7 @@ export async function handlePostAutoRefillSequential(request, response) {
     const body = JSON.parse(await readRequestBody(request));
     autoRefill.sequential = body.enabled !== false;
     if (autoRefill.sequential) {
+      applyRunMode('auto'); // Tuần tự là chế độ tự động: bỏ cờ thủ công của lần Start trước
       autoRefill.enabled = true;
       const s = body.settings ?? autoRefill.settings ?? {};
       let url1 = s.websiteUrl ? normalizeUrl(s.websiteUrl) : '';

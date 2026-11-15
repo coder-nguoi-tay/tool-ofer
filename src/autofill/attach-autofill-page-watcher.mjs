@@ -1,3 +1,4 @@
+import { isCompletedPopupUrl } from '../leads/actions/is-completed-popup-url.mjs';
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { isNoSurveyFrame } from './adsmith/is-no-survey-frame.mjs';
@@ -262,7 +263,7 @@ export function attachAutofillPageWatcher(page, {
         return;
       }
       const pu = typeof popup?.url === 'function' ? popup.url() : '';
-      if (isSpamAdUrl(pu) || /thank[-_]?you(\.php|\.html|\/|\?|$)|thanks(\.php|\.html|\/|\?|$)/i.test(pu)) {
+      if (isSpamAdUrl(pu) || isCompletedPopupUrl(pu)) {
         console.log(`[Autofill] Phát hiện popup rác hoặc trang hoàn tất thankyou (${pu}), đóng ngay lập tức.`);
         options.onLog?.({
           type: 'popup_closed',

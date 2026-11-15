@@ -14,6 +14,7 @@ import { processFrameSurveys } from './process-frame-surveys.mjs';
 import { inspectFrameScreen } from './inspect-frame-screen.mjs';
 import { inspectFrameValidation } from './inspect-frame-validation.mjs';
 import { submitFrameForm } from './submit-frame-form.mjs';
+import { clickPathThankyouButton } from './financialhelp/click-path-thankyou-button.mjs';
 import { addVerifiedFieldCount } from './add-verified-field-count.mjs';
 import { getNormalizedPhone } from './get-normalized-phone.mjs';
 import { humanType } from './human-type.mjs';
@@ -77,6 +78,8 @@ export async function fillPageForms(page, {
     return;
   }
   if (shouldPauseForLead(session, options)) return;
+  // paththankyou.php: bấm đúng nút chuyển tiếp, không qua bộ tìm nút submit chung.
+  if (await clickPathThankyouButton(page, session, options)) return;
   if (await handleSweepstakesCardPage(page, session, options)) return;
 
   // PHÁT HIỆN EMAIL ĐIỀN NGOÀI (RoboForm/extension/tay) — nếu các cờ thường không bắt được,

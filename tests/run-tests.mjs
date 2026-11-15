@@ -21,6 +21,7 @@ const TEST_FILES = [
   'continuous-agent.test.mjs',
   'continuous-agent-api.test.mjs',
   'continuous-agent-ui.test.mjs',
+  'manual-run-mode.test.mjs',
   'stop-after-lead.test.mjs',
   'desktop-lead-check-options.test.mjs',
   'no-slot-refill.test.mjs',

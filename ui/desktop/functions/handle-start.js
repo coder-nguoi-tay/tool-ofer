@@ -221,6 +221,7 @@ async function handleStart(options = {}) {
               hideUntilLead,
               runInApp,
               screenPreviewOnly: runInApp,
+              runMode: mode,
               multiTab: document.getElementById('cbxMultiTab') ? document.getElementById('cbxMultiTab').checked : true,
               useGoLogin: Boolean(document.getElementById('cbxGoLogin')?.checked),
                 gologinDevices: document.getElementById('cbxGoLogin')?.checked && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,

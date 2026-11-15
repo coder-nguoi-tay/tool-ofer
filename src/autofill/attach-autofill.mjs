@@ -4,6 +4,7 @@ import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-
 import { attachAutofillPageWatcher } from './attach-autofill-page-watcher.mjs';
 import { fillPageForms } from './fill-page-forms.mjs';
 import { startContinuousAgent } from '../continuous-agent/index.mjs';
+import { runModeState } from '../runtime/constants/run-mode-state.mjs';
 import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
 
 /**
@@ -21,6 +22,13 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
   protectConfirmedLeadSession(session);
   context.on('page', page => configurePageMousePolicy(page, session));
   for (const page of context.pages()) configurePageMousePolicy(page, session);
+  // Chế độ chạy "Làm thủ công" thắng mọi cấu hình offer: không gắn autofill/AI/watcher cho phiên này (kể cả tab mở thêm).
+  if (runModeState.manual) {
+    session.offerMode = 'manual';
+    session.runMode = 'manual';
+    options.onLog?.({ type: 'offer_manual', detail: 'Chế độ chạy "Làm thủ công": không autofill, không AI. Đang chờ người thao tác...' }, null);
+    return;
+  }
   // offerStrategy: { mode: 'auto_full' | 'consent_only' | 'manual' | 'skip', ... } từ offerStrategyState
   // Không tự tạo record mẫu: chỉ dùng record trong danh sách app cung cấp. Hết record thì dùng record rỗng
   // (không điền gì từ record) và báo log để người dùng nạp thêm dữ liệu.
