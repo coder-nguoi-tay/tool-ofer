@@ -22,7 +22,11 @@ async function fetchRunningState() {
       window.cachedSessions = sessions;
       _updateScreenSlots(sessions);
       document.getElementById('tabRunCount').textContent = sessions.length;
-      document.getElementById('lbTotalRun').textContent = state.limitRun?.count || 0;
+      const totalRunVal = state.limitRun?.count || 0;
+      const elTotalRun = document.getElementById('lbTotalRun');
+      if (elTotalRun) elTotalRun.textContent = totalRunVal;
+      const elTotalRunSb = document.getElementById('lbTotalRunSb');
+      if (elTotalRunSb) elTotalRunSb.textContent = totalRunVal;
 
       // Cập nhật trạng thái nút Start: làm mờ & vô hiệu hóa khi đang có luồng/offer chạy
       const isRunning = (state.enabled && !state.stopRequested) || sessions.length > 0 || ((state.activeCount || 0) > 0);
@@ -88,6 +92,23 @@ async function fetchRunningState() {
         if (elRun && elRun.textContent !== String(state.toffers.point)) elRun.textContent = String(state.toffers.point);
         const elCnt = document.getElementById('lbToffersLeadCount');
         if (elCnt && elCnt.textContent !== String(state.toffers.leadCount)) elCnt.textContent = String(state.toffers.leadCount);
+        const elSbCnt = document.getElementById('sbToffersLeadCount');
+        if (elSbCnt && elSbCnt.textContent !== String(state.toffers.leadCount)) elSbCnt.textContent = String(state.toffers.leadCount);
+      }
+
+      // Cập nhật đèn LED trạng thái footer
+      const statusDot = document.getElementById('sbStatusDot');
+      if (statusDot) {
+        if (isRunning) {
+          statusDot.className = 'status-indicator-dot dot-working';
+        } else {
+          const statusText = document.getElementById('lbStatus')?.textContent || '';
+          if (/error|lỗi|fail|chặn/i.test(statusText)) {
+            statusDot.className = 'status-indicator-dot dot-error';
+          } else {
+            statusDot.className = 'status-indicator-dot dot-ready';
+          }
+        }
       }
 
       // Populate manual AI trigger dropdown

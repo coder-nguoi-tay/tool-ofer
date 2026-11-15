@@ -1,4 +1,5 @@
 import { completeFinancialhelpSession } from './complete-financialhelp-session.mjs';
+import { finishSweepstakesCardSession } from '../../autofill/offerwall/finish-sweepstakes-card-session.mjs';
 import { isFinancialhelpThankyouUrl } from './is-financialhelp-thankyou-url.mjs';
 import { hasOfferProgress, recoverConfirmedLeadErrorPage } from './recover-confirmed-lead-error-page.mjs';
 import { protectConfirmedLeadSession } from './protect-confirmed-lead-session.mjs';
@@ -252,6 +253,8 @@ export function watchTrafficBlockedPage(session) {
         // return sớm nên trước đây (log 2026-11-13 slot 2) tab lifepointspanel 404 không bao giờ bị đóng.
         await closeFinishedSubOfferTabs(session, pages);
         if (await completeFinancialhelpSession(session, closeSessionAndRefill)) return;
+        // Màn card sweepstakes: tab con quá 5 phút thì đóng; hết tab con và hết thẻ thì đóng trình duyệt nhường slot.
+        if (await finishSweepstakesCardSession(session, closeSessionAndRefill)) return;
         if (protectConfirmedLeadSession(session)) {
           for (const page of pages) await recoverConfirmedLeadErrorPage(session, page);
           return;

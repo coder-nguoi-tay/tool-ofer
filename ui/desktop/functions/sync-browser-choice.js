@@ -29,12 +29,16 @@ function syncBrowserChoice(mode = 'Chrome', shouldSave = false) {
       }
 
       // Update Dashboard badge
-      const badge = document.getElementById('dashBrowserBadge');
-      if (badge) {
-        badge.style.background = 'rgba(14, 165, 233, 0.15)';
-        badge.style.borderColor = 'rgba(14, 165, 233, 0.35)';
-        badge.style.color = '#38bdf8';
-        badge.textContent = '🌐 Google Chrome (Mặc định - Chrome 150 - 156)';
+      if (typeof updateDashboardBrowserBar === 'function') {
+        updateDashboardBrowserBar();
+      } else {
+        const badge = document.getElementById('dashBrowserBadge');
+        if (badge) {
+          badge.style.background = 'rgba(14, 165, 233, 0.15)';
+          badge.style.borderColor = 'rgba(14, 165, 233, 0.35)';
+          badge.style.color = '#38bdf8';
+          badge.textContent = '🛡️ Anti-Detect Spoofing: Chrome 150 - 156';
+        }
       }
 
       // Persist to localStorage

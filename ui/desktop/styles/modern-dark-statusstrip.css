@@ -1,43 +1,119 @@
-/* Modern Dark StatusStrip */
-    .win-statusbar {
-      height: 28px;
-      background: #090d16;
-      border-top: 1px solid var(--card-border);
-      display: flex;
-      align-items: center;
-      padding: 0 10px;
-      gap: 8px;
-      flex-shrink: 0;
-      font-size: 11.5px;
-      color: var(--text-muted);
-    }
+/* ==========================================================================
+   Modern Dark StatusStrip (macOS Clean Glassmorphism Footer)
+   ========================================================================== */
 
-    .status-panel {
-      height: 22px;
-      display: inline-flex;
-      align-items: center;
-      padding: 0 8px;
-      background: #131d31;
-      border: 1px solid var(--card-border);
-      border-radius: 4px;
-      color: #f8fafc;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+.win-statusbar {
+  height: 28px;
+  background: #090d16;
+  border-top: 1px solid #1e293b;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #94a3b8;
+  box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.3);
+  box-sizing: border-box;
+  user-select: none;
+}
 
-    .status-panel-flex {
-      flex: 1;
-    }
+.status-panel {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  color: #cbd5e1;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+  transition: all 0.15s ease-in-out;
+}
 
-    .status-grip {
-      width: 14px;
-      height: 14px;
-      background-image: radial-gradient(circle at 2px 2px, #475569 1.2px, transparent 1.2px);
-      background-size: 4px 4px;
-      background-position: bottom right;
-      align-self: flex-end;
-      margin-left: auto;
-    }
+.status-panel-flex {
+  flex: 1;
+  min-width: 120px;
+  color: #f1f5f9;
+}
 
-    
+/* Đèn LED chỉ báo trạng thái */
+.status-indicator-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-indicator-dot.dot-ready {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
+}
+
+.status-indicator-dot.dot-working {
+  background: #38bdf8;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.8);
+  animation: pulseDotStatus 1.5s infinite ease-in-out;
+}
+
+.status-indicator-dot.dot-error {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);
+}
+
+@keyframes pulseDotStatus {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.6;
+  }
+}
+
+/* Các ô tương tác (Clickable Status Chips) */
+.status-panel-clickable {
+  cursor: pointer;
+}
+
+.status-panel-clickable:hover {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: #38bdf8;
+  color: #f8fafc;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
+  transform: translateY(-0.5px);
+}
+
+/* Chip riêng cho Leads */
+.status-panel-lead {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.status-panel-lead:hover {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.3);
+}
+
+/* Chip phiên bản & port */
+.status-panel-version {
+  font-family: Consolas, Menlo, Monaco, monospace;
+  font-size: 10.5px;
+  color: #64748b;
+  background: rgba(15, 23, 42, 0.4);
+  border-color: #1e293b;
+  margin-left: auto;
+}
+
+/* Ẩn grip resize WinForms trên macOS */
+.status-grip {
+  display: none !important;
+}

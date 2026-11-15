@@ -26,6 +26,7 @@ const TEST_FILES = [
   'footer-like-links.test.mjs',
   'stuck-page-reload.test.mjs',
   'adsmith-processing-stuck.test.mjs',
+  'sweepstakes-card-finish.test.mjs',
   'stop-after-lead.test.mjs',
   'desktop-lead-check-options.test.mjs',
   'no-slot-refill.test.mjs',
