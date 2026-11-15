@@ -7,6 +7,8 @@
 function clearLogFilters() {
       document.getElementById('logFilterSlot').value = '';
       document.getElementById('logFilterType').value = '';
+      const ipEl = document.getElementById('logFilterIp');
+      if (ipEl) ipEl.value = '';
       currentSelectedOfferLogTab = 'all';
       renderLogs();
     }

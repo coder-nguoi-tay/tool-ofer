@@ -24,7 +24,10 @@ export async function handleGetScreenHtml(request, response) {
   }
   try {
     const frame = frames[index];
-    const html = await readEvidenceWithTimeout(frame, 'html', () => frame.content());
+    const rawHtml = await readEvidenceWithTimeout(frame, 'html', () => frame.content());
+    const html = String(rawHtml || '')
+      .replace(/<autoleadpc-mouse-pointer\b[^>]*>[\s\S]*?<\/autoleadpc-mouse-pointer\s*>/gi, '')
+      .replace(/<autoleadpc-mouse-pointer\b[^>]*\/?>/gi, '');
     respondWithJson(response, 200, { html, frame: index, frames: frames.map((item, frameIndex) => ({ index: frameIndex, url: item.url() })) });
   } catch { respondWithJson(response, 409, { error: 'Trang đang chuyển hướng hoặc chưa đọc được HTML. Hãy thử lại.' }); }
   return true;

@@ -52,7 +52,8 @@ export function createLeadTestSession(exitIp, slot = 1) {
     browser.emit('page', replacement);
     return replacement;
   };
-  const session = { browser, mainPage: page, exitIp, slot, tileIndex: slot - 1, chromeVersion: 'Chrome fixture', emailFilled: true };
+  // leadHistoryBaselineAt: mốc bắt đầu phiên, như attachAutofill đặt ngay khi gắn phiên (trước mọi lead của phiên).
+  const session = { browser, mainPage: page, exitIp, slot, tileIndex: slot - 1, chromeVersion: 'Chrome fixture', emailFilled: true, leadHistoryBaselineAt: Date.now() };
   return { session, page, browser, counters };
 }
 

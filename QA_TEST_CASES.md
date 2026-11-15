@@ -404,3 +404,6 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - ARIA: ghép `aria-labelledby="first-word name-word"` thành First Name; ưu tiên hơn aria-label Phone Number và label native khi mâu thuẫn. ID thiếu được bỏ qua, không còn nhãn tham chiếu hợp lệ thì dùng aria-label. Kiểm tra tên/email/phone/address/zip với name/id/type bị đặt sai và phone2 lấy đúng ba số giữa. Nhánh nhập nhanh không được điền trước dữ liệu trái với ARIA.
 
 - Trang cuối: card 0→1→2→3 có URL 1 trùng 0 chỉ click URL 0,2,3 đúng thứ tự. Chạy hai lượt quét đồng thời, CSS đảo DOM, reload và đóng tab con vẫn không click lại. CTA lỗi input không thử lần hai. Link đầu pending hoặc đủ trần 10 tab phải chờ; khi có chỗ/nhả pending thì mở tiếp đúng thứ tự.
+
+- Log HTML input: mỗi lần nhập nhanh/chậm/date có một dòng HTML input, Xem HTML hiển thị đúng node; không ghi value/password/token/textarea text, không tạo snapshot trang; thử cả iframe và log mode access/full.
+- Adsmith tải chậm: spinner 25s, blank 20s, chrome-error đúng iframe 4s mới phục hồi. Mạng hồi trước ngưỡng không F5. Tối đa 5 GET cả khi timeout; exhausted ghi một lần và không bị generic watchdog/AI lách trần. Manual reload chờ lại nhưng không xóa budget; form chính, màn hoàn tất và iframe tracking lỗi không bị F5 nhầm.

@@ -1,5 +1,5 @@
 /**
- * Ghi cấu trúc đúng ô sắp nhập vào log phiên, không chụp trang hoặc lưu giá trị cá nhân.
+ * Ghi cấu trúc đúng ô sắp nhập vào log phiên, không chụp trang hoặc giữ value của ô nhập.
  * @param {object} field Locator ô nhập đang chuẩn bị được điền.
  * @param {object|null} page Tab sở hữu ô; mặc định lấy từ locator.
  * @return {Promise<void>} Hoàn tất ghi HTML nhỏ vào bộ log hiện có, không cản trở thao tác nhập.
@@ -25,6 +25,7 @@ export async function recordInputFillHtml(field, page = null) {
     if (!input?.html) return;
     const [pageUrl, frameUrl] = [owner.url(), input.frameUrl || owner.url()].map(value => {
       const url = new URL(value);
+      if (!['http:', 'https:', 'about:'].includes(url.protocol)) return url.protocol;
       url.search = ''; url.hash = ''; url.username = ''; url.password = '';
       return url.href;
     });

@@ -3,10 +3,24 @@ import { readThrottledPageHealth } from '../page-health/read-throttled-page-heal
 import { resetRecoveredPageAutofill } from '../../autofill/reset-recovered-page-autofill.mjs';
 
 const recoveries = new WeakMap();
+const MAX_RECOVERY_ATTEMPTS = 3;
 
 /**
- * Giữ browser có lead và tải lại trang bằng F5 (page.reload) khi gặp lỗi, rồi đánh thức autofill tiếp tục.
- * Tuyệt đối không tắt trình duyệt khi IP đã có lead.
+ * Phiên đã thao tác offer (điền ô/bấm chọn): form có thể đã gửi nên lead có thể về sau đó.
+ * Đóng phiên lúc này để lại lead lỗi (sự cố 2026-11-15 IP 173.19.184.178), phải phục hồi trang trước.
+ * @param {object} session Phiên trình duyệt.
+ * @return {boolean} True khi autofill/AI đã thao tác trên trang offer.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-15
+ */
+export function hasOfferProgress(session) {
+  return session?.lastActionTime != null;
+}
+
+/**
+ * Giữ browser có lead hoặc đã thao tác offer, tải lại trang bằng F5 (page.reload) khi gặp lỗi, rồi đánh thức autofill.
+ * Tuyệt đối không tắt trình duyệt khi IP đã có lead. Phiên chỉ mới thao tác offer: hết 3 lượt vẫn lỗi thì đặt
+ * page._uxErrorRecoveryExhausted để watcher đóng và bù slot.
  * @param {object} session Phiên có IP được xác nhận lead.
  * @param {object} page Tab cần kiểm tra và phục hồi.
  * @return {Promise<boolean>} True khi đã gặp lỗi và giữ tab để phục hồi/chờ xử lý.
@@ -14,7 +28,8 @@ const recoveries = new WeakMap();
  * @since 2026-11-12
  */
 export async function recoverConfirmedLeadErrorPage(session, page) {
-  if (!protectConfirmedLeadSession(session) || session.isClosed || session.suppressAutoRefill || page?.isClosed?.()) return false;
+  const canRecover = () => protectConfirmedLeadSession(session) || hasOfferProgress(session);
+  if (!canRecover() || session.isClosed || session.suppressAutoRefill || page?.isClosed?.()) return false;
   const state = recoveries.get(page) || { busy: false, attempts: 0, lastAt: 0, url: '' };
   recoveries.set(page, state);
   if (state.busy || Date.now() - state.lastAt < 15_000) return false;
@@ -23,17 +38,24 @@ export async function recoverConfirmedLeadErrorPage(session, page) {
     const errorUrl = page.url();
     const mainFrame = page.mainFrame?.() || page;
     const reason = page._uxMainStatus >= 400 ? 'Lỗi HTTP của trang' : await readThrottledPageHealth(mainFrame);
-    if (!reason || !protectConfirmedLeadSession(session) || page.isClosed?.() || page.url() !== errorUrl) return false;
-    if (state.url !== errorUrl) Object.assign(state, { url: errorUrl, attempts: 0 });
-    if (state.attempts >= 3) return true;
+    if (!reason || !canRecover() || page.isClosed?.() || page.url() !== errorUrl) return false;
+    if (state.url !== errorUrl) {
+      Object.assign(state, { url: errorUrl, attempts: 0 });
+      page._uxErrorRecoveryExhausted = false;
+    }
+    if (state.attempts >= MAX_RECOVERY_ATTEMPTS) {
+      page._uxErrorRecoveryExhausted = true;
+      return true;
+    }
     state.attempts++;
     state.lastAt = Date.now();
+    const who = protectConfirmedLeadSession(session) ? 'IP đã có lead' : 'Phiên đã thao tác offer';
     session.addBrowserLog?.({
       type: 'lead_error_recovery',
-      detail: `IP đã có lead gặp trang lỗi (${reason}): giữ trình duyệt, tải lại trang bằng F5 (lượt ${state.attempts}/3).`
+      detail: `${who} gặp trang lỗi (${reason}): giữ trình duyệt, tải lại trang bằng F5 (lượt ${state.attempts}/${MAX_RECOVERY_ATTEMPTS}).`
     }, page);
-    session.updateBadge?.(`🔄 <strong>IP có lead:</strong> Đang F5 tải lại trang lỗi…`);
-    console.log(`[LeadRecovery] Slot ${session.slot || '?'}: IP có lead gặp lỗi "${reason}". Giữ trình duyệt, tải lại trang bằng F5 (lần ${state.attempts}).`);
+    session.updateBadge?.(`🔄 <strong>${who}:</strong> Đang F5 tải lại trang lỗi…`);
+    console.log(`[LeadRecovery] Slot ${session.slot || '?'}: ${who} gặp lỗi "${reason}". Giữ trình duyệt, tải lại trang bằng F5 (lần ${state.attempts}).`);
 
     page._leadRecoveryInProgress = true;
     let response = null;
@@ -64,7 +86,7 @@ export async function recoverConfirmedLeadErrorPage(session, page) {
       } catch {}
     }
 
-    if (!protectConfirmedLeadSession(session) || page.isClosed?.() || session.isClosed) return true;
+    if (!canRecover() || page.isClosed?.() || session.isClosed) return true;
 
     const stillDead = page.url() === errorUrl && !response ||
       !/^https?:/.test(page.url()) ||
@@ -74,13 +96,13 @@ export async function recoverConfirmedLeadErrorPage(session, page) {
     if (stillDead) {
       session.addBrowserLog?.({
         type: 'lead_recovery_waiting',
-        detail: `Trang vẫn còn lỗi sau khi tải lại; giữ trình duyệt có lead mở và tiếp tục chờ phục hồi.`
+        detail: `Trang vẫn còn lỗi sau khi tải lại (lượt ${state.attempts}/${MAX_RECOVERY_ATTEMPTS}); giữ trình duyệt mở và tiếp tục chờ phục hồi.`
       }, page);
       return true;
     }
 
     await resetRecoveredPageAutofill(page, session);
-    if (protectConfirmedLeadSession(session) && !session.isClosed && !page.isClosed?.()) {
+    if (canRecover() && !session.isClosed && !page.isClosed?.()) {
       page._leadRecoveryInProgress = false;
       if (typeof page.triggerAutofillScan === 'function') page.triggerAutofillScan();
       else session.triggerAutofillScan?.();

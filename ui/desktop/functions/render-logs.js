@@ -1,16 +1,68 @@
+const ipLogTypes = new Set([
+  'gologin_started',
+  'session_exit_ip_observed',
+  'lead_ip_resolved',
+  'gologin_exit_ip_changed',
+  'gologin_geo_restart',
+  'gologin_geo_unverified',
+  'lead_ip_mismatch',
+  'lead_ip_mismatch_closed'
+]);
+
+const lifecycleTypes = new Set([
+  'session_closed',
+  'gologin_starting',
+  'gologin_process_exited',
+  'gologin_close_requested',
+  'gologin_profile_deleted',
+  'gologin_profile_delete_failed',
+  'browser_close_all_requested',
+  'manual_browser_closed',
+  'manual_browser_closed_refill',
+  'last_tab_closed_auto',
+  'gologin_cdp_disconnected',
+  'gologin_connection_restored',
+  'gologin_reconnect_failed',
+  'slot_launch_timeout',
+  'max_run_timeout',
+  'window_visibility_error',
+  'adsmith_loading_timeout_reload',
+  'iframe_load_exhausted'
+]);
+
+/**
+ * Lọc bảng log theo địa chỉ IP khi người dùng click vào IP trong bảng hoặc nhập vào ô tìm kiếm.
+ * @param {string} ip Địa chỉ IP cần lọc.
+ * @return {void}
+ */
+function filterLogByIp(ip) {
+  const input = document.getElementById('logFilterIp');
+  if (input) {
+    input.value = ip || '';
+    renderLogs();
+    if (typeof showToast === 'function') {
+      showToast(ip ? `Đang lọc log theo IP: ${ip}` : 'Đã xóa lọc IP');
+    }
+  }
+}
+window.filterLogByIp = filterLogByIp;
+
 /**
  * Render logs.
  * @return {void} Kết quả xử lý render logs.
+ * @throws {Error} Khi trạng thái giao diện log chưa được khởi tạo.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-15
  */
 function renderLogs() {
       const slotFilterEl = document.getElementById('logFilterSlot');
       const typeFilterEl = document.getElementById('logFilterType');
+      const ipFilterEl = document.getElementById('logFilterIp');
       if (!slotFilterEl || !typeFilterEl) return;
 
       const slotFilter = slotFilterEl.value;
       const typeFilter = typeFilterEl.value;
+      const ipFilter = (ipFilterEl?.value || '').trim().toLowerCase();
 
       // Extract all slots and offer stats
       const slots = new Set(logData.map((s) => String(s.slot)));
@@ -132,11 +184,33 @@ function renderLogs() {
       const rows = [];
       for (const session of logData) {
         if (slotFilter && String(session.slot) !== slotFilter) continue;
+        const sessIp = String(session.ip || '').toLowerCase();
         const sessOffer = String(session.offer || 1);
         for (const entry of [...session.logs].reverse()) {
           const entryOffer = String(entry.offer ?? sessOffer);
           if (!isAll && entryOffer !== currentSelectedOfferLogTab) continue;
-          if (typeFilter && entry.type !== typeFilter) continue;
+
+          // Type filter
+          if (typeFilter) {
+            if (typeFilter === 'ip_log') {
+              const isIp = ipLogTypes.has(entry.type) || entry.type.includes('ip') || (entry.detail && /xác minh IP|IP exit|đổi IP|khóa IP|múi giờ của đúng IP/i.test(entry.detail));
+              if (!isIp) continue;
+            } else if (typeFilter === 'lifecycle') {
+              if (!lifecycleTypes.has(entry.type)) continue;
+            } else if (entry.type !== typeFilter) {
+              continue;
+            }
+          }
+
+          // IP filter
+          if (ipFilter) {
+            const entryIp = String(entry.ip || '').toLowerCase();
+            const detailLower = String(entry.detail || '').toLowerCase();
+            if (!sessIp.includes(ipFilter) && !entryIp.includes(ipFilter) && !detailLower.includes(ipFilter)) {
+              continue;
+            }
+          }
+
           rows.push({ session, entry });
         }
       }
@@ -222,6 +296,12 @@ function renderLogs() {
         } else if (entry.type === 'gologin_device_detected') {
           typeBadge = '<span class="badge-log badge-field">📱 Fingerprint</span>';
           detail = `<span style="color:#38bdf8;">${escHtml(entry.detail || '')}</span>`;
+        } else if (ipLogTypes.has(entry.type) || (entry.type && entry.type.includes('ip')) || (entry.detail && /xác minh IP|IP exit|đổi IP|khóa IP|múi giờ của đúng IP|IP lead/i.test(entry.detail))) {
+          typeBadge = '<span class="badge-log" style="background:rgba(2,132,199,0.22);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);font-weight:600;">🌐 Log IP</span>';
+          detail = `<span style="color:#38bdf8;">${escHtml(entry.detail || '')}</span>`;
+        } else if (lifecycleTypes.has(entry.type) || (entry.type && (entry.type.startsWith('gologin_') || entry.type.includes('close') || entry.type.includes('session') || entry.type.includes('timeout')))) {
+          typeBadge = '<span class="badge-log" style="background:rgba(100,116,139,0.22);color:#cbd5e1;border:1px solid rgba(148,163,184,0.35);">⚙️ Hệ thống</span>';
+          detail = `<span style="color:#94a3b8;">${escHtml(entry.detail || '')}</span>`;
         } else if (entry.detail) {
           detail = escHtml(entry.detail);
         }
@@ -243,7 +323,7 @@ function renderLogs() {
           <td class="cell-selector">${idx === 0 ? '►' : ''}</td>
           <td>${fmtTime(entry.time)}</td>
           <td>${offerBadge}</td>
-          <td>Slot ${session.slot} · <b>${escHtml(session.ip || '?')}</b><br><span style="color:#94a3b8;font-size:10px;" title="${escHtml(deviceTitle || session.deviceSummary || '')}">${getDeviceIcon(deviceLabel)} ${escHtml(deviceLabel)}</span></td>
+          <td>Slot ${session.slot} · <b class="clickable-ip" onclick="event.stopPropagation();filterLogByIp('${escHtml(session.ip || '')}')" title="Nhấn để lọc theo IP: ${escHtml(session.ip || '')}" style="cursor:pointer;color:#38bdf8;text-decoration:underline dotted;">${escHtml(session.ip || '?')}</b><br><span style="color:#94a3b8;font-size:10px;" title="${escHtml(deviceTitle || session.deviceSummary || '')}">${getDeviceIcon(deviceLabel)} ${escHtml(deviceLabel)}</span></td>
           <td>${typeBadge}</td>
           <td>${detail}${fileTag}${viewHtmlBtn}</td>
         </tr>`;

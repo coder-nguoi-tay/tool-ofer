@@ -6,6 +6,21 @@
  * @since 2026-11-10
  */
 function renderToffersLeads(data) {
+      if (typeof formatOfferDisplayName !== 'function') {
+        window.formatOfferDisplayName = function formatOfferDisplayName(item) {
+          if (!item) return '--';
+          if (typeof item === 'string') return item.trim() || '--';
+          const name = String(item.nameoff || '').trim();
+          const offerId = item.offerid !== null && item.offerid !== undefined ? String(item.offerid).trim() : '';
+          if (!name && !offerId) return '--';
+          if (!offerId) return name || '--';
+          if (!name) return `#${offerId}`;
+          if (name.startsWith(`#${offerId}_`) || name.startsWith(`#${offerId} - `) || name.startsWith(`#${offerId} `)) {
+            return name;
+          }
+          return `#${offerId}_${name}`;
+        };
+      }
       if (data.leadStats) {
         window.cachedLeadStats = Object.assign(window.cachedLeadStats || {}, data.leadStats);
       }
@@ -42,7 +57,7 @@ function renderToffersLeads(data) {
         if (elLatest) elLatest.textContent = timeStr;
 
         const elLatestOff = document.getElementById('leadCardLatestOffer');
-        if (elLatestOff) elLatestOff.textContent = first.nameoff || '--';
+        if (elLatestOff) elLatestOff.textContent = formatOfferDisplayName(first);
 
         const elLatestIp = document.getElementById('leadCardLatestIp');
         if (elLatestIp) {

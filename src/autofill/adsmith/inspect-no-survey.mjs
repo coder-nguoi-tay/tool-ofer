@@ -55,7 +55,11 @@ export function inspectNoSurvey() {
   const clickables = Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')).filter(element => visible(element) && !element.closest('.Qst, .PopInfo'));
   const next = Array.from(document.querySelectorAll('.Btm .Buttons li.Next a, .Buttons li.Next a')).find(element => visible(element) && !element.closest('.PopInfo') && isNextText(element, /^(continue|next|skip)\b/i))
     || clickables.find(element => isNextText(textOf(element), /^(continue|next|submit|skip)\b/i));
-  const busy = Array.from(survey.querySelectorAll('.Processing,[aria-busy="true"]')).some(visible);
+  // .Processing (màn mờ trắng full màn hình lúc Continue chờ AJAX) là con trực tiếp của body, NGOÀI .Survey/.Wrap
+  // (test.html 2026-11-15): trước đây chỉ tìm trong .Survey nên luôn coi là rảnh và bấm Continue vào màn mờ.
+  // Xét display/kích thước thay vì visible(): lúc fadeIn opacity còn 0 nhưng màn mờ đã chặn chuột.
+  const processing = Array.from(document.querySelectorAll('.Processing')).some(element => getComputedStyle(element).display !== 'none' && element.getClientRects().length > 0);
+  const busy = processing || Array.from(survey.querySelectorAll('[aria-busy="true"]')).some(visible);
   // PopInfo chỉ chặn Continue khi là subform thật (có ô nhập đang hiện); khung chỉ có chữ thì không.
   const subformOpen = Array.from(activePage.querySelectorAll('.PopInfo')).some(popup => visible(popup) && Array.from(popup.querySelectorAll('input:not([type="hidden"]), select, textarea')).some(visible));
   const buttons = clickables.map(element => textOf(element).textContent.replace(/\s+/g, ' ').trim().slice(0, 30)).filter(Boolean).slice(0, 8);

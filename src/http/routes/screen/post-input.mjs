@@ -26,6 +26,8 @@ export async function handlePostScreenInput(request, response) {
     }
     try {
       const body = JSON.parse(await readRequestBody(request));
+      // Người dùng đang thao tác tay trong Screen View: tính là hoạt động, không để F5 tự động đè lên.
+      if (sc.page && body.type !== 'mousemove') sc.page._uxManualInputAt = Date.now();
       const {
         cdpClient
       } = sc;

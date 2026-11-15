@@ -1,4 +1,4 @@
-/* Toolbar preview trình duyệt giữ đủ nút khi cửa sổ hẹp. */
+/* Toolbar preview trình duyệt giữ đủ nút khi cửa sổ hẹp và khóa cứng layout chống giật khi FPS thay đổi. */
 .screen-preview-header {
   min-width: 0;
   gap: 8px 12px;
@@ -14,10 +14,44 @@
   justify-content: flex-end;
 }
 
-.screen-preview-actions > button {
+.screen-preview-actions > button,
+.screen-preview-actions > .screen-tool-btn {
   flex: 0 0 auto;
   justify-content: center;
   white-space: nowrap;
+}
+
+/* Badge FPS: Cố định kích thước, cấm rớt dòng, căn giữa hoàn hảo và dùng tabular-nums để số nhảy không giật 1px */
+#screenModalFps {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 92px !important;
+  min-width: 92px !important;
+  max-width: 92px !important;
+  height: 24px !important;
+  padding: 0 8px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-variant-numeric: tabular-nums !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-align: center !important;
+  box-sizing: border-box !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  line-height: 1 !important;
+}
+
+#screenModalTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
 }
 
 .screen-html-toolbar {
@@ -37,8 +71,50 @@
   min-width: 0;
 }
 
+/* Trên màn hình Desktop (> 900px), khóa cứng chiều cao header và không cho nút rớt dòng để màn hình tuyệt đối không giật khi FPS nhảy */
+@media (min-width: 901px) {
+  .screen-preview-header {
+    height: 48px;
+    min-height: 48px;
+    max-height: 48px;
+    box-sizing: border-box;
+    overflow: hidden;
+    align-items: center;
+  }
+
+  .screen-preview-heading {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .screen-preview-title {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .screen-preview-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+}
+
 @media (max-width: 900px) {
   .screen-preview-header {
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
     flex-wrap: wrap;
     align-items: flex-start !important;
     padding: 6px 10px !important;
@@ -52,6 +128,7 @@
 
   .screen-preview-actions {
     flex: 1 1 100%;
+    flex-wrap: wrap !important;
     justify-content: flex-start;
   }
 

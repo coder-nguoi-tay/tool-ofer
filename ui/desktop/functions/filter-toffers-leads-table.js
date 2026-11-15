@@ -1,4 +1,26 @@
 /**
+ * Định dạng tên hiển thị offer kèm mã code (#<offerid>_<nameoff>).
+ * @param {object|string} item Dữ liệu lead hoặc tên offer.
+ * @return {string} Tên hiển thị kèm mã code hoặc '--'.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-15
+ */
+function formatOfferDisplayName(item) {
+  if (!item) return '--';
+  if (typeof item === 'string') return item.trim() || '--';
+  const name = String(item.nameoff || '').trim();
+  const offerId = item.offerid !== null && item.offerid !== undefined ? String(item.offerid).trim() : '';
+  if (!name && !offerId) return '--';
+  if (!offerId) return name || '--';
+  if (!name) return `#${offerId}`;
+  if (name.startsWith(`#${offerId}_`) || name.startsWith(`#${offerId} - `) || name.startsWith(`#${offerId} `)) {
+    return name;
+  }
+  return `#${offerId}_${name}`;
+}
+window.formatOfferDisplayName = formatOfferDisplayName;
+
+/**
  * Filter toffers leads table.
  * @return {void} Kết quả xử lý filter toffers leads table.
  * @author ductv <ductv@getflycrm.com>
@@ -11,7 +33,8 @@ function filterToffersLeadsTable() {
       const query = (document.getElementById('leadSearchInput')?.value || '').trim().toLowerCase();
       const list = toffersLeadsData.filter((item) => {
         if (!query) return true;
-        const txt = `${item.id || ''} ${item.nameoff || ''} ${item.ip || ''} ${item.username || ''} ${item.fullname || ''} ${item.clickid || ''} ${item.geo || ''}`.toLowerCase();
+        const formattedOffer = formatOfferDisplayName(item);
+        const txt = `${item.id || ''} ${item.offerid || ''} ${formattedOffer} ${item.nameoff || ''} ${item.ip || ''} ${item.username || ''} ${item.fullname || ''} ${item.clickid || ''} ${item.geo || ''}`.toLowerCase();
         return txt.includes(query);
       });
 
@@ -51,11 +74,13 @@ function filterToffersLeadsTable() {
           </span>`;
         }
 
+        const formattedOffer = formatOfferDisplayName(item);
+
         return `
           <tr style="cursor:default;">
             <td style="text-align:center;color:#94a3b8;font-size:11px;">${idx + 1}</td>
             <td style="font-weight:600;color:#38bdf8;font-size:11px;">#${escHtml(item.id || '')}</td>
-            <td style="font-weight:600;color:#f8fafc;" title="${escHtml(item.nameoff || '')}">${escHtml(item.nameoff || '--')}</td>
+            <td style="font-weight:600;color:#f8fafc;" title="${escHtml(formattedOffer)}">${escHtml(formattedOffer)}</td>
             <td style="text-align:center;">${pointBadge}</td>
             <td><code class="clickable-ip" onclick="copyToClipboard('${escHtml(item.ip || '')}', 'Đã sao chép IP: ${escHtml(item.ip || '')}')" title="Nhấn để sao chép IP">${escHtml(item.ip || '')}</code></td>
             <td style="text-align:center;">${progressBadge}</td>

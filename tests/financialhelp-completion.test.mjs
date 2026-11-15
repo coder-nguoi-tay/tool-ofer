@@ -120,3 +120,49 @@ test('thankyou giữ browser có lead khi Yes/No là link tách wrapper hoặc c
     assert.equal(await canCompleteFinancialhelpSession(session), false, 'Còn đáp án phải giữ toàn bộ browser');
   }
 });
+
+test('quy tắc thankyou.php (2026-11-15): hết offer phụ thì tắt trình duyệt; còn offer phụ đang làm thì đợi, làm xong quét lại rồi tắt', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { completeFinancialhelpSession } = await import('../src/leads/actions/complete-financialhelp-session.mjs');
+  const { fillPageForms } = await import('../src/autofill/fill-page-forms.mjs');
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  // Markup thật của financialhelpfinder.com/thankyou.php (bản chụp 2026-11-11): chỉ có 3 link tải PDF, các nút offer nằm trong comment.
+  const thankyou = `<header class="header"><img alt="logo"></header><div class="section_1"><div class="content">
+    <div class="ribbon big"><h1 class="thank_you-h1">Thank You for Joining FinancialHelpFinder.com!</h1></div>
+    <h2 class="thank_you-h2">Dive into Your Free Resource: <a href="Guide.pdf" class="thank_you-a">'The Guide To Financial Assistance'</a></h2>
+    <p>Please enjoy your complimentary copy of <a href="Guide.pdf" class="thank_you-a">"The Guide To Financial Assistance."</a> This eBook is filled with information.</p>
+    <p class="big"><a href="Guide.pdf" class="thank_you-a">Click here to download your guide now!</a></p></div>
+    <!--<table><tr><td><button class="button-box" onClick="NewTab('https://x.test/1');">Loan Options For Poor Credit</button></td></tr></table>--></div>`;
+  const question = '<main style="text-align:center"><h3>Do you own a car?</h3><button>Yes</button> <button>No</button></main>';
+  let subBody = question;
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  await context.route('**/*', route => route.request().isNavigationRequest()
+    ? route.fulfill({ contentType: 'text/html', body: route.request().url().endsWith('thankyou.php') ? thankyou : subBody }) : route.abort());
+  const page = await context.newPage();
+  await page.goto('https://financialhelpfinder.com/thankyou.php');
+  const logs = [];
+  const session = { slot: 1, mainPage: page, browser: context, addBrowserLog: entry => logs.push(entry), autofillFields: 0, autofillActions: 0 };
+  let closes = 0;
+  const closeSession = async options => { closes += 1; session.isClosed = true; assert.equal(options.completedFinancialFlow, true); };
+  /** Một nhịp của bộ canh: autofill quét trang, rồi thử hoàn tất (cần URL/tab ổn định 3 giây giữa hai lần). */
+  const tick = async () => {
+    await fillPageForms(page, { session, sessionRecord: { firstname: 'Fixture' }, options: { autoSubmit: true, enableLeadCheck: false }, triggerLeadCheckAfterEmail() {} });
+    await completeFinancialhelpSession(session, closeSession);
+    await page.waitForTimeout(3200);
+    return completeFinancialhelpSession(session, closeSession);
+  };
+
+  // Còn tab offer phụ đang có câu hỏi chưa trả lời → đợi, không tắt.
+  const sub = await context.newPage();
+  await sub.goto('https://sub-offer.test/question');
+  assert.equal(await tick(), false, 'offer phụ đang làm: chưa được tắt trình duyệt');
+  assert.equal(closes, 0);
+  assert.equal(page.url(), 'https://financialhelpfinder.com/thankyou.php', 'tab chính vẫn ở thankyou.php (không bị kéo sang file PDF)');
+
+  // Offer phụ làm xong (tab phụ đóng) → quét lại → hết offer phụ → tắt trình duyệt nhường slot.
+  await sub.close();
+  assert.equal(await tick(), true, 'hết offer phụ: tắt trình duyệt');
+  assert.equal(closes, 1);
+  assert.ok(logs.some(entry => entry.type === 'thankyou_completed'));
+});

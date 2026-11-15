@@ -346,3 +346,32 @@ test('GoLogin đã có lead gặp trang lỗi: không dừng Orbita, F5 tải l�
   assert.ok(reloads >= 1, 'F5 tải lại trang lỗi');
   assert.equal(session.leadCheckStatus, 'confirmed');
 });
+
+test('IP trùng lịch sử lead cũ KHÔNG biến phiên mới thành có lead (log 2026-11-15: 73.197.121.34 có lead 08:08, phiên 18:25 bị ghi có lead)', () => {
+  const reusedIp = '198.51.100.77';
+  // Lead của lượt chạy trước, nạp từ lead-stats.json lúc khởi động app.
+  recordLeadIpStats({ ip: reusedIp, confirmedAt: new Date(Date.now() - 10 * 3600_000).toISOString(), screen: 5, jumpCount: 44 });
+  const { session } = createLeadTestSession(reusedIp);
+  session.leadHistoryBaselineAt = undefined; // phiên mới tinh: mốc được đặt ở lần kiểm đầu tiên
+  assert.equal(protectConfirmedLeadSession(session), false, 'lead cũ của IP không thuộc phiên này');
+  assert.equal(session.confirmedLeadIp ?? null, null);
+  assert.notEqual(session.leadCheckStatus, 'confirmed');
+  assert.notEqual(session.screen5LeadVerified, true);
+  // Gọi lại nhiều lần vẫn không đổi (watcher gọi hàm này liên tục).
+  assert.equal(protectConfirmedLeadSession(session), false);
+
+  // Lead được xác nhận cho chính phiên này (đường kiểm lead thật đặt cờ trực tiếp) vẫn được bảo vệ.
+  session.confirmedLeadIp = reusedIp;
+  assert.equal(protectConfirmedLeadSession(session), true);
+});
+
+test('lead ghi vào lịch sử SAU khi phiên bắt đầu vẫn bảo vệ phiên đó', async () => {
+  const ip = '198.51.100.78';
+  const { session } = createLeadTestSession(ip);
+  session.leadHistoryBaselineAt = undefined;
+  assert.equal(protectConfirmedLeadSession(session), false, 'chưa có lead');
+  await new Promise(resolve => setTimeout(resolve, 5));
+  recordLeadIpStats({ ip });
+  assert.equal(protectConfirmedLeadSession(session), true);
+  assert.equal(session.confirmedLeadIp, ip);
+});

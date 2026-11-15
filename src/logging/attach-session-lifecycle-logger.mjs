@@ -5,12 +5,14 @@ import { limitSessionEvents } from './recorder/limit-session-events.mjs';
 import { syncBrowserLogSessionMetadata } from './browser-logs/sync-session-metadata.mjs';
 
 const lifecycleTypes = new Set([
+  'adsmith_loading_timeout_reload', 'adsmith_loading_reload_failed', 'iframe_load_exhausted',
   'gologin_process_exited', 'gologin_starting', 'gologin_started', 'gologin_device_detected', 'gologin_close_requested', 'gologin_cdp_disconnected', 'gologin_connection_restored', 'gologin_reconnect_failed', 'window_visibility_error',
   'gologin_start_failed', 'gologin_profile_stop_failed', 'gologin_profile_deleted', 'gologin_profile_delete_failed', 'gologin_exit_ip_changed', 'gologin_device_error', 'session_exit_ip_observed', 'slot_launch_timeout', 'max_run_timeout', 'gologin_geo_restart', 'gologin_geo_unverified', 'lead_check_targets', 'lead_ip_resolved', 'lead_confirmed', 'lead_observed', 'lead_failed', 'lead_ip_mismatch_closed',
   'manual_browser_closed', 'manual_browser_closed_refill', 'browser_close_all_requested',
   'last_tab_closed_auto', 'lead_browser_kept_open', 'thankyou_completed',
   'traffic_blocked', 'toffers_duplicate_ip', 'adtrapper_disabled_close', 'adtrapper_stuck_close',
   'sub_offer_tab_closed', 'thankyou_tab_closed', 'duplicate_tab_closed', 'excluded_tab_closed', 'tab_limit_closed',
+  'stuck_page_reload', 'stuck_page_reload_exhausted', 'stuck_page_reload_failed',
 ]);
 const browserCloseTypes = new Set([
   'gologin_close_requested',
@@ -26,6 +28,7 @@ const browserCloseTypes = new Set([
  * @param {object} session Phiên sở hữu IP và trạng thái lead.
  * @param {object} recording Nhật ký phiên đã đăng ký trong lịch sử.
  * @return {Function} Callback nhận các mốc vòng đời, bỏ qua log thao tác thông thường.
+ * @throws {Error} Khi context không hỗ trợ đăng ký listener.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-15
  */
@@ -37,6 +40,7 @@ export function attachSessionLifecycleLogger(context, session, recording) {
    * Lưu mốc quan trọng cùng IP/lead tại thời điểm sự kiện; bỏ query nhạy cảm trong mô tả.
    * @param {object} entry Mốc lead hoặc lý do đóng từ luồng nghiệp vụ.
    * @return {object|null} Mốc đã lưu hoặc null nếu là log thao tác.
+   * @throws {Error} Khi recorder của phiên không còn hợp lệ.
    * @author ductv <ductv@getflycrm.com>
    * @since 2026-11-15
    */

@@ -19,10 +19,12 @@ function openScreenModal(slot) {
       const fpsEl = document.getElementById('screenModalFps');
       if (fpsEl) {
         if (!entry) {
-          fpsEl.textContent = '🔴 Phiên đã đóng';
+          fpsEl.textContent = '🔴 Đã ngắt';
+          fpsEl.title = 'Phiên đã đóng';
           fpsEl.style.color = '#f87171';
         } else {
-          fpsEl.textContent = '🟢 Đang kết nối...';
+          fpsEl.textContent = '🟢 Kết nối...';
+          fpsEl.title = 'Đang kết nối luồng screencast...';
           fpsEl.style.color = '#38bdf8';
         }
       }

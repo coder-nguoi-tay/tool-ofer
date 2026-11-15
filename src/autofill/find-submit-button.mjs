@@ -49,6 +49,19 @@ async function findSubmitButton(frame, formScope) {
               reason: 'newsletter_submitting'
             };
           }
+          if (el.closest?.('[data-ux-footer-link]')) {
+            return {
+              valid: false,
+              reason: 'footer_like_link'
+            };
+          }
+          // Link tải file (PDF/ebook/tài liệu) không phải nút tiếp tục: bấm vào sẽ đưa tab sang file (thankyou.php của FinancialHelpFinder).
+          if (tag === 'A' && (el.hasAttribute?.('download') || /\.(?:pdf|epub|docx?|xlsx?|pptx?|csv|zip|rar)(?:[?#]|$)/i.test(el.getAttribute?.('href') || ''))) {
+            return {
+              valid: false,
+              reason: 'file_download_link'
+            };
+          }
           if (['IFRAME', 'FRAME', 'FORM', 'BODY', 'HTML', 'MAIN', 'SECTION', 'ARTICLE'].includes(tag)) {
             return {
               valid: false,

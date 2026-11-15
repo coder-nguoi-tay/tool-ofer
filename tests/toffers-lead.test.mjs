@@ -116,3 +116,24 @@ test('initLeadIpStats and clearLeadIpStats initialize and reset persisted stats'
   clearLeadIpStats();
   assert.equal(leadIpStatsMap.size, 0);
 });
+
+test('normalizeIpAddress giữ nguyên IPv6, không cắt ở dấu ":" đầu tiên (log 2026-11-15: 2603:300b:… → "2603")', () => {
+  const full = '2603:300b:4a0:0:88dc:f95:212c:dde2';
+  assert.equal(normalizeIpAddress(full), full);
+  assert.equal(normalizeIpAddress(`  ${full} `), full);
+  assert.equal(normalizeIpAddress('2600:1700:6920:4ee0:ae64:cfff:fe74:b694'), '2600:1700:6920:4ee0:ae64:cfff:fe74:b694');
+  assert.equal(normalizeIpAddress('2603:300B:4A0:0:88DC:F95:212C:DDE2'), full, 'chữ hoa/thường là cùng một IP');
+  assert.equal(normalizeIpAddress('2001:db8::1'), '2001:db8::1');
+  assert.equal(normalizeIpAddress('::1'), '::1');
+  // IPv6 kèm cổng hoặc trong URL dùng ngoặc vuông.
+  assert.equal(normalizeIpAddress(`[${full}]:8080`), full);
+  assert.equal(normalizeIpAddress(`[${full}]`), full);
+  assert.equal(normalizeIpAddress(`http://[${full}]:10000/path`), full);
+  // Hai IPv6 khác nhau cùng tiền tố không được gộp thành một.
+  assert.notEqual(normalizeIpAddress('2603:300b:4a0:0:88dc:f95:212c:dde2'), normalizeIpAddress('2603:8000:1:2:3:4:5:6'));
+  // Hành vi cũ giữ nguyên: IPv4/host kèm cổng, URL, rỗng.
+  assert.equal(normalizeIpAddress('65.35.139.24:9999'), '65.35.139.24');
+  assert.equal(normalizeIpAddress('http://192.168.1.1:8080'), '192.168.1.1');
+  assert.equal(normalizeIpAddress('proxy.example.test:10000'), 'proxy.example.test');
+  assert.equal(normalizeIpAddress(null), '');
+});

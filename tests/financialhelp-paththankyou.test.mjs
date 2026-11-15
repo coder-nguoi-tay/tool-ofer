@@ -133,3 +133,51 @@ test('popup paththankyou không bị đóng như trang cảm ơn; thankyou/thank
   for (const url of ['https://offer.test/thankyou.php', 'https://offer.test/thank-you/', 'https://offer.test/thanks.html', 'https://offer.test/thank_you?x=1', 'https://offer.test/thankyou']) assert.equal(isCompletedPopupUrl(url), true, url);
   for (const url of ['https://offer.test/form', 'https://offer.test/confirmation.php', '', null]) assert.equal(isCompletedPopupUrl(url), false, String(url));
 });
+
+test('thankyou.php: link tải PDF "The Guide To Financial Assistance" không bị coi là đáp án khảo sát và không bị bấm', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  const navigations = [];
+  // Markup thật của financialhelpfinder.com/thankyou.php (bản chụp 2026-11-11), không chứa dữ liệu người dùng.
+  const html = `<header class="header"><img alt="Financial help finder logo" class="fhf_icon"></header>
+    <div class="section_1"><div class="content">
+      <div class="ribbon big"><h1 class="thank_you-h1">Thank You for Joining FinancialHelpFinder.com!</h1></div>
+      <h2 class="thank_you-h2">Dive into Your Free Resource: <a href="GuideToFinancialAssistanceFromFinancialHelpFinderDotCom.pdf" class="thank_you-a">'The Guide To Financial Assistance'</a></h2>
+      <p>As a token of our appreciation, please enjoy your complimentary copy of <a href="GuideToFinancialAssistanceFromFinancialHelpFinderDotCom.pdf" class="thank_you-a">"The Guide To Financial Assistance."</a> This comprehensive eBook is filled with invaluable information.</p>
+      <p class="big"><a href="GuideToFinancialAssistanceFromFinancialHelpFinderDotCom.pdf" class="thank_you-a">Click here to download your guide now!</a> Additionally, explore our thank you page.</p>
+    </div></div>`;
+  await context.route('**/*', route => {
+    if (!route.request().isNavigationRequest()) return route.abort();
+    navigations.push(route.request().url());
+    return route.fulfill({ contentType: 'text/html', body: route.request().url().endsWith('thankyou.php') ? html : '<p>file</p>' });
+  });
+  const page = await context.newPage();
+  await page.goto('https://financialhelpfinder.com/thankyou.php');
+  const session = { slot: 1, mainPage: page, browser: context, addBrowserLog() {}, autofillFields: 0, autofillActions: 0 };
+  for (let round = 0; round < 3; round++) {
+    await fillPageForms(page, { session, sessionRecord: { firstname: 'Fixture' }, options: { autoSubmit: true, enableLeadCheck: false }, triggerLeadCheckAfterEmail() {} });
+    await page.waitForTimeout(400);
+  }
+  assert.deepEqual(navigations.filter(url => /\.pdf/i.test(url)), [], 'không được điều hướng tab sang file PDF');
+  assert.equal(page.url(), 'https://financialhelpfinder.com/thankyou.php', 'tab vẫn ở trang thank you');
+  assert.equal(await page.locator('a.thank_you-a[data-ux-choice-id], a.thank_you-a[data-ux-answer-attempt-at]').count(), 0, 'link PDF không được gắn dấu đáp án');
+});
+
+test('cụm đáp án dạng link thường (không phải file tải) vẫn được nhận diện và bấm như cũ', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  // Link "#..." không điều hướng: chỉ kiểm việc nhận diện + bấm, tránh chờ trang chuyển.
+  const html = '<div class="q"><h3>Do you rent or own your home?</h3><a href="#rent" onclick="this.dataset.clicked=1">Rent</a> <a href="#own" onclick="this.dataset.clicked=1">Own</a></div>';
+  await context.route('**/*', route => route.request().isNavigationRequest() ? route.fulfill({ contentType: 'text/html', body: html }) : route.abort());
+  const page = await context.newPage();
+  await page.goto('https://offer.test/question');
+  const session = { slot: 1, mainPage: page, browser: context, addBrowserLog() {}, autofillFields: 0, autofillActions: 0 };
+  for (let round = 0; round < 3 && !(await page.locator('a[data-clicked]').count()); round++) {
+    await fillPageForms(page, { session, sessionRecord: { firstname: 'Fixture' }, options: { autoSubmit: true, enableLeadCheck: false }, triggerLeadCheckAfterEmail() {} });
+    await page.waitForTimeout(400);
+  }
+  assert.equal(await page.locator('a[data-ux-choice-id]').count(), 2, 'hai link đáp án vẫn được nhận diện');
+  assert.ok(await page.locator('a[data-clicked]').count() >= 1, 'một đáp án vẫn được bấm');
+});

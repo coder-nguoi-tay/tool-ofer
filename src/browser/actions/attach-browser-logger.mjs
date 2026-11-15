@@ -16,6 +16,7 @@ import { syncBrowserLogSessionMetadata } from '../../logging/browser-logs/sync-s
  * @param {object} context BrowserContext của Chrome hoặc AdsPower.
  * @param {object} session Phiên sở hữu các tab trình duyệt.
  * @return {void} Gắn bộ ghi nhận dùng chung cho bot, Screen View và observer.
+ * @throws {Error} Khi context không hỗ trợ đăng ký listener ghi nhận.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-15
  */
@@ -44,6 +45,7 @@ export function attachBrowserLogger(context, session) {
    * @param {object} entry Nội dung hành động hoặc lỗi.
    * @param {object|null} eventPage Tab phát sinh, nếu có.
    * @return {object} Sự kiện đã được gán định danh và lưu vào phiên.
+   * @throws {Error} Khi recorder của phiên không còn hợp lệ.
    * @author ductv <ductv@getflycrm.com>
    * @since 2026-11-15
    */

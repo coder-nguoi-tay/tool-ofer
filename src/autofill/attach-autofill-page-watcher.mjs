@@ -2,8 +2,11 @@ import { isCompletedPopupUrl } from '../leads/actions/is-completed-popup-url.mjs
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { isNoSurveyFrame } from './adsmith/is-no-survey-frame.mjs';
+import { ADSMITH_STUCK_RELOAD_MS } from './adsmith/handle-no-survey.mjs';
 import { recordPageDialog } from './record-page-dialog.mjs';
 import { recoverEmptyProgress } from './late-progress/recover-empty-progress.mjs';
+import { recoverAdsmithFrameLoading } from './adsmith/recover-frame-loading.mjs';
+import { reloadStuckPage } from './stuck-page/reload-stuck-page.mjs';
 import { inspectAutofillChallenge } from './watchdog/inspect-autofill-challenge.mjs';
 import { getAutofillScanDelay } from './watchdog/get-autofill-scan-delay.mjs';
 import { repairVisibleFieldsFromRecord } from './watchdog/repair-visible-fields-from-record.mjs';
@@ -101,6 +104,11 @@ export function attachAutofillPageWatcher(page, {
     } catch {
       // Trang có thể vừa điều hướng — cho phép lượt quét sau chạy tiếp.
     }
+    if (await recoverAdsmithFrameLoading(page, session, options)) {
+      noProgressRounds = 0;
+      scanDelayMs = 1500;
+      return;
+    }
     if (libraryPageUrl !== u) {
       libraryPageUrl = u;
       firstLibraryPassAt = Date.now();
@@ -142,6 +150,13 @@ export function attachAutofillPageWatcher(page, {
         return;
       }
       if (await isNoSurveyFrame(page._activeAutofillFrame)) {
+        // Khảo sát Adsmith: AI không can thiệp, nhưng màn mờ .Processing treo thì F5 trang cha sau 40 giây.
+        // Trước đây return ở đây nên trang treo vĩnh viễn, không tới bộ F5 bên dưới.
+        if (await reloadStuckPage(page, session, 'adsmith-survey', options, Date.now(), { thresholdMs: ADSMITH_STUCK_RELOAD_MS })) {
+          noProgressRounds = 0;
+          scanDelayMs = 5000;
+          return;
+        }
         noProgressRounds = 0;
         scanDelayMs = 500;
         return;
@@ -154,6 +169,12 @@ export function attachAutofillPageWatcher(page, {
         // Đang đợi kiểm tra lead màn 5, không tính là bị kẹt để tránh gọi AI nhầm
         noProgressRounds = 0;
         scanDelayMs = 1500;
+        return;
+      }
+      // Trang đứng hình ~2 phút (không thao tác, giao diện không đổi, không luồng nào đang chạy) thì F5.
+      if (await reloadStuckPage(page, session, visibleState.available ? visibleState.signature : 'unavailable', options)) {
+        noProgressRounds = 0;
+        scanDelayMs = 5000;
         return;
       }
       if (hasInteractable) {

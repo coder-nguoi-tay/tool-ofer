@@ -209,3 +209,47 @@ test('offer mở form ngay trong thẻ: chặn CTA cũ nhưng vẫn điền form
   assert.equal(await humanClick(page, page.locator('#details button')), true);
   assert.equal(await page.evaluate(() => window.continued), true);
 });
+
+test('searchcactus trackofr.asp (redirect gần cuối luồng): chặn đúng đường dẫn, không phụ thuộc query', () => {
+  for (const url of [
+    'https://www.searchcactus.com/publisher/trackofr.asp',
+    'https://www.searchcactus.com/publisher/trackofr.asp?chnl=221341&ofr=1089163&sub=abc',
+    'https://searchcactus.com/publisher/trackofr.asp?chnl=1',
+    'http://www.searchcactus.com/publisher/trackofr.asp',
+  ]) assert.equal(isExcludedOfferPageUrl(url), true, url);
+  for (const url of [
+    'https://www.searchcactus.com/',
+    'https://www.searchcactus.com/publisher/other.asp',
+    'https://www.searchcactus.com.evil.test/publisher/trackofr.asp',
+    'https://offer.test/?next=https://www.searchcactus.com/publisher/trackofr.asp',
+  ]) assert.equal(isExcludedOfferPageUrl(url), false, url);
+});
+
+test('tab mới mở tới searchcactus trackofr.asp bị đóng, tab đang làm vẫn giữ', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { context, page, session } = await createFormScopeFixture(browser, '<main><h1>Offer</h1><input name="email"></main>');
+  t.after(() => context.close());
+  const logs = [];
+  Object.assign(session, { mainPage: page, browser: context, addBrowserLog: entry => logs.push(entry) });
+  attachUniqueOfferTabs(context, session);
+  const popup = await context.newPage();
+  await popup.goto('https://www.searchcactus.com/publisher/trackofr.asp?chnl=221341&ofr=1089163').catch(() => {});
+  await waitFor(() => popup.isClosed());
+  assert.equal(page.isClosed(), false, 'tab đang làm offer không bị đóng');
+  assert.ok(logs.some(entry => entry.type === 'excluded_tab_closed' && entry.detail.includes('searchcactus.com')));
+});
+
+test('account.yougov.com/…/account/privacy-policy bị đóng; form khảo sát YouGov vẫn giữ', () => {
+  for (const url of [
+    'https://account.yougov.com/us-en/account/privacy-policy',
+    'https://account.yougov.com/us-en/account/privacy-policy/',
+    'https://account.yougov.com/us-en/account/privacy-policy?sourceid=1477015&rlid=221341',
+  ]) assert.equal(isExcludedOfferPageUrl(url), true, url);
+  for (const url of [
+    'https://account.yougov.com/us-en/join/new/question-2',
+    'https://account.yougov.com/us-en/join/main?sourceid=1477015',
+    'https://account.yougov.com/us-en/account/login',
+    'https://account.yougov.com.evil.test/us-en/account/privacy-policy',
+  ]) assert.equal(isExcludedOfferPageUrl(url), false, url);
+});

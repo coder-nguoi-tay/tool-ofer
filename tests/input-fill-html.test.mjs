@@ -87,3 +87,12 @@ test('logger full giữ HTML và URL đã bỏ query, không yêu cầu snapshot
   context.emit('close');
   process.env.AUTOLEADPC_LOG_MODE = 'access';
 });
+
+test('URL data không làm lộ toàn bộ trang hoặc giá trị input trong log', async () => {
+  const logs = [];
+  const page = { url: () => 'data:text/html,<input value="private-data">', _autofillSession: { addBrowserLog: entry => logs.push(entry) } };
+  await recordInputFillHtml({ evaluate: async () => ({ html: '<input>', fieldId: 'test', frameUrl: 'data:text/html,<input value="private-frame">' }) }, page);
+  assert.equal(logs[0].pageUrl, 'data:');
+  assert.equal(logs[0].frameUrl, 'data:');
+  assert.doesNotMatch(JSON.stringify(logs), /private-data|private-frame/);
+});

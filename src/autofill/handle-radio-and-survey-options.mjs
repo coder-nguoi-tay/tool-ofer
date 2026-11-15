@@ -452,6 +452,9 @@ async function handleRadioAndSurveyOptions(frame, record = {}, session = null, o
           if (forwardNavText.test(text) || proximityNoise.test(text)) return false;
           const href = (el.getAttribute ? el.getAttribute('href') : '') || '';
           if (href && (href.startsWith('mailto:') || href.startsWith('tel:'))) return false;
+          if (el.closest('[data-ux-footer-link]')) return false; // link footer/giới thiệu/policy/contact (markFooterLikeLinks)
+          // Link tải file (PDF/ebook/tài liệu) không bao giờ là đáp án: bấm vào sẽ đưa tab sang file (thankyou.php của FinancialHelpFinder).
+          if (el.hasAttribute?.('download') || /\.(?:pdf|epub|docx?|xlsx?|pptx?|csv|zip|rar)(?:[?#]|$)/i.test(href)) return false;
           if (!isInteractive(el)) return false;
           // Bỏ qua nút nằm trong input-field form điền (tránh nhầm nút "Check" của ô nhập)
           const holder = el.closest('form, fieldset, .form-group, .form-row, [data-tf-element-role="offer"], .offerwall-card');

@@ -15,6 +15,7 @@ import { inspectFrameScreen } from './inspect-frame-screen.mjs';
 import { inspectFrameValidation } from './inspect-frame-validation.mjs';
 import { submitFrameForm } from './submit-frame-form.mjs';
 import { clickPathThankyouButton } from './financialhelp/click-path-thankyou-button.mjs';
+import { markFooterLikeLinks } from './footer-links/mark-footer-like-links.mjs';
 import { addVerifiedFieldCount } from './add-verified-field-count.mjs';
 import { getNormalizedPhone } from './get-normalized-phone.mjs';
 import { humanType } from './human-type.mjs';
@@ -80,6 +81,8 @@ export async function fillPageForms(page, {
   if (shouldPauseForLead(session, options)) return;
   // paththankyou.php: bấm đúng nút chuyển tiếp, không qua bộ tìm nút submit chung.
   if (await clickPathThankyouButton(page, session, options)) return;
+  // Đánh dấu link kiểu footer (giới thiệu/policy/contact...) trước mọi nhánh bấm; giới hạn 1.5s để trang đang chuyển không giữ lượt quét.
+  await Promise.all(frames.map(frame => Promise.race([frame.evaluate(markFooterLikeLinks).catch(() => 0), new Promise(resolve => setTimeout(resolve, 1500))])));
   if (await handleSweepstakesCardPage(page, session, options)) return;
 
   // PHÁT HIỆN EMAIL ĐIỀN NGOÀI (RoboForm/extension/tay) — nếu các cờ thường không bắt được,

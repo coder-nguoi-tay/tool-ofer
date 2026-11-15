@@ -1,6 +1,6 @@
 import { completeFinancialhelpSession } from './complete-financialhelp-session.mjs';
 import { isFinancialhelpThankyouUrl } from './is-financialhelp-thankyou-url.mjs';
-import { recoverConfirmedLeadErrorPage } from './recover-confirmed-lead-error-page.mjs';
+import { hasOfferProgress, recoverConfirmedLeadErrorPage } from './recover-confirmed-lead-error-page.mjs';
 import { protectConfirmedLeadSession } from './protect-confirmed-lead-session.mjs';
 import { activeBrowsers } from '../../browser/sessions.mjs';
 import { applicationState } from '../../runtime/application-state.mjs';
@@ -303,6 +303,13 @@ export function watchTrafficBlockedPage(session) {
               const remaining = (session.browser?.pages ? session.browser.pages() : []).filter(p => !p.isClosed());
               if (remaining.length > 0) await (session.mainPage?.isClosed?.() ? remaining[0] : session.mainPage).bringToFront().catch(() => {});
               continue;
+            }
+
+            // Phiên đã thao tác offer mà trang lỗi mạng: form có thể đã gửi, đóng lúc này sinh lead lỗi
+            // (2026-11-15 IP 173.19.184.178 lead về 28s sau khi đóng). F5/Back tối đa 3 lượt rồi mới đóng.
+            if (!isToffersDup && !/Traffic Blocked/i.test(deadReason) && hasOfferProgress(session) && !page._uxErrorRecoveryExhausted) {
+              await recoverConfirmedLeadErrorPage(session, page);
+              if (!page._uxErrorRecoveryExhausted) continue;
             }
 
             // Tab chính hoặc IP đã click offer bị lỗi → đóng cả browser và bù slot mới

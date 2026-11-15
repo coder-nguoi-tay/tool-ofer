@@ -16,7 +16,8 @@ function _startScreenStream(slot) {
 
       const fpsEl = document.getElementById('screenModalFps');
       if (fpsEl) {
-        fpsEl.textContent = '🟢 Đang kết nối...';
+        fpsEl.textContent = '🟢 Kết nối...';
+        fpsEl.title = 'Đang kết nối luồng screencast...';
         fpsEl.style.color = '#38bdf8';
       }
 
@@ -25,22 +26,26 @@ function _startScreenStream(slot) {
         const curFpsEl = document.getElementById('screenModalFps');
         if (!curFpsEl) return;
         if (!es || es.readyState === EventSource.CLOSED) {
-          curFpsEl.textContent = '🔴 Mất kết nối (phiên đã đóng)';
+          curFpsEl.textContent = '🔴 Đã ngắt';
+          curFpsEl.title = 'Mất kết nối (phiên đã đóng)';
           curFpsEl.style.color = '#f87171';
           return;
         }
         if (_screenFpsCounter > 0) {
           _fpsMovingAvg = _fpsMovingAvg === 0 ? _screenFpsCounter : Math.round(_fpsMovingAvg * 0.35 + _screenFpsCounter * 0.65);
           curFpsEl.textContent = `🟢 ${_fpsMovingAvg} fps`;
+          curFpsEl.title = `${_fpsMovingAvg} khung hình / giây`;
           curFpsEl.style.color = '#4ade80';
         } else {
           const timeSinceLastFrame = Date.now() - _lastFrameTime;
           if (es.readyState === EventSource.OPEN && timeSinceLastFrame < 10000) {
             const displayFps = Math.max(_fpsMovingAvg, 15);
-            curFpsEl.textContent = `🟢 ${displayFps} fps (Ổn định)`;
+            curFpsEl.textContent = `🟢 ${displayFps} fps`;
+            curFpsEl.title = `${displayFps} fps (Ổn định)`;
             curFpsEl.style.color = '#38bdf8';
           } else {
             curFpsEl.textContent = '🟡 Đang đợi...';
+            curFpsEl.title = 'Đang đợi khung hình mới...';
             curFpsEl.style.color = '#facc15';
             _fpsMovingAvg = 0;
           }
@@ -135,7 +140,8 @@ function _startScreenStream(slot) {
       es.onerror = () => {
         const errFpsEl = document.getElementById('screenModalFps');
         if (errFpsEl) {
-          errFpsEl.textContent = '🟡 Đang kết nối lại...';
+          errFpsEl.textContent = '🟡 Thử lại...';
+          errFpsEl.title = 'Đang kết nối lại luồng screencast...';
           errFpsEl.style.color = '#facc15';
         }
         if (es && es.readyState === EventSource.CLOSED && _screenActiveSlot === slot) {

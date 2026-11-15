@@ -154,3 +154,13 @@ test('tóm tắt vẫn giữ pha và mã lỗi GoLogin trước SDK/IP; lỗi c�
   assert.equal(summary.logs[1].reasonCode, 'GOLOGIN_IP_MISMATCH');
   assert.equal(summary.logs[1].actualExitIp, '192.0.2.2');
 });
+
+test('log tối giản giữ mốc phục hồi/tới trần Adsmith để nhìn được nguyên nhân proxy chậm', () => {
+  const context = new EventEmitter();
+  context.pages = () => [];
+  const session = { slot: 1, exitIp: '192.0.2.1' };
+  attachBrowserLogger(context, session);
+  for (const type of ['adsmith_loading_timeout_reload', 'adsmith_loading_reload_failed', 'iframe_load_exhausted']) session.addBrowserLog({ type, detail: 'Iframe Adsmith cần kiểm tra kết nối.' });
+  assert.deepEqual(session.logs.map(event => event.type), ['adsmith_loading_timeout_reload', 'adsmith_loading_reload_failed', 'iframe_load_exhausted']);
+  context.emit('close');
+});

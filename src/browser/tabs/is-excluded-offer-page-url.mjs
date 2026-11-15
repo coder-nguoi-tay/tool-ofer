@@ -8,6 +8,12 @@ export const excludedOfferPaths = [
   ['www.yougov.com', ['']],
   ['super.com', ['/home/landings/earn']],
   ['www.super.com', ['/home/landings/earn']],
+  // 2026-11-15: trang chuyển hướng tự mở gần cuối luồng FinancialHelpFinder; người dùng yêu cầu đóng tab ngay.
+  ['searchcactus.com', ['/publisher/trackofr.asp']],
+  ['www.searchcactus.com', ['/publisher/trackofr.asp']],
+  // 2026-11-15: trang chính sách của YouGov mở trong luồng khảo sát; người dùng yêu cầu đóng tab. Chỉ đúng đường dẫn này,
+  // các bước join/new/question-* vẫn giữ.
+  ['account.yougov.com', ['/us-en/account/privacy-policy']],
 ];
 const excludedPaths = new Map(excludedOfferPaths.map(([host, paths]) => [host, new Set(paths)]));
 
