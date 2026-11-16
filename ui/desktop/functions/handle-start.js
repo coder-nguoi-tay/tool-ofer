@@ -170,10 +170,13 @@ async function handleStart(options = {}) {
                 gologinDevices: document.getElementById('cbxGoLogin')?.checked && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,
                 browserMode: Boolean(document.getElementById('cbxGoLogin')?.checked) ? 'GoLogin' : 'Chrome',
                 dataSaver,
+                offerSolver: document.getElementById('cbbOfferSolver')?.value || 'auto',
+                scheduleStop: typeof getScheduleStopSettings === 'function' ? getScheduleStopSettings() : null,
               }
             })
           });
           document.getElementById('lbStatus').textContent = res.message || 'Sequential mode active.';
+          if (typeof syncStopSchedulerState === 'function') syncStopSchedulerState();
         } else {
           const res = await api('/launch', {
             method: 'POST',
@@ -227,6 +230,8 @@ async function handleStart(options = {}) {
                 gologinDevices: document.getElementById('cbxGoLogin')?.checked && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,
               browserMode: Boolean(document.getElementById('cbxGoLogin')?.checked) ? 'GoLogin' : 'Chrome',
               dataSaver,
+              offerSolver: document.getElementById('cbbOfferSolver')?.value || 'auto',
+              scheduleStop: typeof getScheduleStopSettings === 'function' ? getScheduleStopSettings() : null,
             })
           });
           if (res.error) {
@@ -236,6 +241,7 @@ async function handleStart(options = {}) {
             showWinAlert('Thông báo: ' + res.warnings.join('\n'));
             document.getElementById('lbStatus').textContent = res.warnings[0];
           } else {
+            if (typeof syncStopSchedulerState === 'function') syncStopSchedulerState();
             document.getElementById('lbStatus').textContent = res.message || 'Chrome launched successfully.';
           }
           fetchRunningState();

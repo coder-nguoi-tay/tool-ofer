@@ -14,7 +14,7 @@ const applicationName = 'AutoLeadPC Mac 2 AdsPower.app';
  * @param {object} context Test context sở hữu thư mục tạm.
  * @return {object} Source fixture, nơi cài app và môi trường công cụ giả.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-16
  */
 function createBuildFixture(context) {
   const directory = mkdtempSync(join(tmpdir(), 'AutoLeadPC-build-test-'));
@@ -26,6 +26,9 @@ function createBuildFixture(context) {
   const rootFiles = ['AutoLeadPCMacApp.swift', 'AutoLeadPC2.icns', 'autoleadpc-icon.svg', 'app.mjs', 'autofill.mjs', 'option-scorer.mjs', 'observer.mjs', 'analyze-ops.mjs', 'stealth.mjs', 'survey-solver.mjs', 'ai-assist.mjs', 'lead-check.mjs', 'chrome-versions.mjs', 'adspower-profile.mjs', 'multilogin-profile.mjs', 'gologin-profile.mjs', 'codex-form-agent.mjs', 'local-profile-engine.mjs', 'playwright-mcp-human.cjs', 'pc-app.png', 'package.json', 'package-lock.json', 'relay.mjs', 'useragents.txt', 'QA_TEST_CASES.md', 'README.md', 'tgbot.mjs', 'tunnel.mjs', 'mcp-server.mjs', 'script.mjs', 'captcha.mjs'];
   for (const name of rootFiles) cpSync(join(sourceDirectory, name), join(directory, name));
   for (const folder of ['src', 'ui', 'tests', 'mock-pages', 'Config/Browser', 'Config/Settings', 'node_modules', 'runtime-node']) mkdirSync(join(directory, folder), { recursive: true });
+  cpSync(join(sourceDirectory, 'packaging/windows'), join(directory, 'packaging/windows'), { recursive: true });
+  mkdirSync(join(directory, 'scripts'));
+  cpSync(join(sourceDirectory, 'scripts/build-windows.mjs'), join(directory, 'scripts/build-windows.mjs'));
   for (const feature of ['desktop', 'mac', 'mini', 'replay']) {
     mkdirSync(join(directory, 'ui', feature));
     writeFileSync(join(directory, 'ui', feature, 'index.html'), `<html>${feature}</html>`);
@@ -66,6 +69,8 @@ test('build lặp chỉ thay một app cố định, không giữ ZIP hoặc bac
     }
     assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/runtime-node/node')));
     assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/build-app.sh')));
+    assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/packaging/windows/electron-builder.cjs')));
+    assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/scripts/build-windows.mjs')));
     assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/AutoLeadPCMacApp.swift')));
   }
 });

@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node app.mjs",
     "test": "node tests/run-tests.mjs",
-    "relay": "node relay.mjs"
+    "relay": "node relay.mjs",
+    "build:windows": "node scripts/build-windows.mjs"
   },
   "dependencies": {
     "@openai/codex-sdk": "^0.163.0",
@@ -18,5 +19,9 @@
     "https-proxy-agent": "^7.0.6",
     "playwright": "^1.56.1",
     "socks-proxy-agent": "^10.1.0"
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0"
   }
 }

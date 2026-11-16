@@ -145,8 +145,9 @@ test('tích hợp: autofill thật trên Chromium, đồng hồ tua nhanh — tr
   let offset = 0;
   const realNow = Date.now.bind(Date);
   t.mock.method(Date, 'now', () => realNow() + offset);
-  // Tua 2 giây giả lập mỗi 0,2 giây thật: lượt quét (500ms thật) cách nhau ~5 giây giả lập, đúng nhịp khi trang đứng yên.
-  const ticker = setInterval(() => { offset += 2_000; }, 200);
+  // Tua 1 giây giả lập mỗi 0,2 giây thật (5 lần): lượt quét 500ms thật ≈ 2,5 giây giả lập; máy bận làm lượt quét trễ
+  // vài giây thật vẫn dưới ngưỡng gián đoạn 15 giây (tua 10 lần thì máy bận vượt ngưỡng, test chập chờn).
+  const ticker = setInterval(() => { offset += 1_000; }, 200);
   t.after(() => clearInterval(ticker));
 
   /** Mở một phiên autofill thật trên trang không có gì để làm; trả số lần trang được tải. */
@@ -164,8 +165,11 @@ test('tích hợp: autofill thật trên Chromium, đồng hồ tua nhanh — tr
     const logs = [];
     const session = { slot: 1, mainPage: page, browser: context, exitIp: '198.51.100.9', addBrowserLog: entry => logs.push(entry) };
     attachAutofill(context, [{ firstname: 'Fixture' }], 'https://offer.test', session, { onLog: entry => logs.push(entry), autoSubmit: true, enableLeadCheck: false });
-    const deadline = realNow() + 25_000;
-    while (realNow() < deadline && !logs.some(entry => entry.type === 'stuck_page_reload')) await new Promise(resolve => setTimeout(resolve, 200));
+    // Chờ theo giờ giả lập (đủ 4 phút, gấp đôi mốc F5 2 phút) thay vì giờ thật: khi cả suite chạy song song máy bận,
+    // đồng hồ tua chậm lại và hạn giờ thật cũ (25 giây) hết trước khi tới mốc. Giờ thật chỉ còn là chốt an toàn.
+    const startOffset = offset;
+    const deadline = realNow() + 120_000;
+    while (realNow() < deadline && offset - startOffset < 240_000 && !logs.some(entry => entry.type === 'stuck_page_reload')) await new Promise(resolve => setTimeout(resolve, 200));
     session.isClosed = true;
     await context.close();
     return { loads, reloaded: logs.some(entry => entry.type === 'stuck_page_reload') };

@@ -13,13 +13,13 @@ const lifecycleTypes = new Set([
   'traffic_blocked', 'toffers_duplicate_ip', 'adtrapper_disabled_close', 'adtrapper_stuck_close',
   'sub_offer_tab_closed', 'thankyou_tab_closed', 'duplicate_tab_closed', 'excluded_tab_closed', 'tab_limit_closed',
   'stuck_page_reload', 'stuck_page_reload_exhausted', 'stuck_page_reload_failed',
-  'sweepstakes_sub_tab_timeout', 'sweepstakes_completed',
+  'sweepstakes_sub_tab_timeout', 'sweepstakes_completed', 'lead_sub_offers_finished', 'slot_launch_abandoned_stop',
 ]);
 const browserCloseTypes = new Set([
   'gologin_close_requested',
   'gologin_start_failed',
   'lead_failed', 'lead_ip_mismatch_closed', 'max_run_timeout', 'manual_browser_closed', 'manual_browser_closed_refill',
-  'browser_close_all_requested', 'last_tab_closed_auto', 'thankyou_completed', 'sweepstakes_completed',
+  'browser_close_all_requested', 'last_tab_closed_auto', 'thankyou_completed', 'sweepstakes_completed', 'lead_sub_offers_finished',
   'traffic_blocked', 'toffers_duplicate_ip', 'adtrapper_disabled_close', 'adtrapper_stuck_close',
 ]);
 

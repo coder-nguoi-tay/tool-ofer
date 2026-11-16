@@ -1,6 +1,8 @@
 import { inspectAdsmithFrameLoading } from './inspect-frame-loading.mjs';
 import { shouldPauseForLead } from '../should-pause-for-lead.mjs';
 import { shouldStopAfterLead } from '../should-stop-after-lead.mjs';
+import { isOffer2615 } from '../offers/2615/match-offer.mjs';
+import { protectConfirmedLeadSession } from '../../leads/actions/protect-confirmed-lead-session.mjs';
 
 const observations = new WeakMap();
 const waitMs = { spinner_stuck: 25000, frame_blank: 20000, chrome_error: 4000 };
@@ -53,16 +55,21 @@ export async function recoverAdsmithFrameLoading(page, session, options = {}, no
     state.lastSeen = now;
     page._lateProgressRecoveryActive = false;
     if (now - state.since < waitMs[state.kind]) return true;
-    if (state.reloads >= maxReloads) {
-      if (!state.exhaustedLogged) {
-        state.exhaustedLogged = true;
-        options.onLog?.({ type: 'iframe_load_exhausted', detail: `Iframe Adsmith vẫn không tải sau ${maxReloads} lần phục hồi; dừng F5, giữ browser để kiểm tra proxy.`, reloads: state.reloads }, page);
+    const hasLead = protectConfirmedLeadSession(session);
+    const offer2615Flow = isOffer2615(page, session);
+    if (!hasLead || !offer2615Flow) {
+      if (state.reloads >= maxReloads) {
+        if (!state.exhaustedLogged) {
+          state.exhaustedLogged = true;
+          options.onLog?.({ type: 'iframe_load_exhausted', detail: `Iframe Adsmith vẫn không tải sau ${maxReloads} lần phục hồi; dừng F5, giữ browser để kiểm tra proxy.`, reloads: state.reloads }, page);
+        }
+        return true;
       }
-      return true;
     }
     if (session.isClosed || page.isClosed() || page.url() !== url || shouldPauseForLead(session, options) || shouldStopAfterLead(session) || page._aiAssistRunning || page._aiFormFixing || page._continuousAgent || page._leadRecoveryInProgress) return true;
     state.reloads++;
-    options.onLog?.({ type: 'adsmith_loading_timeout_reload', detail: `${snapshot.reason} Tải lại trang cha bằng GET, lần ${state.reloads}/${maxReloads}.`, reloads: state.reloads, loadingState: state.kind }, page);
+    const reloadText = (hasLead && offer2615Flow) ? `lần ${state.reloads}` : `lần ${state.reloads}/${maxReloads}`;
+    options.onLog?.({ type: 'adsmith_loading_timeout_reload', detail: `${snapshot.reason} Tải lại trang cha bằng GET, ${reloadText}.`, reloads: state.reloads, loadingState: state.kind }, page);
     const started = Date.now();
     try { await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }); }
     catch { options.onLog?.({ type: 'adsmith_loading_reload_failed', detail: 'Trang cha chưa tải xong; giữ phiên và chờ lại trước lượt phục hồi tiếp.' }, page); }

@@ -146,9 +146,26 @@ test('offerwall: mở tối đa 10 tab tổng và tiếp tục offer còn lại 
     assert.equal(context.pages().length, 10);
     assert.equal(await page.locator('[data-ux-opened="1"]').count(), 9);
     await context.pages()[1].close();
-    assert.equal(await handleOfferwallCards(page.mainFrame(), page), 1);
+    // Trần đặt rõ là 10 (mặc định nay là MAX_CONCURRENT_SUB_OFFERS = 3, giảm tải 2026-11-16).
+    assert.equal(await handleOfferwallCards(page.mainFrame(), page, { maxConcurrentSubOffers: 10 }), 1);
     assert.equal(context.pages().length, 10);
     assert.equal(await page.locator('[data-ux-opened="1"]').count(), 10);
+  } finally { await browser.close(); }
+});
+
+test('offerwall: mặc định chỉ mở 3 tab con cùng lúc (giảm tải máy), mở tiếp khi có tab xong', { skip: !existsSync(chromium.executablePath()) }, async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    await context.route('**/*', route => route.fulfill({ body: '<p>Offer con</p>', contentType: 'text/html' }));
+    const page = await context.newPage();
+    limitOfferTabs(context, { mainPage: page });
+    await page.setContent(Array.from({ length: 6 }, (_, i) => `<div class="offerwall-card"><button class="offerwall-btn" onclick="window.open('https://offer.test/${i}')">Offer ${i}</button></div>`).join(''));
+    assert.equal(await handleOfferwallCards(page.mainFrame(), page), 3);
+    assert.equal(context.pages().length, 4);
+    await context.pages()[1].close();
+    assert.equal(await handleOfferwallCards(page.mainFrame(), page), 1);
+    assert.equal(context.pages().length, 4);
   } finally { await browser.close(); }
 });
 

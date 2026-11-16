@@ -9,11 +9,15 @@ let shutdown = null;
  * @param {object|null} server Máy chủ HTTP cần đóng để lần mở app sau dùng được cổng ngay.
  * @return {Promise<void>} Kết thúc bằng process.exit(0).
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-16
  */
 export function shutdownAppGracefully(reason, server = null) {
   shutdown ||= (async () => {
     server?.close();
+    if (process.platform === 'win32') {
+      const { closeActiveBrowsers } = await import('../../browser/actions/close-active-browsers.mjs');
+      await Promise.race([closeActiveBrowsers().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10000))]);
+    }
     console.log(`[Shutdown] ${reason}: dừng Orbita và xóa profile GoLogin…`);
     // ponytail: chờ tối đa 20 giây; mạng GoLogin treo thì thoát luôn, lần mở app sau sẽ quét profile sót.
     const result = await Promise.race([shutdownGoLoginSessions().catch(() => null), new Promise(resolve => setTimeout(resolve, 20000, null))]);

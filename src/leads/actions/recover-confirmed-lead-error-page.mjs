@@ -1,6 +1,7 @@
 import { protectConfirmedLeadSession } from './protect-confirmed-lead-session.mjs';
 import { readThrottledPageHealth } from '../page-health/read-throttled-page-health.mjs';
 import { resetRecoveredPageAutofill } from '../../autofill/reset-recovered-page-autofill.mjs';
+import { isOffer2615 } from '../../autofill/offers/2615/match-offer.mjs';
 
 const recoveries = new WeakMap();
 const MAX_RECOVERY_ATTEMPTS = 3;
@@ -43,19 +44,26 @@ export async function recoverConfirmedLeadErrorPage(session, page) {
       Object.assign(state, { url: errorUrl, attempts: 0 });
       page._uxErrorRecoveryExhausted = false;
     }
-    if (state.attempts >= MAX_RECOVERY_ATTEMPTS) {
-      page._uxErrorRecoveryExhausted = true;
-      return true;
+    const hasLead = protectConfirmedLeadSession(session);
+    const offer2615Flow = isOffer2615(page, session);
+    // Luồng Offer 2615 nếu đã có lead: cứ tiếp tục F5 để làm hết phễu, không dừng sau 3 lần rồi tắt gây mất lead.
+    // Các luồng khác: giới hạn MAX_RECOVERY_ATTEMPTS rồi nhả cho watcher xử lý.
+    if (!hasLead || !offer2615Flow) {
+      if (state.attempts >= MAX_RECOVERY_ATTEMPTS) {
+        page._uxErrorRecoveryExhausted = true;
+        return true;
+      }
     }
     state.attempts++;
     state.lastAt = Date.now();
-    const who = protectConfirmedLeadSession(session) ? 'IP đã có lead' : 'Phiên đã thao tác offer';
+    const who = hasLead ? (offer2615Flow ? 'Offer 2615 (IP đã có lead)' : 'IP đã có lead') : 'Phiên đã thao tác offer';
+    const attemptText = (hasLead && offer2615Flow) ? `lượt ${state.attempts}` : `lượt ${state.attempts}/${MAX_RECOVERY_ATTEMPTS}`;
     session.addBrowserLog?.({
       type: 'lead_error_recovery',
-      detail: `${who} gặp trang lỗi (${reason}): giữ trình duyệt, tải lại trang bằng F5 (lượt ${state.attempts}/${MAX_RECOVERY_ATTEMPTS}).`
+      detail: `${who} gặp trang lỗi (${reason}): giữ trình duyệt, tải lại trang bằng F5 (${attemptText}).`
     }, page);
-    session.updateBadge?.(`🔄 <strong>${who}:</strong> Đang F5 tải lại trang lỗi…`);
-    console.log(`[LeadRecovery] Slot ${session.slot || '?'}: ${who} gặp lỗi "${reason}". Giữ trình duyệt, tải lại trang bằng F5 (lần ${state.attempts}).`);
+    session.updateBadge?.(`🔄 <strong>${who}:</strong> Đang F5 tải lại trang lỗi (${attemptText})…`);
+    console.log(`[LeadRecovery] Slot ${session.slot || '?'}: ${who} gặp lỗi "${reason}". Giữ trình duyệt, tải lại trang bằng F5 (${attemptText}).`);
 
     page._leadRecoveryInProgress = true;
     let response = null;
@@ -96,7 +104,7 @@ export async function recoverConfirmedLeadErrorPage(session, page) {
     if (stillDead) {
       session.addBrowserLog?.({
         type: 'lead_recovery_waiting',
-        detail: `Trang vẫn còn lỗi sau khi tải lại (lượt ${state.attempts}/${MAX_RECOVERY_ATTEMPTS}); giữ trình duyệt mở và tiếp tục chờ phục hồi.`
+        detail: `Trang vẫn còn lỗi sau khi tải lại (${attemptText}); giữ trình duyệt mở và tiếp tục chờ phục hồi.`
       }, page);
       return true;
     }

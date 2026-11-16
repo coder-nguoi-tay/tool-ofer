@@ -1,18 +1,19 @@
 /**
  * Dừng và xóa profile tạm của phiên trình duyệt được quản lý đúng một lần.
  *
- * @param {object} session Phiên AdsPower do app tạo.
+ * @param {object} session Phiên trình duyệt được app quản lý, gồm AdsPower và GoLogin.
  * @return {Promise<void>} Kết quả dừng profile đã được ghi log nếu thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 export function requestManagedProfileStop(session) {
+  const profileProvider = session.isGoLogin ? 'GoLogin' : 'AdsPower';
   if (!session._profileStopPromise) {
     session._profileStopPromise = (async () => {
       try {
         if (session._stopProfile) await session._stopProfile();
       } catch (error) {
-        console.warn(`[AdsPower] Dừng profile ${session.profileId}: ${error.message}`);
+        console.warn(`[${profileProvider}] Dừng profile ${session.profileId}: ${error.message}`);
       }
       // Giữ lại profile trong AdsPower để tái sử dụng (Profile Pool), không xóa để tránh chạm hạn ngạch daily import
       if (session._forceDeleteProfile && session._deleteProfile) {

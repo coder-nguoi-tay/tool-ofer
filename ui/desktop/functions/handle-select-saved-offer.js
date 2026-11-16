@@ -17,6 +17,10 @@ function handleSelectSavedOffer() {
         document.getElementById('txtLinkOffer4').value = found.LinkOffer4 || '';
         if (found.LinkOffer2 || found.LinkOffer3 || found.LinkOffer4) toggleExtraOfferLinks(true);
         applyOfferMethods(Array.isArray(found.methodConfigs) ? found.methodConfigs : []);
+        if (found.offerSolver && document.getElementById('cbbOfferSolver')) {
+          document.getElementById('cbbOfferSolver').value = found.offerSolver;
+          try { localStorage.setItem('autoleadpc_offer_solver', found.offerSolver); } catch { }
+        }
         document.getElementById('txtTimeLimit').value = found.MaxRunMinutes ?? '10';
         if (found.Complete && found.Complete !== 'id') {
           document.getElementById('txtTextComplete').value = found.Complete;
@@ -58,6 +62,17 @@ function handleSelectSavedOffer() {
               }
             }
           });
+        }
+        if (found.scheduleStop) {
+          const cbxStop = document.getElementById('cbxScheduleStop');
+          const timeStop = document.getElementById('timeScheduleStop');
+          const hintStop = document.getElementById('lblScheduleStopHint');
+          if (cbxStop) cbxStop.checked = Boolean(found.scheduleStop.enabled);
+          if (timeStop) {
+            if (found.scheduleStop.time) timeStop.value = found.scheduleStop.time;
+            timeStop.style.display = found.scheduleStop.enabled ? 'inline-block' : 'none';
+          }
+          if (hintStop) hintStop.style.display = found.scheduleStop.enabled ? 'inline' : 'none';
         }
         syncOptionPills();
 

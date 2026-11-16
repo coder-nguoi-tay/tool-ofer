@@ -8,6 +8,9 @@ async function handleStop() {
       if (typeof cancelOfferSchedule === 'function') {
         cancelOfferSchedule();
       }
+      if (typeof cancelStopScheduler === 'function') {
+        cancelStopScheduler();
+      }
       const btnStart = document.getElementById('btnStart');
       if (btnStart) {
         btnStart.disabled = true;

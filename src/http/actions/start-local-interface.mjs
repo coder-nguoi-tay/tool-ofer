@@ -15,7 +15,7 @@ import { shutdownAppGracefully } from '../../process/actions/shutdown-app-gracef
 import { deleteAppGoLoginProfiles } from '../../gologin-profile/delete-app-gologin-profiles.mjs';
 import { readGoLoginConfig } from '../../runtime/actions/read-gologin-config.mjs';
 import { initializeEmailQueue } from '../../queues/email.mjs';
-import { instanceId } from '../../config/paths.mjs';
+import { instanceId, dataDirName } from '../../config/paths.mjs';
 import { launchGoLoginBrowsers } from '../../browser/actions/launch-gologin-browsers.mjs';
 import { launchMultiloginBrowsers } from '../../browser/actions/launch-multilogin-browsers.mjs';
 import { launchRequestedBrowsers } from '../../browser/actions/launch-requested-browsers.mjs';
@@ -60,7 +60,7 @@ import { writeFile } from 'node:fs/promises';
  * @return {Promise<void>} Hoàn tất khi giao diện được mở.
  * @throws {Error} Khi máy chủ giao diện không thể lắng nghe cổng cục bộ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 export async function startLocalInterface() {
   void cleanupStaleProfiles();
@@ -169,7 +169,7 @@ export async function startLocalInterface() {
    *
    * @return {Promise<void>} Hoàn tất khi giao diện đã được mở (nếu không chạy ẩn).
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-10
+   * @since 2026-11-16
    */
   async function onServerListening() {
     const interfaceUrl = `http://127.0.0.1:${port}`;
@@ -195,6 +195,9 @@ export async function startLocalInterface() {
   // tự thoát khi cha chết, không được sống sót giữ cổng.
   // Tắt app (Swift gửi SIGTERM, hoặc app cha chết khi quit qua AppleScript): dừng mọi Orbita và xóa profile GoLogin.
   exitWhenParentExits(() => void shutdownAppGracefully('App đã thoát', server));
+  process.on('message', message => {
+    if (message === 'autoleadpc:shutdown') void shutdownAppGracefully('Đóng ứng dụng Windows', server);
+  });
   for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => void shutdownAppGracefully(signal, server));
   // Mở app: chưa có phiên nào, profile "AutoLeadPC Mac" còn trên GoLogin là đồ sót sau crash/Force Quit.
   void readGoLoginConfig().then(({ token }) => deleteAppGoLoginProfiles(token)).then(({ deleted }) => {
@@ -203,6 +206,7 @@ export async function startLocalInterface() {
   // Dọn trình duyệt mồ côi từ phiên trước: app vừa khởi động là KHÔNG có session nào
   // trong bộ nhớ, còn lại Chrome/SunBrowser chạy ngầm từ lần trước sẽ biến thành
   // "web đang chạy nhưng tab Running không thấy gì". Kill sạch trước khi nhận luồng mới.
+  if (process.platform === 'win32') await executeFile('pkill', ['-9', '-f', `user-data-dir.*${dataDirName}`]).catch(() => {});
   for (const profileRoot of ['AutoLeadPC-2', 'AutoLeadPC-3', 'AutoLeadPC', 'AutoLeadPC-AdsPower-Smoke', 'AutoLeadPC-Debug', 'AutoLeadPC Wine']) {
     await executeFile('pkill', ['-9', '-f', `user-data-dir.*Application Support/${profileRoot}`]).catch(() => {});
   }

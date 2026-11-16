@@ -1,3 +1,4 @@
+import { chromeBuildExecutable } from './chrome-build-executable.mjs';
 import { access } from 'node:fs/promises';
 import { chromeBuildDirectory } from './state/chrome-build-directory.mjs';
 import { chromeForTestingPlatform } from './chrome-for-testing-platform.mjs';
@@ -13,7 +14,7 @@ import { stat } from 'node:fs/promises';
  *
  * @return {Promise<{name: string, executablePath: string, version: string, major: number}[]>} Build theo major tăng dần.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 async function listInstalledChromeVersions() {
   const platform = chromeForTestingPlatform();
@@ -26,7 +27,7 @@ async function listInstalledChromeVersions() {
   const buildsByMajor = new Map();
   for (const version of entries) {
     if (!chromeVersionPattern.test(version)) continue;
-    const executablePath = join(chromeBuildDirectory, version, 'chrome-' + platform, 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing');
+    const executablePath = chromeBuildExecutable(join(chromeBuildDirectory, version), platform);
     try {
       if (!(await stat(executablePath)).isFile()) continue;
       await access(executablePath, fileConstants.X_OK);

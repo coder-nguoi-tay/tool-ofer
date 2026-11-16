@@ -15,10 +15,11 @@ import { chromium } from 'playwright';
  * @param {Function} resume Gắn runtime vào kết nối được khôi phục.
  * @return {void} Gắn observer một lần và cho phép bind context mới sau reconnect.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-16
  */
 export function attachGoLoginSessionLifecycle(session, delayStop = 0, resume = async () => {}) {
   let finished = false, reconnecting = false;
+  let finishPromise;
   const bound = new WeakSet();
   const child = session._gologinProcess;
   session.isGoLoginProcessAlive = () => Boolean(child?.pid && child.exitCode === null && child.signalCode === null);
@@ -26,23 +27,28 @@ export function attachGoLoginSessionLifecycle(session, delayStop = 0, resume = a
    * Dọn tài nguyên đúng một lần sau đóng thật hoặc lệnh đóng chủ động.
    * @return {Promise<void>} Ghi kết thúc, nhả khóa và bù đúng chính sách.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-14
+   * @since 2026-11-16
    */
-  async function finish() {
-    if (finished) return;
-    finished = true;
-    session.isClosed = true;
-    activeBrowsers.delete(session);
-    await requestManagedProfileStop(session);
-    if (!session.isGoLoginProcessAlive()) {
-      releaseProxyLock(session.proxy, session.exitIp);
-      session.finishRecording?.();
-    } else session.addBrowserLog?.({ type: 'gologin_profile_stop_failed', detail: 'Orbita chưa dừng; giữ khóa IP/proxy và nhật ký mở.' });
-    if (session._gologinProfileStopped) reservedGoLoginProfileIds.delete(session.profileId);
-    await session._cdpBrowser?.close().catch(() => {});
-    await releaseViewer();
-    if (!session.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested) queueAutomaticRefill(2000 + delayStop * 1000);
+  function finish() {
+    if (!finishPromise) {
+      finished = true;
+      finishPromise = Promise.resolve().then(async () => {
+        session.isClosed = true;
+        activeBrowsers.delete(session);
+        await requestManagedProfileStop(session);
+        if (!session.isGoLoginProcessAlive()) {
+          releaseProxyLock(session.proxy, session.exitIp);
+          session.finishRecording?.();
+        } else session.addBrowserLog?.({ type: 'gologin_profile_stop_failed', detail: 'Orbita chưa dừng; giữ khóa IP/proxy và nhật ký mở.' });
+        if (session._gologinProfileStopped) reservedGoLoginProfileIds.delete(session.profileId);
+        await session._cdpBrowser?.close().catch(() => {});
+        await releaseViewer();
+        if (session._gologinProfileStopped && !session.suppressAutoRefill && autoRefill.enabled && !autoRefill.stopRequested) queueAutomaticRefill(2000 + delayStop * 1000);
+      });
+    }
+    return finishPromise;
   }
+  session.closeGoLoginSession = finish;
   /**
    * Nhả stream của kết nối cũ để Screen View tự đăng ký lại trên context được phục hồi.
    * @return {Promise<void>} Stream đã dừng mà không tác động tiến trình Orbita.

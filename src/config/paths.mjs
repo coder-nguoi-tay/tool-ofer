@@ -4,8 +4,9 @@ import { existsSync } from 'node:fs';
 export const instanceId = process.env.AUTOLEADPC_INSTANCE || '1';
 const instanceSuffix = instanceId !== '1' ? `-${instanceId}` : '';
 export const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${instanceSuffix}`;
-export const baseDataDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC');
-export const appDataDirectory = join(homedir(), 'Library', 'Application Support', dataDirName);
+export const applicationSupportDirectory = process.platform === 'win32' ? (process.env.APPDATA || join(homedir(), 'AppData', 'Roaming')) : join(homedir(), 'Library', 'Application Support');
+export const baseDataDirectory = join(applicationSupportDirectory, 'AutoLeadPC');
+export const appDataDirectory = join(applicationSupportDirectory, dataDirName);
 /**
  * Xác định thư mục cấu hình AutoLeadPC của người dùng.
  * @return {string} Kết quả xử lý nghiệp vụ.

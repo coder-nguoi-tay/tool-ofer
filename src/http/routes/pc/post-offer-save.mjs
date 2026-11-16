@@ -32,7 +32,7 @@ export async function handlePostPcOfferSave(request, response) {
       const link2 = (body.LinkOffer2 || '').trim();
       const link3 = (body.LinkOffer3 || '').trim();
       const link4 = (body.LinkOffer4 || '').trim();
-      const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${link1}\nLinkOffer2=${link2}\nLinkOffer3=${link3}\nLinkOffer4=${link4}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nMaxRunMinutes=${body.MaxRunMinutes ?? '10'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\nThread=${body.Thread || '1'}\nLimitRun=${body.LimitRun || '0'}\n`;
+      const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${link1}\nLinkOffer2=${link2}\nLinkOffer3=${link3}\nLinkOffer4=${link4}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nMaxRunMinutes=${body.MaxRunMinutes ?? '10'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\nThread=${body.Thread || '1'}\nLimitRun=${body.LimitRun || '0'}\nscheduleStopEnabled=${body.scheduleStop?.enabled ? 'True' : 'False'}\nscheduleStopTime=${body.scheduleStop?.time || '23:00'}\n`;
       writeFileSync(filePath, iniContent, 'utf8');
 
       // Lưu / cập nhật danh sách preset saved-offers.json
@@ -59,6 +59,9 @@ export async function handlePostPcOfferSave(request, response) {
         delayStop: body.delayStop || '1',
         Thread: body.Thread || '1',
         LimitRun: body.LimitRun || '0',
+        offerSolver: body.offerSolver || 'auto',
+        schedules: Array.isArray(body.schedules) ? body.schedules : [],
+        scheduleStop: body.scheduleStop || null,
         methodConfigs: Array.isArray(body.methodConfigs) ? body.methodConfigs : [],
         updatedAt: new Date().toISOString()
       };

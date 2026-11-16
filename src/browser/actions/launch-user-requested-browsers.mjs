@@ -9,6 +9,8 @@ import { queueAutomaticRefill } from '../../refill/actions/queue-automatic-refil
 import { saveAutoRefillSettings } from '../../refill/actions/save-auto-refill-settings.mjs';
 import { selectProxies } from '../../proxy/configuration.mjs';
 import { applyRunMode } from '../../runtime/constants/run-mode-state.mjs';
+import { scheduleAutoStop } from '../../runtime/auto-stop-scheduler.mjs';
+import { closeActiveBrowsers } from './close-active-browsers.mjs';
 import { writeFile } from 'node:fs/promises';
 
 /**
@@ -25,6 +27,9 @@ export async function launchUserRequestedBrowsers(requestBody) {
   applyRunMode(body.runMode);
   autoRefill.stopRequested = false;
   autoRefill.enabled = true;
+  if (body.scheduleStop && body.scheduleStop.enabled && body.scheduleStop.time) {
+    scheduleAutoStop(body.scheduleStop.time, closeActiveBrowsers);
+  }
   const isGoLogin = body.useGoLogin === true || String(body.browserMode).toLowerCase() === 'gologin';
   if (!isGoLogin) {
     body.browserMode = 'Chrome';
@@ -93,7 +98,8 @@ export async function launchUserRequestedBrowsers(requestBody) {
     hideUntilLead: Boolean(body.hideUntilLead),
     runInApp: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
     screenPreviewOnly: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
-    dataSaver: Boolean(body.dataSaver !== false)
+    dataSaver: Boolean(body.dataSaver !== false),
+    offerSolver: body.offerSolver || 'auto'
   };
   autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(autoRefill.targetCount, activeBeforeLaunch + requestedCount, activeBrowsers.size));
   autoRefill.message = `Tự bù ${autoRefill.enabled ? 'đang bật' : 'đang tắt'}: ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`;

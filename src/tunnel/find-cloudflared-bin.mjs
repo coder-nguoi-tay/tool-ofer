@@ -4,9 +4,10 @@ import { existsSync } from 'node:fs';
  * Tìm đường dẫn thực thi của binary cloudflared trên macOS.
  * @return {*} Kết quả xử lý find cloudflared bin.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 function findCloudflaredBin() {
+  if (process.platform === 'win32') return 'cloudflared.exe';
   const commonPaths = ['/opt/homebrew/bin/cloudflared', '/usr/local/bin/cloudflared', 'cloudflared'];
   for (const p of commonPaths) {
     if (p === 'cloudflared' || existsSync(p)) return p;

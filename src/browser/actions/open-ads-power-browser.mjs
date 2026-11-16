@@ -33,6 +33,7 @@ import { markAutofillRecordUsed } from '../../records/actions/mark-autofill-reco
 import { navigationTimeout } from '../../runtime/constants/navigation-timeout.mjs';
 import { offerStrategyState } from '../../runtime/constants/offer-strategy-state.mjs';
 import { queueAutomaticRefill } from '../../refill/actions/queue-automatic-refill.mjs';
+import { verifyOffer2615Landing } from '../../autofill/offers/2615/verify-offer-landing.mjs';
 import { readScreenSize } from './read-screen-size.mjs';
 import { releaseProxyLock } from '../../proxy/actions/release-proxy-lock.mjs';
 import { releaseScreencast } from '../screencast.mjs';
@@ -96,7 +97,8 @@ export async function openAdsPowerBrowser({
   threadCount = 1,
   multiTab = true,
   choiceDelay = 0,
-  dataSaver = true
+  dataSaver = true,
+  offerSolver = 'auto'
 }) {
   const assignedSlot = slot ?? tileIndex + 1;
   const screen = await readScreenSize();
@@ -235,6 +237,7 @@ export async function openAdsPowerBrowser({
     requestCount: 0,
     bandwidthFormatted: '0 B',
     dataSaver: Boolean(dataSaver),
+    offerSolver: offerSolver || 'auto',
     updateBadge: text => {
       session.badgeText = text;
     }
@@ -558,6 +561,15 @@ export async function openAdsPowerBrowser({
       waitUntil: 'domcontentloaded'
     }).catch(() => {}), new Promise(r => setTimeout(r, navigationTimeout + 2000))]);
     const finalNavUrl = typeof page.url === 'function' ? page.url() : '';
+    const isInvalid2615Landing = await verifyOffer2615Landing(page, session);
+    if (isInvalid2615Landing) {
+      session.isClosed = true;
+      session.suppressAutoRefill = true;
+      await page.close().catch(() => {});
+      await context.close().catch(() => {});
+      await stopProfile(profileId).catch(() => {});
+      return null;
+    }
     if (isToffersDuplicateOfferUrl(finalNavUrl) && !protectConfirmedLeadSession(session)) {
       console.log(`[ToffersDup] Slot ${assignedSlot}: URL đích trả về lỗi IP đã click (${finalNavUrl}). Đóng profile và bù slot mới.`);
       session.isClosed = true;

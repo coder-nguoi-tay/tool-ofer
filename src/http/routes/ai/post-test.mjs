@@ -1,10 +1,9 @@
 import { callAgt } from '../../../../ai-assist.mjs';
 import { executeFile } from '../../../runtime/constants/execute-file.mjs';
 import { globalAiConfig } from '../../../../ai-assist.mjs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { readRequestBody } from '../../actions/read-request-body.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
+import { getAgtSpawnConfig } from '../../../ai-assist/get-agt-spawn-config.mjs';
 
 /**
  * Xử lý API ai-test.
@@ -12,21 +11,19 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 export async function handlePostAiTest(request, response) {
   if (request.method === 'POST' && request.url === '/ai/test') {
+    let body;
     try {
-      const body = JSON.parse((await readRequestBody(request)) || '{}');
+      body = JSON.parse((await readRequestBody(request)) || '{}');
       const binName = body.binary || globalAiConfig.cliBinary || 'agy';
-      const augmentedPath = [join(homedir(), '.local', 'bin'), join(homedir(), '.gemini', 'antigravity-cli', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || ''].filter(Boolean).join(':');
+      const { bin, env } = getAgtSpawnConfig(binName);
       const {
         stdout
-      } = await executeFile(binName, ['--version'], {
-        env: {
-          ...process.env,
-          PATH: augmentedPath
-        },
+      } = await executeFile(bin, ['--version'], {
+        env,
         timeout: 5000
       });
       const versionStr = stdout.trim();

@@ -13,14 +13,16 @@
  * @param {Function} [onParentExit] Việc dọn dẹp trước khi thoát (mặc định thoát ngay).
  * @return {void} Không trả về giá trị.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 export function exitWhenParentExits(onParentExit = () => process.exit(0)) {
   if (process.env.AUTOLEADPC_NO_WATCHDOG === '1') return;
   const parentPid = process.ppid;
   if (parentPid <= 1) return;
   const watchdog = setInterval(() => {
-    if (process.ppid === parentPid) return;
+    if (process.platform === 'win32') {
+      try { process.kill(parentPid, 0); return; } catch (error) { if (error.code !== 'ESRCH') return; }
+    } else if (process.ppid === parentPid) return;
     console.error('Tiến trình cha đã thoát, đóng máy chủ giao diện.');
     clearInterval(watchdog);
     onParentExit();

@@ -6,7 +6,7 @@
  * @param {typeof fetch} [request=fetch] Hàm gọi API, thay bằng mock khi test.
  * @return {Promise<boolean>} True khi GoLogin nhận tên mới.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-16
  */
 export async function renameGoLoginProfile(token, profileId, name, request = fetch) {
   const response = await request(`https://api.gologin.com/browser/${profileId}/name`, {
@@ -15,5 +15,6 @@ export async function renameGoLoginProfile(token, profileId, name, request = fet
     body: JSON.stringify({ name }),
     signal: AbortSignal.timeout(15000)
   }).catch(() => null);
+  if (!response?.ok) console.warn(`[GoLogin] Không đồng bộ tên profile theo IP: ${response ? `HTTP ${response.status}` : 'lỗi mạng hoặc hết thời gian chờ'}.`);
   return Boolean(response?.ok);
 }

@@ -1,3 +1,4 @@
+import { MAX_CONCURRENT_SUB_OFFERS } from '../../runtime/constants/max-concurrent-sub-offers.mjs';
 import { isSweepstakesCardPage, SWEEPSTAKES_CARD_SELECTOR, SWEEPSTAKES_IFRAME_CARD_SELECTOR } from './is-sweepstakes-card-page.mjs';
 import { prepareSweepstakesCardPage } from './prepare-sweepstakes-card-page.mjs';
 import { handleOfferwallCards } from '../handle-offerwall-cards.mjs';
@@ -37,7 +38,7 @@ export async function handleSweepstakesCardPage(page, session, options) {
     if (await prepareSweepstakesCardPage(page, session, options)) {
       if (session.isClosed || page.isClosed() || shouldPauseForLead(session, options)) return true;
       const hasTasks = placement && await frame.locator('.unit-stack, #infoPanel').count().catch(() => 0);
-      if (hasTasks && page.context().pages().filter(tab => !tab.isClosed()).length >= MAX_OFFER_TABS) return true;
+      if (hasTasks && page.context().pages().filter(tab => !tab.isClosed()).length >= 1 + MAX_CONCURRENT_SUB_OFFERS) return true;
       const opened = hasTasks ? await handleOfferwallTasks(page, frame, {
         ...options, isCancelled: () => session.isClosed || page.isClosed() || shouldPauseForLead(session, options)
       }) : await handleOfferwallCards(frame, page, {

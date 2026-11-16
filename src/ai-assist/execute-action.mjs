@@ -1,6 +1,7 @@
 import { humanClick } from '../autofill/human-click.mjs';
 import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
 import { isNoSurveyFrame } from '../autofill/adsmith/is-no-survey-frame.mjs';
+import { isAddeptOfferwallFrame } from '../autofill/offerwall/is-addept-offerwall-frame.mjs';
 import { performSurveyAnswer } from '../survey-solver/verification/perform-survey-answer.mjs';
 import { inspectActionPurpose } from './inspect-action-purpose.mjs';
 import { collectFieldMetadata } from '../autofill/collect-field-metadata.mjs';
@@ -56,6 +57,7 @@ async function executeAction(page, act, session = null, policy = {}) {
   const { locator } = target;
   try {
     if (await isNoSurveyFrame(target.frame)) return { ok: false, verified: false, reason: 'survey_owned_by_autofill' };
+    if (isAddeptOfferwallFrame(target.frame)) return { ok: false, verified: false, reason: 'offerwall_owned_by_autofill' };
     if (policy.allowSubmit === false || policy.repairOnly) {
       const purpose = await locator.evaluate(inspectActionPurpose);
       if (action === 'click' && purpose.noise) return { ok: false, verified: false, reason: 'not_answer_control' };

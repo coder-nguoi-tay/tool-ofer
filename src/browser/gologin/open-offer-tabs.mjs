@@ -2,6 +2,7 @@ import { selectUniqueOfferUrls } from '../tabs/select-unique-offer-urls.mjs';
 import { configurePageMousePolicy } from '../../autofill/interaction/configure-page-mouse-policy.mjs';
 import { takeNextRecord } from '../../records/actions/take-next-record.mjs';
 import { navigationTimeout } from '../../runtime/constants/navigation-timeout.mjs';
+import { verifyOffer2615Landing } from '../../autofill/offers/2615/verify-offer-landing.mjs';
 
 /**
  * Mở đủ URL offer duy nhất trong Orbita, gán record/chuột và giữ mainPage trước khi điều hướng.
@@ -32,5 +33,9 @@ export async function openGoLoginOfferTabs(session, offerUrls, records) {
     if (index === 0) session.currentRecord = page._assignedRecord;
     await page.goto(urls[index], { waitUntil: 'domcontentloaded', timeout: navigationTimeout })
       .catch(() => session.addBrowserLog?.({ type: 'offer_navigation_failed', detail: 'Không tải được tab offer GoLogin.' }, page));
+    if (index === 0) {
+      const isInvalid2615Landing = await verifyOffer2615Landing(page, session);
+      if (isInvalid2615Landing) return;
+    }
   }
 }

@@ -14,8 +14,11 @@ import { processFrameSurveys } from './process-frame-surveys.mjs';
 import { inspectFrameScreen } from './inspect-frame-screen.mjs';
 import { inspectFrameValidation } from './inspect-frame-validation.mjs';
 import { submitFrameForm } from './submit-frame-form.mjs';
-import { clickPathThankyouButton } from './financialhelp/click-path-thankyou-button.mjs';
+import { dispatchOfferCustomPreScan } from './offers/index.mjs';
 import { markFooterLikeLinks } from './footer-links/mark-footer-like-links.mjs';
+import { handleOfferwallTasks } from './handle-offerwall-tasks.mjs';
+import { addActionCount } from './add-action-count.mjs';
+import { isAddeptOfferwallFrame } from './offerwall/is-addept-offerwall-frame.mjs';
 import { addVerifiedFieldCount } from './add-verified-field-count.mjs';
 import { getNormalizedPhone } from './get-normalized-phone.mjs';
 import { humanType } from './human-type.mjs';
@@ -79,8 +82,8 @@ export async function fillPageForms(page, {
     return;
   }
   if (shouldPauseForLead(session, options)) return;
-  // paththankyou.php: bấm đúng nút chuyển tiếp, không qua bộ tìm nút submit chung.
-  if (await clickPathThankyouButton(page, session, options)) return;
+  // Điều phối các bước tiền quét đặc thù theo từng Offer (ví dụ Offer 2615 paththankyou)
+  if (await dispatchOfferCustomPreScan(page, { session, sessionRecord, options, triggerLeadCheckAfterEmail })) return;
   // Đánh dấu link kiểu footer (giới thiệu/policy/contact...) trước mọi nhánh bấm; giới hạn 1.5s để trang đang chuyển không giữ lượt quét.
   await Promise.all(frames.map(frame => Promise.race([frame.evaluate(markFooterLikeLinks).catch(() => 0), new Promise(resolve => setTimeout(resolve, 1500))])));
   if (await handleSweepstakesCardPage(page, session, options)) return;
@@ -161,6 +164,17 @@ export async function fillPageForms(page, {
       session.autofillStep = `kiểm tra frame ${typeof frame.url === 'function' ? frame.url().split(/[?#]/)[0] : ''}`;
       const responsive = await Promise.race([frame.evaluate(() => true).catch(() => false), new Promise(resolve => setTimeout(() => resolve(false), 3000))]);
       if (!responsive) continue;
+    }
+    // Offerwall Addept (trang cuối mở hết offer): chỉ bộ mở offerwall được bấm, mỗi offer một lần. Bộ trả lời khảo sát
+    // dự phòng và bộ submit chung từng coi nút "Claim Offer" là đáp án/nút tiếp tục và bấm lại mỗi lượt (log 2026-11-16).
+    if (isAddeptOfferwallFrame(frame)) {
+      session.autofillStep = 'xử lý offerwall Addept';
+      const openedTasks = await handleOfferwallTasks(page, frame, {
+        onLog: options.onLog,
+        isCancelled: () => session.isClosed || page.isClosed() || shouldPauseForLead(session, options)
+      }).catch(() => 0);
+      if (openedTasks) addActionCount(session, openedTasks);
+      continue;
     }
     session.autofillStep = `điền frame ${typeof frame.url === 'function' ? frame.url().split(/[?#]/)[0] : ''}`;
     const frameProgress = {

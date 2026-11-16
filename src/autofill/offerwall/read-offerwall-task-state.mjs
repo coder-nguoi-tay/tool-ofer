@@ -37,10 +37,17 @@ export function readOfferwallTaskState() {
       try { if (raw && !/^(#|javascript:)/i.test(raw)) destUrl = new URL(raw, document.baseURI).href; } catch {}
       return { kind: 'cta', selector: '#infoPanel #infoPanelButton', destUrl };
     }
-    const skip = document.querySelector('#skipButton, #closeButton');
+    const skip = Array.from(document.querySelectorAll('#skipButton, #closeButton, #infoPanelClose')).find(visible);
     return visible(skip) ? { kind: 'skip', selector: `#${skip.id}` } : null;
   }
   const cards = Array.from(document.querySelectorAll('.unit-stack .unit-card'));
+  // Bấm thẻ mà khung chi tiết không hiện sau 5 giây (biến thể mở thẳng offer): coi thẻ đã xử lý, không chờ mãi.
+  for (const card of cards) {
+    if (card.getAttribute('data-ux-ow-awaiting-panel') !== '1') continue;
+    if (Date.now() - Number(card.getAttribute('data-ux-ow-awaiting-since') || 0) < 5000) continue;
+    card.removeAttribute('data-ux-ow-awaiting-panel');
+    card.setAttribute('data-ux-ow-clicked', '1');
+  }
   if (cards.some(card => visible(card) && card.getAttribute('data-ux-ow-awaiting-panel') === '1')) return { kind: 'waiting' };
   const card = cards.filter(element => visible(element) && element.getAttribute('data-ux-ow-clicked') !== '1').sort((first, second) => {
     const firstBounds = first.getBoundingClientRect();
@@ -55,6 +62,13 @@ export function readOfferwallTaskState() {
   const headline = String(model.headline || card.innerText || '').trim();
   let destUrl = '';
   try { if (model.url) destUrl = new URL(model.url, document.baseURI).href; } catch {}
+  const taskCard = { offerId: `addept:${model.id || model.creativeId || `${card.getAttribute('data-index') || index}:${headline}`}`, title: headline, destUrl, sourceUrl: location.href };
+  // Biến thể blissxo (2026-11-16): nút .unit-button trong thẻ mở thẳng offer sang tab mới, bấm thân thẻ không mở khung.
+  const button = Array.from(card.querySelectorAll('.unit-actions .unit-button, .unit-button')).find(visible);
+  if (button) {
+    button.setAttribute('data-ux-ow-task-button', String(index));
+    return { kind: 'button', selector: `.unit-stack [data-ux-ow-task-button="${index}"]`, cardSelector: `.unit-stack [data-ux-ow-task-id="${index}"]`, headline, card: taskCard };
+  }
   return {
     kind: 'card', selector: `.unit-stack [data-ux-ow-task-id="${index}"]`, headline,
     card: { offerId: `addept:${model.id || model.creativeId || `${card.getAttribute('data-index') || index}:${headline}`}`, title: headline, destUrl, sourceUrl: location.href }

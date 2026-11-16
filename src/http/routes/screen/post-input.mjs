@@ -1,5 +1,5 @@
 import { activeBrowsers } from '../../../browser/sessions.mjs';
-import { execFile } from 'node:child_process';
+import { copyHtmlToClipboard } from '../../../autofill/copy-html-to-clipboard.mjs';
 import { executeFile } from '../../../runtime/constants/execute-file.mjs';
 import { findSelectAtPoint } from "../../../browser/screen/find-select-at-point.mjs";
 import { readRequestBody } from '../../actions/read-request-body.mjs';
@@ -285,10 +285,7 @@ export async function handlePostScreenInput(request, response) {
             return String(window.getSelection() || '');
           }).catch(() => '');
           if (selected) {
-            await new Promise(resolve => {
-              const child = execFile('pbcopy', resolve);
-              child.stdin.end(selected);
-            });
+            await copyHtmlToClipboard(selected);
           }
         }
         if (sc.page && !sc.page.isClosed() && body.command === 'paste') {

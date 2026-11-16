@@ -1,3 +1,4 @@
+import { executeFile } from '../../runtime/constants/execute-file.mjs';
 import { chromeProfileCacheDirectory } from '../chrome-paths.mjs';
 import { chromeProfileDirectory } from '../chrome-paths.mjs';
 import { isManagedChromeProfilePath } from './is-managed-chrome-profile-path.mjs';
@@ -11,9 +12,16 @@ import { rm } from 'node:fs/promises';
  * Kiểm tra SingletonLock: nếu không có lock → xóa ngay; nếu có lock nhưng PID trong lock đã chết → xóa.
  * @return {Promise<void>} Kết quả xử lý nghiệp vụ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 async function cleanupStaleProfiles() {
+  let windowsCommandLines = '';
+  if (process.platform === 'win32') {
+    try {
+      const { stdout } = await executeFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(chrome|chromium|SunBrowser)\\.exe$' } | ForEach-Object { $_.CommandLine }"]);
+      windowsCommandLines = stdout.toLowerCase();
+    } catch { return; } // Không xác định được process thì giữ profile.
+  }
   const roots = [chromeProfileDirectory, chromeProfileCacheDirectory];
   let removed = 0;
   for (const root of roots) {
@@ -42,7 +50,7 @@ async function cleanupStaleProfiles() {
         for (const profileDir of profileDirs) {
           const profilePath = join(versionPath, profileDir);
           const lockPath = join(profilePath, 'SingletonLock');
-          let hasActiveLock = false;
+          let hasActiveLock = process.platform === 'win32' && windowsCommandLines.includes(profilePath.toLowerCase());
           try {
             const lockTarget = await readlink(lockPath);
             // lockTarget = "hostname-PID"

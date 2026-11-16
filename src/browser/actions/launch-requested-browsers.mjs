@@ -323,7 +323,8 @@ export async function launchRequestedBrowsers(requestBody, {
       Android: Boolean(body.Android),
       iPhone: Boolean(body.iPhone),
       iPad: Boolean(body.iPad),
-      dataSaver: Boolean(body.dataSaver !== false)
+      dataSaver: Boolean(body.dataSaver !== false),
+      offerSolver: body.offerSolver || 'auto'
     };
     if (autoRefill.targetCount < 1) autoRefill.targetCount = targetSuccessCount;
   }
@@ -446,7 +447,8 @@ export async function launchRequestedBrowsers(requestBody, {
           hideUntilTarget,
           hideUntilLead,
           screenPreviewOnly,
-          dataSaver: body.dataSaver !== false
+          dataSaver: body.dataSaver !== false,
+          offerSolver: body.offerSolver || 'auto'
         });
         activeSession = openedBrowser.session;
         successfulBrowsers += 1;

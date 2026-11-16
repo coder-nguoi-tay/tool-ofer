@@ -1,4 +1,4 @@
-import { homedir } from 'node:os';
+import { baseDataDirectory } from '../../config/paths.mjs';
 import { join } from 'node:path';
-const chromeBuildDirectory = join(homedir(), 'Library', 'Application Support', 'AutoLeadPC', 'chrome-builds');
+const chromeBuildDirectory = join(baseDataDirectory, 'chrome-builds');
 export { chromeBuildDirectory };

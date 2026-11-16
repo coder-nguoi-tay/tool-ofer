@@ -13,7 +13,7 @@ import { screencastSessions } from '../../../runtime/constants/screencast-sessio
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 export async function handlePostScreenTabsClose(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/screen/tabs/close/')) {
@@ -51,7 +51,10 @@ export async function handlePostScreenTabsClose(request, response) {
           autoRefill.targetCount -= 1;
           void saveAutoRefillSettings();
         }
-        await session.browser?.close?.().catch(() => {});
+        if (session.isGoLogin && session.closeGoLoginSession) {
+          await session.closeGoLoginSession();
+          if (!session._gologinProfileStopped || session._gologinProfileDeleted !== true) throw new Error('Chưa hoàn tất dừng/xóa profile GoLogin; kiểm tra nhật ký GoLogin.');
+        } else await session.browser?.close?.().catch(() => {});
         respondWithJson(response, 200, {
           ok: true,
           closedSession: true,

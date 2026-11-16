@@ -1,3 +1,4 @@
+import { stopAbandonedGoLoginLaunch } from '../gologin/stop-abandoned-launch.mjs';
 import { buildGoLoginLaunchOptions } from '../../gologin-profile/build-launch-options.mjs';
 import { startGoLoginSessionRecording, recordGoLoginStartupFailure } from '../gologin/start-session-recording.mjs';
 import { activeBrowsers } from '../sessions.mjs';
@@ -20,6 +21,7 @@ import { createProxyUsageKey } from '../../proxy/actions/create-proxy-usage-key.
 import { persistProxyUsageHistory } from '../../proxy/actions/persist-proxy-usage-history.mjs';
 import { saveProxyQueue } from '../../proxy/actions/save-proxy-queue.mjs';
 import { saveAutoRefillSettings } from '../../refill/actions/save-auto-refill-settings.mjs';
+import { queueAutomaticRefill } from '../../refill/actions/queue-automatic-refill.mjs';
 import { readGoLoginConfig } from '../../runtime/actions/read-gologin-config.mjs';
 import { saveGoLoginConfig } from '../../runtime/actions/save-gologin-config.mjs';
 import { buildGoLoginProfileRequest, buildGoLoginProfileName } from '../../gologin-profile/build-gologin-profile-request.mjs';
@@ -128,6 +130,8 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
     const detail = `Slot ${slot} mở quá ${GOLOGIN_SLOT_LAUNCH_TIMEOUT_MS / 60000} phút, kẹt ở pha ${phase}; bỏ slot này để tiếp tục bù slot khác.`;
     attempt.startupSession?.addBrowserLog?.({ type: 'slot_launch_timeout', detail });
     console.warn(`[GoLogin] ${detail}`);
+    // Dừng Orbita của lượt bị bỏ; không chờ để lượt bù đi tiếp ngay.
+    void stopAbandonedGoLoginLaunch(attempt);
     warnings.push(detail);
   };
   /**
@@ -187,19 +191,8 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
     const deleteProfile = () => deletion ||= deleteGoLoginProfile(apiToken, profileId);
     const isUsableExitIp = ip => Boolean(ip) && !isExitIpCurrentlyInUse(ip) && !(body.checkDuplicate !== false && Object.values(history.proxies).some(entry =>
       entry.exitIp === ip && isExitIpConsumed(entry) && safeNormalizeUrl(entry.websiteUrl || '') === safeNormalizeUrl(websiteUrl)));
-    /**
-     * Proxy "sticky" vẫn có thể đổi IP giữa lúc kiểm tra và lúc Orbita kết nối; IP trong browser mới là IP offer thấy.
-     * @param {string} detectedIp IP đọc được trong Orbita.
-     * @return {boolean} True khi đã chuyển khóa sang IP mới; false khi IP đang dùng/đã dùng cho offer này.
-     * @author ductv <ductv@getflycrm.com>
-     * @since 2026-11-14
-     */
-    const adoptDetectedExitIp = detectedIp => {
-      if (!isUsableExitIp(detectedIp)) return false;
-      activeExitIpLocks.delete(exitIp); activeExitIpLocks.add(detectedIp);
-      exitIp = detectedIp;
-      return true;
-    };
+    // IP app, Orbita và GoLogin phải khớp nhau 100%; không nhận IP lệch dù chưa dùng
+    const adoptDetectedExitIp = () => false;
     while (proxyCursor < proxyLines.length) {
       proxyLine = proxyLines[proxyCursor++];
       const candidate = parseProxyLine(proxyLine, proxyCursor, body.proxyType || 'socks5');
@@ -271,7 +264,8 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
         deleteProfile, adoptDetectedExitIp, shouldAbort: () => attempt.abandoned, maxRunMinutes: Number(body.maxRunMinutes) || 0, completeText: String(body.completeText || '').trim(), startProfile: appGeo => startGoLoginProfile(apiToken, profileId, { ...buildGoLoginLaunchOptions({ screenPreviewOnly: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true), hideUntilTarget: body.hideUntilTarget ?? body.hideBrowser, hideUntilLead: body.hideUntilLead, mobileScreen: profileRequest.os === 'android' ? startupSession.mobileScreen : undefined }), ...((appGeo || timezone) ? { timezone: appGeo || timezone } : {}) }, error => recordGoLoginStartupFailure(startupSession, error)), stopProfile: gl => stopGoLoginProfile(gl),
         offerUrls: body.multiTab === false ? [websiteUrl] : [websiteUrl, ...offerUrls],
         choiceDelay: body.enableChoiceDelay !== false ? Math.max(0, Number(body.choiceDelay) || 0) : 0,
-        dataSaver: body.dataSaver !== false
+        dataSaver: body.dataSaver !== false,
+        offerSolver: body.offerSolver || 'auto'
       });
       if (!session) {
         await closeRelay();
@@ -295,6 +289,9 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
       // Hết hạn mức profile không phải lỗi proxy: giữ dòng để lượt sau dùng; lỗi khác thì bỏ dòng, tránh thử lại mãi.
       if (!profileLimitReached) await retireProxyLine(proxyLine).catch(() => {});
       warnings.push(`Slot ${slot}: ${profileLimitReached ? 'GoLogin đã đủ số profile tối đa của gói (HTTP 403); xóa bớt profile trên GoLogin hoặc giảm số luồng.' : error.message}`);
+      if (!profileLimitReached && autoRefill.enabled && !autoRefill.stopRequested) {
+        queueAutomaticRefill(2000);
+      }
       // Các slot còn lại cũng sẽ bị 403; dừng lượt này, lượt bù sau tự thử lại khi phiên đóng và profile được xóa.
       if (profileLimitReached) return 'stop';
     } finally {

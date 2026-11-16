@@ -1,5 +1,6 @@
 import { completeFinancialhelpSession } from './complete-financialhelp-session.mjs';
 import { finishSweepstakesCardSession } from '../../autofill/offerwall/finish-sweepstakes-card-session.mjs';
+import { finishLeadSessionAfterSubOffers } from './finish-lead-session-after-sub-offers.mjs';
 import { isFinancialhelpThankyouUrl } from './is-financialhelp-thankyou-url.mjs';
 import { hasOfferProgress, recoverConfirmedLeadErrorPage } from './recover-confirmed-lead-error-page.mjs';
 import { protectConfirmedLeadSession } from './protect-confirmed-lead-session.mjs';
@@ -22,7 +23,27 @@ import { warnIdleOfferSession } from './warn-idle-offer-session.mjs';
 import { recordProxyOutcome, sessionLabel } from './record-proxy-outcome.mjs';
 import { getEmptyOfferPageReason } from './get-empty-offer-page-reason.mjs';
 import { isSessionWorkingOnOffer } from './is-session-working-on-offer.mjs';
-import { readSubOfferCloseReason } from './get-sub-offer-close-reason.mjs';
+import { readSubOfferCloseReason, matchSubOfferCloseReason } from './get-sub-offer-close-reason.mjs';
+
+/**
+ * Đọc DOM mỗi tab con tối đa mỗi chừng này (giảm tải 2026-11-16): trước đây mỗi giây quét toàn DOM của mọi tab con
+ * (10 trình duyệt × 9 tab ≈ 90 lần/giây). Ngưỡng đóng tab con đều ≥ 20 giây nên 5 giây không làm chậm quyết định;
+ * luật theo URL (chrome-error, host chặn) vẫn xét mỗi giây vì không tốn gì.
+ */
+export const SUB_OFFER_DOM_CHECK_MS = 5000;
+
+/**
+ * Đã tới lượt đọc DOM của tab cho một loại kiểm tra chưa; lần đầu luôn chạy ngay.
+ * @param {object} page Tab.
+ * @param {string} key Tên mốc trên tab (mỗi loại kiểm tra một mốc riêng).
+ * @return {boolean} True nếu được đọc DOM ở nhịp này.
+ */
+function dueForDomCheck(page, key) {
+  const last = page[key];
+  if (last !== undefined && Date.now() - last < SUB_OFFER_DOM_CHECK_MS) return false;
+  page[key] = Date.now();
+  return true;
+}
 
 /**
  * Theo dõi lỗi/tự bù phiên chưa có lead; chỉ đóng thêm trang trắng/một dòng sau thời gian chờ.
@@ -229,7 +250,11 @@ export function watchTrafficBlockedPage(session) {
       if (!pages.some(other => other !== page && !other.isClosed?.())) continue;
       let tracker = emptyPageTrackers.get(page);
       if (!tracker) { tracker = { since: Date.now() }; emptyPageTrackers.set(page, tracker); }
-      const subOfferReason = await readSubOfferCloseReason(page) || await getEmptyOfferPageReason(page, tracker, { subTab: true });
+      let subOfferReason = matchSubOfferCloseReason({ url: typeof page.url === 'function' ? page.url() : '' });
+      if (!subOfferReason) {
+        if (!dueForDomCheck(page, '_uxSubOfferDomCheckAt')) continue;
+        subOfferReason = await readSubOfferCloseReason(page) || await getEmptyOfferPageReason(page, tracker, { subTab: true });
+      }
       if (!subOfferReason || page.isClosed?.()) continue;
       const currentUrl = typeof page.url === 'function' ? page.url() : '';
       console.log(`[SubOffer] Đóng tab ${currentUrl}: ${subOfferReason}.`);
@@ -255,6 +280,8 @@ export function watchTrafficBlockedPage(session) {
         if (await completeFinancialhelpSession(session, closeSessionAndRefill)) return;
         // Màn card sweepstakes: tab con quá 5 phút thì đóng; hết tab con và hết thẻ thì đóng trình duyệt nhường slot.
         if (await finishSweepstakesCardSession(session, closeSessionAndRefill)) return;
+        // Phiên có lead: offer con đã đóng hết thì đóng trình duyệt lấy slot mới (người dùng chốt 2026-11-16).
+        if (await finishLeadSessionAfterSubOffers(session, closeSessionAndRefill)) return;
         if (protectConfirmedLeadSession(session)) {
           for (const page of pages) await recoverConfirmedLeadErrorPage(session, page);
           return;
@@ -275,7 +302,9 @@ export function watchTrafficBlockedPage(session) {
 
           bindPageInstantCheck(page);
           let deadReason = await readThrottledPageHealth(page);
-          if (!deadReason && !isSessionWorkingOnOffer(session)) {
+          // Tab con (khi còn tab khác) đọc DOM tối đa mỗi 5 giây; tab chính/tab duy nhất giữ mỗi giây để nhả slot đúng mốc.
+          const isSubTab = page !== session.mainPage && !page._uxOriginTab && pages.some(other => other !== page && !other.isClosed?.());
+          if (!deadReason && !isSessionWorkingOnOffer(session) && (!isSubTab || dueForDomCheck(page, '_uxEmptyPageCheckAt'))) {
             let tracker = emptyPageTrackers.get(page);
             if (!tracker) {
               tracker = { since: Date.now() };

@@ -119,7 +119,9 @@ async function main() {
 
       const isQuestion = /Q-\d/.test(file) || (await frame.evaluate(() => !!document.querySelector('button.question-answer-button')).catch(() => false));
       const isSoi = file.includes('SOI');
-      const hasOwSuccess = logs.some((l) => l.startsWith('ow_task_selected'));
+      // Addept: script SDK (setupEventListeners) mở offer thẳng khi bấm .unit-button/.unit-title; khung #infoPanel chỉ mở qua
+      // .info-button (enableInfoButton=false trên mẫu này). Đạt khi bấm nút offer một lần, hoặc chọn task có khung chi tiết.
+      const hasOwSuccess = logs.some((l) => l.startsWith('ow_task_selected') || l.startsWith('ow_task_button'));
       let verdict = 'SKIP';
       if (file.includes('SCRPTK')) verdict = hasOwSuccess ? 'PASS' : 'FAIL';
       if (file.includes('GMAIL-OAUTH')) verdict = logs.some((l) => l.startsWith('gmail_oauth_skipped')) ? 'PASS' : 'FAIL';

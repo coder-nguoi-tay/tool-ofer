@@ -238,3 +238,92 @@ Addept đã thử chọn card nhưng info panel chưa hiện thì giữ trạng 
 Theo yêu cầu ghi HTML từng ô, log `input_fill_html` được giữ cả trong mode access: ghi trước thao tác nhập nhanh/chậm/date, chỉ outerHTML của input/textarea (tối đa 8.192 ký tự), bỏ value/nội dung textarea, handler inline và data attribute ngoài nhóm định danh field. URL trang/frame bỏ query; không chụp toàn trang hoặc ghi từng ký tự. Desktop có bộ lọc HTML input và nút Xem HTML; nội dung nằm trong browser-logs.json, cùng giới hạn 2.000 event/phiên.
 
 Cứu kẹt Adsmith: `inspectAdsmithFrameLoading` + `recoverAdsmithFrameLoading` chỉ áp dụng FinancialHelpFinder với đúng AS_SURVEY/AS_IFRAME. Spinner chưa tạo frame chờ 25s, blank chờ 20s, Chrome error chờ 4s; GET lại trang cha tối đa 5 lượt/URL, giữ budget qua reload/hash/quay lại URL. Handler sở hữu lượt quét kể cả khi hết lượt, không để late-progress/stuck-page/AI F5 thêm. Tôn trọng lead/AI/manual; renderer chưa đọc được không bị suy diễn thành blank. Chi tiết tại docs/ADSMITH_IFRAME_LOADING_RECOVERY.md.
+# Bản Windows
+
+Bộ cài Windows x64 được tạo từ chính backend Node.js và giao diện `/pc` hiện tại,
+với cửa sổ Electron thay wrapper Swift. Node.js, Playwright, Codex SDK/CLI Windows
+và SQLite native Windows được đóng gói cùng ứng dụng; không cần cài Node.js trên máy đích.
+
+```sh
+npm ci
+npm run build:windows
+```
+
+Kết quả: `dist/windows/AutoLeadPC-Setup-1.3.3-x64.exe`. Đây là một tệp cài đặt;
+sau khi cài, chạy AutoLeadPC trong Start Menu. Không xóa hay tách các tệp trong
+thư mục cài đặt. Cần Internet khi build để lấy runtime và dependency chính thức.
+Build trên Windows được hỗ trợ qua workflow **Windows installer** (chạy thủ công
+trong GitHub Actions); sau khi chạy tải artifact **AutoLeadPC-Windows-x64**.
+Build chéo trên macOS còn phụ thuộc khả năng chạy công cụ NSIS của electron-builder.
+
+Dữ liệu Windows nằm ở `%APPDATA%\AutoLeadPC-2`; cache profile ở
+`%LOCALAPPDATA%\AutoLeadPC-2\Cache`. Nhật ký khởi động là `backend.log` trong
+thư mục dữ liệu. Gỡ bộ cài giữ dữ liệu. App chỉ mở một instance và báo lỗi nếu
+cổng 3211 đang được chương trình khác sử dụng. Mặc định chỉ bind loopback;
+đặt `AUTOLEADPC_ALLOW_LAN=1` trước khi mở nếu cần hub LAN trong mạng tin cậy.
+
+Cài Chrome (major 150 trở lên theo chính sách hiện tại) hoặc dùng chức năng tải
+Chrome for Testing. AdsPower/Multilogin cần ứng dụng và Local API Windows;
+GoLogin cần token và Internet để SDK tải Orbita. AI cần tài khoản/API key và
+cấu hình riêng; CLI `agy` cần cài riêng nếu chọn nhà cung cấp này. Tunnel cần
+`cloudflared.exe` trong PATH hoặc Tailscale đã cài. Không mang token, proxy,
+profile hoặc dữ liệu thật từ máy build vào bộ cài.
+
+Các kiểm tra tự động không thay thế QA trên Windows thật. Trước khi coi bản Windows
+đủ chức năng, thực hiện checklist Windows trong `QA_TEST_CASES.md`, nhất là
+Chrome/AdsPower/GoLogin, tự bù, Screen View, AI và dọn phiên khi đóng app.
+
+Bản thư mục chạy trực tiếp: giải nén `AutoLeadPC-Windows-x64.zip`, mở
+`AutoLeadPC-Windows-x64/AutoLeadPC.exe` và giữ nguyên toàn bộ thư mục đi kèm.
+Gói này kèm Chrome for Testing Windows x64 tại `resources/browser/chrome-win64`;
+wrapper tự chọn Chrome đi kèm khi không đặt `AUTOLEADPC_CHROME_APP`. Không cần
+cài Node.js hay Chrome riêng. Token/proxy/record cần nhập hoặc import khi dùng;
+AdsPower/Multilogin vẫn là ứng dụng ngoài nếu chọn các engine này.
+
+Gói riêng tư `AutoLeadPC-Windows-Private-x64.zip` được tạo riêng khi người dùng
+yêu cầu chuyển cấu hình/tài khoản. Dữ liệu nằm trong `resources/private-settings`,
+được nạp trước backend ở lần mở đầu tiên; các file đã có trên Windows được giữ.
+Marker `imported-private-settings.json` ngăn nạp lại sau đó. Gói riêng tư chứa
+thông tin đăng nhập dạng đọc được: giữ kín và không đưa vào Git hoặc chia sẻ công khai.
+Build Windows thông thường không tự đóng gói dữ liệu riêng tư. Không chuyển
+Keychain macOS hoặc cookie/password của profile trình duyệt giữa hai hệ điều hành.
+
+## Server Windows chạy nền và truy cập LAN
+
+Thanh IP/title trong trang Orbita được đồng bộ lại khi IP phiên đổi (ví dụ khi
+xác nhận lead), kể cả tab đang mở, reload và tab mới. Các request đổi tên profile
+GoLogin được gửi tuần tự để phản hồi cũ không ghi đè tên có IP mới. Đây là IP app
+đã xác minh/đối chiếu lead; nội dung IP do website tự hiển thị được giữ nguyên.
+Proxy xoay hoặc IP khác nhau theo đích/IPv4/IPv6 vẫn cần đối chiếu IP mạng thực tế.
+
+Đóng GoLogin từ app dùng trực tiếp luồng dọn phiên, chờ dừng Orbita và xóa profile
+trên GoLogin; không phụ thuộc sự kiện đóng Context/CDP của Windows. Nút X từng slot,
+tab cuối Screen View và Đóng tất cả dùng cùng lượt cleanup; sự kiện trùng không xóa
+lặp. Nếu dừng SDK hoặc xóa profile thất bại, xem nhật ký `[GoLogin]`; giữ khóa khi
+chưa dừng được tiến trình và không báo thành công giả ở nút đóng.
+
+Giải nén gói Windows vào một thư mục cố định, thoát app cũ rồi chạy
+`Cai-tu-khoi-dong.cmd` một lần. Server chạy nền và tự mở sau khi đăng nhập Windows.
+Chạy `Mo-cong-LAN.cmd`, chấp nhận quyền Administrator của Windows để thêm rule
+Firewall chỉ cho đúng Node đi kèm, cổng 3211, mạng Private và máy cùng subnet.
+Đặt LAN/Wi-Fi tin cậy thành Private trong Windows Settings.
+
+Nhấp phải biểu tượng AutoLeadPC trong khay hệ thống → **Địa chỉ truy cập từ máy khác**;
+mở `http://IP-MAY-WINDOWS:3211` trên máy cùng mạng. Nút X chỉ ẩn cửa sổ khi chạy
+server; **Thoát và dừng server** trong tray mới dừng backend và các phiên của app.
+Mở `AutoLeadPC.exe` khi server đã chạy sẽ hiện giao diện của cùng instance.
+
+`Bat-Server.cmd` chỉ mở server, `Go-tu-khoi-dong.cmd` gỡ autorun,
+`Dong-cong-LAN.cmd` gỡ rule Firewall. Có thể bật/tắt autorun ngay trong menu tray.
+Không di chuyển thư mục app sau khi đăng ký autorun; nếu di chuyển cần gỡ và đăng ký lại.
+Server giữ dữ liệu/cấu hình hiện tại và không tự Start các luồng offer khi mở máy.
+
+Đây là server chạy trong phiên desktop sau đăng nhập, để Chrome/GoLogin dùng được
+giao diện trình duyệt; không phải Windows Service chạy trước màn hình đăng nhập.
+Máy phải còn bật, không sleep và không đăng xuất. Chế độ `--server` bật LAN mặc định,
+ẩn cửa sổ và tắt public tunnel tự động (`AUTOLEADPC_DISABLE_TUNNEL=1`).
+`AUTOLEADPC_ALLOW_LAN=0` vẫn giới hạn loopback; `AUTOLEADPC_PORT` đổi cổng và cần
+dùng cùng giá trị cho app lẫn script Firewall.
+
+API hiện chưa có đăng nhập chung nên chỉ mở cho mạng tin cậy; không forward cổng
+3211 ra Internet. Truy cập qua Internet cần một kết nối riêng được bảo vệ.

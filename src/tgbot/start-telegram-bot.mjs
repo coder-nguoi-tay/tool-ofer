@@ -1,9 +1,8 @@
+import { appDataDirectory } from '../config/paths.mjs';
 import { BTN_RUNNING } from './state/btn-running.mjs';
 import { BTN_STOPPED } from './state/btn-stopped.mjs';
 import { appGet } from './app-get.mjs';
 import { checkAndNotify } from './check-and-notify.mjs';
-import { dataDirName } from './state/data-dir-name.mjs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { moduleState } from './state/module-state.mjs';
 import { pollUpdates } from './poll-updates.mjs';
@@ -16,10 +15,10 @@ import { tgNotify } from './tg-notify.mjs';
  *
  * @return {Promise<boolean>} true nếu bot đã khởi động (có botToken + allowedUserId).
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 async function startTelegramBot() {
-  const configPath = join(homedir(), 'Library', 'Application Support', dataDirName, 'telegram-config.json');
+  const configPath = join(appDataDirectory, 'telegram-config.json');
   try {
     const raw = JSON.parse(await readFile(configPath, 'utf8'));
     if (!raw.botToken || !raw.allowedUserId) return false;

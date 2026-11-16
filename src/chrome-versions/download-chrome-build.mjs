@@ -1,3 +1,4 @@
+import { chromeBuildExecutable } from './chrome-build-executable.mjs';
 import { Readable } from 'node:stream';
 import { access } from 'node:fs/promises';
 import { chromeBuildDirectory } from './state/chrome-build-directory.mjs';
@@ -18,7 +19,7 @@ import { rm } from 'node:fs/promises';
  * @return {Promise<void>} Hoàn tất khi binary nằm đúng chỗ.
  * @throws {Error} Khi tải, giải nén hoặc binary sau giải nén không chạy được.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 async function downloadChromeBuild(download, platform) {
   const temporaryDirectory = join(chromeBuildDirectory, '.tmp');
@@ -40,7 +41,7 @@ async function downloadChromeBuild(download, platform) {
   await rm(archivePath, {
     force: true
   });
-  const executablePath = join(partialDirectory, 'chrome-' + platform, 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing');
+  const executablePath = chromeBuildExecutable(partialDirectory, platform);
   await access(executablePath, fileConstants.X_OK);
   await rename(partialDirectory, join(chromeBuildDirectory, download.version));
 }

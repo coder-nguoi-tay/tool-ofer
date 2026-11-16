@@ -300,6 +300,110 @@ test('SDK dừng lỗi thì giữ khóa IP/proxy và ghi lỗi thay vì cấp l�
   assert.ok(events.some(entry => entry.type === 'gologin_profile_stop_failed'));
 });
 
+/**
+ * Nút đóng slot phải dừng SDK và chờ xóa profile ngay cả khi Context.close không phát sự kiện.
+ * @return {Promise<void>} Dừng/xóa đúng một lần và HTTP chỉ hoàn tất sau bước xóa.
+ * @throws {AssertionError} Khi bỏ sót cleanup hoặc trả kết quả trước khi profile được xóa.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-16
+ */
+async function closesGoLoginSlotWithoutContextEvent() {
+  const connected = createBrowserFixture();
+  const calls = [];
+  connected.context.close = async () => { calls.push('context_close'); };
+  const { openGoLoginBrowser } = await loadFixtureModule('src/browser/actions/open-gologin-browser.mjs', {
+    connectGoLoginProfile: async () => connected,
+    verifyGoLoginProfileIp: async () => '192.0.2.39',
+    configureGoLoginWindow: async () => {}, initializeGoLoginRuntime: async () => {}
+  });
+  let completeDeletion;
+  const pendingDeletion = new Promise(resolve => { completeDeletion = resolve; });
+  const session = await openGoLoginBrowser({ slot: 39, profileId: 'windows-close-fixture',
+    proxy: { server: 'socks5://127.0.0.1:9999' }, verifiedExitIp: '192.0.2.39', websiteUrl: 'https://offer.test/',
+    stopProfile: async () => { calls.push('stop'); },
+    closeRelay: async () => { calls.push('relay'); throw new Error('fixture relay statistics write failed'); },
+    deleteProfile: async () => { calls.push('delete'); await pendingDeletion; return true; } });
+  const { handlePostBrowserClose } = await import('../src/http/routes/browser/post-close.mjs');
+  let response;
+  const closing = handlePostBrowserClose({ method: 'POST', url: '/browser/close/39' }, { writeHead() {}, end(body) { response = JSON.parse(body); } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls.slice(0, 3), ['stop', 'relay', 'delete']);
+  assert.equal(response, undefined, 'Không được báo thành công khi xóa profile còn đang chạy');
+  const sameClosing = session.closeGoLoginSession();
+  completeDeletion();
+  await Promise.all([closing, sameClosing]);
+  connected.context.emit('close');
+  connected.browser.emit('disconnected');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(response.ok, true);
+  assert.equal(calls.filter(call => call === 'delete').length, 1);
+  assert.equal(session._gologinProfileStopped, true);
+  assert.equal(activeBrowsers.has(session), false);
+}
+test('đóng slot GoLogin chủ động không phụ thuộc sự kiện close/disconnect của Windows', closesGoLoginSlotWithoutContextEvent);
+
+test('đóng GoLogin không báo thành công khi dừng SDK hoặc xóa profile thất bại', async () => {
+  const { handlePostBrowserClose } = await import('../src/http/routes/browser/post-close.mjs');
+  for (const stopped of [false, true]) {
+    const session = { slot: 40, isGoLogin: true, closeGoLoginSession: async () => {
+      session._gologinProfileStopped = stopped;
+      session._gologinProfileDeleted = false;
+    } };
+    activeBrowsers.add(session);
+    let status, response;
+    await handlePostBrowserClose({ method: 'POST', url: '/browser/close/40' }, { writeHead(code) { status = code; }, end(body) { response = JSON.parse(body); } });
+    assert.equal(status, 500);
+    assert.ok(response.error);
+    assert.notEqual(response.ok, true);
+    activeBrowsers.delete(session);
+  }
+});
+
+test('đóng tab cuối qua Screen View gọi dọn GoLogin dù không có sự kiện context close', async () => {
+  let pageClosed = false, cleanupCalls = 0, response;
+  const page = { isClosed: () => pageClosed, close: async () => { pageClosed = true; } };
+  const session = { slot: 41, isGoLogin: true, browser: { pages: () => [page] }, closeGoLoginSession: async () => {
+    cleanupCalls += 1;
+    session._gologinProfileStopped = true;
+    session._gologinProfileDeleted = true;
+  } };
+  activeBrowsers.add(session);
+  const { handlePostScreenTabsClose } = await loadFixtureModule('src/http/routes/screen/post-tabs-close.mjs', { readRequestBody: async () => '{}' });
+  await handlePostScreenTabsClose({ method: 'POST', url: '/screen/tabs/close/41' }, { writeHead() {}, end(body) { response = JSON.parse(body); } });
+  assert.equal(cleanupCalls, 1);
+  assert.equal(response.closedSession, true);
+  activeBrowsers.delete(session);
+});
+
+test('Đóng tất cả gọi dọn GoLogin trực tiếp thay vì chờ context close', async () => {
+  let cleanupCalls = 0;
+  const session = { slot: 42, profileId: 'bulk-close-fixture', isGoLogin: true, isManagedProfile: true,
+    browser: { close: async () => { throw new Error('Không được phụ thuộc context.close'); } },
+    closeGoLoginSession: async () => { cleanupCalls += 1; session._gologinProfileStopped = true; activeBrowsers.delete(session); } };
+  activeBrowsers.add(session);
+  const { closeActiveBrowsers } = await loadFixtureModule('src/browser/actions/close-active-browsers.mjs', {
+    executeFile: async () => {}, readAdsPowerApiKey: async () => '', writeFile: async () => {}, stopAllContinuousAgents: () => {}
+  });
+  await closeActiveBrowsers();
+  assert.equal(cleanupCalls, 1);
+  assert.equal(activeBrowsers.has(session), false);
+});
+
+test('Đóng tất cả giữ khóa IP/proxy khi chưa dừng được GoLogin', async () => {
+  const session = { slot: 43, profileId: 'bulk-stop-failed-fixture', isGoLogin: true, isManagedProfile: true,
+    closeGoLoginSession: async () => { activeBrowsers.delete(session); } };
+  activeBrowsers.add(session);
+  activeExitIpLocks.add('192.0.2.43');
+  activeProxyLocks.add('fixture-owned-proxy');
+  const { closeActiveBrowsers } = await loadFixtureModule('src/browser/actions/close-active-browsers.mjs', {
+    executeFile: async () => {}, readAdsPowerApiKey: async () => '', writeFile: async () => {}, stopAllContinuousAgents: () => {}
+  });
+  const result = await closeActiveBrowsers();
+  assert.equal(activeExitIpLocks.has('192.0.2.43'), true);
+  assert.equal(activeProxyLocks.has('fixture-owned-proxy'), true);
+  assert.ok(result.warnings.length);
+});
+
 test('khởi tạo lỗi mà SDK chưa dừng thì launcher cũng không nhả khóa IP/proxy', async () => {
   let deletes = 0;
   const { launchGoLoginBrowsers } = await loadFixtureModule('src/browser/actions/launch-gologin-browsers.mjs', {
@@ -490,29 +594,23 @@ test('chạy trong app không thực hiện lệnh hiện/ẩn cửa sổ; lỗi
   assert.equal(logs[0].type, 'window_visibility_error');
 });
 
-test('proxy đổi IP: dùng IP trong Orbita nếu launcher nhận, ngược lại vẫn dừng phiên', async t => {
+test('proxy đổi IP: IP trong Orbita khác IP app thì lập tức dừng phiên, không nhận IP mới dù chưa dùng', async t => {
   t.mock.method(console, 'log', () => {});
   const mismatch = () => Object.assign(new Error('IP lệch'), { code: 'GOLOGIN_IP_MISMATCH', detectedIp: '192.0.2.201', expectedIp: '192.0.2.200' });
-  for (const accepted of [true, false]) {
-    activeBrowsers.clear();
-    const connected = createBrowserFixture();
-    const { openGoLoginBrowser } = await loadFixtureModule('src/browser/actions/open-gologin-browser.mjs', {
-      connectGoLoginProfile: async () => connected, configureGoLoginWindow: async () => {},
-      verifyGoLoginProfileIp: async () => { throw mismatch(); },
-      initializeGoLoginRuntime: async () => {}
-    });
-    const opening = openGoLoginBrowser({ slot: 1, profileId: `ip-drift-${accepted}`, proxy: { server: 'socks5://127.0.0.1:9999' },
-      verifiedExitIp: '192.0.2.200', websiteUrl: 'https://offer.test/', stopProfile: async () => {},
-      adoptDetectedExitIp: ip => accepted && ip === '192.0.2.201' });
-    if (!accepted) { await assert.rejects(opening, /IP lệch/); continue; }
-    const session = await opening;
-    assert.equal(session.exitIp, '192.0.2.201');
-    assert.ok(session.logs.some(log => log.type === 'gologin_exit_ip_changed'));
-    activeBrowsers.delete(session);
-  }
+  activeBrowsers.clear();
+  const connected = createBrowserFixture();
+  const { openGoLoginBrowser } = await loadFixtureModule('src/browser/actions/open-gologin-browser.mjs', {
+    connectGoLoginProfile: async () => connected, configureGoLoginWindow: async () => {},
+    verifyGoLoginProfileIp: async () => { throw mismatch(); },
+    initializeGoLoginRuntime: async () => {}
+  });
+  const opening = openGoLoginBrowser({ slot: 1, profileId: 'ip-drift', proxy: { server: 'socks5://127.0.0.1:9999' },
+    verifiedExitIp: '192.0.2.200', websiteUrl: 'https://offer.test/', stopProfile: async () => {},
+    adoptDetectedExitIp: () => false });
+  await assert.rejects(opening, /IP lệch/);
 });
 
-test('launcher chỉ nhận IP mới khi chưa phiên nào dùng, và chuyển khóa IP sang IP mới', async () => {
+test('launcher không nhận IP lệch: IP trong Orbita và app phải giống nhau 100%', async () => {
   const answers = [];
   const { launchGoLoginBrowsers } = await loadFixtureModule('src/browser/actions/launch-gologin-browsers.mjs', {
     waitForStableProxyIp: async (proxy, probe) => probe(),
@@ -525,14 +623,14 @@ test('launcher chỉ nhận IP mới khi chưa phiên nào dùng, và chuyển k
     openGoLoginBrowser: async options => {
       answers.push(options.adoptDetectedExitIp('192.0.2.250'));
       answers.push(options.adoptDetectedExitIp('192.0.2.211'));
-      const session = { ...options, isGoLogin: true, exitIp: '192.0.2.211' }; activeBrowsers.add(session); return session;
+      const session = { ...options, isGoLogin: true, exitIp: '192.0.2.210' }; activeBrowsers.add(session); return session;
     }
   });
   activeExitIpLocks.add('192.0.2.250');
   await launchGoLoginBrowsers(JSON.stringify({ concurrency: 1, websiteUrl: 'https://offer.test/', proxyList: '127.0.0.1:9461' }));
-  assert.deepEqual(answers, [false, true]);
-  assert.equal(activeExitIpLocks.has('192.0.2.210'), false);
-  assert.equal(activeExitIpLocks.has('192.0.2.211'), true);
+  assert.deepEqual(answers, [false, false], 'Tuyệt đối không nhận IP lệch');
+  assert.equal(activeExitIpLocks.has('192.0.2.210'), true);
+  assert.equal(activeExitIpLocks.has('192.0.2.211'), false);
 });
 
 test('GoLogin hết hạn mức profile (403) thì dừng lượt mở, báo rõ lý do, không thử lại slot', async () => {
@@ -910,7 +1008,8 @@ test('GoLogin: múi giờ lệch IP app thì khởi động lại Orbita đúng 
       assert.ok(session.logs.some(log => log.type === 'gologin_geo_restart'));
     }
     assert.deepEqual(renamed, [NY.ip], 'tên profile GoLogin ghi đúng IP app');
-    session.onExitIpChanged('192.0.2.83');
+    session.exitIp = '192.0.2.83';
+    await session.onExitIpChanged(session.exitIp);
     assert.deepEqual(renamed, [NY.ip, '192.0.2.83'], 'IP phiên đổi thì đổi tên theo');
     activeBrowsers.clear();
   }
@@ -943,6 +1042,38 @@ test('profile GoLogin tạo ra chưa ghi IP; đổi tên gọi PATCH /browser/{i
   assert.equal(await renameGoLoginProfile('fixture-token', 'abc', 'Tên mới', async (url, options) => { calls.push({ url, method: options.method, body: JSON.parse(options.body) }); return { ok: true }; }), true);
   assert.deepEqual(calls, [{ url: 'https://api.gologin.com/browser/abc/name', method: 'PATCH', body: { name: 'Tên mới' } }]);
 });
+
+/**
+ * IP mới phải cập nhật title ngay và tên profile sau cùng phải theo IP mới nhất dù PATCH cũ chậm.
+ * @return {Promise<void>} Các request đổi tên được tuần tự hóa và hiển thị dùng IP phiên hiện tại.
+ * @throws {AssertionError} Khi tên cũ có thể ghi đè tên mới hoặc bỏ qua cập nhật hiển thị.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-16
+ */
+async function serializesGoLoginNameUpdates() {
+  const connected = createBrowserFixture();
+  const renamed = [], displayed = [];
+  let completeInitialRename;
+  const initialRename = new Promise(resolve => { completeInitialRename = resolve; });
+  const { openGoLoginBrowser } = await loadFixtureModule('src/browser/actions/open-gologin-browser.mjs', {
+    connectGoLoginProfile: async () => connected,
+    verifyGoLoginProfileIp: async () => '192.0.2.120',
+    configureGoLoginWindow: async () => {}, initializeGoLoginRuntime: async () => {},
+    decorateGoLoginPages: async session => { displayed.push(session.exitIp); }
+  });
+  const session = await openGoLoginBrowser({ slot: 1, profileId: 'rename-order-fixture',
+    proxy: { server: 'http://127.0.0.1:9999' }, verifiedExitIp: '192.0.2.120', websiteUrl: 'https://offer.test/',
+    stopProfile: async () => {}, renameProfile: async ip => { renamed.push(ip); return renamed.length === 1 ? initialRename : true; } });
+  session.exitIp = '192.0.2.121';
+  const updating = session.onExitIpChanged(session.exitIp);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(renamed, ['192.0.2.120'], 'Đợi PATCH cũ xong trước khi gửi PATCH mới');
+  assert.deepEqual(displayed, ['192.0.2.121'], 'Title/bar không phải chờ PATCH cũ');
+  completeInitialRename(true);
+  await updating;
+  assert.deepEqual(renamed, ['192.0.2.120', '192.0.2.121']);
+}
+test('đồng bộ IP hiển thị và thứ tự đổi tên GoLogin khi request cũ phản hồi chậm', serializesGoLoginNameUpdates);
 
 test('geo proxy: geo.myip.link lỗi thì dựng múi giờ/toạ độ/ngôn ngữ từ dịch vụ dự phòng, SDK không phải tự tra (Proxy Error)', async () => {
   const { fetchProxyGeo } = await import('../src/gologin-profile/fetch-proxy-geo.mjs');
@@ -986,4 +1117,48 @@ test('dòng proxy chết hoặc mở lỗi bị chuyển sang đã dùng (không
     proxyQueue.used.splice(0, Infinity, ...saved.used);
     activeBrowsers.clear(); activeExitIpLocks.clear(); activeProxyLocks.clear();
   }
+});
+
+test('proxy ra cả IPv6 lẫn IPv4: IP chính của phiên là IPv4 (IP toffers thấy), IPv6 báo làm IP phụ; proxy chỉ IPv6 thì giữ IPv6', async () => {
+  const IP6 = '2601:100:8000:91:597c:332b:9d23:54bc';
+  /**
+   * Context giả: geo.myip.link trả IPv6 (dual-stack); api.ipify.org chỉ IPv4 — `ipv4` null nghĩa là proxy chỉ có IPv6.
+   * @return {object} Context Orbita giả.
+   */
+  const contextWith = ipv4 => ({ newPage: async () => {
+    let current = '';
+    return {
+      goto: async url => { current = url; return { ok: () => url === 'https://geo.myip.link' || (url.startsWith('https://api.ipify.org') && Boolean(ipv4)) }; },
+      locator: () => ({ innerText: async () => current === 'https://geo.myip.link'
+        ? JSON.stringify({ ip: IP6, timezone: 'America/New_York', ll: [40.7, -74], country: 'US' })
+        : JSON.stringify({ ip: ipv4 }) }),
+      evaluate: async () => null, close: async () => {}
+    };
+  } });
+  let geo = null, alternate = null;
+  assert.equal(await verifyGoLoginProfileIp(contextWith('198.51.100.91'), '198.51.100.91', () => {}, value => { geo = value; }, value => { alternate = value; }), '198.51.100.91',
+    'IP chính là IPv4, khớp IP app kiểm proxy nên không báo lệch');
+  assert.equal(alternate, IP6, 'IPv6 vẫn được báo để tính khi kiểm lead/khoá trùng');
+  assert.equal(geo.timezone, 'America/New_York', 'vẫn giữ geo để khớp múi giờ');
+  alternate = null;
+  assert.equal(await verifyGoLoginProfileIp(contextWith(null), IP6, () => {}, () => {}, value => { alternate = value; }), IP6, 'proxy chỉ có IPv6 thì giữ IPv6');
+  assert.equal(alternate, null);
+  await assert.rejects(verifyGoLoginProfileIp(contextWith('198.51.100.92'), '198.51.100.91', () => {}, () => {}, () => {}),
+    error => error.code === 'GOLOGIN_IP_MISMATCH' && error.detectedIp === '198.51.100.92', 'so lệch IP theo IPv4');
+});
+
+test('phiên GoLogin dual-stack: hiển thị/kiểm lead theo IPv4, IPv6 nằm trong IP phụ của phiên', async () => {
+  const IP6 = '2601:100:8000:91:597c:332b:9d23:54bc';
+  const connected = createBrowserFixture();
+  const { openGoLoginBrowser } = await loadFixtureModule('src/browser/actions/open-gologin-browser.mjs', {
+    connectGoLoginProfile: async () => connected,
+    verifyGoLoginProfileIp: async (context, expected, onHints, onGeo, onAlternate) => { onAlternate(IP6); return '198.51.100.93'; },
+    configureGoLoginWindow: async () => {}, takeNextEmail: async () => null, initializeGoLoginRuntime: async () => {}, recordGoLoginDeviceFingerprint: async () => {}
+  });
+  const session = await openGoLoginBrowser({ slot: 1, profileId: 'fixture-dual', proxy: { server: 'http://127.0.0.1:9999' }, verifiedExitIp: '198.51.100.93',
+    websiteUrl: 'https://offer.test/', dataSaver: false, startProfile: async () => ({}), stopProfile: async () => {} });
+  assert.equal(session.exitIp, '198.51.100.93', 'IP hiển thị trên bảng/log là IPv4');
+  assert.ok(session.exitIps.has('198.51.100.93') && session.exitIps.has(IP6), 'kiểm lead theo cả IPv4 lẫn IPv6');
+  assert.ok(session.logs.some(log => log.type === 'session_exit_ip_observed' && String(log.detail).includes(IP6)), 'log ghi IPv6 là IP phụ');
+  activeBrowsers.clear();
 });

@@ -55,7 +55,7 @@ async function loadSavedOffers() {
             if (chosen.CheckDuplicate !== undefined) document.getElementById('cbxCheckDuplicateIP').checked = chosen.CheckDuplicate !== false && chosen.CheckDuplicate !== 'False';
             if (chosen.HideUntilTarget !== undefined) document.getElementById('cbxHideUntilTarget').checked = chosen.HideUntilTarget === true;
             if (chosen.HideUntilLead !== undefined) document.getElementById('cbxHideUntilLead').checked = chosen.HideUntilLead === true;
-            miniRunApplySchedules(chosen.schedules);
+            miniRunApplySchedules(chosen.schedules, chosen.scheduleStop);
             syncOptionPills();
             showToast(`Đã chọn: ${chosen.NameOffer}`);
           }

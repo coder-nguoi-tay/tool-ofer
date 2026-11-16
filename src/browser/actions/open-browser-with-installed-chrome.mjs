@@ -38,6 +38,7 @@ import { localeForCountry } from '../../../stealth.mjs';
 import { markAutofillRecordUsed } from '../../records/actions/mark-autofill-record-used.mjs';
 import { mkdir } from 'node:fs/promises';
 import { navigationTimeout } from '../../runtime/constants/navigation-timeout.mjs';
+import { verifyOffer2615Landing } from '../../autofill/offers/2615/verify-offer-landing.mjs';
 import { offerStrategyState } from '../../runtime/constants/offer-strategy-state.mjs';
 import { pickConfiguredUserAgent } from "../user-agents/pick-configured-user-agent.mjs";
 import { queueAutomaticRefill } from '../../refill/actions/queue-automatic-refill.mjs';
@@ -113,7 +114,8 @@ export async function openBrowserWithInstalledChrome({
   multiTab = true,
   screenPreviewOnly = true,
   choiceDelay = 0,
-  dataSaver = true
+  dataSaver = true,
+  offerSolver = 'auto'
 }) {
   // Chromium không mở an toàn profile đã được Chrome phiên bản mới hơn khởi tạo.
   const userDataDirectory = browserProfilePath(build, proxyKey);
@@ -277,6 +279,7 @@ export async function openBrowserWithInstalledChrome({
     deviceVersion: dp.deviceVersion || (dp.summary ? dp.summary.split(' · ')[0] : dp.label),
     deviceSummary: dp.summary,
     suppressAutoRefill: false,
+    offerSolver: offerSolver || 'auto',
     proxyKey,
     proxyServer: proxy.server,
     websiteUrl,
@@ -617,6 +620,10 @@ export async function openBrowserWithInstalledChrome({
       timeout: navigationTimeout
     });
     const finalUrl = page.url();
+    const isInvalid2615Landing = await verifyOffer2615Landing(page, session);
+    if (isInvalid2615Landing) {
+      throw new Error(`Offer 2615 mở không đúng link blog.financialhelpfinder.com (${page.url()}); đã tắt tất cả trình duyệt.`);
+    }
     if (!response || response.status() >= 400) {
       throw new Error(`website trả HTTP ${response?.status() ?? 'không có phản hồi'}`);
     }

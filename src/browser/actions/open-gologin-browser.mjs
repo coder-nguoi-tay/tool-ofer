@@ -15,6 +15,7 @@ import { recordObservedExitIp } from '../../proxy/actions/record-observed-exit-i
 import { attachMaxRunTimer } from './attach-max-run-timer.mjs';
 import { takeNextEmail } from '../../queues/email.mjs';
 import { assertNotMacPublicIp } from '../../proxy/actions/get-mac-public-ip.mjs';
+import { decorateGoLoginPages } from '../gologin/decorate-profile-pages.mjs';
 
 /**
  * Ghi nhật ký từ trước SDK, ẩn ngay khi mở, xác minh IP rồi gắn runtime có thể nối lại CDP.
@@ -22,14 +23,14 @@ import { assertNotMacPublicIp } from '../../proxy/actions/get-mac-public-ip.mjs'
  * @return {Promise<object|null>} Phiên đã mở hoặc null khi nhận Stop.
  * @throws {Error} Lỗi mở/xác minh có log pha trước khi dừng profile.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-16
  */
 export async function openGoLoginBrowser({
   slot, tileIndex, profileId, proxy, proxyKey = null, verifiedExitIp, websiteUrl, offer = 1,
   autofillRecords = [], autoSubmit = true, leadConfig = {}, scriptSteps = null, scriptPath = '',
   captchaApiKey = '', delayStop = 0, hideUntilTarget = false, hideUntilLead = false,
   screenPreviewOnly = false, deviceProfile = 'macos', deviceLabel = deviceProfile, userAgent = '', startProfile, stopProfile, deleteProfile = async () => true, adoptDetectedExitIp = () => false, shouldAbort = () => false, maxRunMinutes = 0, completeText = '', relay = null, closeRelay = async () => {}, renameProfile = async () => true,
-  offerUrls = [], choiceDelay = 0, dataSaver = true, startupSession = null
+  offerUrls = [], choiceDelay = 0, dataSaver = true, startupSession = null, offerSolver = 'auto'
 }) {
   const session = Object.assign(startupSession || {}, {
     slot, tileIndex: tileIndex ?? slot - 1, profileId, isManagedProfile: true, isGoLogin: true,
@@ -38,7 +39,7 @@ export async function openGoLoginBrowser({
     userAgent, deviceProfile, deviceVersion: deviceLabel, deviceSummary: startupSession?.deviceSummary || `${deviceLabel} · GoLogin Orbita`, chromeVersion: startupSession?.chromeVersion || 'Orbita',
     enableLeadCheck: leadConfig.enabled === true,
     stopAutofillOnLead: leadConfig.enabled === true && leadConfig.stopAutofillOnLead === true,
-    confirmedLeadIp: null, leadCheckStatus: null, suppressAutoRefill: false,
+    confirmedLeadIp: null, leadCheckStatus: null, suppressAutoRefill: false, offerSolver: offerSolver || 'auto',
     choiceDelay, dataSaver, hideUntilTarget, hideUntilLead, inAppPreview: screenPreviewOnly,
     trueHeadless: screenPreviewOnly, isWindowVisible: !screenPreviewOnly && !hideUntilTarget && !hideUntilLead,
     bandwidthBytes: 0, bytesSent: 0, bytesReceived: 0, requestCount: 0,
@@ -58,9 +59,10 @@ export async function openGoLoginBrowser({
       await stopProfile(connected.gl);
       session._gologinProfileStopped = true;
       // Orbita đã dừng: ghi byte thật qua relay vào thống kê băng thông rồi đóng relay.
-      await closeRelay();
+      await closeRelay().catch(() => session.addBrowserLog?.({ type: 'gologin_relay_close_failed', detail: 'Không hoàn tất dọn relay/ghi băng thông; Orbita đã dừng, tiếp tục xóa profile GoLogin.' }));
       // Chỉ xóa khi Orbita đã dừng (stopProfile ném lỗi thì giữ profile để không xóa dưới browser còn sống).
       const deleted = await deleteProfile();
+      session._gologinProfileDeleted = deleted;
       session.addBrowserLog?.(deleted
         ? { type: 'gologin_profile_deleted', detail: 'Đã xóa profile GoLogin của phiên; lần chạy sau tạo profile mới.' }
         : { type: 'gologin_profile_delete_failed', detail: 'Không xóa được profile GoLogin của phiên; cần xóa tay trên GoLogin.' });
@@ -69,6 +71,9 @@ export async function openGoLoginBrowser({
     // khởi động lại Orbita đúng múi giờ của IP đó; proxy vẫn đổi IP mỗi kết nối nên kiểm lại sau mỗi lần.
     session.startupPhase = 'verify_ip';
     let probe = await probeAppIp(connected.context, verifiedExitIp);
+    if (probe.mismatch) {
+      throw probe.mismatch;
+    }
     for (let restart = 1; isGeoMismatch(probe.geo, connected.gl._tz); restart++) {
       if (restart > GEO_RESTART_LIMIT) {
         throw Object.assign(new Error(`Múi giờ Orbita vẫn lệch IP ${probe.ip} sau ${GEO_RESTART_LIMIT} lần khởi động lại; bỏ proxy này, không mở offer.`), { code: 'GOLOGIN_GEO_MISMATCH' });
@@ -80,28 +85,33 @@ export async function openGoLoginBrowser({
       await stopProfile(connected.gl);
       connected = await connectGoLoginProfile(() => startProfile(nextGeo), stopProfile, connectOptions);
       probe = await probeAppIp(connected.context, verifiedExitIp);
+      if (probe.mismatch) {
+        throw probe.mismatch;
+      }
     }
     if (!probe.geo) session.addBrowserLog({ type: 'gologin_geo_unverified', detail: 'Không đọc được múi giờ của đúng IP trong Orbita; giữ múi giờ lúc khởi động.' });
     session.orbitaClientHints = probe.hints;
     session.ipGeo = probe.geo;
-    if (!probe.mismatch) {
-      session.exitIp = probe.ip;
-    } else {
-      const error = probe.mismatch;
-      if (!adoptDetectedExitIp(error.detectedIp)) throw error;
-      session.exitIp = error.detectedIp;
-      session.addBrowserLog({ type: 'gologin_exit_ip_changed', expectedExitIp: verifiedExitIp, actualExitIp: error.detectedIp,
-        detail: `Proxy đã đổi IP ${verifiedExitIp} → ${error.detectedIp}; IP mới chưa dùng cho offer này nên tiếp tục bằng IP trong Orbita.` });
-    }
-    // Tập IP của phiên: IP Orbita đang dùng và IP lúc app kiểm proxy (cùng session sticky nhưng có thể khác IP).
+    // IP app, Orbita và GoLogin phải giống nhau 100%; tuyệt đối không nhận IP lệch
+    session.exitIp = verifiedExitIp;
     session.exitIps = new Set([normalizeIpAddress(session.exitIp)].filter(Boolean));
     await recordObservedExitIp(session, verifiedExitIp);
+    // IPv6 của proxy dual-stack: IP phụ, vẫn tính khi kiểm lead và khoá không dùng lại.
+    if (probe.alternate) await recordObservedExitIp(session, probe.alternate);
     // Proxy hỏng hoặc trong suốt: Orbita ra Internet bằng IP thật của Mac thì dừng phiên, không mở offer.
     await assertNotMacPublicIp(session.exitIp);
     // Tên profile trên GoLogin ghi đúng IP app hiển thị; IP phiên đổi về sau (vd. lead khớp clickid) thì đổi tên theo.
-    session.onExitIpChanged = ip => void renameProfile(ip).then(renamed => {
-      if (!renamed) session.addBrowserLog?.({ type: 'gologin_device_error', detail: `Không đổi được tên profile GoLogin theo IP ${ip}.` });
-    });
+    let profileRename = Promise.resolve();
+    session.onExitIpChanged = ip => {
+      const displayUpdate = session.browser ? decorateGoLoginPages(session).catch(() => {
+        session.addBrowserLog?.({ type: 'gologin_device_error', detail: 'Chưa đồng bộ được IP trên title/thanh nhận diện của Orbita.' });
+      }) : Promise.resolve();
+      // Đổi tên tuần tự: phản hồi PATCH cũ tới chậm không được ghi đè tên mang IP mới.
+      profileRename = profileRename.then(() => session.isClosed ? true : renameProfile(ip)).catch(() => false).then(renamed => {
+        if (!renamed) session.addBrowserLog?.({ type: 'gologin_device_error', detail: `Không đổi được tên profile GoLogin theo IP ${ip}.` });
+      });
+      return Promise.all([displayUpdate, profileRename]);
+    };
     session.onExitIpChanged(session.exitIp);
     const { context, browser, gl } = connected;
     session.browser = context; session._cdpBrowser = browser; session.browserWebSocketUrl = connected.wsUrl;
@@ -184,13 +194,13 @@ const GEO_RESTART_LIMIT = 3;
  * @since 2026-11-15
  */
 async function probeAppIp(context, expectedIp) {
-  let geo = null, hints = null;
+  let geo = null, hints = null, alternate = null;
   try {
-    const ip = await verifyGoLoginProfileIp(context, expectedIp, value => { hints = value; }, value => { geo = value; });
-    return { ip, geo, hints, mismatch: null };
+    const ip = await verifyGoLoginProfileIp(context, expectedIp, value => { hints = value; }, value => { geo = value; }, value => { alternate = value; });
+    return { ip, geo, hints, alternate, mismatch: null };
   } catch (error) {
     if (error.code !== 'GOLOGIN_IP_MISMATCH') throw error;
-    return { ip: error.detectedIp, geo, hints, mismatch: error };
+    return { ip: error.detectedIp, geo, hints, alternate, mismatch: error };
   }
 }
 

@@ -2,6 +2,8 @@ import { shouldPauseForLead } from '../should-pause-for-lead.mjs';
 import { isThankYouUrl } from '../../leads/actions/is-thank-you-url.mjs';
 import { isFinancialhelpThankyouUrl } from '../../leads/actions/is-financialhelp-thankyou-url.mjs';
 import { isFinancialhelpPathThankyouUrl } from '../../leads/actions/is-financialhelp-path-thankyou-url.mjs';
+import { isOffer2615 } from '../offers/2615/match-offer.mjs';
+import { protectConfirmedLeadSession } from '../../leads/actions/protect-confirmed-lead-session.mjs';
 
 /** Trang đứng yên liên tục bao lâu thì F5 (yêu cầu người dùng 2026-11-15: khoảng 2 phút). */
 export const STUCK_PAGE_RELOAD_MS = 120_000;
@@ -56,15 +58,20 @@ export async function reloadStuckPage(page, session, signature, options = {}, no
   if (busy || state.signature !== signature || state.activity !== activity || now - (state.lastCheckAt ?? now) > OBSERVATION_GAP_MS) state.since = now;
   Object.assign(state, { signature, activity, lastCheckAt: now });
   if (busy || now - state.since < thresholdMs) return false;
-  if (state.reloads >= MAX_RELOADS_PER_URL) {
-    if (!state.exhaustedLogged) {
-      state.exhaustedLogged = true;
-      options.onLog?.({ type: 'stuck_page_reload_exhausted', detail: `Trang vẫn đứng yên sau ${MAX_RELOADS_PER_URL} lần F5; không F5 thêm, chờ thay đổi hoặc người thao tác.` }, page);
+  const hasLead = protectConfirmedLeadSession(session);
+  const offer2615Flow = isOffer2615(page, session);
+  if (!hasLead || !offer2615Flow) {
+    if (state.reloads >= MAX_RELOADS_PER_URL) {
+      if (!state.exhaustedLogged) {
+        state.exhaustedLogged = true;
+        options.onLog?.({ type: 'stuck_page_reload_exhausted', detail: `Trang vẫn đứng yên sau ${MAX_RELOADS_PER_URL} lần F5; không F5 thêm, chờ thay đổi hoặc người thao tác.` }, page);
+      }
+      return false;
     }
-    return false;
   }
   state.reloads += 1;
-  options.onLog?.({ type: 'stuck_page_reload', detail: `Trang đứng yên ${thresholdMs >= 60_000 ? `${Math.round(thresholdMs / 60_000)} phút` : `${Math.round(thresholdMs / 1000)} giây`} (không thao tác, giao diện không đổi); F5 lần ${state.reloads}/${MAX_RELOADS_PER_URL}: ${url}` }, page);
+  const reloadText = (hasLead && offer2615Flow) ? `lần ${state.reloads}` : `lần ${state.reloads}/${MAX_RELOADS_PER_URL}`;
+  options.onLog?.({ type: 'stuck_page_reload', detail: `Trang đứng yên ${thresholdMs >= 60_000 ? `${Math.round(thresholdMs / 60_000)} phút` : `${Math.round(thresholdMs / 1000)} giây`} (không thao tác, giao diện không đổi); F5 ${reloadText}: ${url}` }, page);
   const startedAt = Date.now();
   try {
     if (url.includes('#')) await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });

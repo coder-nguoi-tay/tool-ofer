@@ -35,11 +35,28 @@ test('chạy quá N phút thì ghi log và tắt trình duyệt để bù slot, 
   assert.equal(session.suppressAutoRefill, false);
 });
 
-test('phiên đã có lead không bị tắt khi hết giờ', async t => {
+test('phiên đã có lead cũng bị tắt khi hết giờ (người dùng chốt 2026-11-16); đánh dấu đóng trước để không bị nối lại', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { session, closes } = createSession({ leadCheckStatus: 'confirmed' });
+  let closedFlagAtClose = null;
+  const { session, logs } = createSession({ leadCheckStatus: 'confirmed', confirmedLeadIp: '198.51.100.30', leadHistoryBaselineAt: 0 });
+  session.browser.close = async () => { closedFlagAtClose = session.isClosed; };
   attachMaxRunTimer(session, 10);
-  t.mock.timers.tick(10 * 60_000);
+  t.mock.timers.tick(10 * 60_000 - 1);
+  await flush();
+  assert.equal(closedFlagAtClose, null, 'chưa đủ 10 phút');
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal(closedFlagAtClose, true, 'phiên có lead được đánh dấu đã đóng trước khi tắt (bộ nối lại CDP bỏ qua)');
+  assert.equal(logs[0].type, 'max_run_timeout');
+  assert.match(logs[0].detail, /có lead/);
+  assert.equal(session.suppressAutoRefill, false, 'vẫn bù slot mới');
+});
+
+test('bật "dừng autofill khi có lead" và phiên đã có lead: giữ trình duyệt khi hết giờ', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { session, closes } = createSession({ leadCheckStatus: 'confirmed', confirmedLeadIp: '198.51.100.30', stopAutofillOnLead: true, enableLeadCheck: true, leadHistoryBaselineAt: 0 });
+  attachMaxRunTimer(session, 10);
+  t.mock.timers.tick(30 * 60_000);
   await flush();
   assert.equal(closes(), 0);
 });

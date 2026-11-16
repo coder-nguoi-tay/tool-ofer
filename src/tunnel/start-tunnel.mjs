@@ -16,9 +16,10 @@ import { writeFileSync } from 'node:fs';
  * @param {number} timeoutMs - Thời gian chờ tối đa lấy URL (mặc định 20s)
  * @returns {Promise<{ ok: boolean, url?: string, error?: string, provider?: string }>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 async function startTunnel(port = 3211, timeoutMs = 20000) {
+  if (process.env.AUTOLEADPC_DISABLE_TUNNEL === '1') return { ok: false, error: 'Tunnel đã tắt trong chế độ server LAN.' };
   // 1. Ưu tiên kiểm tra Tailscale Funnel (URL cố định vĩnh viễn)
   try {
     const tsUrl = getTailscaleFunnel(port);

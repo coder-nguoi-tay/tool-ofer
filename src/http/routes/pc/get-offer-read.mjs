@@ -44,7 +44,11 @@ export async function handleGetPcOfferRead(request, response) {
           delayStart: getVal('delayStart') || '1',
           delayStop: getVal('delayStop') || '1',
           Thread: getVal('Thread') || '1',
-          LimitRun: getVal('LimitRun') || '0'
+          LimitRun: getVal('LimitRun') || '0',
+          scheduleStop: {
+            enabled: getVal('scheduleStopEnabled') === 'True',
+            time: getVal('scheduleStopTime') || '23:00'
+          }
         };
       }
       const listPath = join(offerDir, 'saved-offers.json');

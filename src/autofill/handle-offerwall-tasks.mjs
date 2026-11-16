@@ -1,3 +1,4 @@
+import { MAX_CONCURRENT_SUB_OFFERS } from '../runtime/constants/max-concurrent-sub-offers.mjs';
 import { inspectInteractionReadiness } from '../browser/locators/inspect-interaction-readiness.mjs';
 import { clickReadyControl } from '../browser/locators/click-ready-control.mjs';
 import { readOfferwallTaskState } from './offerwall/read-offerwall-task-state.mjs';
@@ -59,7 +60,25 @@ async function handleOfferwallTasks(page, frame, options = {}) {
     if (options.isCancelled?.()) return 0;
     if (state.kind === 'card') {
       selectedCards.set(frame, state.card);
-      await control.evaluate(element => element.setAttribute('data-ux-ow-awaiting-panel', '1'));
+      await control.evaluate(element => { element.setAttribute('data-ux-ow-awaiting-panel', '1'); element.setAttribute('data-ux-ow-awaiting-since', String(Date.now())); });
+    } else if (state.kind === 'button') {
+      // Nút mở thẳng offer: giữ thẻ + link + chỗ tab như CTA, và chốt "đã mở" TRƯỚC khi bấm để không bao giờ bấm lần hai.
+      const markCard = () => frame.locator(state.cardSelector).first().evaluate(element => element.setAttribute('data-ux-ow-clicked', '1')).catch(() => {});
+      finishCard = reserveOfferwallCard(page, state.card);
+      if (finishCard === false) { finishCard = null; return 0; }
+      if (!finishCard) { await markCard(); return 0; }
+      const destination = state.card.destUrl;
+      if (destination && /^https?:/.test(destination)) {
+        finishLink = reserveOfferLink(page, destination);
+        if (!finishLink && getOfferUrlState(page.context()).pending.has(normalizeOfferUrl(destination, page.url()))) return 0;
+        if (!finishLink || isExcludedOfferPageUrl(destination)) { finishCard(true); await markCard(); return 0; }
+      }
+      releaseSlot = reserveOfferwallTabSlot(page, MAX_CONCURRENT_SUB_OFFERS);
+      if (!releaseSlot || options.isCancelled?.()) return 0;
+      finishCard(true);
+      finishLink?.(true);
+      selectedCards.set(frame, state.card);
+      await markCard();
     } else if (state.kind === 'cta') {
       const card = selectedCards.get(frame);
       finishCard = card ? reserveOfferwallCard(page, card) : () => {};
@@ -73,7 +92,7 @@ async function handleOfferwallTasks(page, frame, options = {}) {
         await control.evaluate(element => element.setAttribute('data-ux-ow-cta', '1'));
         return 0;
       }
-      releaseSlot = reserveOfferwallTabSlot(page, MAX_OFFER_TABS - 1);
+      releaseSlot = reserveOfferwallTabSlot(page, MAX_CONCURRENT_SUB_OFFERS);
       if (!releaseSlot || options.isCancelled?.()) return 0;
       // Chốt trước input: timeout không được phép dẫn tới lần click CTA thứ hai.
       finishCard(true);
@@ -96,6 +115,8 @@ async function handleOfferwallTasks(page, frame, options = {}) {
       await frame.locator('#infoPanelButton').evaluate(element => element.removeAttribute('data-ux-ow-cta')).catch(() => {});
       await control.evaluate(element => element.setAttribute('data-ux-ow-clicked', '1'));
       options.onLog?.({ type: 'ow_task_selected', detail: '[OW Task] Đã chọn task kế tiếp theo thứ tự hiển thị.' });
+    } else if (state.kind === 'button') {
+      options.onLog?.({ type: 'ow_task_button', detail: `[OW Task] Đã bấm nút offer "${String(state.headline || '').slice(0, 60)}" một lần.` });
     } else if (state.kind === 'cta') {
       options.onLog?.({ type: 'ow_task_cta', detail: '[OW Task] Đã thử bấm CTA một lần.' });
     } else {

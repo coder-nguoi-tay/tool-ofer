@@ -1,3 +1,4 @@
+import { MAX_CONCURRENT_SUB_OFFERS } from '../runtime/constants/max-concurrent-sub-offers.mjs';
 import { markOfferwallCardProcessed } from './mark-offerwall-card-processed.mjs';
 import { readOfferwallCards } from './read-offerwall-cards.mjs';
 import { reserveOfferwallCard } from './reserve-offerwall-card.mjs';
@@ -29,7 +30,7 @@ import { normalizeOfferUrl } from '../browser/tabs/normalize-offer-url.mjs';
  */
 async function handleOfferwallCards(frame, page = null, options = {}) {
   let openedCount = 0;
-  const maxConcurrentSubOffers = Math.min(MAX_OFFER_TABS - 1, Math.max(0, Number(options.maxConcurrentSubOffers ?? MAX_OFFER_TABS - 1)));
+  const maxConcurrentSubOffers = Math.min(MAX_OFFER_TABS - 1, Math.max(0, Number(options.maxConcurrentSubOffers ?? MAX_CONCURRENT_SUB_OFFERS)));
   try {
     // Trần tab đồng thời được check lại trước MỖI thẻ — đủ trần thì dừng, giữ thẻ
     // chưa đánh dấu data-ux-opened để vòng quét sau (khi có tab hoàn tất nhả slot) mở tiếp.

@@ -23,6 +23,8 @@ export const ADSMITH_STUCK_RELOAD_MS = 40_000;
  * @since 2026-11-12
  */
 export async function handleNoSurvey(frame, page, options = {}) {
+  const session = options.session || page?._autofillSession;
+  if (session?.offerSolver === 'generic') return null;
   if (!await isNoSurveyFrame(frame)) return null;
   page._activeAutofillFrame = frame;
   const waiting = { handled: true, actions: 0 };

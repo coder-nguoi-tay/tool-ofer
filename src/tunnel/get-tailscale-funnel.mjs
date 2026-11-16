@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { findTailscaleBin } from './find-tailscale-bin.mjs';
 
 /**
@@ -6,7 +6,7 @@ import { findTailscaleBin } from './find-tailscale-bin.mjs';
  * @param {number} port
  * @returns {string|null}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 function getTailscaleFunnel(port = 3211) {
   const bin = findTailscaleBin();
@@ -14,7 +14,7 @@ function getTailscaleFunnel(port = 3211) {
 
   // 1. Kiểm tra trạng thái hiện tại
   try {
-    const raw = execSync(`${bin} funnel status --json`, {
+    const raw = execFileSync(bin, ['funnel', 'status', '--json'], {
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore']
     }).toString();
@@ -31,11 +31,11 @@ function getTailscaleFunnel(port = 3211) {
 
   // 2. Thử kích hoạt funnel nếu chưa bật
   try {
-    execSync(`${bin} funnel --bg ${port}`, {
+    execFileSync(bin, ['funnel', '--bg', String(port)], {
       timeout: 8000,
       stdio: ['ignore', 'pipe', 'ignore']
     });
-    const raw = execSync(`${bin} funnel status --json`, {
+    const raw = execFileSync(bin, ['funnel', 'status', '--json'], {
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore']
     }).toString();

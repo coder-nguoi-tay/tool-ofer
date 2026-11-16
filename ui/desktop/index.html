@@ -230,6 +230,15 @@
                   <option value="manual">Manual work (Làm thủ công)</option>
                 </select>
               </div>
+              <div class="form-row" style="margin-bottom:6px;">
+                <span class="form-label" style="min-width:85px;">Cách giải:</span>
+                <select id="cbbOfferSolver" class="win-select" style="flex:1;"
+                  title="Chọn bộ giải cho trang Offer: Tự động phát hiện theo link (2615...), Ép dùng giải 2615, hoặc Giải chung (Generic)">
+                  <option value="auto" selected>⚡ Tự động theo link (Offer 2615...)</option>
+                  <option value="2615">🎯 Offer 2615 (FinancialHelpFinder / ThankYou)</option>
+                  <option value="generic">🌐 Giải chung (Generic - Bỏ qua luật riêng)</option>
+                </select>
+              </div>
               <div class="form-row">
                 <span class="form-label" style="min-width:85px;">Chuỗi xong:</span>
                 <input type="text" id="txtTextComplete" class="win-input" style="flex:1;" value=""
@@ -425,6 +434,18 @@
                 style="padding:5px 20px;font-size:12px;font-weight:600;gap:6px;" onclick="handleStop()">⏹ Stop</button>
               <button type="button" class="win-btn" id="btnCloseChrome" style="padding:5px 14px;gap:6px;font-size:12px;"
                 onclick="handleCloseAll()">✕ Close Chrome</button>
+            </div>
+            <div class="controls-schedule-stop-group" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(15,23,42,0.7);border:1px solid #334155;border-radius:6px;">
+              <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-size:11.5px;color:#f87171;font-weight:600;white-space:nowrap;"
+                title="Tích vào để hẹn giờ tự động dừng luồng và đóng tất cả trình duyệt khi đến mốc giờ này">
+                <input type="checkbox" id="cbxScheduleStop" onchange="toggleScheduleStop(this.checked)" style="cursor:pointer;">
+                <span>⏰ Chạy đến:</span>
+              </label>
+              <input type="time" id="timeScheduleStop" class="win-input" value="23:00"
+                style="width:78px;padding:1px 4px;font-size:11.5px;display:none;background:#0f172a;color:#f87171;border-color:#ef4444;font-weight:600;"
+                title="Chọn mốc giờ sẽ tự động dừng auto và đóng tất cả trình duyệt (ví dụ 23:00)"
+                onchange="try{localStorage.setItem('autoleadpc_schedule_stop', JSON.stringify({enabled:Boolean(document.getElementById('cbxScheduleStop')?.checked),time:this.value}));}catch{} if(typeof syncStopSchedulerState==='function') syncStopSchedulerState();">
+              <span id="lblScheduleStopHint" style="font-size:11px;color:#fca5a5;display:none;font-weight:600;">thì tắt</span>
             </div>
           </div>
         </fieldset>

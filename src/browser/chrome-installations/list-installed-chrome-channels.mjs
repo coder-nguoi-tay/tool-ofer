@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { listInstalledChromeVersions } from '../../../chrome-versions.mjs';
 import { readInstalledChromeChannel } from './read-installed-chrome-channel.mjs';
 import { readdir } from 'node:fs/promises';
+import { windowsChromePaths } from '../windows-chrome-paths.mjs';
+import { existsSync } from 'node:fs';
 
 /**
  * Liệt kê Chrome thường từ bản 150 trở lên, mỗi major chỉ một bản.
@@ -12,9 +14,23 @@ import { readdir } from 'node:fs/promises';
  * @return {Promise<{executablePath: string, version: string, major: number, channel: string}[]>} Các kênh khả dụng.
  * @throws {Error} Khi không tìm thấy kênh Stable mặc định.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 async function listInstalledChromeChannels() {
+  if (process.platform === 'win32') {
+    const channels = [['stable', installedChromeAppPath], ...['beta', 'dev', 'canary'].map(channel => [channel, windowsChromePaths(channel).find(existsSync)])];
+    const builds = [];
+    for (const [channel, executablePath] of channels) {
+      if (executablePath && existsSync(executablePath)) builds.push(await readInstalledChromeChannel(executablePath, channel));
+    }
+    builds.push(...(await listInstalledChromeVersions()).map(build => ({ ...build, channel: build.version })));
+    const seenMajors = new Set();
+    return builds.filter(build => {
+      if (build.major < 150 || seenMajors.has(build.major)) return false;
+      seenMajors.add(build.major);
+      return true;
+    });
+  }
   const stableApp = installedChromeAppPath;
   const archivedAppNames = await readdir(chromeRegularBuildDirectory).catch(error => {
     if (error.code === 'ENOENT') return [];

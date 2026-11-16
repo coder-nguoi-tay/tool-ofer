@@ -66,20 +66,22 @@ test('màn card giữ root, dọn đúng context một lần, mở mọi card l�
   assert.equal(context.pages().length, 4, 'reload không mở lại link đã xử lý');
 });
 
-test('màn card mở tối đa 9 tab con và tiếp tục card chưa mở khi có chỗ', { skip }, async t => {
+test('màn card mở tối đa MAX_CONCURRENT_SUB_OFFERS tab con cùng lúc (3, giảm tải máy 2026-11-16) và mở tiếp khi có chỗ, cho tới hết thẻ', { skip }, async t => {
+  const { MAX_CONCURRENT_SUB_OFFERS } = await import('../src/runtime/constants/max-concurrent-sub-offers.mjs');
+  assert.equal(MAX_CONCURRENT_SUB_OFFERS, 3);
   const cards = Array.from({ length: 12 }, (_, index) => `<div class="card"><a href="https://offer.test/${index}">Offer ${index}</a></div>`).join('');
   const { context, root, session } = await createFixture(t, cards);
   limitOfferTabs(context, session);
   attachUniqueOfferTabs(context, session);
   await handleSweepstakesCardPage(root, session, {});
-  assert.equal(context.pages().length, 10);
-  assert.equal(await root.locator('[data-ux-opened="1"]').count(), 9);
-  for (let index = 0; index < 3; index++) {
+  assert.equal(context.pages().length, 1 + MAX_CONCURRENT_SUB_OFFERS, 'chỉ mở 3 tab con cùng lúc');
+  assert.equal(await root.locator('[data-ux-opened="1"]').count(), MAX_CONCURRENT_SUB_OFFERS);
+  for (let round = 0; round < 12 && await root.locator('[data-ux-opened="1"]').count() < 12; round++) {
     await context.pages().find(page => page !== root).close();
     await handleSweepstakesCardPage(root, session, {});
-    assert.equal(context.pages().length, 10);
+    assert.ok(context.pages().length <= 1 + MAX_CONCURRENT_SUB_OFFERS, 'không vượt trần khi mở tiếp');
   }
-  assert.equal(await root.locator('[data-ux-opened="1"]').count(), 12);
+  assert.equal(await root.locator('[data-ux-opened="1"]').count(), 12, 'vẫn mở hết mọi thẻ, chỉ là lần lượt');
   assert.equal(root.isClosed(), false);
   assert.equal(await getEmptyOfferPageReason(root, { key: root.url(), since: Date.now() - 60000 }), null);
 });

@@ -322,7 +322,8 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
         stopProfile: () => stopAdsPowerProfile(apiToken, profileId),
         totalCount: concurrency,
         screenPreviewOnly,
-        dataSaver: body.dataSaver !== false
+        dataSaver: body.dataSaver !== false,
+        offerSolver: body.offerSolver || 'auto'
       });
       results.push({
         status: 'ok',

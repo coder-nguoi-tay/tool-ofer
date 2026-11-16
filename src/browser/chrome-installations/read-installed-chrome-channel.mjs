@@ -2,18 +2,27 @@ import { access } from 'node:fs/promises';
 import { chromeExecutableNames } from './chrome-executable-names.mjs';
 import { executeFile } from './state/execute-file.mjs';
 import { join } from 'node:path';
+import { basename } from 'node:path';
 
 /**
- * Đọc binary và phiên bản của một kênh Google Chrome đã cài trên macOS.
+ * Đọc binary và phiên bản của Chrome đã cài trên macOS hoặc Windows.
  *
  * @param {string} appPath Đường dẫn ứng dụng của kênh Chrome.
  * @param {string} channel Tên kênh để gắn với phiên mở.
  * @return {Promise<{executablePath: string, version: string, major: number, channel: string}>} Kênh Chrome đang cài.
  * @throws {Error} Khi không tìm thấy binary hoặc phiên bản không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
 async function readInstalledChromeChannel(appPath, channel) {
+  if (process.platform === 'win32') {
+    const executablePath = basename(appPath).toLowerCase() === 'chrome.exe' ? appPath : join(appPath, 'chrome.exe');
+    await access(executablePath);
+    const { stdout } = await executeFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '(Get-Item -LiteralPath $env:AUTOLEADPC_BROWSER_BINARY).VersionInfo.ProductVersion'], { env: { ...process.env, AUTOLEADPC_BROWSER_BINARY: executablePath } });
+    const version = stdout.trim();
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) throw new Error(`Phiên bản Chrome không hợp lệ: ${version}`);
+    return { executablePath, version, major: Number(version.split('.')[0]), channel };
+  }
   const executableNames = chromeExecutableNames(channel);
   let executablePath;
   for (const executableName of executableNames) {

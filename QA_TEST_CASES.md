@@ -407,3 +407,40 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 
 - Log HTML input: mỗi lần nhập nhanh/chậm/date có một dòng HTML input, Xem HTML hiển thị đúng node; không ghi value/password/token/textarea text, không tạo snapshot trang; thử cả iframe và log mode access/full.
 - Adsmith tải chậm: spinner 25s, blank 20s, chrome-error đúng iframe 4s mới phục hồi. Mạng hồi trước ngưỡng không F5. Tối đa 5 GET cả khi timeout; exhausted ghi một lần và không bị generic watchdog/AI lách trần. Manual reload chờ lại nhưng không xóa budget; form chính, màn hoàn tất và iframe tracking lỗi không bị F5 nhầm.
+# QA bản Windows x64
+
+- GoLogin: khi IP phiên đổi do xác nhận lead, IP trong bảng, thanh/title do app
+  chèn và tên profile trên GoLogin phải đồng bộ; thử tab đang mở, reload, tab khác
+  origin và trường hợp PATCH tên cũ phản hồi chậm. Trang kiểm IP tự hiển thị nội
+  dung mạng phải giữ nguyên; không sửa nội dung website để làm IP trông giống nhau.
+
+- GoLogin: nút X từng slot, đóng tab cuối qua Screen View và Đóng tất cả đều phải
+  dừng SDK rồi xóa đúng profile trên GoLogin, kể cả khi Context.close/CDP không phát
+  sự kiện. Yêu cầu đóng phải chờ cleanup; close/disconnect/exit trùng chỉ xóa một lần.
+  Dừng lỗi giữ khóa IP/proxy; API xóa lỗi phải ghi log, nút đóng không báo thành công.
+
+- Server: chạy `Cai-tu-khoi-dong.cmd`, xác nhận có mục Startup trỏ đúng app và cờ
+  `--server`; đăng xuất/đăng nhập lại phải thấy server trong tray, không tự Start offer.
+- Chạy `Mo-cong-LAN.cmd` với quyền Administrator; rule chỉ mở Node đi kèm/TCP3211/
+  Private/LocalSubnet. Máy LAN khác vào được giao diện và Screen View qua IP Windows.
+- Đóng X cửa sổ server không dừng phiên; mở lại app chỉ hiện cùng instance. Chọn
+  Thoát trong tray phải dừng backend và nhả cổng. Chế độ app thường vẫn thoát khi đóng X.
+- Gỡ autorun bằng menu hoặc `Go-tu-khoi-dong.cmd`; gỡ Firewall bằng `Dong-cong-LAN.cmd`.
+  Rule không thuộc AutoLeadPC phải được giữ. Thử thư mục có khoảng trắng và dấu nháy.
+
+- Cài `.exe` vào thư mục có khoảng trắng, chạy bằng tài khoản thường không cài Node.js;
+  giao diện desktop phải tải đủ JS/CSS. Chạy lần hai chỉ focus cửa sổ cũ.
+- Kiểm tra cấu hình/queue vẫn còn sau khi đóng/mở và nâng cấp/gỡ/cài lại;
+  dữ liệu nằm trong AppData, không nằm trong Program Files.
+- Mở Chrome đã cài và Chrome for Testing đã tải; kiểm tra proxy/IP, fingerprint,
+  điền form/iframe/survey/captcha, phát hiện lead và các checkbox dừng/chờ lead.
+- Chạy AdsPower và GoLogin với tài khoản thử; xác nhận chọn kernel/OS, reconnect,
+  đóng/xóa profile và nhả relay/khóa IP. Kiểm tra Multilogin nếu đang sử dụng.
+- Kiểm tra Start thường/tuần tự, tự bù, Không bù slot, Stop và Đóng tất cả.
+  Chrome cá nhân mở ngoài app phải được giữ nguyên.
+- Screen View: chuột, bàn phím, Ctrl+C/X/V với tiếng Việt, tải HTML,
+  mở DevTools, đổi tab và đóng tab. Xuất ZIP nhật ký và mở thư mục bằng Explorer.
+- Kiểm tra AI SDK/MCP và từng provider đã cấu hình; xác nhận không yêu cầu Node
+  trên PATH hệ thống. Kiểm tra Telegram, remote agent, Mini App và tunnel khi dùng.
+- Đóng cửa sổ app khi có phiên thử: backend, browser thuộc app và relay phải dừng;
+  mở lại không chiếm cổng cũ hoặc tự chạy phiên. Thử lỗi mạng/force quit riêng.

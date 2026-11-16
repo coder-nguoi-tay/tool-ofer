@@ -39,7 +39,9 @@ async function saveOfferConfig(silent = false) {
         CheckDuplicate: document.getElementById('cbxCheckDuplicateIP')?.checked ?? true,
         HideUntilTarget: document.getElementById('cbxHideUntilTarget')?.checked ?? false,
         HideUntilLead: document.getElementById('cbxHideUntilLead')?.checked ?? false,
+        offerSolver: document.getElementById('cbbOfferSolver')?.value || 'auto',
         schedules: typeof getOfferScheduleSettings === 'function' ? getOfferScheduleSettings() : [],
+        scheduleStop: typeof getScheduleStopSettings === 'function' ? getScheduleStopSettings() : null,
         methodConfigs: methodConfigs,
       };
 

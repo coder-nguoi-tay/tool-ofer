@@ -16,3 +16,18 @@ function getOfferScheduleSettings() {
     };
   });
 }
+
+/**
+ * Đọc cấu hình hẹn giờ tắt ("Chạy đến mấy giờ thì tắt") trên giao diện.
+ * @return {{enabled: boolean, time: string}} Cấu hình hẹn giờ tắt.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-16
+ */
+function getScheduleStopSettings() {
+  const cbx = document.getElementById('cbxScheduleStop');
+  const timeInput = document.getElementById('timeScheduleStop');
+  return {
+    enabled: Boolean(cbx?.checked),
+    time: timeInput?.value || '23:00'
+  };
+}

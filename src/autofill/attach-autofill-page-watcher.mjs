@@ -15,6 +15,7 @@ import { configurePageMousePolicy } from './interaction/configure-page-mouse-pol
 import { inspectAiStateGate } from '../ai-assist/retry/ai-state-gate.mjs';
 import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-lead-session.mjs';
 import { inspectAndFixFormWithAi } from '../../ai-assist.mjs';
+import { verifyOffer2615Landing } from './offers/2615/verify-offer-landing.mjs';
 
 /**
  * Theo dõi điều hướng, quét và lead; màn card đang điều phối không gọi AI hoặc reload vì chờ tab con.
@@ -75,6 +76,9 @@ export function attachAutofillPageWatcher(page, {
    */
   const scanOnce = async () => {
     protectConfirmedLeadSession(session);
+    if (await verifyOffer2615Landing(page, session, options)) {
+      return;
+    }
     const u = typeof page.url === 'function' ? page.url() : '';
     if (!u || u.startsWith('chrome-error:') || u.startsWith('about:') || u.startsWith('chrome:') || /toffers\.top\/error\.php/i.test(u) || /error\.php\?.*error=.*ip_/i.test(u) || /clicked_offer_/i.test(u)) {
       return;

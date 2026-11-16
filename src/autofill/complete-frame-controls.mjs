@@ -82,7 +82,7 @@ export async function completeFrameControls({
 
   // Tự động phát hiện và mở đồng loạt tất cả các thẻ Offerwall trên trang cuối.
   // Các tab offer con được điền song song (mỗi tab một vòng quét riêng), giới hạn
-  // số tab đồng thời bằng options.maxConcurrentSubOffers, tối đa MAX_OFFER_TABS trừ tab hiện tại, để không
+  // số tab đồng thời bằng options.maxConcurrentSubOffers (mặc định MAX_CONCURRENT_SUB_OFFERS = 3), để không
   // nghẽn CPU/proxy; thẻ chưa mở được sẽ tự thử lại khi có tab hoàn tất.
   if (!frameProgress.formScope) try {
     const openedOffers = await handleOfferwallCards(frame, page, options);

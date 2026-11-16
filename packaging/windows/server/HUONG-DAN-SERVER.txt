@@ -1,0 +1,28 @@
+AUTOLEADPC SERVER WINDOWS — MANG LAN
+
+1. Dat thu muc app o mot vi tri co dinh. Thoat ban app cu truoc khi cap nhat.
+2. Chay Cai-tu-khoi-dong.cmd mot lan: bat server nen va tu chay sau khi dang nhap Windows.
+3. Chay Mo-cong-LAN.cmd mot lan va chap nhan quyen Administrator de mo Firewall.
+4. Dat ket noi LAN/Wi-Fi tin cay cua may Windows thanh Private trong Windows Settings.
+5. Nhan phai bieu tuong AutoLeadPC o khay he thong > Dia chi truy cap tu may khac.
+   Mo URL http://IP-MAY-WINDOWS:3211 tren trinh duyet cua may khac cung mang.
+
+Bat-Server.cmd: chi mo server nen, khong thay doi cai dat tu khoi dong.
+AutoLeadPC.exe: mo giao dien; neu server da chay thi hien cua so cua chinh server do.
+Dong cua so bang X van giu server. Dung han: khay he thong > Thoat va dung server.
+Go-tu-khoi-dong.cmd: go autorun, giu server hien tai den khi ban chu dong thoat.
+Dong-cong-LAN.cmd: thu hoi rule Firewall rieng cua AutoLeadPC.
+
+Khong can mat khau Windows de dang ky Startup. App bat sau dang nhap, khong phai
+Windows Service chay truoc man hinh dang nhap: Chrome/GoLogin can phien desktop.
+May phai con bat, khong sleep va khong dang xuat thi server moi tiep tuc phuc vu.
+Mo lai app khong tu dong Start cac luong offer; hanh vi nay giu nhu ban dang dung.
+
+LAN dung cong 3211 mac dinh. Neu doi cong bang AUTOLEADPC_PORT, dat cung gia tri
+khi mo app va khi chay script Firewall. Khong di chuyen thu muc sau khi dang ky
+autorun; neu di chuyen thi go autorun cu va cai lai tai thu muc moi.
+
+API hien chua co dang nhap chung: chi dung tren mang LAN tin cay. Khong forward
+cong nay tren router ra Internet. Che do server LAN tat tu dong mo public tunnel.
+GoLogin/Telegram dung chung tai khoan voi Mac co the xung dot; dong ban Mac truoc.
+Goi rieng tu van chua mat khau/token; khong chia se cong khai.

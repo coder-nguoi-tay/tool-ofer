@@ -15,7 +15,19 @@ async function loadOfferConfig() {
           if (c.LinkOffer2 && document.getElementById('txtLinkOffer2')) document.getElementById('txtLinkOffer2').value = c.LinkOffer2;
           if (c.LinkOffer3 && document.getElementById('txtLinkOffer3')) document.getElementById('txtLinkOffer3').value = c.LinkOffer3;
           if (c.LinkOffer4 && document.getElementById('txtLinkOffer4')) document.getElementById('txtLinkOffer4').value = c.LinkOffer4;
+          if (c.offerSolver && document.getElementById('cbbOfferSolver')) document.getElementById('cbbOfferSolver').value = c.offerSolver;
           if (c.LinkOffer2 || c.LinkOffer3 || c.LinkOffer4) toggleExtraOfferLinks(true);
+          if (c.scheduleStop) {
+            const cbxStop = document.getElementById('cbxScheduleStop');
+            const timeStop = document.getElementById('timeScheduleStop');
+            const hintStop = document.getElementById('lblScheduleStopHint');
+            if (cbxStop) cbxStop.checked = Boolean(c.scheduleStop.enabled);
+            if (timeStop) {
+              if (c.scheduleStop.time) timeStop.value = c.scheduleStop.time;
+              timeStop.style.display = c.scheduleStop.enabled ? 'inline-block' : 'none';
+            }
+            if (hintStop) hintStop.style.display = c.scheduleStop.enabled ? 'inline' : 'none';
+          }
         }
       } catch { }
 
@@ -43,6 +55,9 @@ async function loadOfferConfig() {
         if (data.LimitRun !== undefined && document.getElementById('nudLimitRun')) {
           document.getElementById('nudLimitRun').value = Math.max(0, parseInt(data.LimitRun) || 0);
         }
+        if (data.offerSolver && document.getElementById('cbbOfferSolver')) {
+          document.getElementById('cbbOfferSolver').value = data.offerSolver;
+        }
 
         if (Array.isArray(data.savedList)) {
           currentSavedOffers = data.savedList;
@@ -61,6 +76,18 @@ async function loadOfferConfig() {
               }
             }
           });
+        }
+
+        if (data.scheduleStop) {
+          const cbxStop = document.getElementById('cbxScheduleStop');
+          const timeStop = document.getElementById('timeScheduleStop');
+          const hintStop = document.getElementById('lblScheduleStopHint');
+          if (cbxStop) cbxStop.checked = Boolean(data.scheduleStop.enabled);
+          if (timeStop) {
+            if (data.scheduleStop.time) timeStop.value = data.scheduleStop.time;
+            timeStop.style.display = data.scheduleStop.enabled ? 'inline-block' : 'none';
+          }
+          if (hintStop) hintStop.style.display = data.scheduleStop.enabled ? 'inline' : 'none';
         }
 
         applyOfferMethods(Array.isArray(data.methodConfigs) ? data.methodConfigs : []);
@@ -137,6 +164,21 @@ async function loadOfferConfig() {
               localStorage.setItem('autoleadpc_run_in_app', String(e.target.checked));
             } catch { }
             syncOptionPills();
+          });
+        }
+
+        // Khôi phục bộ giải (offerSolver: auto | 2615 | generic)
+        const cachedSolver = localStorage.getItem('autoleadpc_offer_solver');
+        const cbbSolver = document.getElementById('cbbOfferSolver');
+        if (cbbSolver && cachedSolver !== null) {
+          cbbSolver.value = cachedSolver;
+        }
+        if (cbbSolver && !cbbSolver._hasStorageListener) {
+          cbbSolver._hasStorageListener = true;
+          cbbSolver.addEventListener('change', (e) => {
+            try {
+              localStorage.setItem('autoleadpc_offer_solver', String(e.target.value));
+            } catch { }
           });
         }
 

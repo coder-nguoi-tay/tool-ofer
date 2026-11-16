@@ -146,11 +146,56 @@ test('watcher: tab phụ không có form/câu hỏi sau 30s bị đóng (kể c�
   await tickAt(0);
   await tickAt(29_000);
   assert.equal(article.closed, false, 'chưa đủ 30s thì chưa đóng');
+  // Đọc DOM tab con tối đa mỗi 5 giây (giảm tải 2026-11-16): quyết định đóng có thể trễ thêm tối đa 5 giây sau mốc 30s.
   await tickAt(31_000);
+  await tickAt(35_000);
   assert.equal(article.closed, true, 'tab không form/câu hỏi bị đóng');
   assert.equal(form.closed, false);
   assert.equal(quiz.closed, false);
   assert.equal(loading.closed, false);
   assert.equal(page.closed, false, 'tab đầu giữ nguyên');
   assert.equal(counters.browserCloses, 0);
+});
+
+test('giảm tải: bộ canh chỉ đọc DOM mỗi tab con tối đa mỗi 5 giây; luật theo URL (chrome-error) vẫn đóng ngay', async t => {
+  const { watchTrafficBlockedPage } = await import('../src/leads/actions/watch-traffic-blocked-page.mjs');
+  const { captureLeadWatcherTicks, createLeadTestSession } = await import('./helpers/lead-session-fixture.mjs');
+  const { SUB_OFFER_DOM_CHECK_MS } = await import('../src/leads/actions/watch-traffic-blocked-page.mjs');
+  const { autoRefill } = await import('../src/runtime/constants/auto-refill.mjs');
+  const previous = { enabled: autoRefill.enabled };
+  autoRefill.enabled = false;
+  t.after(() => Object.assign(autoRefill, previous));
+  const ticks = captureLeadWatcherTicks(t);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const { session, page, browser } = createLeadTestSession('198.51.100.71');
+  page.currentUrl = 'https://offer.test/main';
+  page.frames = () => [page];
+  const working = await browser.newPage();
+  working.currentUrl = 'https://sub.test/survey';
+  let domReads = 0;
+  working.frames = () => [working];
+  // Chỉ đếm hai lệnh đọc DOM nặng đã giãn nhịp (nội dung offer, chữ tab con); kiểm trang lỗi đã giới hạn 3s từ trước.
+  working.evaluate = async callback => {
+    if (['detectOfferContentInPage', 'readSubOfferText'].includes(callback?.name)) domReads += 1;
+    return callback?.name === 'readSubOfferText' ? 'Survey question' : { loading: false, challenge: false, worked: true, hasForm: true, hasChoices: false, hasOfferWork: true };
+  };
+  const broken = await browser.newPage();
+  broken.currentUrl = 'chrome-error://chromewebdata/';
+  watchTrafficBlockedPage(session);
+  const run = async seconds => {
+    for (let i = 0; i < seconds; i++) {
+      now += 1000;
+      for (const tick of ticks) tick();
+      for (let k = 0; k < 30; k++) await new Promise(resolve => setImmediate(resolve));
+    }
+  };
+  await run(1);
+  assert.equal(broken.isClosed(), true, 'tab con lỗi mạng: đóng ngay ở nhịp đầu (chỉ xét URL)');
+  domReads = 0;
+  await run(20);
+  assert.equal(SUB_OFFER_DOM_CHECK_MS, 5000);
+  assert.ok(domReads <= 5 * 2, `20 giây chỉ đọc DOM nặng của tab con khoảng 4–5 nhịp (mỗi nhịp tối đa 2 lệnh), thực tế ${domReads}`);
+  assert.ok(domReads > 0, 'vẫn kiểm tra định kỳ');
+  assert.equal(working.isClosed(), false, 'tab con đang có form không bị đóng');
 });

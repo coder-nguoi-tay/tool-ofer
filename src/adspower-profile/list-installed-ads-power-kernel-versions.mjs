@@ -1,8 +1,8 @@
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdir } from 'node:fs/promises';
+import { applicationSupportDirectory } from '../config/paths.mjs';
 
 /**
  * Liệt kê các bản SunBrowser đã cài hoàn chỉnh theo thứ tự mới đến cũ.
@@ -11,14 +11,14 @@ import { readdir } from 'node:fs/promises';
  * @return {Promise<string[]>} Các phiên bản Chrome có binary chạy được.
  * @throws {Error} Khi AdsPower chưa tải xong bất kỳ kernel SunBrowser nào.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-16
  */
-async function listInstalledAdsPowerKernelVersions(installationDirectory = join(homedir(), 'Library', 'Application Support', 'adspower_global', 'cwd_global')) {
+async function listInstalledAdsPowerKernelVersions(installationDirectory = join(applicationSupportDirectory, 'adspower_global', 'cwd_global')) {
   const installations = await readdir(installationDirectory).catch(() => []);
   const versions = installations.map(name => /^chrome_(\d+)$/.exec(name)).filter(Boolean).map(match => Number(match[1])).sort((left, right) => right - left);
   const installedVersions = [];
   for (const version of versions) {
-    const browserBinary = join(installationDirectory, `chrome_${version}`, 'SunBrowser.app', 'Contents', 'MacOS', 'SunBrowser');
+    const browserBinary = process.platform === 'win32' ? join(installationDirectory, `chrome_${version}`, 'chrome.exe') : join(installationDirectory, `chrome_${version}`, 'SunBrowser.app', 'Contents', 'MacOS', 'SunBrowser');
     if (await access(browserBinary, constants.X_OK).then(() => true, () => false)) installedVersions.push(String(version));
   }
   if (installedVersions.length) return installedVersions;

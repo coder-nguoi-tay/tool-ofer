@@ -46,18 +46,38 @@ function miniRunGetSchedules() {
 }
 
 /**
+ * Đọc cấu hình hẹn giờ tắt của mini.
+ * @return {{enabled: boolean, time: string}} Cấu hình hẹn giờ tắt.
+ */
+function miniRunGetScheduleStop() {
+  const toggle = document.getElementById('miniSchedStopOn');
+  const time = document.getElementById('miniSchedStopTime');
+  return {
+    enabled: Boolean(toggle?.checked),
+    time: time?.value || '23:00'
+  };
+}
+
+/**
  * Đặt lại lịch hẹn giờ từ offer đã lưu.
  * @param {object[]} schedules Mảng lịch của offer.
+ * @param {object} [scheduleStop] Cấu hình hẹn giờ tắt.
  * @return {void}
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-14
  */
-function miniRunApplySchedules(schedules) {
+function miniRunApplySchedules(schedules, scheduleStop) {
   for (const item of Array.isArray(schedules) ? schedules : []) {
     const toggle = document.getElementById(`miniSchedOn${item.offerIndex}`);
     const time = document.getElementById(`miniSchedTime${item.offerIndex}`);
     if (toggle) toggle.checked = Boolean(item.enabled);
     if (time && item.time) time.value = item.time;
+  }
+  if (scheduleStop) {
+    const toggle = document.getElementById('miniSchedStopOn');
+    const time = document.getElementById('miniSchedStopTime');
+    if (toggle) toggle.checked = Boolean(scheduleStop.enabled);
+    if (time && scheduleStop.time) time.value = scheduleStop.time;
   }
 }
 
@@ -84,6 +104,7 @@ function miniRunBuildOfferPayload() {
     HideUntilTarget: document.getElementById('cbxHideUntilTarget')?.checked ?? false,
     HideUntilLead: document.getElementById('cbxHideUntilLead')?.checked ?? false,
     schedules: miniRunGetSchedules(),
+    scheduleStop: miniRunGetScheduleStop(),
     methodConfigs: links.map((link, index) => ({ offerNumber: index + 1, link: link || null, mode: 'auto_full', autoSubmit: true, maxPick: null, pickRandom: false, notes: '' }))
   };
 }

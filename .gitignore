@@ -49,6 +49,10 @@ AutoLeadPC Mac.app/
 ._*
 
 # Temporary files
+.windows-build/
+dist/windows/
+/AutoLeadPC-Windows-*.zip
+/AutoLeadPC-Server-Private.zip
 *.tmp
 .tmp/
 *.partial/

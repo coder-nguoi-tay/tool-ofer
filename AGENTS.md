@@ -1,5 +1,26 @@
 # Hướng dẫn cho AI coding agent
 
+## Đóng gói Windows
+
+`npm run build:windows` tạo bộ cài x64 trong `dist/windows/` bằng Electron/NSIS.
+Wrapper ở `packaging/windows/`, backend dùng chung `src/` và `ui/`; script
+`scripts/build-windows.mjs` tạo staging `.windows-build/backend`, cài dependency
+Windows riêng và kiểm SHA-256 Node.js từ nodejs.org. Không chép node_modules macOS,
+Config/Settings hoặc dữ liệu runtime sang Windows. App Windows dùng AppData,
+Node độc lập và IPC shutdown; giữ guard đường dẫn khi dọn profile.
+Workflow `.github/workflows/windows-build.yml` build và smoke test trên Windows.
+`tests/windows-packaging.test.mjs` thuộc TEST_FILES. Không chạy smoke test bằng
+dữ liệu thật. Mọi tuyên bố đủ tính năng cần QA Windows thật theo QA_TEST_CASES.md.
+Quy tắc chỉ giữ một `.app` ở /Applications vẫn áp dụng cho bản macOS;
+artifact `.exe` là đầu ra riêng được người dùng yêu cầu.
+
+Windows `--server` chạy nền trong phiên desktop sau đăng nhập, giữ tray khi đóng X,
+bind LAN (trừ `AUTOLEADPC_ALLOW_LAN=0`) và tắt public tunnel tự động. Không gọi đây
+là Windows Service trước đăng nhập. Autorun dùng Electron login item, không lưu
+mật khẩu Windows. Công cụ ở `packaging/windows/server/` được copy vào gốc app qua
+`extraFiles`; `Windows-LAN.ps1` chỉ mở đúng Node/port trên Private/LocalSubnet,
+không tắt Firewall hoặc thay network profile. Test vòng đời ở `tests/windows-server.test.mjs`.
+
 Tài liệu này mô tả repository AutoLeadPC Mac ở trạng thái hiện tại. Ngôn ngữ chính của mã, tài liệu và giao diện là tiếng Việt; giữ ngôn ngữ này khi bổ sung tài liệu hoặc thông báo cho người dùng.
 
 ## 1. Tổng quan dự án

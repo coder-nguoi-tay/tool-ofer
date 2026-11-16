@@ -1,0 +1,42 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Cài công cụ đóng gói
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - name: Kiểm tra tương thích Windows
+        run: node --test tests/windows-packaging.test.mjs tests/windows-server.test.mjs
+      - name: Tạo bộ cài
+        run: npm run build:windows
+      - name: Khởi động thử bundle trong dữ liệu cô lập
+        shell: pwsh
+        run: |
+          $env:AUTOLEADPC_DATA_DIR = 'AutoLeadPC-Windows-CI-' + [guid]::NewGuid()
+          $env:AUTOLEADPC_PORT = '43211'
+          $env:AUTOLEADPC_WINDOWS_SMOKE = '1'
+          $application = Start-Process 'dist/windows/win-unpacked/AutoLeadPC.exe' -PassThru
+          if (-not $application.WaitForExit(90000)) { $application.Kill(); throw 'App không thoát sau smoke test' }
+          if ($application.ExitCode -ne 0) { throw "App lỗi: $($application.ExitCode)" }
+          Remove-Item (Join-Path $env:APPDATA $env:AUTOLEADPC_DATA_DIR) -Recurse -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoLeadPC-Windows-x64
+          path: dist/windows/AutoLeadPC-Setup-*-x64.exe
+          if-no-files-found: error
