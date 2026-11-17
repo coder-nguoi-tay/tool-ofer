@@ -315,6 +315,27 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
         }}
         return ext;
       }}, 'getExtension');
+
+      const highFloatPrecision = Object.freeze({{ rangeMin: 127, rangeMax: 127, precision: 23 }});
+      proto.getShaderPrecisionFormat = spoofToString(function getShaderPrecisionFormat(shaderType, precisionType) {{
+        return highFloatPrecision;
+      }}, 'getShaderPrecisionFormat');
+
+      const chromeExtensions = Object.freeze([
+        'ANGLE_instanced_arrays', 'EXT_blend_minmax', 'EXT_color_buffer_half_float',
+        'EXT_float_blend', 'EXT_frag_depth', 'EXT_shader_texture_lod',
+        'EXT_texture_compression_bptc', 'EXT_texture_compression_rgtc',
+        'EXT_texture_filter_anisotropic', 'EXT_sRGB', 'KHR_parallel_shader_compile',
+        'OES_element_index_uint', 'OES_fbo_render_mipmap', 'OES_standard_derivatives',
+        'OES_texture_float', 'OES_texture_float_linear', 'OES_texture_half_float',
+        'OES_texture_half_float_linear', 'OES_vertex_array_object', 'WEBGL_color_buffer_float',
+        'WEBGL_compressed_texture_s3tc', 'WEBGL_compressed_texture_s3tc_srgb',
+        'WEBGL_debug_renderer_info', 'WEBGL_debug_shaders', 'WEBGL_depth_texture',
+        'WEBGL_draw_buffers', 'WEBGL_multi_draw'
+      ]);
+      proto.getSupportedExtensions = spoofToString(function getSupportedExtensions() {{
+        return chromeExtensions;
+      }}, 'getSupportedExtensions');
     }};
 
     if (typeof WebGLRenderingContext !== 'undefined') {{
@@ -345,11 +366,131 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
                 }};
               }}
               return null;
-            }}, 'getExtension')
+            }}, 'getExtension'),
+            getShaderPrecisionFormat: spoofToString(function getShaderPrecisionFormat() {{
+              return {{ rangeMin: 127, rangeMax: 127, precision: 23 }};
+            }}, 'getShaderPrecisionFormat'),
+            getSupportedExtensions: spoofToString(function getSupportedExtensions() {{
+              return ['WEBGL_debug_renderer_info'];
+            }}, 'getSupportedExtensions')
           }};
         }}
         return ctx;
       }}, 'getContext');
+    }}
+  }} catch (_) {{}}
+
+  // 10. Font Metrics Emulation for Canvas 2D
+  try {{
+    if (typeof CanvasRenderingContext2D !== 'undefined') {{
+      const origMeasureText = CanvasRenderingContext2D.prototype.measureText;
+      CanvasRenderingContext2D.prototype.measureText = spoofToString(function measureText(text) {{
+        const res = origMeasureText.call(this, text);
+        const font = String(this.font || '').toLowerCase();
+        const isWin = __PROFILE__.platform === 'Win32' || __PROFILE__.client_hints?.platform === 'Windows';
+        if (isWin && (font.includes('segoe ui') || font.includes('calibri'))) {{
+          const scale = font.includes('segoe ui') ? 1.02 : 0.98;
+          const adjWidth = Math.round(res.width * scale * 100) / 100;
+          if (typeof TextMetrics !== 'undefined') {{
+            return Object.create(TextMetrics.prototype, {{
+              width: {{ value: adjWidth, enumerable: true }},
+              actualBoundingBoxAscent: {{ value: res.actualBoundingBoxAscent || 10, enumerable: true }},
+              actualBoundingBoxDescent: {{ value: res.actualBoundingBoxDescent || 3, enumerable: true }},
+              actualBoundingBoxLeft: {{ value: res.actualBoundingBoxLeft || 0, enumerable: true }},
+              actualBoundingBoxRight: {{ value: adjWidth, enumerable: true }},
+              fontBoundingBoxAscent: {{ value: res.fontBoundingBoxAscent || 12, enumerable: true }},
+              fontBoundingBoxDescent: {{ value: res.fontBoundingBoxDescent || 4, enumerable: true }}
+            }});
+          }}
+        }}
+        return res;
+      }}, 'measureText');
+    }}
+  }} catch (_) {{}}
+
+  // 11. WebRTC Local IP mDNS Protection
+  try {{
+    if (typeof RTCPeerConnection !== 'undefined') {{
+      const origSetLocalDescription = RTCPeerConnection.prototype.setLocalDescription;
+      const origCreateOffer = RTCPeerConnection.prototype.createOffer;
+      const mdnsHost = Math.random().toString(36).substring(2, 10) + '-' + Math.random().toString(36).substring(2, 10) + '.local';
+
+      const sanitizeSdp = (sdp) => {{
+        if (!sdp || typeof sdp !== 'string') return sdp;
+        return sdp.replace(/(candidate:\S+\s+\d+\s+\S+\s+\d+\s+)(?:192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(\s+\d+\s+typ\s+host)/gi,
+          `$1${{mdnsHost}}$2`);
+      }};
+
+      RTCPeerConnection.prototype.setLocalDescription = spoofToString(async function setLocalDescription(desc) {{
+        if (desc && desc.sdp) {{
+          desc.sdp = sanitizeSdp(desc.sdp);
+        }}
+        return origSetLocalDescription.call(this, desc);
+      }}, 'setLocalDescription');
+
+      if (origCreateOffer) {{
+        RTCPeerConnection.prototype.createOffer = spoofToString(async function createOffer(options) {{
+          const offer = await origCreateOffer.call(this, options);
+          if (offer && offer.sdp) {{
+            offer.sdp = sanitizeSdp(offer.sdp);
+          }}
+          return offer;
+        }}, 'createOffer');
+      }}
+    }}
+  }} catch (_) {{}}
+
+  // 12. SpeechSynthesis Voices Emulation
+  try {{
+    if (typeof speechSynthesis !== 'undefined' && typeof speechSynthesis.getVoices === 'function') {{
+      const isWin = __PROFILE__.platform === 'Win32' || __PROFILE__.client_hints?.platform === 'Windows';
+      const isMac = /mac/i.test(__PROFILE__.platform || '') || __PROFILE__.client_hints?.platform === 'macOS';
+
+      const voices = isWin ? [
+        {{ name: 'Microsoft David - English (United States)', lang: 'en-US', default: true, localService: true, voiceURI: 'Microsoft David - English (United States)' }},
+        {{ name: 'Microsoft Mark - English (United States)', lang: 'en-US', default: false, localService: true, voiceURI: 'Microsoft Mark - English (United States)' }},
+        {{ name: 'Microsoft Zira - English (United States)', lang: 'en-US', default: false, localService: true, voiceURI: 'Microsoft Zira - English (United States)' }}
+      ] : isMac ? [
+        {{ name: 'Samantha', lang: 'en-US', default: true, localService: true, voiceURI: 'Samantha' }},
+        {{ name: 'Alex', lang: 'en-US', default: false, localService: true, voiceURI: 'Alex' }}
+      ] : [
+        {{ name: 'Google US English', lang: 'en-US', default: true, localService: true, voiceURI: 'Google US English' }}
+      ];
+
+      const Proto = typeof SpeechSynthesisVoice !== 'undefined' ? SpeechSynthesisVoice.prototype : null;
+      const voiceObjects = voices.map(v => {{
+        const obj = Proto ? Object.create(Proto) : {{}};
+        for (const [k, val] of Object.entries(v)) {{
+          Object.defineProperty(obj, k, {{ value: val, enumerable: true, configurable: true }});
+        }}
+        return obj;
+      }});
+
+      speechSynthesis.getVoices = spoofToString(function getVoices() {{
+        return voiceObjects;
+      }}, 'getVoices');
+    }}
+  }} catch (_) {{}}
+
+  // 13. Permissions Notification State Coherence
+  try {{
+    if (navigator.permissions && typeof navigator.permissions.query === 'function') {{
+      const origQuery = navigator.permissions.query;
+      navigator.permissions.query = spoofToString(function query(params) {{
+        if (params && params.name === 'notifications') {{
+          const state = typeof Notification !== 'undefined' && Notification.permission !== 'default'
+            ? Notification.permission : 'prompt';
+          return Promise.resolve({{
+            state,
+            name: 'notifications',
+            onchange: null,
+            addEventListener() {{}},
+            removeEventListener() {{}},
+            dispatchEvent() {{ return false; }}
+          }});
+        }}
+        return origQuery.call(this, params);
+      }}, 'query');
     }}
   }} catch (_) {{}}
 
@@ -411,5 +552,10 @@ mod tests {
         assert!(js.contains(&profile.webgl.unmasked_renderer));
         assert!(js.contains("XorShift64"));
         assert!(js.contains("UNMASKED_RENDERER_WEBGL"));
+        assert!(js.contains("getShaderPrecisionFormat"));
+        assert!(js.contains("getSupportedExtensions"));
+        assert!(js.contains("measureText"));
+        assert!(js.contains("RTCPeerConnection"));
+        assert!(js.contains("speechSynthesis"));
     }
 }
