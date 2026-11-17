@@ -1,3 +1,4 @@
+import { countLiveBrowsers } from '../count-live-browsers.mjs';
 import { launchRequestedBrowsers } from './launch-requested-browsers.mjs';
 import { openObscuraSession } from '../../obscura-engine/open-obscura-session.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
@@ -25,7 +26,7 @@ export async function launchObscuraBrowsers(requestBody, isAutomaticRefill = fal
     autoRefill.enabled = true;
     autoRefill.settings = { ...body, browserMode: 'Obscura', useObscura: true, useGoLogin: false };
     const requestedCount = Number(body.requestedCount || body.concurrency) || 1;
-    autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(autoRefill.targetCount, activeBrowsers.size + requestedCount));
+    autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(1, requestedCount));
     await saveAutoRefillSettings();
   }
   if (autoRefill.stopRequested || (isAutomaticRefill && autoRefill.noSlotRefill)) return { results: [], warnings: [] };

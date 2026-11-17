@@ -22,6 +22,9 @@ export async function decorateGoLoginPages(session) {
    */
   function applyGoLoginIdentity(identity) {
     try {
+      // Chỉ cửa sổ chính cần thanh IP/title. Gắn vào iframe (Adsmith...) làm iframe trống trông như có nội dung,
+      // khiến bộ phục hồi iframe tưởng khảo sát đã hiện, và để lại DOM lạ trong frame bên thứ ba.
+      if (window.top !== window) return;
       const state = window.__autoleadGoLoginDisplay ||= { revision: -1 };
       if (identity.revision < state.revision) return;
       Object.assign(state, identity);

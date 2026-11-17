@@ -52,6 +52,9 @@ export async function inspectAdsmithFrameLoading(page) {
     const frame = await element.contentFrame();
     if (!frame) return { state: 'frame_blank', documentId: parent.documentId, reason: 'Iframe khảo sát chưa có document.' };
     if (/^(chrome-error:|about:neterror)/i.test(frame.url())) return { state: 'chrome_error', documentId: parent.documentId, reason: 'Iframe khảo sát báo lỗi mạng của trình duyệt.' };
+    // Obscura để iframe nạp lỗi ở about:blank; Chrome để URL rỗng khi request iframe còn treo (evaluate cũng treo theo).
+    // src Adsmith mà document vẫn trống là chưa tải.
+    if ((!frame.url() || frame.url() === 'about:blank') && parent.source && parent.source !== 'about:blank') return { state: 'frame_blank', documentId: parent.documentId, reason: 'Iframe khảo sát vẫn là about:blank.' };
     const content = await readEvidenceWithTimeout(frame, 'adsmith-loading-document', () => frame.evaluate(() => {
       /**
        * Chỉ nhận nội dung khảo sát không nằm trong bước ẩn.
@@ -69,7 +72,9 @@ export async function inspectAdsmithFrameLoading(page) {
       };
       const controls = Array.from(document.querySelectorAll('.Qst,input:not([type="hidden"]),select,textarea,button,a[href],[role="button"]'));
       const hasWork = controls.some(control => visible(control) && (control.matches('input,select,textarea,button,a,[role="button"]') || control.textContent.trim()));
-      const text = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+      // Bỏ thanh IP của AutoLeadPC (nếu lỡ có) khỏi phần chữ: nó không phải nội dung khảo sát.
+      const ipBar = document.getElementById('__autolead_ip_bar');
+      const text = (document.body?.innerText || '').replace(ipBar?.innerText || '\u0000', '').replace(/\s+/g, ' ').trim();
       const hasContent = Boolean(text && !/^(loading(?:\s+(?:survey|questions|content))?|please wait|đang tải)[\s.!…]*$/i.test(text));
       const hasImage = Array.from(document.images).some(image => image.complete && image.naturalWidth > 32 && image.getBoundingClientRect().height > 32 && visible(image)
         && !/logo|loading|spinner|load-spin/i.test(`${image.id} ${image.className} ${image.alt} ${image.getAttribute('src') || ''}`));

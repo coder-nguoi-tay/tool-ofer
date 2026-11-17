@@ -8,6 +8,7 @@ import { protectConfirmedLeadSession } from '../../../../../leads/actions/protec
 const observations = new WeakMap();
 const waitMs = { spinner_stuck: 25000, frame_blank: 20000, chrome_error: 4000 };
 const maxReloads = 5;
+const maxFrameReloads = 2;
 
 /**
  * Giữ quyền phục hồi frame Adsmith: chờ lag, GET lại trang cha tối đa năm lần mỗi URL và chống chạy chồng.
@@ -50,11 +51,29 @@ export async function recoverAdsmithFrameLoading(page, session, options = {}, no
       return Boolean(state || snapshot.applicable);
     }
     if (!state) { state = { reloads: 0, exhaustedLogged: false }; tab.urls.set(key, state); }
+    if (state.documentId !== snapshot.documentId) state.frameReloads = 0;
     if (state.kind !== snapshot.state || state.documentId !== snapshot.documentId || now - (state.lastSeen ?? now) > 15000) state.since = now;
     state.documentId = snapshot.documentId;
     state.kind = snapshot.state;
     state.lastSeen = now;
     page._lateProgressRecoveryActive = false;
+    // Ưu tiên hiện iframe offer: nạp lại riêng iframe (giữ trang cha) ở 30% và 60% thời gian chờ, rồi mới F5 trang cha.
+    const frameReloads = state.frameReloads ?? 0;
+    if (state.kind !== 'spinner_stuck' && frameReloads < maxFrameReloads && now - state.since >= waitMs[state.kind] * 0.3 * (frameReloads + 1)
+      && now - state.since < waitMs[state.kind]) {
+      state.frameReloads = frameReloads + 1;
+      const reloaded = await page.evaluate(() => {
+        const frame = document.querySelector('#AS_SURVEY iframe#AS_IFRAME');
+        const source = frame?.getAttribute('src');
+        if (!source || source === 'about:blank') return false;
+        // Gán lại đúng src khi request cũ còn treo thì trình duyệt bỏ qua: hủy bằng about:blank rồi nạp lại.
+        frame.setAttribute('src', 'about:blank');
+        setTimeout(() => frame.setAttribute('src', source), 50);
+        return true;
+      }).catch(() => false);
+      if (reloaded) options.onLog?.({ type: 'adsmith_frame_reload', detail: `${snapshot.reason} Nạp lại riêng iframe khảo sát, lần ${state.frameReloads}/${maxFrameReloads} (giữ trang cha).`, frameReloads: state.frameReloads, loadingState: state.kind }, page);
+      return true;
+    }
     if (now - state.since < waitMs[state.kind]) return true;
     const hasLead = protectConfirmedLeadSession(session);
     const offer2615Flow = isOffer2615(page, session);

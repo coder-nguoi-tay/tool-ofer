@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { inspectAdsmithFrameLoading } from '../src/autofill/adsmith/inspect-frame-loading.mjs';
 import { recoverAdsmithFrameLoading } from '../src/autofill/adsmith/recover-frame-loading.mjs';
+import { inspectAdsmithFrameLoading as inspectOffer2615AdsmithFrameLoading } from '../src/autofill/offers/2615/solver/adsmith/inspect-frame-loading.mjs';
 import { attachAutofillPageWatcher } from '../src/autofill/attach-autofill-page-watcher.mjs';
 
 /**
@@ -154,4 +155,37 @@ test('watcher giữ loading Adsmith trước autofill/AI và các luồng F5 kh�
   assert.equal(fills, 0);
   assert.equal(aiRequests, 0);
   await page.close();
+});
+
+test('iframe Adsmith kẹt about:blank hoặc chỉ có thanh IP của AutoLeadPC vẫn là frame_blank (lỗi gặp trên Obscura 2026-11-18)', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  for (const inspect of [inspectAdsmithFrameLoading, inspectOffer2615AdsmithFrameLoading]) {
+    const page = await browser.newPage();
+    await page.route('https://blog.financialhelpfinder.com/**', route => route.fulfill({ contentType: 'text/html', body: '<html></html>' }));
+    await page.goto('https://blog.financialhelpfinder.com/path1a.php');
+    // Request iframe treo qua proxy: document vẫn about:blank dù src là Adsmith.
+    await page.route('https://www.adsmith.io/forge/**', () => {});
+    await page.setContent('<div id="AS_SURVEY"><iframe id="AS_IFRAME" src="https://www.adsmith.io/forge/v4/?plc=9235"></iframe></div>', { waitUntil: 'domcontentloaded' });
+    assert.equal((await inspect(page)).state, 'frame_blank');
+    // Document Adsmith chỉ có thanh IP do AutoLeadPC gắn: không phải nội dung khảo sát.
+    await page.unroute('https://www.adsmith.io/forge/**');
+    await page.route('https://www.adsmith.io/forge/**', route => route.fulfill({ contentType: 'text/html',
+      body: '<body><div id="__autolead_ip_bar"><span data-autolead-ip>203.0.113.7</span> | <span>Slot 16</span></div></body>' }));
+    await page.setContent('<div id="AS_SURVEY"><iframe id="AS_IFRAME" src="https://www.adsmith.io/forge/v4/?plc=9235"></iframe></div>');
+    await page.frameLocator('#AS_IFRAME').locator('#__autolead_ip_bar').waitFor({ state: 'attached' });
+    assert.equal((await inspect(page)).state, 'frame_blank');
+    await page.close();
+  }
+});
+
+test('ưu tiên hiện iframe offer: nạp lại riêng iframe 2 lần (6s, 12s) trước khi F5 trang cha ở 20s', async () => {
+  const page = createLoadingPage('blank');
+  const logs = [];
+  const options = { onLog: entry => logs.push({ ...entry }) };
+  for (let now = 0; now < 20000; now += 1000) assert.equal(await recoverAdsmithFrameLoading(page, {}, options, now), true);
+  assert.deepEqual(logs.filter(entry => entry.type === 'adsmith_frame_reload').map(entry => entry.frameReloads), [1, 2]);
+  assert.equal(page.navigations.length, 0, 'chưa F5 trang cha khi đang nạp lại iframe');
+  await recoverAdsmithFrameLoading(page, {}, options, 20000);
+  assert.deepEqual(page.navigations, [page.url()]);
 });

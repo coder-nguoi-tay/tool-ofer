@@ -1,3 +1,4 @@
+import { countLiveBrowsers } from '../../browser/count-live-browsers.mjs';
 import { protectConfirmedLeadSession } from '../../leads/actions/protect-confirmed-lead-session.mjs';
 import { shouldStopAfterLead } from '../../autofill/should-stop-after-lead.mjs';
 import { activeBrowsers } from '../../browser/sessions.mjs';
@@ -20,7 +21,7 @@ export function getAutoRefillStatus() {
     enabled: autoRefill.enabled,
     noSlotRefill: autoRefill.noSlotRefill === true,
     sequential: autoRefill.sequential,
-    activeCount: activeBrowsers.size,
+    activeCount: countLiveBrowsers(),
     targetCount: autoRefill.targetCount,
     message: autoRefill.message,
     bandwidth: getBandwidthSummary(),

@@ -1,3 +1,4 @@
+import { countLiveBrowsers } from '../count-live-browsers.mjs';
 import { stopAbandonedGoLoginLaunch } from '../gologin/stop-abandoned-launch.mjs';
 import { buildGoLoginLaunchOptions } from '../../gologin-profile/build-launch-options.mjs';
 import { startGoLoginSessionRecording, recordGoLoginStartupFailure } from '../gologin/start-session-recording.mjs';
@@ -81,7 +82,7 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
     autoRefill.stopRequested = false;
     autoRefill.enabled = true;
     autoRefill.settings = { ...body, browserMode: 'GoLogin', useGoLogin: true, gologinDevices: selectedDevices };
-    autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(autoRefill.targetCount, activeBrowsers.size + requestedCount));
+    autoRefill.targetCount = requestedCount;
     await saveAutoRefillSettings();
   }
   // Như Chrome: ô Giới hạn = số phiên hoàn tất (Complete text) tối đa; đạt giới hạn thì không mở thêm.

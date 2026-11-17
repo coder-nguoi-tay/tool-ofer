@@ -7,6 +7,7 @@ import { ADSMITH_STUCK_RELOAD_MS } from './adsmith/handle-no-survey.mjs';
 import { recordPageDialog } from './record-page-dialog.mjs';
 import { recoverEmptyProgress } from './late-progress/recover-empty-progress.mjs';
 import { recoverAdsmithFrameLoading } from './adsmith/recover-frame-loading.mjs';
+import { recoverBlankOfferFrames } from '../../../frames/recover-blank-offer-frames.mjs';
 import { reloadStuckPage } from './stuck-page/reload-stuck-page.mjs';
 import { inspectAutofillChallenge } from './watchdog/inspect-autofill-challenge.mjs';
 import { getAutofillScanDelay } from './watchdog/get-autofill-scan-delay.mjs';
@@ -110,6 +111,12 @@ export function attachAutofillPageWatcher(page, {
       // Trang có thể vừa điều hướng — cho phép lượt quét sau chạy tiếp.
     }
     if (await recoverAdsmithFrameLoading(page, session, options)) {
+      noProgressRounds = 0;
+      scanDelayMs = 1500;
+      return;
+    }
+    // Ưu tiên hiện iframe offer: iframe offer trống thì nạp lại riêng iframe trước khi autofill/F5 trang cha.
+    if (await recoverBlankOfferFrames(page, session, options)) {
       noProgressRounds = 0;
       scanDelayMs = 1500;
       return;

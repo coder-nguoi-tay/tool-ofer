@@ -1,3 +1,4 @@
+import { countLiveBrowsers } from '../count-live-browsers.mjs';
 import { saveGoLoginConfig } from '../../runtime/actions/save-gologin-config.mjs';
 import { activeBrowsers } from '../sessions.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
@@ -50,7 +51,7 @@ export async function launchUserRequestedBrowsers(requestBody) {
     settings: body,
     savedAt: new Date().toISOString()
   }), 'utf8').catch(() => {});
-  const activeBeforeLaunch = activeBrowsers.size;
+  const activeBeforeLaunch = countLiveBrowsers();
   let result;
   if (isObscura) {
     result = await launchObscuraBrowsers(JSON.stringify(body));
@@ -116,10 +117,10 @@ export async function launchUserRequestedBrowsers(requestBody) {
     dataSaver: Boolean(body.dataSaver !== false),
     offerSolver: body.offerSolver || 'auto'
   };
-  autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(autoRefill.targetCount, activeBeforeLaunch + requestedCount, activeBrowsers.size));
-  autoRefill.message = `Tự bù ${autoRefill.enabled ? 'đang bật' : 'đang tắt'}: ${activeBrowsers.size}/${autoRefill.targetCount} trình duyệt.`;
+  autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(1, requestedCount));
+  autoRefill.message = `Tự bù ${autoRefill.enabled ? 'đang bật' : 'đang tắt'}: ${countLiveBrowsers()}/${autoRefill.targetCount} trình duyệt.`;
   void saveAutoRefillSettings();
-  if (autoRefill.enabled && activeBrowsers.size < autoRefill.targetCount) {
+  if (autoRefill.enabled && countLiveBrowsers() < autoRefill.targetCount) {
     queueAutomaticRefill(2000);
   }
   return {

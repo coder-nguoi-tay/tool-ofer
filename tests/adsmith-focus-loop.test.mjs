@@ -9,12 +9,13 @@ import { handleAdsmithSurvey } from '../src/autofill/handle-adsmith-survey.mjs';
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-12
  */
-function adsmithParent(url) {
+function adsmithParent(url, surveyUrl = 'https://www.adsmith.io/forge/v4/?plc=9235') {
   let clicks = 0;
   const page = { currentUrl: url, url() { return this.currentUrl; }, frames: () => [], mouse: { click: async () => { clicks++; } } };
   const frame = {
     url: () => page.currentUrl,
-    locator: () => ({ first: () => ({ isVisible: async () => true, boundingBox: async () => ({ x: 0, y: 0, width: 300, height: 400 }) }) })
+    locator: () => ({ first: () => ({ isVisible: async () => true, boundingBox: async () => ({ x: 0, y: 0, width: 300, height: 400 }),
+      elementHandle: async () => ({ contentFrame: async () => ({ url: () => surveyUrl }), dispose: async () => {} }) }) })
   };
   return { page, frame, clicks: () => clicks };
 }
@@ -36,4 +37,14 @@ test('Adsmith: cùng một trang chỉ click focus #AS_IFRAME tối đa 3 lần 
   now += 6000;
   await handleAdsmithSurvey(page, frame, options);
   assert.equal(clicks(), 4, 'sang trang mới thì được focus lại');
+});
+
+test('Adsmith: iframe khảo sát còn trống/about:blank thì không click focus (tránh spam chuột lúc đang tải)', async t => {
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  for (const surveyUrl of ['about:blank', '']) {
+    const { page, frame, clicks } = adsmithParent('https://blog.financialhelpfinder.com/path1a.php', surveyUrl);
+    for (let i = 0; i < 5; i++) { now += 6000; await handleAdsmithSurvey(page, frame, {}); }
+    assert.equal(clicks(), 0, surveyUrl || 'URL rỗng');
+  }
 });

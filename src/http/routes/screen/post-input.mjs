@@ -5,6 +5,7 @@ import { findSelectAtPoint } from "../../../browser/screen/find-select-at-point.
 import { readRequestBody } from '../../actions/read-request-body.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
+import { renderBrowserMousePointer } from '../../../autofill/interaction/render-browser-mouse-pointer.mjs';
 
 /**
  * Xử lý API screen-input.
@@ -17,12 +18,32 @@ import { screencastSessions } from '../../../runtime/constants/screencast-sessio
 export async function handlePostScreenInput(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/screen/input/')) {
     const slot = parseInt(request.url.split('/').pop(), 10);
-    const sc = screencastSessions.get(slot);
+    let sc = screencastSessions.get(slot);
+    let fallbackCdp = null;
     if (!sc) {
-      respondWithJson(response, 404, {
-        error: 'stream not open'
-      });
-      return true;
+      const liveSession = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
+      if (!liveSession || !liveSession.browser) {
+        respondWithJson(response, 404, {
+          error: 'stream not open'
+        });
+        return true;
+      }
+      const pages = liveSession.browser.pages ? liveSession.browser.pages().filter(p => !p.isClosed()) : [];
+      const fallbackPage = (liveSession.mainPage && !liveSession.mainPage.isClosed()) ? liveSession.mainPage : pages[0];
+      if (!fallbackPage) {
+        respondWithJson(response, 404, {
+          error: 'no active page'
+        });
+        return true;
+      }
+      fallbackCdp = await liveSession.browser.newCDPSession(fallbackPage).catch(() => null);
+      if (!fallbackCdp) {
+        respondWithJson(response, 500, {
+          error: 'cannot open cdp session'
+        });
+        return true;
+      }
+      sc = { cdpClient: fallbackCdp, page: fallbackPage, isFallback: true };
     }
     try {
       const body = JSON.parse(await readRequestBody(request));
@@ -43,6 +64,9 @@ export async function handlePostScreenInput(request, response) {
         }
         if (body.clientHeight && devH) {
           targetY = Math.round(targetY * (devH / body.clientHeight));
+        }
+        if (sc.page && !sc.page.isClosed()) {
+          void renderBrowserMousePointer(sc.page, targetX, targetY, body.type === 'mousedown' || body.type === 'click');
         }
         if (body.type === 'click') {
           // Thao tác click nguyên tử: kiểm tra dropdown <select>, kiểm tra input, và nhấn/nhả chuột
@@ -456,6 +480,8 @@ export async function handlePostScreenInput(request, response) {
       respondWithJson(response, 500, {
         error: err.message
       });
+    } finally {
+      if (fallbackCdp) await fallbackCdp.detach().catch(() => {});
     }
     return true;
   }

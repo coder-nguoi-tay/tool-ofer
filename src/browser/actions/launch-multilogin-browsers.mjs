@@ -2,6 +2,7 @@ import { DEFAULT_LEAD_CONFIG } from '../../../lead-check.mjs';
 import { isExitIpConsumed } from '../../proxy/actions/is-exit-ip-consumed.mjs';
 import { DEVICE_PROFILES } from '../../runtime/constants/device-profiles.mjs';
 import { acquireProxyLock } from '../../proxy/actions/acquire-proxy-lock.mjs';
+import { countLiveBrowsers } from '../count-live-browsers.mjs';
 import { activeBrowsers } from '../sessions.mjs';
 import { activeExitIpLocks } from '../../runtime/constants/active-exit-ip-locks.mjs';
 import { applicationState } from '../../runtime/application-state.mjs';
@@ -200,7 +201,7 @@ export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = 
       browserMode: 'Multilogin',
       useMultilogin: true
     };
-    autoRefill.targetCount = Math.min(maxAliveBrowsers, activeBrowsers.size + Math.max(0, requestedCount - results.length));
+    autoRefill.targetCount = requestedCount;
     await saveAutoRefillSettings().catch(() => {});
   }
 
@@ -209,7 +210,7 @@ export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = 
   return {
     results,
     warnings,
-    activeCount: activeBrowsers.size,
+    activeCount: countLiveBrowsers(),
     targetCount: autoRefill.targetCount
   };
 }

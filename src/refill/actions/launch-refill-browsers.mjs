@@ -28,5 +28,5 @@ export function launchRefillBrowsers(requestBody, options) {
   if (mode === 'adspower' || settings.useAdsPower === true) {
     return launchAdsPowerBrowsers(requestBody, true, options.assignedStreamRoles);
   }
-  return launchRequestedBrowsers(requestBody, options);
+  return launchRequestedBrowsers(requestBody, { ...options, isAutomaticRefill: true });
 }

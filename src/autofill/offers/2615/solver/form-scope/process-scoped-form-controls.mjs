@@ -8,6 +8,7 @@ import { addActionCount } from '../add-action-count.mjs';
 import { addVerifiedFieldCount } from '../add-verified-field-count.mjs';
 import { extractPrepopulatedDataFromPage } from '../extract-prepopulated-data-from-page.mjs';
 import { fillAlphaIntentSpecialFields } from '../fill-alpha-intent-special-fields.mjs';
+import { waitForSurveyReady } from '../survey/wait-for-survey-ready.mjs';
 
 /**
  * Hoàn tất lựa chọn thuộc form đang điền, giữ offer cards/skip bên ngoài cho màn riêng.
@@ -35,6 +36,8 @@ export async function processScopedFormControls({ frame, record, session, option
   const gender = await handleCustomGenderButtons(frame, record).catch(() => 0);
   session.autofillStep = 'xử lý trường Uplevel';
   const synced = await syncUplevelRewardsFields(frame, record).catch(() => 0);
+  // Đảm bảo các lựa chọn / câu hỏi khảo sát được load đầy đủ trước khi click (Offer 2615)
+  await waitForSurveyReady(frame, { timeoutMs: 3500, onLog: options.onLog }).catch(() => null);
   session.autofillStep = 'xử lý lựa chọn khảo sát';
   const answered = await handleRadioAndSurveyOptions(frame, record, session, options).catch(() => 0);
   session.autofillStep = 'xử lý survey solver';

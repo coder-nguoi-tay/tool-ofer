@@ -30,7 +30,12 @@ async function handleAdsmithSurvey(page, frame, options = {}) {
       try {
         const iframeLoc = frame.locator('#AS_IFRAME, #AS_SURVEY iframe').first();
         const visible = await iframeLoc.isVisible().catch(() => false);
-        if (visible) {
+        // Iframe chưa có document khảo sát (trống/about:blank/đang tải) thì không click: click vào khung trắng
+        // không làm gì ngoài spam chuột lúc AJAX đang nạp; recoverAdsmithFrameLoading lo nạp lại iframe.
+        const surveyHandle = visible ? await iframeLoc.elementHandle({ timeout: 500 }).catch(() => null) : null;
+        const surveyFrame = surveyHandle ? await surveyHandle.contentFrame().catch(() => null) : null;
+        await surveyHandle?.dispose().catch(() => {});
+        if (visible && surveyFrame && /adsmith\.io/i.test(surveyFrame.url() || '')) {
           const box = await iframeLoc.boundingBox().catch(() => null);
           if (box && box.width > 10 && box.height > 10) {
             await page.mouse.click(box.x + box.width / 2, box.y + Math.min(40, box.height / 2), {

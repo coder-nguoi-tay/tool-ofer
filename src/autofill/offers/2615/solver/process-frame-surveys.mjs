@@ -18,6 +18,7 @@ import { handleSurveySemanticQuestions } from './handle-survey-semantic-question
 import { handleTwyOfferCards } from './handle-twy-offer-cards.mjs';
 import { solveSurveyStep } from '../../../../../survey-solver.mjs';
 import { syncUplevelRewardsFields } from './sync-uplevel-rewards-fields.mjs';
+import { waitForSurveyReady } from './survey/wait-for-survey-ready.mjs';
 
 /**
  * Xử lý survey, offer cards và các trường đặc thù trước lượt điền thông thường.
@@ -183,6 +184,9 @@ export async function processFrameSurveys({
       detail: `Đã đồng bộ ${uplevelSynced} trường/trạng thái Uplevel Rewards (#reg-container).`
     }, page);
   }
+
+  // Đảm bảo các lựa chọn / câu hỏi khảo sát được load đầy đủ trước khi click (Offer 2615)
+  await waitForSurveyReady(frame, { timeoutMs: 3500, onLog: options.onLog }).catch(() => null);
 
   // 0. ƯU TIÊN HÀNG ĐẦU: Tự động bấm nút khảo sát / btn-option / radio ngay lập tức
   // để không bị trễ do phải duyệt qua danh sách các input ẩn trên các trang khảo sát

@@ -1,3 +1,4 @@
+import { countLiveBrowsers, getLiveBrowsers } from '../../browser/count-live-browsers.mjs';
 import { activeBrowsers } from '../../browser/sessions.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
 import { dispatchOneTaskToAgent } from '../../agents/actions/dispatch-one-task-to-agent.mjs';
@@ -27,7 +28,7 @@ export function queueAutomaticRefill(delayMs = 0) {
 
     // Dọn các phiên đã đóng hoặc mất kết nối khỏi activeBrowsers
     for (const session of [...activeBrowsers]) {
-      if (session.isObscuraProcessAlive?.()) continue;
+      if (session.isObscuraProcessAlive?.() && !session.isClosed) continue;
       const isDead = session.isClosed ||
         (session.browser && typeof session.browser.isClosed === 'function' && session.browser.isClosed()) ||
         (session.browser && typeof session.browser.isConnected === 'function' && !session.browser.isConnected()) ||
@@ -38,14 +39,7 @@ export function queueAutomaticRefill(delayMs = 0) {
       }
     }
 
-    const liveBrowsers = [...activeBrowsers].filter(s => {
-      if (s.isObscuraProcessAlive?.()) return true;
-      if (s.isClosed) return false;
-      if (s.browser && typeof s.browser.isClosed === 'function' && s.browser.isClosed()) return false;
-      if (s.browser && typeof s.browser.isConnected === 'function' && !s.browser.isConnected()) return false;
-      if (s.isManagedProfile && s._cdpBrowser && !s._cdpBrowser.isConnected()) return false;
-      return true;
-    });
+    const liveBrowsers = getLiveBrowsers();
 
     const waitMs = autoRefill.sequential || liveBrowsers.length === 0 ? delayMs : 0;
     if (waitMs > 0) {
@@ -119,7 +113,7 @@ export function queueAutomaticRefill(delayMs = 0) {
       layoutTarget: seqTarget,
       assignedStreamRoles
     });
-    const currentAlive = [...activeBrowsers].filter(s => !s.isClosed && !(s.browser?.isClosed?.())).length;
+    const currentAlive = countLiveBrowsers();
     autoRefill.message = currentAlive >= seqTarget ? `Đã bù đủ ${currentAlive}/${seqTarget} trình duyệt.` : result.warnings.at(-1) ?? `Hiện mở ${currentAlive}/${seqTarget}; không còn proxy phù hợp để bù.`;
     if (currentAlive < seqTarget && autoRefill.enabled && !autoRefill.stopRequested) {
       setTimeout(() => {

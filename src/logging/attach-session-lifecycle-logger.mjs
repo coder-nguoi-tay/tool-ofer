@@ -6,7 +6,7 @@ import { syncBrowserLogSessionMetadata } from './browser-logs/sync-session-metad
 
 const lifecycleTypes = new Set([
   'obscura_starting', 'obscura_start_failed', 'obscura_started', 'obscura_cdp_disconnected', 'obscura_connection_restored', 'obscura_reconnect_failed',
-  'adsmith_loading_timeout_reload', 'adsmith_loading_reload_failed', 'iframe_load_exhausted',
+  'adsmith_loading_timeout_reload', 'adsmith_frame_reload', 'offer_frame_reload', 'adsmith_loading_reload_failed', 'iframe_load_exhausted',
   'gologin_process_exited', 'gologin_starting', 'gologin_started', 'gologin_device_detected', 'gologin_close_requested', 'gologin_cdp_disconnected', 'gologin_connection_restored', 'gologin_reconnect_failed', 'window_visibility_error',
   'gologin_start_failed', 'gologin_profile_stop_failed', 'gologin_profile_deleted', 'gologin_profile_delete_failed', 'gologin_exit_ip_changed', 'gologin_device_error', 'session_exit_ip_observed', 'slot_launch_timeout', 'max_run_timeout', 'gologin_geo_restart', 'gologin_geo_unverified', 'lead_check_targets', 'lead_ip_resolved', 'lead_confirmed', 'lead_observed', 'lead_failed', 'lead_ip_mismatch_closed',
   'manual_browser_closed', 'manual_browser_closed_refill', 'browser_close_all_requested',
