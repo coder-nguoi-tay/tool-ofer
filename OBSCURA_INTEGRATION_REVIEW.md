@@ -1,5 +1,36 @@
 # Trạng thái xử lý sau review
 
+## Stop, đóng tab cuối và bù bằng phiên sạch
+
+Đã sửa tab cuối Screen View dùng cùng `prepareManualBrowserClose()` với đóng slot: không check lead giữ target/bù; check lead giảm target đúng một lần; Stop/Không bù slot thắng. Route không nuốt lỗi dừng native hoặc xóa phiên còn sống. Watcher bỏ qua tab do route này quản lý để tránh đóng/bù hai lần. Stop/Đóng tất cả giữ phiên/khóa chưa dừng được, nhận cả child pending xuất hiện muộn và trả số đóng thực tế/cảnh báo cho cả chế độ giữ lead. Desktop dùng chung handler Stop; Desktop/Mini hiển thị lỗi/cảnh báo thay vì báo thành công giả. Đường tự đóng trang lỗi/duplicate của Obscura cũng đi qua `session.close()`.
+
+Khi phiên Obscura đã dừng, lưu metadata thuần gần nhất theo slot, không giữ context/cookie/storage. Phiên bù lấy seed mới, fingerprint phần cứng và phiên bản Chrome/Safari khác phiên vừa đóng. Nhóm thiết bị xoay trong lựa chọn của người dùng; nếu chỉ chọn một nhóm thì đổi fingerprint/phiên bản trong nhóm đó. Danh sách phiên bản Apple 17.4.1–18.0 và pool Chrome hiện có được giữ. Pool hữu hạn nên các phiên bản có thể xuất hiện lại ở các lượt sau; không lặp lại phiên bản của phiên vừa thay thế.
+
+IP geo và IP xác minh trong browser đều được đối chiếu với IP của phiên cũ, kể cả khi tắt checkDuplicate. Proxy xoay cùng endpoint vẫn được phép nếu có IP mới. Không tìm được IP/profile mới thì báo thiếu tài nguyên, không mở offer bằng phiên cũ. Slot có native còn sống vẫn được giữ chỗ dù đang đóng. Relay, log, screencast và khóa được dọn trước callback bù; PID/context mới không nhận cookie/localStorage cũ.
+
+App đã build/ký/cập nhật và mở lại tại `/Applications/AutoLeadPC Mac 2 AdsPower.app` khi không có phiên thật hoạt động. Source trong app khớp bản sửa. Suite chính thức đạt 952/952, không skip (`/tmp/autoleadpc-stop-fresh-suite.log`); bộ đóng–bù/fresh chạy từ bundle đạt 26/26 (`/tmp/autoleadpc-stop-fresh-bundle-tests.log`).
+
+Kiểm chứng mới: các ca tab cuối/Stop lỗi, giữ lead, child pending muộn, UI lỗi, xoay thiết bị/phiên bản, cookie/localStorage sạch, loại IP cũ và đóng trang duplicate đạt. Test lead-refill hiện đi qua adapter/queue/routing thật với native thật, chứng minh PID/IP/thiết bị/phiên bản mới khác phiên cũ; API/proxy/đầu vào launcher được giả lập offline.
+
+
+## Danh sách phiên bản Apple đã bổ sung
+
+Theo yêu cầu giới hạn phiên bản, iPhone/iPad mới dùng bốn cặp OS/Safari cố định: 17.4.1/17.4, 17.5.1/17.5, 17.6.1/17.6 và 18.0/18.0. Generator dùng chung danh sách cho cả hai loại thiết bị; không còn iOS 16.6.1 hoặc Safari 17.5 cố định cho mọi OS. Token Safari/604.1 giữ nguyên. Preview hiển thị `profile.os`; các override HTTP/JS tiếp tục lấy cùng profile. Phiên đang chạy không được chỉnh lại fingerprint.
+
+Đã kiểm tra 64 seed/thiết bị và mở native thật cho đủ tám tổ hợp thiết bị/phiên bản, đối chiếu HTTP, JS và API trạng thái; 25/25 test runtime/full-flow đạt. Release nextest của demo engine đạt 5/5, trong đó có kiểm tra 256 seed/thiết bị và giới hạn danh sách cho phép. Không sửa engine upstream trong lượt này. Suite chính thức đạt 934/934, không skip (`/tmp/autoleadpc-apple-profiles-suite.log`). App đã build/ký/cài lại và mở tại `/Applications/AutoLeadPC Mac 2 AdsPower.app`; binary trong app khớp SHA-256 với release/bin. Hai test kiểm tra đủ tám tổ hợp profile chạy trực tiếp trong bundle cũng đạt.
+
+
+## Sửa đóng sau check lead và kiểm tra phiên bản Tablet
+
+`startLeadVerification.closeForNewSlot()` trước đây gọi `session.browser.close()` cho Obscura, chỉ ngắt CDP rồi reconnect vào engine cũ; callback cleanup/bù không chạy. Nhánh Obscura nay gọi `session.close()` để xác nhận process dừng trước khi callback nhả relay/IP/proxy và gọi hàng đợi bù hiện có. Không sửa quy tắc xác định lead, không giảm target và không tạo vòng bù riêng. Suite chính thức lượt này đạt 931/932; một test phone-mask báo 27 sự kiện input vượt ngưỡng 16. Chạy lại riêng file phone-mask đạt 2/2; không sửa logic phone trong phạm vi này. Log: `/tmp/autoleadpc-lead-refill-full-suite.log`, `/tmp/autoleadpc-phone-mask-recheck.log`.
+
+Test hồi quy mới `tests/obscura-lead-refill.test.mjs` dùng native thật và adapter/queue/routing hiện có, mock các biên Internet: không khớp IP, không có lead, giữ mở theo cài đặt, lỗi API, có lead, Stop, Không bù slot và dừng native thất bại. 8/8 đã đạt cả từ source và bundle đã cài tại `/Applications/AutoLeadPC Mac 2 AdsPower.app`; app đã mở lại, chữ ký hợp lệ. Kiểm chứng PID cũ dừng, cleanup một lần, khóa nhả trước khi mở PID mới, không reconnect và không bù chồng.
+
+Kiểm tra 48 seed cho từng thiết bị từ binary hiện tại: iPad có iPadOS 17.4.1 và 17.5.1; iPhone có iOS 16.6.1, 17.4.1 và 17.5.1. Generator đang cố định `Version/17.5` cho tất cả profile Apple; cần mapping theo profile nếu mở rộng danh mục. `Safari/604.1` là token tương thích, không dùng làm phiên bản Safari thực; phiên bản sản phẩm nằm ở `Version/…`. Có thể mở rộng các cặp OS/Safari đã xác minh (ví dụ iPadOS 18 / Safari 18), nhưng thay UA không biến Obscura thành Safari/WebKit thật. Lượt này chỉ kiểm tra danh mục, chưa thêm phiên bản.
+
+Nguồn đối chiếu: [WHATWG Safari UA](https://compat.spec.whatwg.org/#safari-user-agent-pattern), [Apple Safari 18](https://developer.apple.com/documentation/safari-release-notes/safari-18-release-notes).
+
+
 ## Bổ sung sửa preview iPhone/iPad
 
 Đã xác định `/state` loại phiên Obscura có `chromeVersion` rỗng; đây là giá trị hợp lệ của profile iPhone/iPad. Bộ lọc nay nhận diện Obscura qua engine/cờ phiên, vẫn loại phiên đã đóng và giữ điều kiện IP/managed. Danh sách này dùng chung cho bảng chạy, preview desktop và Mini App. Nút điều khiển cập nhật theo engine khi tái dùng slot; Obscura mở Screen View, tooltip không hứa mở cửa sổ Desktop.

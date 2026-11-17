@@ -23,11 +23,11 @@ export function buildObscuraStealthScript({ seed = 42, os = 'windows', profile =
 
   let script = scriptOutput.trim();
   if (profile) script = script.replace(/const __PROFILE__ = .*;/, `const __PROFILE__ = ${JSON.stringify(profile)};`);
-  if (antiFingerprint.canvas === false) {
-    const start = script.indexOf('// 7. Canvas Fingerprint Noise');
-    const end = script.indexOf('// 8. Audio Fingerprint Noise');
-    if (start !== -1 && end > start) script = script.slice(0, start) + script.slice(end);
-  }
+  // Engine đã tự lo canvas (nhiễu theo seed), audio (OfflineAudioContext theo seed) và WebGL theo danh tính phiên,
+  // nên bỏ hẳn các hook tiêm này: hook tiêm để lại khung "<preload>" trong stack và hàm không giống native.
+  const start = script.indexOf('// 7. Canvas Fingerprint Noise');
+  const end = script.indexOf('// 7. Auto-follow HTML');
+  if (start !== -1 && end > start) script = script.slice(0, start) + script.slice(end);
   return script;
 
 }

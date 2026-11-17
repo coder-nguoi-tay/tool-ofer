@@ -53,7 +53,7 @@ function dueForDomCheck(page, key) {
  * @param {object} session Phiên Chrome đã mở thành công.
  * @return {void} Gắn lịch kiểm tra vào các tab của phiên.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-17
  */
 export function watchTrafficBlockedPage(session) {
   if (!session || session.trafficWatcherAttached) return;
@@ -70,7 +70,7 @@ export function watchTrafficBlockedPage(session) {
    * @param {object} options Tab lỗi hoặc cờ hoàn tất FinancialHelpFinder đã được kiểm tra nội bộ.
    * @return {Promise<void>} Đóng phiên/bù theo trạng thái Start/Stop hiện tại.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-12
+   * @since 2026-11-17
    */
   const closeSessionAndRefill = async (options = {}) => {
     if (session.isClosed || protectConfirmedLeadSession(session) && !options.completedFinancialFlow) {
@@ -80,6 +80,12 @@ export function watchTrafficBlockedPage(session) {
     blocked = true;
     clearInterval(timer);
     session.closingDueToTrafficBlocked = !options.completedFinancialFlow;
+    if (session.isObscura || session.engine === 'obscura') {
+      session.suppressAutoRefill = autoRefill.stopRequested || !autoRefill.enabled;
+      try { await session.close(); }
+      catch (error) { console.warn(`[Obscura] Chưa dừng được Slot ${session.slot}; giữ phiên và khóa proxy/IP: ${error.message}`); }
+      return;
+    }
     session.isClosed = true;
     activeBrowsers.delete(session);
 

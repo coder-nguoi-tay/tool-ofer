@@ -99,7 +99,8 @@ function createMockFingerprintServer() {
       let webglVendor = 'none';
       let webglRenderer = 'none';
       try {
-        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        const glCanvas = document.createElement('canvas');
+        const gl = glCanvas.getContext('webgl') || glCanvas.getContext('experimental-webgl');
         if (gl) {
           const ext = gl.getExtension('WEBGL_debug_renderer_info');
           if (ext) {
@@ -136,7 +137,7 @@ function createMockFingerprintServer() {
         canvasDataSlice: canvasData.slice(-32),
         webglVendor,
         webglRenderer,
-        isAntiDetectActive: Boolean(window.__obscura_antidetect_active),
+        engineGlobals: Object.getOwnPropertyNames(window).filter(k => /obscura|antidetect/i.test(k)),
       };
     };
   </script>
@@ -263,10 +264,10 @@ test('Full Flow E2E: Giả lập đa phiên bản OS & Trình duyệt trên Obsc
 
         // 1. Kiểm tra tính năng che giấu Automation (Stealth)
         assert.ok(
-          fp.webdriver === undefined || fp.webdriver === null,
-          `navigator.webdriver phải bị ẩn hoàn toàn (nhận được: ${fp.webdriver})`
+          fp.webdriver === false,
+          `navigator.webdriver phải giống trình duyệt thật: false, không phải undefined (nhận được: ${fp.webdriver})`
         );
-        assert.ok(fp.isAntiDetectActive, 'Engine Anti-Detect hook phải được bật');
+        assert.deepEqual(fp.engineGlobals, [], 'Trang không được thấy global của engine/anti-detect');
 
         // 2. Kiểm tra độ chân thực của Safari iOS vs Chromium:
         if (tc.isAppleSafari) {
@@ -324,7 +325,7 @@ test('Full Flow E2E: Giả lập đa phiên bản OS & Trình duyệt trên Obsc
       const gpuShort = r.fp.webglRenderer.length > 20 ? r.fp.webglRenderer.slice(0, 20) + '...' : r.fp.webglRenderer;
       const chromeStatus = r.fp.hasChrome ? 'Emulated' : 'None (Safari)';
       console.log(
-        `| ${r.os.padEnd(16)} | ${(r.launchTimeMs + 'ms').padEnd(9)} | ${(r.fp.webdriver === undefined ? 'Hidden' : 'Exposed').padEnd(9)} | ${chromeStatus.padEnd(13)} | ${r.fp.vendor.padEnd(22)} | ${String(r.fp.maxTouchPoints).padEnd(5)} | ${gpuShort.padEnd(20)} |`
+        `| ${r.os.padEnd(16)} | ${(r.launchTimeMs + 'ms').padEnd(9)} | ${(r.fp.webdriver === false ? 'Hidden' : 'Exposed').padEnd(9)} | ${chromeStatus.padEnd(13)} | ${r.fp.vendor.padEnd(22)} | ${String(r.fp.maxTouchPoints).padEnd(5)} | ${gpuShort.padEnd(20)} |`
       );
     }
     console.log('========================================================================================================\n');

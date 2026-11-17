@@ -63,12 +63,15 @@ async function waitForObscuraReady(port, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS,
  * @param {string} [options.userAgent] Danh tính HTTP của profile.
  * @param {object} [options.headers] Header Client Hints/ngôn ngữ đồng bộ.
  * @param {Function|null} [options.onSpawn] Đăng ký process ngay khi spawn để Stop/shutdown không bỏ sót.
+ * @param {string} [options.tlsProfile] Profile TLS/HTTP2 của engine (chrome-windows|chrome-macos|chrome-linux|chrome-android|safari-ios|safari-ipad).
+ * @param {object|null} [options.identity] Danh tính thiết bị (profile + seed + public_ip) cho bề mặt native của engine.
  * @throws {Error} Khi spawn hoặc CDP không sẵn sàng.
  * @return {Promise<{ port: number, cdpEndpoint: string, process: import('node:child_process').ChildProcess, pid: number }>}
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-17
  */
-export async function startObscuraSession({ port = OBSCURA_DEFAULT_PORT, proxy = null, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS, timezone = 'UTC', userAgent = '', headers = {}, onSpawn = null } = {}) {
+export async function startObscuraSession({ port = OBSCURA_DEFAULT_PORT, proxy = null, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS, timezone = 'UTC', userAgent = '', headers = {}, onSpawn = null,
+  tlsProfile = 'chrome-windows', identity = null } = {}) {
   const binary = resolveObscuraBinary();
   const args = ['serve', String(port)];
   if (proxy) {
@@ -78,7 +81,11 @@ export async function startObscuraSession({ port = OBSCURA_DEFAULT_PORT, proxy =
   const child = spawn(binary, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, TZ: timezone, AUTOLEADPC_OBSCURA_PERSISTENT: '1', AUTOLEADPC_OBSCURA_USER_AGENT: userAgent, AUTOLEADPC_OBSCURA_HEADERS: JSON.stringify(headers) },
+    env: { ...process.env, TZ: timezone, AUTOLEADPC_OBSCURA_PERSISTENT: '1', AUTOLEADPC_OBSCURA_USER_AGENT: userAgent, AUTOLEADPC_OBSCURA_HEADERS: JSON.stringify(headers),
+      // TLS/HTTP2 giống trình duyệt thật theo thiết bị; không chặn tracker vì offer cần script chứng thực lead/pixel.
+      AUTOLEADPC_OBSCURA_TLS_PROFILE: tlsProfile, OBSCURA_BLOCK_TRACKERS: '0',
+      // Danh tính thiết bị để engine trả giá trị gốc (WebGL, font, giọng đọc, media, WebRTC) thay vì vá bằng script tiêm.
+      ...(identity ? { AUTOLEADPC_OBSCURA_IDENTITY: JSON.stringify(identity) } : {}) },
   });
 
   onSpawn?.(child);

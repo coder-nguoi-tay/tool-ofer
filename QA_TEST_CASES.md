@@ -460,3 +460,20 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - So sánh băng thông với proxy provider; xác nhận Data Saver giữ captcha/ảnh/form API. Chế độ access không tạo HTML/snapshot; full/debug giữ cùng recording qua reconnect.
 
 - Regression preview Obscura iPhone/iPad: bỏ chọn Chạy trong app và hai ô ẩn chờ; Start phải vẫn có slot trong bảng/Screen View dù `chromeVersion` rỗng. Obscura xem trong app; đóng phiên phải bỏ đúng ô. Khi slot cũ Chrome được tái dùng bởi Obscura, nút điều khiển chuyển sang Trong app và mở Screen View.
+
+## Regression Obscura: đóng sau check lead và bù slot
+
+- Không có lead hoặc lead chưa khớp IP: sau hết lượt chờ, PID Obscura cũ phải thoát; slot cũ biến mất; relay/khóa proxy/IP nhả trước khi bù đúng engine Obscura. Target và cài đặt offer/check lead không đổi; không có mốc reconnect của phiên đã đóng chủ động.
+- Có lead, lỗi API hoặc không có lead với `autoCloseNoLead=false`: giữ nguyên phiên/PID, không bù.
+- Bật Không bù slot hoặc bấm Stop trong lúc kiểm lead: không mở phiên thay thế. Dừng native thất bại phải giữ phiên/khóa và báo chưa dừng, không bù chồng.
+- Test offline `tests/obscura-lead-refill.test.mjs` dùng native thật và source adapter/queue/routing thật; chỉ giả API, proxy và đầu vào launcher để không gọi offer/tài khoản thật.
+
+- Profile Apple Obscura: mở phiên iPhone/iPad mới với nhiều seed, xác nhận chỉ sinh bốn cặp OS/Safari: 17.4.1/17.4, 17.5.1/17.5, 17.6.1/17.6, 18.0/18.0. HTTP và `navigator.userAgent` phải khớp, giữ `Safari/604.1`, không có Chrome Client Hints. Bảng chạy/preview hiển thị đúng phiên bản OS và vẫn điều khiển/đóng được cả iPhone/iPad.
+
+## Obscura: Stop và phiên bù sạch
+
+- Đóng tab cuối: không check lead thì giữ target và bù; check lead thì giảm target một lần. Stop/Không bù slot chặn bù. Lỗi dừng native phải báo lỗi, giữ phiên và khóa để thử đóng lại.
+- Stop/Đóng tất cả: thử lỗi dừng có chủ đích trên fixture; số đã đóng/cảnh báo phải đúng ở Desktop/Mini, kể cả khi giữ phiên đã có lead. Child đang chờ CDP hoặc xuất hiện muộn cũng phải được dừng.
+- Bù cùng slot nhiều lượt: xác nhận PID cũ đã thoát trước PID mới, không reconnect vào cũ; seed, fingerprint thiết bị, IP và phiên bản Chrome/Safari đổi so với phiên vừa đóng. Chỉ xoay thiết bị trong các nhóm được chọn. Không tái dùng cookie/localStorage/tab/record/lead của phiên cũ.
+- IP cũ do proxy xoay cấp lại phải bị loại trước offer; hết IP/profile khác phải báo thiếu tài nguyên. Slot có native chưa dừng vẫn chiếm chỗ, không mở chồng để đủ target.
+- Trang duplicate/traffic blocked đi qua lifecycle native; chỉ nhả khóa và bù sau khi PID đã dừng. Phiên đã có lead vẫn áp dụng các guard giữ lead hiện có.

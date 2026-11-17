@@ -35,7 +35,7 @@ export async function handlePostBrowserClose(request, response) {
         return true;
       }
       activeBrowsers.delete(session);
-      if (refill) queueAutomaticRefill();
+      if (refill && !session.onClosed) queueAutomaticRefill();
     } else {
       await session.browser?.close?.().catch(() => {});
       if (refill) queueAutomaticRefill();

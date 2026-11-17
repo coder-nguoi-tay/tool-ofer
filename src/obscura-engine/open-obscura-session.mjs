@@ -1,4 +1,5 @@
-import { pendingObscuraSessions } from './sessions.mjs';
+import { pendingObscuraSessions, lastClosedObscuraIdentities } from './sessions.mjs';
+import { getObscuraProfileIdentity } from './profile-identity.mjs';
 import { openObscuraBrowser } from './open-obscura-browser.mjs';
 import { initializeObscuraRuntime } from './initialize-obscura-runtime.mjs';
 import { fetchProxyGeo } from '../gologin-profile/fetch-proxy-geo.mjs';
@@ -28,8 +29,10 @@ import { releaseScreencast } from '../browser/screencast.mjs';
 export async function openObscuraSession(options) {
   const { proxy, tileIndex, websiteUrl, usedExitIps, onExitIp, leadConfig, shouldAbort, delayStop = 0 } = options;
   if (!proxy?.server) throw new Error('Obscura yêu cầu proxy hợp lệ; không mở bằng IP trực tiếp.');
+  const previousIdentity = lastClosedObscuraIdentities.get(tileIndex + 1);
   const geo = await waitForStableProxyIp(proxy, () => fetchProxyGeo(proxy));
   if (!geo?.timezone) throw new Error('Không xác minh được IP/múi giờ của proxy; không mở offer.');
+  if (previousIdentity?.exitIps.includes(geo.ip)) throw new Error('IP trùng phiên vừa đóng; cần IP mới để bù slot.');
   if (shouldAbort()) throw new Error('Đã hủy lượt mở Obscura.');
   let relay, session, started = false;
   const startupSession = { proxy, proxyKey: options.proxyKey, proxyServer: proxy.server, slot: tileIndex + 1, tileIndex, websiteUrl, offerNumber: options.offerNumber, engine: 'obscura', exitIp: geo.ip, startupPhase: 'engine_start' };
@@ -37,6 +40,12 @@ export async function openObscuraSession(options) {
   try {
     relay = proxy.username ? await (proxy.server.startsWith('socks5:') ? startAuthenticatedSocksRelay(proxy) : startAuthenticatedHttpRelay(proxy)) : { proxy, close: async () => {} };
     startupSession.onClosed = async () => {
+      if (started) lastClosedObscuraIdentities.set(startupSession.slot, {
+        ...getObscuraProfileIdentity(startupSession.profile),
+        seed: startupSession.profile.id,
+        deviceProfile: startupSession.requestedDeviceProfile,
+        exitIps: [...new Set([startupSession.exitIp, startupSession.ownedExitIp, ...(startupSession.exitIps || [])].filter(Boolean))],
+      });
       recordRelayUsage(relay.readBytes?.());
       await relay.close().catch(() => {});
       releaseProxyLock(proxy, startupSession.ownedExitIp || null);
@@ -53,7 +62,7 @@ export async function openObscuraSession(options) {
     };
     session = await openObscuraBrowser({
       slot: tileIndex + 1, proxy: relay.proxy, geo, os: options.deviceProfile,
-      targetUrl: null, registerSession: false, antiFingerprint: options.antiFingerprint, startupSession,
+      targetUrl: null, registerSession: false, antiFingerprint: options.antiFingerprint, startupSession, previousIdentity,
     });
     Object.assign(session, {
       proxy, proxyKey: options.proxyKey, proxyServer: proxy.server, websiteUrl,
@@ -66,6 +75,7 @@ export async function openObscuraSession(options) {
     session.bindRecordingContext(session.browser);
     session.exitIp = await verifyBrowserExitIp(session.browser, usedExitIps, onExitIp, websiteUrl, options.checkDuplicate);
     session.ownedExitIp = session.exitIp;
+    if (previousIdentity?.exitIps.includes(session.exitIp)) throw new Error('IP trong Obscura trùng phiên vừa đóng; bỏ phiên và chọn proxy mới.');
     if (session.exitIp !== geo.ip) throw new Error('IP trong Obscura khác IP đã dùng để cấu hình múi giờ; bỏ phiên.');
     session.verifiedExitIp = session.exitIp;
     session.exitIps.add(session.exitIp);

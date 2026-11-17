@@ -17,13 +17,13 @@ import { recordObservedExitIp } from '../../proxy/actions/record-observed-exit-i
  * Bắt đầu quy trình kiểm tra lead khi đến/hoàn thành màn đích (mặc định màn 5: DOB/Gender).
  * Gọi API toffers.top kiểm tra IP sock theo chu kỳ cấu hình (mặc định mỗi 30s, tối đa 2 lần).
  * Nếu IP xuất hiện: cho phép autofill tiếp tục các bước sau (Jump Page, Reward, Offerwall).
- * Chỉ đóng Chrome khi API trả dữ liệu hợp lệ nhưng không có lead; giữ Chrome khi dữ liệu có lead chưa khớp IP hoặc API lỗi.
+ * Đóng và bù khi API hợp lệ không có lead hoặc lead chưa khớp IP; giữ phiên có lead, lỗi API hoặc cấu hình giữ mở.
  *
- * @param {object} session Phiên Chrome đang chạy.
+ * @param {object} session Phiên trình duyệt đang chạy, có hàm đóng riêng khi dùng Obscura.
  * @param {object} leadConfig Cấu hình API và thời gian chờ.
  * @return {Promise<void>} Hoàn tất quy trình kiểm tra lead.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-17
  */
 export async function startLeadVerification(session, leadConfig) {
   // Chỉ check lead khi người dùng tick ô "Check Lead" (leadConfig.enabled === true).
@@ -57,14 +57,14 @@ export async function startLeadVerification(session, leadConfig) {
     session.leadCheckMessage = `Đã nộp ${targetDesc}; bắt đầu chờ kiểm tra lead (${attemptText})...`;
     updateBadge(`🌐 <strong>IP:</strong> ${exitIp} | <span style="color:#f59e0b;">⏳ Chờ lead (${attemptText})...</span>`);
 
-    // Đóng Chrome để phiên tự bù mở slot mới với proxy khác (closingDueToNoLead: không tính là người dùng tự đóng).
+    // Đóng phiên để tự bù bằng proxy khác; Obscura phải dừng process qua session.close(), tránh reconnect context cũ.
     /**
      * Đóng phiên chưa có lead để bù slot; huỷ thao tác nếu IP vừa được xác nhận có lead.
      * @param {string} logType Loại log của nguyên nhân đóng.
      * @param {string} reasonText Nguyên nhân đóng phiên.
-     * @return {Promise<void>} Hoàn tất đóng phiên hoặc giữ mở khi có lead.
+     * @return {Promise<void>} Đóng phiên để callback dọn/bù chạy; giữ tài nguyên nếu chưa dừng được process.
      * @author ductv <ductv@getflycrm.com>
-     * @since 2026-11-10
+     * @since 2026-11-17
      */
     const closeForNewSlot = async (logType, reasonText) => {
       if (protectConfirmedLeadSession(session)) return;
@@ -80,11 +80,15 @@ export async function startLeadVerification(session, leadConfig) {
         detail: `${reasonText}. Tự động đóng trình duyệt để chuyển proxy tiếp theo.`
       });
       try {
-        if (session.browser && !session.browser.isClosed?.()) {
+        if (session.isObscura || session.engine === 'obscura') {
+          session.suppressAutoRefill = false;
+          await session.close();
+        } else if (session.browser && !session.browser.isClosed?.()) {
           session.suppressAutoRefill = false;
           await session.browser.close().catch(() => {});
         }
       } catch (closeErr) {
+        session.leadCheckMessage = 'Chưa dừng được trình duyệt; giữ phiên và khóa proxy/IP, không mở chồng slot.';
         console.warn(`[LeadCheck] ${label}: Lỗi khi đóng trình duyệt:`, closeErr.message);
       }
     };

@@ -9,6 +9,7 @@ import { createProxyUsageKey } from '../../proxy/actions/create-proxy-usage-key.
 import { executeFile } from '../../runtime/constants/execute-file.mjs';
 import { getNextCollisionFreeProxy } from '../../proxy/actions/get-next-collision-free-proxy.mjs';
 import { getNextDeviceProfile } from './get-next-device-profile.mjs';
+import { lastClosedObscuraIdentities } from '../../obscura-engine/sessions.mjs';
 import { getProxyUniqueKey } from '../../proxy/actions/get-proxy-unique-key.mjs';
 import { importAutofillRecords } from '../../records/actions/import-autofill-records.mjs';
 import { importEmailLines } from '../../queues/email.mjs';
@@ -264,7 +265,7 @@ export async function launchRequestedBrowsers(requestBody, {
       activeBrowsers.delete(session);
     }
   }
-  const liveBrowsers = [...activeBrowsers].filter(s => !s.isClosed && !(s.browser?.isClosed?.()));
+  const liveBrowsers = [...activeBrowsers].filter(s => s.isObscuraProcessAlive?.() || (!s.isClosed && !(s.browser?.isClosed?.())));
   const alreadyAlive = liveBrowsers.length;
   if (alreadyAlive + targetSuccessCount > maxAliveBrowsers) {
     const room = Math.max(0, maxAliveBrowsers - alreadyAlive);
@@ -426,7 +427,8 @@ export async function launchRequestedBrowsers(requestBody, {
           checkScreen: Number(body.leadCheckScreen) || DEFAULT_LEAD_CONFIG.checkScreen || 4,
           autoCloseNoLead: body.autoCloseNoLead !== false
         };
-        const chosenDeviceProfile = getNextDeviceProfile();
+        const previousIdentity = isObscura ? lastClosedObscuraIdentities.get(tileIndex + 1) : null;
+        const chosenDeviceProfile = getNextDeviceProfile(previousIdentity?.deviceProfile);
         if (delayStart > 0) {
           await new Promise(r => setTimeout(r, delayStart * 1000));
         }

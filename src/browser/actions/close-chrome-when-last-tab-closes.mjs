@@ -26,6 +26,7 @@ export function closeChromeWhenLastTabCloses(session) {
    * @since 2026-11-17
    */
   async function closeEmptyChromeSession(closedPage) {
+    if (closedPage?._uxClosedByApp === 'screen_view_manual') return;
     if (session.isGoLogin || session.isObscura) {
       await new Promise(resolve => setTimeout(resolve, 150));
       if (session._cdpBrowser?.isConnected?.() === false) return;

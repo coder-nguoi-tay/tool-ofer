@@ -94,7 +94,8 @@ function stealthInitScript(cfg) {
 
   // ── Worker tạo từ blob (cách các script fingerprint hay dùng): ghép script vá vào đầu mã worker.
   // Qua CDP không chắc chạy kịp vì Playwright cho worker chạy ngay khi gắn vào.
-  if (typeof G.Worker === 'function' && typeof G.XMLHttpRequest === 'function' && G.document) {
+  // cfg.patchWorkers === false: engine chạy worker chung realm với trang (Obscura) nên không cần và không được bọc.
+  if (cfg.patchWorkers !== false && typeof G.Worker === 'function' && typeof G.XMLHttpRequest === 'function' && G.document) {
     const OriginalWorker = G.Worker;
     const patchSource = `(${originalToString.call(stealthInitScript)})(${JSON.stringify(cfg)});\n`;
     const patchedUrl = url => {

@@ -18,7 +18,10 @@ import { homedir } from 'node:os';
 const TEST_FILES = [
   'obscura-engine.test.mjs',
   'obscura-runtime.test.mjs',
+  'obscura-lead-refill.test.mjs',
+  'obscura-stop-and-fresh-session.test.mjs',
   'obscura-full-flow-e2e.test.mjs',
+  'obscura-antidetect-upgrade.test.mjs',
   'gologin-ip-display.test.mjs',
   'windows-server.test.mjs',
   'offer-2615.test.mjs',

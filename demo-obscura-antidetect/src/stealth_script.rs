@@ -17,29 +17,37 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
   // Seeded Profile Data
   const __PROFILE__ = {profile_json};
 
-  // Utility to spoof function string representation: 'function () {{ [native code] }}'
+  // Hàm giả in ra '[native code]' qua một registry WeakMap, không gắn own property 'toString' lên từng hàm
+  // (Object.getOwnPropertyNames(fn) có 'toString' là dấu hiệu bị hook).
   const nativeToString = Function.prototype.toString;
+  const nativeStrings = new WeakMap();
+  const patchedToString = function toString() {{
+    return nativeStrings.has(this) ? nativeStrings.get(this) : nativeToString.call(this);
+  }};
+  nativeStrings.set(patchedToString, 'function toString() {{ [native code] }}');
+  // Chỉ thay Function.prototype.toString khi thật sự có hàm cần giả (engine native thì không cần).
+  let toStringPatched = false;
   const spoofToString = (fn, name) => {{
-    const str = `function ${{name || fn.name || ''}}() {{ [native code] }}`;
-    Object.defineProperty(fn, 'toString', {{
-      value: function toString() {{
-        if (this === fn) return str;
-        return nativeToString.call(this);
-      }},
-      configurable: true,
-      writable: true
-    }});
+    if (!toStringPatched) {{ Function.prototype.toString = patchedToString; toStringPatched = true; }}
+    nativeStrings.set(fn, `function ${{name || fn.name || ''}}() {{ [native code] }}`);
     return fn;
+  }};
+  // Ghi đè trên prototype (như Chrome), bỏ qua khi engine đã trả đúng giá trị: không để lại dấu vết thừa.
+  const defineGetter = (target, key, val) => {{
+    if (target[key] === val) return;
+    Object.defineProperty(Object.getPrototypeOf(target), key, {{
+      // Getter dạng accessor shorthand: không có prototype, không gọi new được, giống getter native.
+      get: spoofToString(Object.getOwnPropertyDescriptor({{ get [key]() {{ return val; }} }}, key).get, `get ${{key}}`),
+      configurable: true,
+      enumerable: true
+    }});
+    if (Object.prototype.hasOwnProperty.call(target, key)) delete target[key];
   }};
 
   // 1. Remove / Mask navigator.webdriver
   try {{
-    delete Object.getPrototypeOf(navigator).webdriver;
-    Object.defineProperty(navigator, 'webdriver', {{
-      get: spoofToString(function webdriver() {{ return undefined; }}, 'get webdriver'),
-      configurable: true,
-      enumerable: true
-    }});
+    // Chrome thật (không automation) trả false; engine Obscura cũng trả false trên prototype.
+    defineGetter(navigator, 'webdriver', false);
   }} catch (_) {{}}
 
   // 2. Emulate window.chrome (Chỉ cho Chromium; Safari iOS KHÔNG có window.chrome)
@@ -106,20 +114,11 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
     }};
 
     for (const [key, val] of Object.entries(navProps)) {{
-      Object.defineProperty(navigator, key, {{
-        get: spoofToString(function () {{ return val; }}, `get ${{key}}`),
-        configurable: true,
-        enumerable: true
-      }});
+      if (key === 'languages' && JSON.stringify(navigator.languages) === JSON.stringify(val)) continue;
+      defineGetter(navigator, key, val);
     }}
 
-    if (__PROFILE__.is_safari_ios) {{
-      Object.defineProperty(navigator, 'standalone', {{
-        get: spoofToString(function standalone() {{ return false; }}, 'get standalone'),
-        configurable: true,
-        enumerable: true
-      }});
-    }}
+    if (__PROFILE__.is_safari_ios) defineGetter(navigator, 'standalone', false);
   }} catch (_) {{}}
 
   // 4. Spoof navigator.userAgentData (Client Hints)
@@ -151,11 +150,10 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
         }}, 'toJSON')
       }};
 
-      Object.defineProperty(navigator, 'userAgentData', {{
-        get: spoofToString(function userAgentData() {{ return uaData; }}, 'get userAgentData'),
-        configurable: true,
-        enumerable: true
-      }});
+      const native = navigator.userAgentData;
+      const sameHints = native && native.platform === uaData.platform && native.mobile === uaData.mobile &&
+        JSON.stringify(native.brands) === JSON.stringify(uaData.brands);
+      if (!sameHints) defineGetter(navigator, 'userAgentData', uaData);
     }} else {{
       try {{
         delete Object.getPrototypeOf(navigator).userAgentData;
@@ -176,19 +174,15 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
       pixelDepth: sc.pixel_depth
     }};
 
-    for (const [key, val] of Object.entries(screenOverrides)) {{
-      Object.defineProperty(screen, key, {{
-        get: spoofToString(function () {{ return val; }}, `get ${{key}}`),
+    for (const [key, val] of Object.entries(screenOverrides)) defineGetter(screen, key, val);
+
+    if (window.devicePixelRatio !== sc.device_pixel_ratio) {{
+      Object.defineProperty(window, 'devicePixelRatio', {{
+        get: spoofToString(Object.getOwnPropertyDescriptor({{ get devicePixelRatio() {{ return sc.device_pixel_ratio; }} }}, 'devicePixelRatio').get, 'get devicePixelRatio'),
         configurable: true,
         enumerable: true
       }});
     }}
-
-    Object.defineProperty(window, 'devicePixelRatio', {{
-      get: spoofToString(function devicePixelRatio() {{ return sc.device_pixel_ratio; }}, 'get devicePixelRatio'),
-      configurable: true,
-      enumerable: true
-    }});
   }} catch (_) {{}}
 
   // 6. PRNG Noise Generator for Canvas & Audio (Ported from C# XorShift64)
@@ -212,65 +206,79 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
   }}
 
   // 7. Canvas Fingerprint Noise
+  // Nhiễu cố định theo (seed, vị trí điểm ảnh): đọc lại bao nhiêu lần cũng ra cùng hash, khác nhau giữa các profile.
+  // Bản cũ dùng PRNG có trạng thái nên mỗi lần đọc ra hash khác, và toDataURL ghi nhiễu cộng dồn vào canvas.
   try {{
-    const canvasPrng = new XorShift64(__PROFILE__.canvas_noise_seed);
+    const canvasSeed = Number(BigInt.asUintN(32, BigInt(__PROFILE__.canvas_noise_seed || 1)));
+    const pixelDelta = (x, y) => {{
+      let h = Math.imul(canvasSeed ^ Math.imul(x, 73856093) ^ Math.imul(y, 19349663), 0x45d9f3b);
+      h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+      return ((h ^ (h >>> 16)) >>> 0) % 3 - 1;
+    }};
     const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+    const origPutImageData = CanvasRenderingContext2D.prototype.putImageData;
     const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
 
-    // Apply micro jitter to image pixels
-    const applyCanvasNoise = (imageData) => {{
+    const applyCanvasNoise = (imageData, sx, sy) => {{
       const d = imageData.data;
-      const len = d.length;
-      for (let i = 0; i < len; i += 16) {{
-        // Subtle delta: -1, 0, or +1
-        const delta = (canvasPrng.next() % 3) - 1;
-        d[i] = Math.max(0, Math.min(255, d[i] + delta));
+      const w = imageData.width;
+      for (let i = 0; i < d.length; i += 16) {{
+        const p = i >> 2;
+        d[i] = Math.max(0, Math.min(255, d[i] + pixelDelta(sx + (p % w), sy + Math.floor(p / w))));
       }}
       return imageData;
     }};
 
     CanvasRenderingContext2D.prototype.getImageData = spoofToString(function getImageData(sx, sy, sw, sh, settings) {{
-      const imgData = origGetImageData.call(this, sx, sy, sw, sh, settings);
-      return applyCanvasNoise(imgData);
+      return applyCanvasNoise(origGetImageData.call(this, sx, sy, sw, sh, settings), Math.round(sx) || 0, Math.round(sy) || 0);
     }}, 'getImageData');
 
     HTMLCanvasElement.prototype.toDataURL = spoofToString(function toDataURL(type, quality) {{
+      let ctx = null, original = null;
       try {{
-        const ctx = this.getContext('2d');
+        ctx = this.getContext('2d');
         if (ctx && this.width > 0 && this.height > 0) {{
-          const imgData = origGetImageData.call(ctx, 0, 0, Math.min(16, this.width), Math.min(16, this.height));
-          applyCanvasNoise(imgData);
-          ctx.putImageData(imgData, 0, 0);
+          const w = Math.min(16, this.width), h = Math.min(16, this.height);
+          original = origGetImageData.call(ctx, 0, 0, w, h);
+          origPutImageData.call(ctx, applyCanvasNoise(origGetImageData.call(ctx, 0, 0, w, h), 0, 0), 0, 0);
         }}
       }} catch (_) {{}}
-      return origToDataURL.call(this, type, quality);
+      try {{
+        return origToDataURL.call(this, type, quality);
+      }} finally {{
+        if (original) origPutImageData.call(ctx, original, 0, 0);
+      }}
     }}, 'toDataURL');
   }} catch (_) {{}}
 
   // 8. Audio Fingerprint Noise
+  // Mỗi buffer chỉ nhận nhiễu một lần, cố định theo (seed, chỉ số mẫu). Bản cũ cộng thêm nhiễu mỗi lần gọi
+  // getChannelData nên hai lần đọc cùng buffer ra hai giá trị khác nhau (dấu hiệu bị can thiệp).
   try {{
-    const audioPrng = new XorShift64(__PROFILE__.audio_noise_seed);
+    const audioSeed = Number(BigInt.asUintN(32, BigInt(__PROFILE__.audio_noise_seed || 1)));
+    const sampleDelta = (i) => {{
+      let h = Math.imul(audioSeed ^ Math.imul(i, 2654435761), 0x45d9f3b);
+      h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+      return (((h ^ (h >>> 16)) >>> 0) / 4294967296 - 0.5) * 0.0000002;
+    }};
     if (typeof AudioBuffer !== 'undefined') {{
       const origGetChannelData = AudioBuffer.prototype.getChannelData;
-      const origCopyFromChannel = AudioBuffer.prototype.copyFromChannel;
-
-      AudioBuffer.prototype.getChannelData = spoofToString(function getChannelData(channel) {{
-        const buffer = origGetChannelData.call(this, channel);
-        for (let i = 0; i < buffer.length; i += 64) {{
-          // micro noise: ~1e-7
-          const delta = (audioPrng.nextFloat() - 0.5) * 0.0000002;
-          buffer[i] += delta;
+      const noised = new WeakSet();
+      const noiseOnce = (data) => {{
+        if (!noised.has(data)) {{
+          noised.add(data);
+          for (let i = 0; i < data.length; i += 64) data[i] += sampleDelta(i);
         }}
-        return buffer;
+        return data;
+      }};
+      AudioBuffer.prototype.getChannelData = spoofToString(function getChannelData(channel) {{
+        return noiseOnce(origGetChannelData.call(this, channel));
       }}, 'getChannelData');
-
-      if (origCopyFromChannel) {{
+      if (AudioBuffer.prototype.copyFromChannel) {{
         AudioBuffer.prototype.copyFromChannel = spoofToString(function copyFromChannel(destination, channelNumber, startInChannel) {{
-          origCopyFromChannel.call(this, destination, channelNumber, startInChannel);
-          for (let i = 0; i < destination.length; i += 64) {{
-            const delta = (audioPrng.nextFloat() - 0.5) * 0.0000002;
-            destination[i] += delta;
-          }}
+          const source = noiseOnce(origGetChannelData.call(this, channelNumber));
+          const start = startInChannel || 0;
+          for (let i = 0; i < destination.length && start + i < source.length; i++) destination[i] = source[start + i];
         }}, 'copyFromChannel');
       }}
     }}
@@ -382,8 +390,6 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
     }}
   }} catch (_) {{}}
 
-  // Mark evasion active
-  window.__obscura_antidetect_active = true;
 }})();
 "#
     )

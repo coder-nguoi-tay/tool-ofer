@@ -22,6 +22,14 @@ pub const CHROME_VERSION_POOL: &[(&str, &str)] = &[
     ("156", "156.0.8260.115"),
 ];
 
+// Danh sách cố định theo yêu cầu: iOS/iPadOS 17.4.1–18.0, Safari đi theo OS.
+pub const APPLE_MOBILE_VERSION_POOL: &[(&str, &str)] = &[
+    ("17_4_1", "17.4"),
+    ("17_5_1", "17.5"),
+    ("17_6_1", "17.6"),
+    ("18_0", "18.0"),
+];
+
 pub struct ProfileGenerator;
 
 /// Hàm tiện ích sinh profile theo seed số nguyên và hệ điều hành mong muốn.
@@ -149,10 +157,10 @@ impl ProfileGenerator {
         let (major_ver, chrome_ver) = CHROME_VERSION_POOL[(rng.next_u64() as usize) % CHROME_VERSION_POOL.len()];
 
         let gpu_options = [
-            ("Google Inc. (Apple)", "ANGLE (Apple, Apple M1, OpenGL 4.1)"),
-            ("Google Inc. (Apple)", "ANGLE (Apple, Apple M2, OpenGL 4.1)"),
-            ("Google Inc. (Apple)", "ANGLE (Apple, Apple M2 Pro, OpenGL 4.1)"),
-            ("Google Inc. (Apple)", "ANGLE (Apple, Apple M3, OpenGL 4.1)"),
+            ("Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)"),
+            ("Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)"),
+            ("Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"),
+            ("Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)"),
         ];
         let gpu_choice = gpu_options[(rng.next_u64() as usize) % gpu_options.len()];
 
@@ -335,24 +343,32 @@ impl ProfileGenerator {
         }
     }
 
+    /// Sinh profile iPhone với cặp iOS/Safari trong danh sách cho phép.
+    /// @param rng Bộ sinh ngẫu nhiên xác định theo seed của phiên.
+    /// @param seed_str Định danh seed của profile.
+    /// @param _seed Seed số được giữ theo hợp đồng generator.
+    /// @return Profile iPhone nhất quán giữa OS và Safari trong user-agent.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-17
     fn generate_iphone(rng: &mut XorShift64, seed_str: &str, _seed: u64) -> AntiDetectProfile {
         let iphone_models = [
-            ("iPhone 15 Pro", "17_5_1", 393, 852, 3.0),
-            ("iPhone 15 Pro Max", "17_5_1", 430, 932, 3.0),
-            ("iPhone 14 Pro", "17_4_1", 393, 852, 3.0),
-            ("iPhone 13", "16_6_1", 390, 844, 3.0),
+            ("iPhone 15 Pro", 393, 852, 3.0),
+            ("iPhone 15 Pro Max", 430, 932, 3.0),
+            ("iPhone 14 Pro", 393, 852, 3.0),
+            ("iPhone 13", 390, 844, 3.0),
         ];
         let m = iphone_models[(rng.next_u64() as usize) % iphone_models.len()];
+        let (os_version, safari_version) = APPLE_MOBILE_VERSION_POOL[(rng.next_u64() as usize) % APPLE_MOBILE_VERSION_POOL.len()];
 
         let canvas_seed = rng.next_u64();
         let audio_seed = rng.next_u64();
 
         AntiDetectProfile {
             id: seed_str.to_string(),
-            os: format!("iOS {}", m.1.replace('_', ".")),
+            os: format!("iOS {}", os_version.replace('_', ".")),
             platform: "iPhone".to_string(),
             vendor: "Apple Computer, Inc.".to_string(),
-            user_agent: format!("Mozilla/5.0 (iPhone; CPU iPhone OS {} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", m.1),
+            user_agent: format!("Mozilla/5.0 (iPhone; CPU iPhone OS {} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{} Mobile/15E148 Safari/604.1", os_version, safari_version),
             chrome_version: "".to_string(),
             hardware_concurrency: 6,
             device_memory: 8,
@@ -362,13 +378,13 @@ impl ProfileGenerator {
             languages: vec!["en-US".to_string(), "en".to_string()],
             timezone: "America/New_York".to_string(),
             screen: ScreenConfig {
-                width: m.2,
-                height: m.3,
-                avail_width: m.2,
-                avail_height: m.3,
+                width: m.1,
+                height: m.2,
+                avail_width: m.1,
+                avail_height: m.2,
                 color_depth: 32,
                 pixel_depth: 32,
-                device_pixel_ratio: m.4,
+                device_pixel_ratio: m.3,
             },
             webgl: WebGlConfig {
                 unmasked_vendor: "Apple Inc.".to_string(),
@@ -382,23 +398,31 @@ impl ProfileGenerator {
         }
     }
 
+    /// Sinh profile iPad với cặp iPadOS/Safari trong danh sách cho phép.
+    /// @param rng Bộ sinh ngẫu nhiên xác định theo seed của phiên.
+    /// @param seed_str Định danh seed của profile.
+    /// @param _seed Seed số được giữ theo hợp đồng generator.
+    /// @return Profile iPad nhất quán giữa OS và Safari trong user-agent.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-17
     fn generate_ipad(rng: &mut XorShift64, seed_str: &str, _seed: u64) -> AntiDetectProfile {
         let ipad_models = [
-            ("iPad Air (5th gen)", "17_5_1", 820, 1180, 2.0),
-            ("iPad Pro 11-inch", "17_5_1", 834, 1194, 2.0),
-            ("iPad Pro 12.9-inch", "17_4_1", 1024, 1366, 2.0),
+            ("iPad Air (5th gen)", 820, 1180, 2.0),
+            ("iPad Pro 11-inch", 834, 1194, 2.0),
+            ("iPad Pro 12.9-inch", 1024, 1366, 2.0),
         ];
         let m = ipad_models[(rng.next_u64() as usize) % ipad_models.len()];
+        let (os_version, safari_version) = APPLE_MOBILE_VERSION_POOL[(rng.next_u64() as usize) % APPLE_MOBILE_VERSION_POOL.len()];
 
         let canvas_seed = rng.next_u64();
         let audio_seed = rng.next_u64();
 
         AntiDetectProfile {
             id: seed_str.to_string(),
-            os: format!("iPadOS {}", m.1.replace('_', ".")),
+            os: format!("iPadOS {}", os_version.replace('_', ".")),
             platform: "iPad".to_string(),
             vendor: "Apple Computer, Inc.".to_string(),
-            user_agent: format!("Mozilla/5.0 (iPad; CPU OS {} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", m.1),
+            user_agent: format!("Mozilla/5.0 (iPad; CPU OS {} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{} Mobile/15E148 Safari/604.1", os_version, safari_version),
             chrome_version: "".to_string(),
             hardware_concurrency: 8,
             device_memory: 8,
@@ -408,13 +432,13 @@ impl ProfileGenerator {
             languages: vec!["en-US".to_string(), "en".to_string()],
             timezone: "America/New_York".to_string(),
             screen: ScreenConfig {
-                width: m.2,
-                height: m.3,
-                avail_width: m.2,
-                avail_height: m.3,
+                width: m.1,
+                height: m.2,
+                avail_width: m.1,
+                avail_height: m.2,
                 color_depth: 24,
                 pixel_depth: 24,
-                device_pixel_ratio: m.4,
+                device_pixel_ratio: m.3,
             },
             webgl: WebGlConfig {
                 unmasked_vendor: "Apple Inc.".to_string(),
@@ -425,6 +449,38 @@ impl ProfileGenerator {
             client_hints: None, // Safari trên iPad thật không có Client Hints
             canvas_noise_seed: canvas_seed,
             audio_noise_seed: audio_seed,
+        }
+    }
+}
+
+#[cfg(test)]
+mod apple_mobile_tests {
+    use super::{APPLE_MOBILE_VERSION_POOL, ProfileGenerator, TargetOs};
+    use std::collections::HashSet;
+
+    /// Kiểm chứng danh sách cho phép và user-agent Apple không trộn OS/Safari ngoài cặp.
+    /// @return Hoàn tất khi iPhone và iPad đều sinh đủ bốn cặp phiên bản hợp lệ.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-17
+    #[test]
+    fn apple_mobile_versions_stay_in_supported_pairs() {
+        assert_eq!(APPLE_MOBILE_VERSION_POOL, &[
+            ("17_4_1", "17.4"), ("17_5_1", "17.5"), ("17_6_1", "17.6"), ("18_0", "18.0"),
+        ]);
+        for os in [TargetOs::IPhone, TargetOs::IPad] {
+            let mut observed_versions = HashSet::new();
+            for seed in 1..=256 {
+                let profile = ProfileGenerator::generate(&seed.to_string(), Some(os));
+                let os_version = profile.os.split_whitespace().nth(1).unwrap().replace('.', "_");
+                let (_, safari_version) = APPLE_MOBILE_VERSION_POOL.iter().find(|(version, _)| *version == os_version).unwrap();
+                assert!(profile.user_agent.contains(&format!("OS {} like Mac OS X", os_version)));
+                assert!(profile.user_agent.contains(&format!("Version/{} Mobile/", safari_version)));
+                assert!(profile.user_agent.ends_with("Safari/604.1"));
+                assert!(profile.chrome_version.is_empty());
+                assert!(profile.client_hints.is_none());
+                observed_versions.insert(os_version);
+            }
+            assert_eq!(observed_versions.len(), APPLE_MOBILE_VERSION_POOL.len());
         }
     }
 }

@@ -287,3 +287,45 @@ test('Obscura iPhone/iPad thật xuất hiện trong state và chụp được �
     } finally { await session.close(); }
   }
 });
+
+for (const os of ['iphone', 'ipad']) {
+  test(`Obscura ${os}: chỉ dùng 4 cặp OS/Safari cho phép, JS/HTTP/preview đồng bộ`, { skip: !hasNativeBinary, timeout: 20000 }, async t => {
+    const { generateObscuraProfile } = await import('../src/obscura-engine/generate-obscura-profile.mjs');
+    const { getAutoRefillStatus } = await import('../src/refill/actions/get-auto-refill-status.mjs');
+    const allowedVersions = new Map([['17.4.1', '17.4'], ['17.5.1', '17.5'], ['17.6.1', '17.6'], ['18.0', '18.0']]);
+    const selectedProfiles = new Map();
+    for (let seed = 1; seed <= 64; seed++) {
+      const profile = generateObscuraProfile({ seed, os });
+      const osVersion = profile.os.split(' ')[1];
+      assert.ok(allowedVersions.has(osVersion), `OS ngoài danh sách: ${profile.os}`);
+      assert.equal(profile.user_agent.match(/Version\/([^ ]+)/)?.[1], allowedVersions.get(osVersion));
+      assert.ok(profile.user_agent.includes(`OS ${osVersion.replaceAll('.', '_')} like Mac OS X`));
+      assert.ok(profile.user_agent.endsWith('Safari/604.1'));
+      assert.equal(profile.chrome_version, '');
+      assert.equal(profile.client_hints, null);
+      if (!selectedProfiles.has(osVersion)) selectedProfiles.set(osVersion, { seed, profile });
+    }
+    assert.equal(selectedProfiles.size, 4, 'Phải sinh được đủ các bản đã bổ sung');
+    const fixture = await createFixture();
+    t.after(() => new Promise(resolve => fixture.server.close(resolve)));
+    for (const { seed, profile } of selectedProfiles.values()) {
+      fixture.requests.length = 0;
+      const session = await openObscuraBrowser({ slot: 992, port: 0, seed, os, targetUrl: fixture.url });
+      try {
+        const browserIdentity = await session.page.evaluate(() => ({ userAgent: navigator.userAgent, platform: navigator.platform, hints: typeof navigator.userAgentData }));
+        assert.equal(browserIdentity.userAgent, profile.user_agent);
+        assert.equal(browserIdentity.platform, profile.platform);
+        assert.equal(browserIdentity.hints, 'undefined');
+        assert.ok(fixture.requests.length > 0);
+        for (const request of fixture.requests) {
+          assert.equal(request.headers['user-agent'], profile.user_agent);
+          assert.equal(request.headers['sec-ch-ua'], undefined);
+          assert.equal(request.headers['sec-ch-ua-platform'], undefined);
+        }
+        const row = getAutoRefillStatus().chromeSessions.find(candidate => candidate.slot === session.slot);
+        assert.equal(row.deviceVersion, profile.os);
+        assert.equal(row.deviceSummary, `${profile.os} · Obscura`);
+      } finally { await session.close(); }
+    }
+  });
+}

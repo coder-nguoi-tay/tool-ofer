@@ -1,19 +1,19 @@
 import { activeBrowsers } from '../../../browser/sessions.mjs';
 import { attachScreencastSession } from '../../../browser/screencast.mjs';
-import { autoRefill } from '../../../runtime/constants/auto-refill.mjs';
+import { prepareManualBrowserClose } from '../../../browser/actions/prepare-manual-browser-close.mjs';
+import { queueAutomaticRefill } from '../../../refill/actions/queue-automatic-refill.mjs';
 import { readRequestBody } from '../../actions/read-request-body.mjs';
 import { releaseScreencast } from '../../../browser/screencast.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
-import { saveAutoRefillSettings } from '../../../refill/actions/save-auto-refill-settings.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 
 /**
- * Xử lý API screen-tabs-close.
+ * Đóng tab qua Screen View; tab cuối dùng chung chính sách đóng slot và báo lỗi nếu native chưa dừng.
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-17
  */
 export async function handlePostScreenTabsClose(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/screen/tabs/close/')) {
@@ -39,25 +39,19 @@ export async function handlePostScreenTabsClose(request, response) {
 
       // Gỡ listener tự khôi phục trước khi đóng tab: tránh tranh nhau gắn lại với đoạn chuyển tab bên dưới.
       screencastSessions.get(slot)?.unbindListeners?.();
-      await targetPage.close().catch(() => {});
+      targetPage._uxClosedByApp = 'screen_view_manual';
+      await targetPage.close();
       let remainingPages = session.browser.pages().filter(p => !p.isClosed());
       if (remainingPages.length === 0) {
-        session.suppressAutoRefill = true;
-        session.addBrowserLog?.({
-          type: 'manual_browser_closed',
-          detail: 'Đã đóng tab cuối cùng qua Screen View; tắt trình duyệt.'
-        });
-        if (autoRefill.enabled && !autoRefill.stopRequested && !autoRefill.noSlotRefill && autoRefill.targetCount > 0) {
-          autoRefill.targetCount -= 1;
-          void saveAutoRefillSettings();
-        }
+        const refill = prepareManualBrowserClose(session);
         if (session.isGoLogin && session.closeGoLoginSession) {
           await session.closeGoLoginSession();
           if (!session._gologinProfileStopped || session._gologinProfileDeleted !== true) throw new Error('Chưa hoàn tất dừng/xóa profile GoLogin; kiểm tra nhật ký GoLogin.');
         } else if (session.isObscura || session.engine === 'obscura') {
-          await session.close?.().catch(() => {});
+          await session.close();
           activeBrowsers.delete(session);
         } else await session.browser?.close?.().catch(() => {});
+        if (refill && !(session.isObscura && session.onClosed)) queueAutomaticRefill();
         respondWithJson(response, 200, {
           ok: true,
           closedSession: true,

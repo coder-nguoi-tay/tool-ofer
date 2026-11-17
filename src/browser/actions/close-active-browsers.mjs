@@ -130,6 +130,7 @@ export async function closeActiveBrowsers(options = {}) {
     activeBrowsers.delete(session);
   }));
 
+  let stoppedSessions = sessionsToClose;
   // Chỉ kill hàng loạt khi dừng hẳn toàn bộ (không giữ phiên có lead)
   if (leadSessionsKept.length === 0) {
     await executeFile('pkill', ['-9', '-f', 'chrome-regular-builds']).catch(() => {});
@@ -138,7 +139,7 @@ export async function closeActiveBrowsers(options = {}) {
 
     // Pass 2: bắt các browser vừa được add vào activeBrowsers trong lúc pass 1 đang chạy
     await new Promise(r => setTimeout(r, 800));
-    const lateComers = [...activeBrowsers];
+    const lateComers = [...new Set([...activeBrowsers, ...pendingObscuraSessions])];
     for (const s of lateComers) {
       s.addBrowserLog?.({ type: 'browser_close_all_requested', detail: 'Đóng phiên mở muộn theo lệnh Đóng tất cả/Dừng toàn bộ.' });
       s.suppressAutoRefill = true;
@@ -154,14 +155,14 @@ export async function closeActiveBrowsers(options = {}) {
       if (s.isObscura || s.engine === 'obscura') await s.close?.().catch(() => {});
       else if (s.isGoLogin && s.closeGoLoginSession) await s.closeGoLoginSession();
       else await (s.browser ?? s.context)?.close?.().catch(() => {});
-      if (s.isManagedProfile && s.profileId) {
+      if (s.isManagedProfile && s.profileId && !s.isObscura && s.engine !== 'obscura') {
         await requestManagedProfileStop(s).catch(() => {});
       }
     }
     activeBrowsers.clear();
-    const stoppedSessions = [...new Set([...sessionsToClose, ...lateComers])];
+    stoppedSessions = [...new Set([...sessionsToClose, ...lateComers])];
     const unfinishedGoLogin = stoppedSessions.filter(session => session.isGoLogin && !session._gologinProfileStopped);
-    const unfinishedObscura = stoppedSessions.filter(session => session.isObscura && session.isObscuraProcessAlive?.());
+    const unfinishedObscura = stoppedSessions.filter(session => (session.isObscura || session.engine === 'obscura') && session.isObscuraProcessAlive?.());
     for (const session of unfinishedObscura) { session.isClosed = false; activeBrowsers.add(session); }
     if (!unfinishedGoLogin.length && !unfinishedObscura.length) {
       activeProxyLocks.clear();
@@ -171,21 +172,18 @@ export async function closeActiveBrowsers(options = {}) {
     if (adsPowerToken) {
       void cleanupOrphanedAdsPowerProfiles(adsPowerToken, new Set(), fetch, 10).catch(() => {});
     }
-    return {
-      results: [unfinishedGoLogin.length ? 'Đã gửi lệnh dừng toàn bộ; có phiên GoLogin chưa xác nhận dừng.' : sessionsToClose.length > 0 ? 'Đã đóng ' + sessionsToClose.length + ' trình duyệt và dừng hẳn toàn bộ luồng.' : 'Đã đóng toàn bộ trình duyệt trên màn hình và dừng hẳn.'],
-      warnings: unfinishedObscura.length ? ['Obscura chưa dừng; giữ phiên và khóa proxy/IP để thử đóng lại.'] : unfinishedGoLogin.length ? ['Chưa dừng được một số phiên GoLogin; giữ khóa IP/proxy và profile để tránh xóa phiên còn chạy.'] : stoppedSessions.some(session => session.isGoLogin && session._gologinProfileDeleted === false) ? ['Orbita đã dừng nhưng có profile chưa xóa được trên GoLogin; kiểm tra nhật ký GoLogin.'] : [],
-      closedCount: sessionsToClose.length,
-      leadSessionsKeptCount: 0,
-      autoRefillEnabled: false
-    };
   }
 
-  // Trường hợp có giữ phiên lead:
+  const unfinishedObscura = stoppedSessions.filter(session => (session.isObscura || session.engine === 'obscura') && session.isObscuraProcessAlive?.());
+  const unfinishedGoLogin = stoppedSessions.filter(session => session.isGoLogin && !session._gologinProfileStopped);
+  const closedCount = stoppedSessions.length - unfinishedObscura.length - unfinishedGoLogin.length;
+  const warnings = [];
+  if (unfinishedObscura.length) warnings.push('Obscura chưa dừng; giữ phiên và khóa proxy/IP để thử đóng lại.');
+  if (unfinishedGoLogin.length) warnings.push('Chưa dừng được một số phiên GoLogin; giữ khóa IP/proxy và profile.');
+  if (stoppedSessions.some(session => session.isGoLogin && session._gologinProfileStopped && session._gologinProfileDeleted === false)) warnings.push('Orbita đã dừng nhưng có profile chưa xóa được trên GoLogin; kiểm tra nhật ký GoLogin.');
+  autoRefill.message = `Đã đóng ${closedCount} trình duyệt; tự bù đã tắt.${leadSessionsKept.length ? ` Giữ ${leadSessionsKept.length} phiên có lead làm nốt.` : ''}${unfinishedObscura.length || unfinishedGoLogin.length ? ' Còn phiên chưa xác nhận dừng.' : ''}`;
   return {
-    results: [`Hết giờ hẹn tắt: Đã đóng ${sessionsToClose.length} phiên chưa có lead; đang giữ ${leadSessionsKept.length} phiên có lead làm nốt (không bù slot).`],
-    warnings: [],
-    closedCount: sessionsToClose.length,
-    leadSessionsKeptCount: leadSessionsKept.length,
-    autoRefillEnabled: false
+    results: [autoRefill.message], warnings, closedCount,
+    leadSessionsKeptCount: leadSessionsKept.length, autoRefillEnabled: false
   };
 }

@@ -221,9 +221,9 @@ async fn run_live_obscura_test(seed: u64, os: TargetOs) -> anyhow::Result<()> {
     println!("  [Test 7] WebGL Unmasked Vendor:         {}", val_webgl_vendor);
     println!("  [Test 7] WebGL Unmasked Renderer:       {}", val_webgl_renderer);
 
-    // Test 8: Evasion Active Flag
-    let val_active = page.evaluate("window.__obscura_antidetect_active");
-    println!("  [Test 8] Engine Anti-Detect Active:     {}", val_active);
+    // Test 8: Không để lại global của engine/anti-detect cho trang dò (thay cờ __obscura_antidetect_active cũ).
+    let val_clean = page.evaluate("Object.getOwnPropertyNames(window).every(k => !/obscura|antidetect/i.test(k))");
+    println!("  [Test 8] Khong lo global engine:        {}", val_clean);
 
     println!("------------------------------------------------------------------");
     println!("==> KET QUA: TOAN BO HE THONG FINGERPRINT SPOOFING HOAT DONG 100%!");
@@ -273,7 +273,8 @@ async fn main() -> anyhow::Result<()> {
                 port,
                 "127.0.0.1",
                 proxy,
-                false,
+                // TLS/JA3/JA4 + HTTP/2 kiểu Chrome/Safari qua wreq (BoringSSL). AUTOLEADPC_OBSCURA_STEALTH=0 quay về rustls.
+                std::env::var("AUTOLEADPC_OBSCURA_STEALTH").as_deref() != Ok("0"),
                 std::env::var("AUTOLEADPC_OBSCURA_USER_AGENT").ok().filter(|value| !value.is_empty()),
                 false,
                 None,

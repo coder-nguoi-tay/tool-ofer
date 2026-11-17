@@ -2,14 +2,17 @@ import { applicationState } from '../../runtime/application-state.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
 
 /**
- * Lấy profile thiết bị tiếp theo theo vòng tròn xoay vòng toàn cục.
- * @return {*} Kết quả xử lý get next device profile.
+ * Xoay nhóm thiết bị trong lựa chọn của người dùng, tránh nhóm vừa đóng nếu có lựa chọn khác.
+ * @param {string|null} previousProfile Nhóm thiết bị trước của slot cần bù.
+ * @return {string} Nhóm thiết bị hợp lệ tiếp theo; giữ nhóm duy nhất nếu chỉ chọn một nhóm.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-17
  */
-export function getNextDeviceProfile() {
+export function getNextDeviceProfile(previousProfile = null) {
   const profiles = autoRefill.deviceProfiles?.length > 0 ? autoRefill.deviceProfiles : ['windows'];
-  const profile = profiles[applicationState.deviceProfileRotationCounter % profiles.length];
-  applicationState.deviceProfileRotationCounter += 1;
-  return profile;
+  for (let attempt = 0; attempt < profiles.length; attempt++) {
+    const profile = profiles[applicationState.deviceProfileRotationCounter % profiles.length];
+    applicationState.deviceProfileRotationCounter += 1;
+    if (profile !== previousProfile || attempt === profiles.length - 1) return profile;
+  }
 }

@@ -1,6 +1,6 @@
 import { pendingObscuraSessions } from './sessions.mjs';
 import { chromium } from 'playwright';
-import { generateObscuraProfile } from './generate-obscura-profile.mjs';
+import { createFreshObscuraProfile } from './create-fresh-profile.mjs';
 import { buildObscuraStealthScript } from './build-obscura-stealth-script.mjs';
 import { startObscuraSession } from './start-obscura-session.mjs';
 import { stopObscuraSession } from './stop-obscura-session.mjs';
@@ -12,6 +12,37 @@ import { stealthInitScript } from '../stealth/stealth-init-script.mjs';
 import { buildClientHintHeaders } from '../stealth/build-client-hint-headers.mjs';
 
 /**
+ * Chọn profile TLS/HTTP2 của engine khớp thiết bị: Safari cho iPhone/iPad, Chrome theo nền tảng cho máy còn lại.
+ * @param {object} profile Profile Obscura (is_safari_ios, platform, client_hints).
+ * @return {string} Giá trị AUTOLEADPC_OBSCURA_TLS_PROFILE mà engine hiểu.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-17
+ */
+export function obscuraTlsProfile(profile) {
+  if (profile.is_safari_ios) return profile.platform === 'iPad' ? 'safari-ipad' : 'safari-ios';
+  const platform = String(profile.client_hints?.platform || profile.platform || '');
+  if (/android/i.test(platform)) return 'chrome-android';
+  if (/mac/i.test(platform)) return 'chrome-macos';
+  if (/linux/i.test(platform)) return 'chrome-linux';
+  return 'chrome-windows';
+}
+
+/**
+ * Vùng nội dung (innerWidth/innerHeight) như trình duyệt thật: nhỏ hơn màn hình đúng phần thanh tab/địa chỉ/taskbar.
+ * Trước đây viewport bằng cả màn hình nên innerHeight > outerHeight, điều không thể có ở trình duyệt thật.
+ * @param {object} profile Profile Obscura (screen, is_mobile, is_safari_ios, platform).
+ * @return {{width: number, height: number}} Kích thước viewport.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-18
+ */
+export function obscuraViewport(profile) {
+  const { screen } = profile;
+  if (profile.is_safari_ios) return { width: screen.width, height: screen.height - (profile.platform === 'iPad' ? 74 : 193) };
+  if (profile.is_mobile) return { width: screen.width, height: screen.height - 128 };
+  return { width: screen.avail_width || screen.width, height: (screen.avail_height || screen.height) - 87 };
+}
+
+/**
  * Khởi tạo engine Obscura độc lập; cung cấp một hàm đóng idempotent và khôi phục CDP khi process còn sống.
  * @param {object} options Slot, proxy, seed, OS, geo và tùy chọn đăng ký phiên/URL fixture.
  * @return {Promise<object>} Phiên có BrowserContext, kết nối CDP và điều khiển vòng đời engine.
@@ -20,17 +51,21 @@ import { buildClientHintHeaders } from '../stealth/build-client-hint-headers.mjs
  * @since 2026-11-17
  */
 export async function openObscuraBrowser({ slot = 1, port = null, seed = null, os = 'windows', proxy = null,
-  targetUrl = null, geo = null, registerSession = true, antiFingerprint = {}, startupSession = null } = {}) {
+  targetUrl = null, geo = null, registerSession = true, antiFingerprint = {}, startupSession = null, previousIdentity = null } = {}) {
   const deviceOs = ({ macos: 'mac', ios: 'iphone', win: 'windows' })[os] || os;
-  const profileSeed = seed ?? Date.now() + slot;
-  const profile = generateObscuraProfile({ seed: profileSeed, os: deviceOs });
+  const { seed: profileSeed, profile } = createFreshObscuraProfile({ seed, os: deviceOs, previousIdentity });
+  const deviceVersion = profile.is_safari_ios ? profile.os : profile.platform;
   if (geo?.timezone) profile.timezone = geo.timezone;
   if (geo?.country) profile.languages = [localeForCountry(geo.country).locale, 'en'];
   const script = buildObscuraStealthScript({ seed: profileSeed, os: deviceOs, profile, antiFingerprint });
   const hints = profile.client_hints;
   const metadata = hints ? { ...hints, platformVersion: hints.platform_version, fullVersion: profile.chrome_version,
     fullVersionList: hints.brands.map(brand => ({ ...brand, version: brand.brand.includes('Not') ? brand.version : profile.chrome_version })) } : null;
-  const headers = metadata ? buildClientHintHeaders(metadata) : {};
+  // Chrome chỉ tự gửi 3 Client Hints entropy thấp; bitness/arch/model/platform-version chỉ có khi server xin qua
+  // Accept-CH. Gửi sẵn trên mọi request là dấu hiệu bot (đo qua tls.peet.ws 2026-11-17).
+  // ponytail: chưa xử lý Accept-CH, site xin high-entropy qua header sẽ không nhận được; JS getHighEntropyValues vẫn đủ.
+  const headers = metadata ? Object.fromEntries(Object.entries(buildClientHintHeaders(metadata))
+    .filter(([name]) => /^sec-ch-ua(-mobile|-platform)?$/i.test(name))) : {};
   headers['user-agent'] = profile.user_agent;
   headers['accept-language'] = profile.languages.join(',');
   let proxyUrl = typeof proxy === 'string' ? proxy : proxy?.server;
@@ -68,6 +103,7 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
   try {
     engine = await startObscuraSession({ port: await findFreePort(port ?? 9220 + slot), proxy: proxyUrl,
       timezone: profile.timezone, userAgent: profile.user_agent, headers,
+      tlsProfile: obscuraTlsProfile(profile), identity: { ...profile, seed: String(profileSeed), public_ip: geo?.ip || null },
       onSpawn: child => { startingChild = child; pendingObscuraSessions.add(startingSession); },
     });
     browser = await chromium.connectOverCDP(engine.cdpEndpoint, { timeout: 15000 });
@@ -78,7 +114,7 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
     const session = Object.assign(startupSession || {}, {
       slot, tileIndex: slot - 1, engine: 'obscura', browserType: 'obscura', isObscura: true, isManagedProfile: true,
       profileId: `obscura_${engine.pid}`, profile, chromeVersion: profile.chrome_version,
-      deviceProfile: deviceOs, deviceVersion: profile.platform, deviceSummary: `${profile.platform} · Obscura`,
+      deviceProfile: deviceOs, requestedDeviceProfile: os, deviceVersion, deviceSummary: `${deviceVersion} · Obscura`,
       port: engine.port, browserWebSocketUrl: engine.cdpEndpoint, browser: context, context,
       _cdpBrowser: browser, page, mainPage: page, process: engine.process, pid: engine.pid,
       websiteUrl: targetUrl || 'about:blank', isWindowVisible: false, trueHeadless: true,
@@ -116,6 +152,8 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
         } };
         const noiseConfig = buildStealthConfig(device, { ...antiFingerprint, canvas: false }, profileSeed, profile.user_agent);
         noiseConfig.noise.audio = false;
+        // Worker của Obscura chạy chung realm với trang (đã có danh tính); bọc Worker bằng XHR đồng bộ làm worker treo.
+        noiseConfig.patchWorkers = false;
         await currentContext.addInitScript(stealthInitScript, noiseConfig);
         await currentContext.setExtraHTTPHeaders(headers);
         if (geo?.ll?.length === 2) {
@@ -135,7 +173,7 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
           const cdp = await currentContext.newCDPSession(currentPage);
           try {
             await cdp.send('Network.setUserAgentOverride', { userAgent: profile.user_agent, acceptLanguage: profile.languages.join(','), userAgentMetadata: metadata });
-            await currentPage.setViewportSize({ width: profile.screen.width, height: profile.screen.height });
+            await currentPage.setViewportSize(obscuraViewport(profile));
           } finally { await cdp.detach(); }
         };
         await Promise.all(currentContext.pages().map(session.prepareDevicePage));

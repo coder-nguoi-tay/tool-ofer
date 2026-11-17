@@ -91,8 +91,10 @@ test('Obscura Engine Integration Suite', async (t) => {
     assert.ok(script.length > 1000);
     assert.ok(script.includes('navigator.webdriver'));
     assert.ok(script.includes('window.chrome'));
-    assert.ok(script.includes('HTMLCanvasElement.prototype.getContext'));
-    assert.ok(script.includes('__obscura_antidetect_active = true'));
+    // Canvas/audio/WebGL do engine tự lo theo danh tính phiên; script tiêm không còn hook các API này.
+    assert.ok(!script.includes('HTMLCanvasElement.prototype.getContext'));
+    // Không để lại global đánh dấu cho trang dò.
+    assert.ok(!script.includes('__obscura_antidetect_active'));
   });
 
   await t.test('5. Root facade re-exports matches src/obscura-engine', () => {
@@ -118,11 +120,12 @@ test('Obscura Engine Integration Suite', async (t) => {
       assert.ok(session.page, 'Page instance phải tồn tại');
       assert.equal(session.engine, 'obscura');
 
-      const isEvasionActive = await session.page.evaluate(() => window.__obscura_antidetect_active);
-      assert.equal(isEvasionActive, true, 'Anti-detect script phải được inject thành công');
+      const engineGlobals = await session.page.evaluate(() => Object.getOwnPropertyNames(window).filter(k => /obscura|antidetect/i.test(k)));
+      assert.deepEqual(engineGlobals, [], 'Trang không được thấy global của engine/anti-detect');
 
       const webdriver = await session.page.evaluate(() => navigator.webdriver);
-      assert.ok(webdriver === undefined || webdriver === null, 'navigator.webdriver phải được che dấu');
+      // Chrome/Safari thật không automation trả false; undefined/null là dấu hiệu plugin stealth bị CreepJS bắt.
+      assert.equal(webdriver, false, 'navigator.webdriver phải giống trình duyệt thật (false)');
     } finally {
       await session.close();
     }
