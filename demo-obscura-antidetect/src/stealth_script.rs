@@ -118,7 +118,51 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
       defineGetter(navigator, key, val);
     }}
 
-    if (__PROFILE__.is_safari_ios) defineGetter(navigator, 'standalone', false);
+    if (__PROFILE__.is_safari_ios) {{
+      defineGetter(navigator, 'standalone', false);
+      defineGetter(navigator, 'pdfViewerEnabled', false);
+    }} else if (__PROFILE__.max_touch_points === 0) {{
+      // Desktop Chromium has built-in PDF viewer & plugins (PDF Viewer, Chrome PDF Viewer)
+      defineGetter(navigator, 'pdfViewerEnabled', true);
+      const createPlugin = (name, filename, description, mimeTypes) => {{
+        const plugin = {{ name, filename, description, length: mimeTypes.length }};
+        mimeTypes.forEach((m, idx) => {{ plugin[idx] = m; plugin[m.type] = m; }});
+        return plugin;
+      }};
+      const mimePdf = {{ type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' }};
+      const mimeTextPdf = {{ type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' }};
+      const pluginList = [
+        createPlugin('PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+        createPlugin('Chrome PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+        createPlugin('Chromium PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+        createPlugin('Microsoft Edge PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf]),
+        createPlugin('WebKit built-in PDF', 'internal-pdf-viewer', 'Portable Document Format', [mimePdf, mimeTextPdf])
+      ];
+      mimePdf.enabledPlugin = pluginList[0];
+      mimeTextPdf.enabledPlugin = pluginList[0];
+      const mockPlugins = {{
+        length: pluginList.length,
+        item(i) {{ return this[i] || null; }},
+        namedItem(n) {{ return this[n] || null; }},
+        refresh() {{}}
+      }};
+      pluginList.forEach((p, idx) => {{ mockPlugins[idx] = p; mockPlugins[p.name] = p; }});
+      const mockMimes = {{
+        length: 2,
+        item(i) {{ return this[i] || null; }},
+        namedItem(n) {{ return this[n] || null; }}
+      }};
+      mockMimes[0] = mimePdf;
+      mockMimes[1] = mimeTextPdf;
+      mockMimes['application/pdf'] = mimePdf;
+      mockMimes['text/pdf'] = mimeTextPdf;
+      if (typeof PluginArray !== 'undefined' && PluginArray.prototype) Object.setPrototypeOf(mockPlugins, PluginArray.prototype);
+      if (typeof MimeTypeArray !== 'undefined' && MimeTypeArray.prototype) Object.setPrototypeOf(mockMimes, MimeTypeArray.prototype);
+      defineGetter(navigator, 'plugins', mockPlugins);
+      defineGetter(navigator, 'mimeTypes', mockMimes);
+    }} else {{
+      defineGetter(navigator, 'pdfViewerEnabled', false);
+    }}
   }} catch (_) {{}}
 
   // 4. Spoof navigator.userAgentData (Client Hints)
@@ -570,6 +614,46 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
     }}
   }} catch (_) {{}}
 
+  // 17. ClientRects Micro-Noise (Ported from stealth-init-script.mjs)
+  try {{
+    const rectSeed = Number(BigInt.asUintN(32, BigInt(__PROFILE__.canvas_noise_seed || 1)));
+    const rectScale = 1 + (1 + (rectSeed % 997)) * 1e-8 * (rectSeed % 2 ? 1 : -1);
+    if (typeof DOMRectReadOnly !== 'undefined' && typeof Element !== 'undefined') {{
+      const layoutRects = new WeakSet();
+      const rectKeys = ['x', 'y', 'width', 'height', 'top', 'right', 'bottom', 'left'];
+      const origGetBCR = Element.prototype.getBoundingClientRect;
+      const origGetCR = Element.prototype.getClientRects;
+
+      Element.prototype.getBoundingClientRect = spoofToString(function getBoundingClientRect() {{
+        const r = origGetBCR.call(this);
+        layoutRects.add(r);
+        return r;
+      }}, 'getBoundingClientRect');
+
+      if (origGetCR) {{
+        Element.prototype.getClientRects = spoofToString(function getClientRects() {{
+          const list = origGetCR.call(this);
+          for (let i = 0; i < list.length; i++) layoutRects.add(list[i]);
+          return list;
+        }}, 'getClientRects');
+      }}
+
+      for (const key of rectKeys) {{
+        const origDesc = Object.getOwnPropertyDescriptor(DOMRectReadOnly.prototype, key);
+        if (origDesc && origDesc.get) {{
+          Object.defineProperty(DOMRectReadOnly.prototype, key, {{
+            get: spoofToString(function get() {{
+              const val = origDesc.get.call(this);
+              return layoutRects.has(this) ? val * rectScale : val;
+            }}, 'get ' + key),
+            configurable: true,
+            enumerable: true
+          }});
+        }}
+      }}
+    }}
+  }} catch (_) {{}}
+
   // 7. Auto-follow HTML <meta http-equiv="refresh"> redirects (for Offerwall Trackers like Toffers)
   try {{
     const handleMetaRefresh = () => {{
@@ -636,5 +720,7 @@ mod tests {
         assert!(js.contains("getBattery"));
         assert!(js.contains("connection"));
         assert!(js.contains("OfflineAudioContext"));
+        assert!(js.contains("pdfViewerEnabled"));
+        assert!(js.contains("DOMRectReadOnly"));
     }
 }
