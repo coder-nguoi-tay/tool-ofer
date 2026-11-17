@@ -101,6 +101,8 @@ export { launchRefillBrowsers } from './launcher.mjs';
 export { pickRefillOfferRoles } from '${new URL('../src/refill/actions/pick-refill-offer-roles.mjs', import.meta.url).href}';
 export const offerStrategyState = new Map();
 export const activeBrowsers = new Set();
+export function countLiveBrowsers() { return [...activeBrowsers].filter(s => !s.isClosed).length; }
+export function getLiveBrowsers() { return [...activeBrowsers].filter(s => !s.isClosed); }
 export const autoRefill = { enabled:true, stopRequested:false, queued:false, targetCount:3, sequential:false };
 export const remoteAgents = new Map();
 export const maxAliveBrowsers = 20;

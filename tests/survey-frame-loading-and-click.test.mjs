@@ -115,7 +115,7 @@ test('Khảo sát: Đảm bảo khảo sát load ra đầy đủ và click chọ
     }
   });
 
-  await t.test('5. updateBrowserMousePointer vẽ con trỏ HTML/SVG với tọa độ left/top trực tiếp', async () => {
+  await t.test('5. updateBrowserMousePointer vẽ con trỏ HTML/SVG với Shadow DOM và transform', async () => {
     const page = await browser.newPage();
     try {
       await page.setContent('<html><body><h1>Test Cursor</h1></body></html>');
@@ -124,21 +124,22 @@ test('Khảo sát: Đảm bảo khảo sát load ra đầy đủ và click chọ
       const cursorInfo = await page.evaluate(() => {
         const el = document.querySelector('[data-autoleadpc-mouse-pointer]');
         if (!el) return null;
+        const svg = el.shadowRoot?.querySelector('svg');
+        const path = el.shadowRoot?.querySelector('path');
         return {
-          left: el.style.left,
-          top: el.style.top,
-          hasSvg: !!el.querySelector('svg'),
-          pathFill: el.querySelector('#__autolead_cursor_path')?.getAttribute('fill'),
-          ringOpacity: el.querySelector('#__autolead_cursor_ring')?.getAttribute('opacity'),
+          hasElement: true,
+          transform: el.style.transform,
+          hasSvg: !!svg,
+          pathFill: path?.getAttribute('fill'),
+          dataPressed: el.getAttribute('data-pressed'),
         };
       });
 
       assert.ok(cursorInfo, 'Phần tử chuột ảo phải tồn tại trong DOM');
-      assert.equal(cursorInfo.left, '150px');
-      assert.equal(cursorInfo.top, '250px');
       assert.equal(cursorInfo.hasSvg, true);
+      assert.ok(cursorInfo.transform.includes('150px') && cursorInfo.transform.includes('250px'));
       assert.equal(cursorInfo.pathFill, '#38bdf8', 'Màu chuột khi bấm phải là xanh dạ quang #38bdf8');
-      assert.equal(cursorInfo.ringOpacity, '0.85', 'Hiệu ứng vòng sóng chạm phải hiển thị');
+      assert.equal(cursorInfo.dataPressed, '1');
     } finally {
       await page.close();
     }
