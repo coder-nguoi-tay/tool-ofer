@@ -281,6 +281,19 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
           for (let i = 0; i < destination.length && start + i < source.length; i++) destination[i] = source[start + i];
         }}, 'copyFromChannel');
       }}
+
+      if (typeof OfflineAudioContext !== 'undefined') {{
+        const origStartRendering = OfflineAudioContext.prototype.startRendering;
+        if (origStartRendering) {{
+          OfflineAudioContext.prototype.startRendering = spoofToString(async function startRendering() {{
+            const renderedBuffer = await origStartRendering.call(this);
+            if (renderedBuffer && typeof renderedBuffer.getChannelData === 'function') {{
+              noiseOnce(renderedBuffer.getChannelData(0));
+            }}
+            return renderedBuffer;
+          }}, 'startRendering');
+        }}
+      }}
     }}
   }} catch (_) {{}}
 
@@ -494,6 +507,69 @@ pub fn generate_stealth_js(profile: &AntiDetectProfile) -> String {
     }}
   }} catch (_) {{}}
 
+  // 14. Battery API Emulation (Chromium only on Prototype)
+  try {{
+    if (!__PROFILE__.is_safari_ios && typeof navigator !== 'undefined' && typeof navigator.getBattery !== 'function') {{
+      const navProto = Object.getPrototypeOf(navigator);
+      if (navProto) {{
+        const isMobile = __PROFILE__.max_touch_points > 0 || (__PROFILE__.client_hints && __PROFILE__.client_hints.mobile);
+        const batteryManager = Object.create(typeof EventTarget !== 'undefined' ? EventTarget.prototype : Object.prototype, {{
+          charging: {{ value: true, enumerable: true }},
+          chargingTime: {{ value: 0, enumerable: true }},
+          dischargingTime: {{ value: Infinity, enumerable: true }},
+          level: {{ value: isMobile ? 0.95 : 1.0, enumerable: true }},
+          onchargingchange: {{ value: null, writable: true, enumerable: true }},
+          onchargingtimechange: {{ value: null, writable: true, enumerable: true }},
+          ondischargingtimechange: {{ value: null, writable: true, enumerable: true }},
+          onlevelchange: {{ value: null, writable: true, enumerable: true }}
+        }});
+        Object.defineProperty(navProto, 'getBattery', {{
+          value: spoofToString(function getBattery() {{
+            return Promise.resolve(batteryManager);
+          }}, 'getBattery'),
+          writable: true,
+          enumerable: true,
+          configurable: true
+        }});
+      }}
+    }}
+  }} catch (_) {{}}
+
+  // 15. Network Information API (navigator.connection for Chromium)
+  try {{
+    if (!__PROFILE__.is_safari_ios && typeof navigator !== 'undefined' && !navigator.connection) {{
+      const connObj = Object.create(typeof EventTarget !== 'undefined' ? EventTarget.prototype : Object.prototype, {{
+        downlink: {{ value: 10, enumerable: true }},
+        effectiveType: {{ value: '4g', enumerable: true }},
+        rtt: {{ value: 50, enumerable: true }},
+        saveData: {{ value: false, enumerable: true }},
+        onchange: {{ value: null, writable: true, enumerable: true }}
+      }});
+      defineGetter(navigator, 'connection', connObj);
+    }}
+  }} catch (_) {{}}
+
+  // 16. Error Stack Sanitization
+  try {{
+    const cleanStack = (stack) => {{
+      if (typeof stack !== 'string') return stack;
+      return stack
+        .split('\n')
+        .filter(line => !line.includes('stealth_script') && !line.includes('spoofToString') && !line.includes('XorShift64'))
+        .join('\n');
+    }};
+    const origStackDesc = Object.getOwnPropertyDescriptor(Error.prototype, 'stack');
+    if (origStackDesc && origStackDesc.get) {{
+      Object.defineProperty(Error.prototype, 'stack', {{
+        ...origStackDesc,
+        get: spoofToString(function get() {{
+          const raw = origStackDesc.get.call(this);
+          return cleanStack(raw);
+        }}, 'get stack')
+      }});
+    }}
+  }} catch (_) {{}}
+
   // 7. Auto-follow HTML <meta http-equiv="refresh"> redirects (for Offerwall Trackers like Toffers)
   try {{
     const handleMetaRefresh = () => {{
@@ -557,5 +633,8 @@ mod tests {
         assert!(js.contains("measureText"));
         assert!(js.contains("RTCPeerConnection"));
         assert!(js.contains("speechSynthesis"));
+        assert!(js.contains("getBattery"));
+        assert!(js.contains("connection"));
+        assert!(js.contains("OfflineAudioContext"));
     }
 }
