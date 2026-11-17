@@ -18,11 +18,18 @@ async function loadWindowsSettings() {
         : 'Chưa có token GoLogin. Nhập token rồi bấm Lưu cài đặt.';
 
 
-      const savedGoLogin = (() => {
-        try { return localStorage.getItem('autolead_use_gologin'); } catch { return null; }
+      const savedObscura = (() => {
+        try { return localStorage.getItem('autolead_use_obscura'); } catch { return null; }
       })();
-      if (typeof syncGoLoginSetting === 'function') {
-        syncGoLoginSetting(savedGoLogin === '1');
+      if (savedObscura === '1' && typeof syncObscuraSetting === 'function') {
+        syncObscuraSetting(true);
+      } else {
+        const savedGoLogin = (() => {
+          try { return localStorage.getItem('autolead_use_gologin'); } catch { return null; }
+        })();
+        if (typeof syncGoLoginSetting === 'function') {
+          syncGoLoginSetting(savedGoLogin === '1');
+        }
       }
 
 

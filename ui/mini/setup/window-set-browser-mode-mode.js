@@ -2,6 +2,7 @@
     const MINI_BROWSER_MODES = {
       Chrome: { pill: 'pillBrowserChrome', radio: 'radioChrome', label: '🌐 Google Chrome', color: '#38bdf8' },
       GoLogin: { pill: 'pillBrowserGoLogin', radio: 'radioGoLogin', label: '🚀 GoLogin Orbita', color: '#a78bfa' },
+      Obscura: { pill: 'pillBrowserObscura', radio: 'radioObscura', label: '⚡ Obscura V8', color: '#10b981' },
     };
     window.setBrowserMode = (mode) => {
       // Cấu hình cũ có thể lưu 'gologin'/'Gologin'; mode lạ (kể cả AdsPower cũ, server luôn chạy Chrome) quay về Chrome.

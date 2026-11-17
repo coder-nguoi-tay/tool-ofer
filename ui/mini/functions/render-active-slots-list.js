@@ -39,7 +39,7 @@ function renderActiveSlotsList() {
           <div style="display:flex; align-items:center; justify-content:space-between;">
             <div style="font-size:12px; font-weight:700; color:#38bdf8;">Slot ${s.slot} • <span style="color:#f8fafc;">🌐 ${s.exitIp || 'Local'}</span>${s.engine ? ` <span style="color:#a78bfa; font-size:10px;">• ${s.engine}</span>` : ''} <span style="color:#a78bfa; font-size:10px;">• Offer ${escHtml(offerOf(s))}</span></div>
             <div style="display:flex; gap:6px;">
-              <button class="btn" style="padding:3px 8px; font-size:11px;" onclick="miniStatsToggleWindow(${s.slot}, ${Boolean(s.isWindowVisible)})">${s.isWindowVisible ? '🔽 Ẩn' : '🖥️ Hiện'}</button>
+              <button class="btn" style="padding:3px 8px; font-size:11px;" ${s.engine === 'Obscura' ? 'disabled title="Obscura chạy trong Screen View"' : ''} onclick="miniStatsToggleWindow(${s.slot}, ${Boolean(s.isWindowVisible)})">${s.isWindowVisible ? '🔽 Ẩn' : '🖥️ Hiện'}</button>
               <button class="btn btn-primary" style="padding:3px 8px; font-size:11px;" onclick="switchAndStream(${s.slot})">📺 Xem</button>
               <button class="btn btn-danger" style="padding:3px 8px; font-size:11px;" onclick="closeSlotDirect(${s.slot})">🛑</button>
             </div>

@@ -1,3 +1,4 @@
+import { resolveObscuraBinary } from '../../obscura-engine/resolve-obscura-binary.mjs';
 import { activeBrowsers } from '../../browser/sessions.mjs';
 import { cpus } from 'node:os';
 import { hostname as getHostname } from 'node:os';
@@ -8,9 +9,11 @@ import { runAgentTask } from './run-agent-task.mjs';
  * @param {string} hubUrl hub url.
  * @return {Promise<void>} Kết quả xử lý start agent mode.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-17
  */
 export async function startAgentMode(hubUrl) {
+  const supportedEngines = ['Chrome'];
+  try { resolveObscuraBinary(); supportedEngines.push('Obscura'); } catch {}
   const myHostname = getHostname();
   const agentId = `${myHostname}-${process.pid}`;
   const maxSlots = Math.max(3, Math.min(10, Math.floor(cpus().length / 2)));
@@ -25,7 +28,8 @@ export async function startAgentMode(hubUrl) {
     agentId,
     platform: process.platform,
     hostname: myHostname,
-    maxSlots
+    maxSlots,
+    supportedEngines
   });
   console.log(`[Agent] Hub: ${hubUrl} | ID: ${agentId} | Slots: ${maxSlots}`);
 

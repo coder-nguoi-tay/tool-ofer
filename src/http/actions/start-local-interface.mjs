@@ -18,6 +18,7 @@ import { initializeEmailQueue } from '../../queues/email.mjs';
 import { instanceId, dataDirName } from '../../config/paths.mjs';
 import { launchGoLoginBrowsers } from '../../browser/actions/launch-gologin-browsers.mjs';
 import { launchMultiloginBrowsers } from '../../browser/actions/launch-multilogin-browsers.mjs';
+import { launchObscuraBrowsers } from '../../browser/actions/launch-obscura-browsers.mjs';
 import { launchRequestedBrowsers } from '../../browser/actions/launch-requested-browsers.mjs';
 import { launchUserRequestedBrowsers } from '../../browser/actions/launch-user-requested-browsers.mjs';
 import { listUsedExitIps } from '../../proxy/actions/list-used-exit-ips.mjs';
@@ -71,6 +72,7 @@ export async function startLocalInterface() {
   setInterval(() => {
     if (autoRefill.enabled && !autoRefill.stopRequested && autoRefill.settings && !autoRefill.queued) {
       for (const s of [...activeBrowsers]) {
+        if (s.isObscuraProcessAlive?.()) continue;
         const isDead = s.isClosed ||
           (s.browser && typeof s.browser.isClosed === 'function' && s.browser.isClosed()) ||
           (s.browser && typeof s.browser.isConnected === 'function' && !s.browser.isConnected()) ||
@@ -121,6 +123,7 @@ export async function startLocalInterface() {
     '/launch-adspower': runExclusively(launchRequestedBrowsers),
     '/launch-multilogin': runExclusively(launchMultiloginBrowsers),
     '/launch-gologin': runExclusively(launchGoLoginBrowsers),
+    '/launch-obscura': runExclusively(launchObscuraBrowsers),
     '/check': checkRequestedProxies,
     '/close': closeActiveBrowsers,
     '/stop': closeActiveBrowsers,

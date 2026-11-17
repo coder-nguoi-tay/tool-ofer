@@ -7,11 +7,11 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-17
  */
 export async function handlePostBrowserShowAll(request, response) {
   if (request.method === 'POST' && request.url === '/browser/show-all') {
-    const liveSessions = [...activeBrowsers].filter(s => !s.isClosed);
+    const liveSessions = [...activeBrowsers].filter(s => !s.isClosed && s.supportsNativeWindow !== false);
     await Promise.allSettled(liveSessions.map(s => s.showWindow?.(true)));
     respondWithJson(response, 200, {
       ok: true,

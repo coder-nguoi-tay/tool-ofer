@@ -327,3 +327,11 @@ dùng cùng giá trị cho app lẫn script Firewall.
 
 API hiện chưa có đăng nhập chung nên chỉ mở cho mạng tin cậy; không forward cổng
 3211 ra Internet. Truy cập qua Internet cần một kết nối riêng được bảo vệ.
+
+### Obscura native
+
+Chạy `npm run build:obscura` trước khi chạy Obscura từ source. Lệnh này dùng Rust/Cargo để build engine có rendering/CDP và đặt binary đúng hệ điều hành trong `bin/`; không chép cấu hình, token hoặc dữ liệu phiên. Backend dùng các bước cấp proxy, phân công offer, lịch sử và giới hạn chung với Chrome, sau đó gắn autofill/AI/lead/script vào context Obscura.
+
+Obscura là engine headless: điều khiển bằng Screen View, không có cửa sổ Chrome/Orbita trên Desktop. Các profile Windows/Mac/Android/iPhone/iPad là cấu hình giả lập fingerprint; profile iOS không phải Safari/iOS thật. Khi mất kết nối CDP, app giữ renderer, IP và record rồi thử nối lại; Stop/Đóng tất cả dừng đúng process của từng phiên, kể cả phiên đang khởi tạo.
+
+Bộ cài Windows cần binary Rust Windows x64. Trên Windows, `npm run build:windows` tự build engine nếu `bin/obscura_antidetect_demo.exe` chưa có. Khi đóng gói Windows trên Mac, cung cấp binary Windows đã build qua `AUTOLEADPC_OBSCURA_WINDOWS_BIN`; không dùng binary macOS. Workflow Windows build engine trên runner Windows trước khi đóng gói.

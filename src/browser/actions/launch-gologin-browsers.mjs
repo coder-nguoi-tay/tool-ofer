@@ -11,6 +11,7 @@ import { getGoLoginDeviceSettings } from '../../gologin-profile/get-device-setti
 import { selectGoLoginDevices } from '../../gologin-profile/select-devices.mjs';
 import { parseProxyLine, safeNormalizeUrl } from '../../proxy/configuration.mjs';
 import { checkProxyExitIp } from '../../proxy/actions/check-proxy-exit-ip.mjs';
+import { requestProxyIpInfo } from '../../proxy/actions/request-proxy-ip-info.mjs';
 import { isExitIpCurrentlyInUse } from '../../proxy/actions/is-exit-ip-currently-in-use.mjs';
 import { isProxyCurrentlyActive } from '../../proxy/actions/is-proxy-currently-active.mjs';
 import { acquireProxyLock } from '../../proxy/actions/acquire-proxy-lock.mjs';
@@ -49,6 +50,8 @@ const GOLOGIN_PARALLEL_LAUNCHES = 10;
 // Mở bình thường 7–35 giây; cộng mọi giới hạn hợp lệ (kiểm IP, API, SDK, CDP, xác minh IP, trang offer) khoảng 2 phút.
 // Quá hạn này là kẹt ở chỗ không có timeout: bỏ slot để lượt bù không treo cả hàng đợi. Phiên đã mở xong không bị tính.
 const GOLOGIN_SLOT_LAUNCH_TIMEOUT_MS = 180_000;
+// Cổng proxy vừa trả 429/407 (lỗi chung mọi dòng): mọi lượt mở/bù chờ tới `until` mới gọi lại cổng.
+export const proxyGatewayCooldown = { until: 0, detail: '' };
 
 /**
  * Cấp proxy/IP độc quyền, profile riêng và đúng offer cho từng phiên GoLogin; mở song song tối đa 10 phiên; giữ cấu hình khi bù.
@@ -104,6 +107,7 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
    */
   const launchOne = async index => {
     if (autoRefill.stopRequested || isAutomaticRefill && autoRefill.noSlotRefill) return 'stop';
+    if (Date.now() < proxyGatewayCooldown.until) { warnings.push(proxyGatewayCooldown.detail); return 'stop'; }
     if (activeBrowsers.size + reservedSlots.size >= maxAliveBrowsers) return 'stop';
     if (applicationState.limitRunMax > 0 && applicationState.limitRunCount >= applicationState.limitRunMax) {
       warnings.push(`Đã đạt giới hạn ${applicationState.limitRunMax} phiên hoàn tất; dừng mở thêm.`);
@@ -194,16 +198,26 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
     // IP app, Orbita và GoLogin phải khớp nhau 100%; không nhận IP lệch dù chưa dùng
     const adoptDetectedExitIp = () => false;
     while (proxyCursor < proxyLines.length) {
+      // Stop/bỏ slot phải cắt cả vòng chọn proxy, không thì lượt mở cũ vẫn tra và loại hết hàng proxy.
+      if (autoRefill.stopRequested || attempt.abandoned) return 'stop';
       proxyLine = proxyLines[proxyCursor++];
       const candidate = parseProxyLine(proxyLine, proxyCursor, body.proxyType || 'socks5');
       if (!candidate || isProxyCurrentlyActive(candidate)) continue;
       acquireProxyLock(candidate);
+      // Cổng proxy từ chối (429 quá tải, 407 tài khoản bị từ chối) là lỗi chung của mọi dòng cùng cổng, không phải
+      // dòng chết: đã thấy app loại ~50 dòng/phút vì 429 mà không mở được phiên nào.
+      let gatewayRejection = null;
+      const probeRequest = (...args) => requestProxyIpInfo(...args).catch(error => {
+        gatewayRejection = error.message.match(/^HTTP (407|429)\b/)?.[1] ?? gatewayRejection;
+        throw error;
+      });
       // Session proxy mới đổi IP 2 lần trong ~10 giây đầu rồi mới giữ cố định: chờ IP ổn định rồi mới kiểm trùng, khoá,
       // lấy múi giờ và mở Orbita, để IP khoá = IP trình duyệt dùng = IP trang offer thấy. Mỗi lần tra lấy IP kèm múi giờ
       // của chính IP đó (geo.myip.link); dịch vụ đó lỗi thì tra IP thường.
       const stable = await waitForStableProxyIp(candidate, async () => {
-        const geo = await fetchProxyGeo(candidate).catch(() => null);
+        const geo = await fetchProxyGeo(candidate, probeRequest).catch(() => null);
         if (geo?.ip) return { ip: geo.ip, geo };
+        if (gatewayRejection) return null;
         const ip = await checkProxyExitIp(candidate);
         return ip ? { ip, geo: null } : null;
       });
@@ -211,6 +225,17 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
       const candidateGeo = Promise.resolve(stable?.geo || null);
       if (!isUsableExitIp(candidateIp)) {
         releaseProxyLock(candidate);
+        if (!stable && gatewayRejection) {
+          // Giữ nguyên hàng proxy, dừng lượt và nghỉ gọi cổng: vòng tự bù thử lại mỗi ~5 giây, gọi tiếp chỉ giữ cổng ở 429.
+          const is429 = gatewayRejection === '429';
+          proxyGatewayCooldown.until = Date.now() + (is429 ? 30_000 : 60_000);
+          proxyGatewayCooldown.detail = is429
+            ? 'Cổng proxy báo quá nhiều yêu cầu (HTTP 429); giữ nguyên hàng proxy, tạm nghỉ 30 giây rồi thử lại.'
+            : 'Cổng proxy từ chối xác thực (HTTP 407); giữ nguyên hàng proxy, kiểm tra Sub-user/lưu lượng trên 711proxy. Tạm nghỉ 60 giây rồi thử lại.';
+          console.warn(`[GoLogin] Slot ${slot}: ${proxyGatewayCooldown.detail}`);
+          warnings.push(`Slot ${slot}: ${proxyGatewayCooldown.detail}`);
+          return 'stop';
+        }
         // Proxy chết hoặc IP không ổn định thì bỏ hẳn; IP trùng/đang dùng thì giữ dòng (offer khác vẫn có thể dùng).
         if (!stable) await retireProxyLine(proxyLine);
         continue;
@@ -270,6 +295,9 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
       if (!session) {
         await closeRelay();
         await writeUsage(usageKey, entry => keepOutcome(entry, { status: 'failed', reason: 'Đã dừng khi đang khởi tạo', completedAt: new Date().toISOString() }));
+        // Phiên tự dừng lúc khởi tạo (vd. offer 2615 mở sai trang đích): dòng giữ session cố định nên để lại hàng thì
+        // lượt bù sau lấy lại đúng dòng, cùng IP, lỗi y hệt (đã thấy một slot lặp ~25 giây/lần). Stop thì giữ dòng.
+        if (!autoRefill.stopRequested) await retireProxyLine(proxyLine);
         return;
       }
       await writeUsage(usageKey, entry => keepOutcome(entry, { status: 'success', exitIp, time: new Date().toISOString() }));

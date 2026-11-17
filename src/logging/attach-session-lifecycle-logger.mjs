@@ -5,6 +5,7 @@ import { limitSessionEvents } from './recorder/limit-session-events.mjs';
 import { syncBrowserLogSessionMetadata } from './browser-logs/sync-session-metadata.mjs';
 
 const lifecycleTypes = new Set([
+  'obscura_starting', 'obscura_start_failed', 'obscura_started', 'obscura_cdp_disconnected', 'obscura_connection_restored', 'obscura_reconnect_failed',
   'adsmith_loading_timeout_reload', 'adsmith_loading_reload_failed', 'iframe_load_exhausted',
   'gologin_process_exited', 'gologin_starting', 'gologin_started', 'gologin_device_detected', 'gologin_close_requested', 'gologin_cdp_disconnected', 'gologin_connection_restored', 'gologin_reconnect_failed', 'window_visibility_error',
   'gologin_start_failed', 'gologin_profile_stop_failed', 'gologin_profile_deleted', 'gologin_profile_delete_failed', 'gologin_exit_ip_changed', 'gologin_device_error', 'session_exit_ip_observed', 'slot_launch_timeout', 'max_run_timeout', 'gologin_geo_restart', 'gologin_geo_unverified', 'lead_check_targets', 'lead_ip_resolved', 'lead_confirmed', 'lead_observed', 'lead_failed', 'lead_ip_mismatch_closed',
@@ -14,6 +15,7 @@ const lifecycleTypes = new Set([
   'sub_offer_tab_closed', 'thankyou_tab_closed', 'duplicate_tab_closed', 'excluded_tab_closed', 'tab_limit_closed',
   'stuck_page_reload', 'stuck_page_reload_exhausted', 'stuck_page_reload_failed',
   'sweepstakes_sub_tab_timeout', 'sweepstakes_completed', 'lead_sub_offers_finished', 'slot_launch_abandoned_stop',
+  'offer_2615_invalid_landing',
 ]);
 const browserCloseTypes = new Set([
   'gologin_close_requested',
@@ -21,6 +23,7 @@ const browserCloseTypes = new Set([
   'lead_failed', 'lead_ip_mismatch_closed', 'max_run_timeout', 'manual_browser_closed', 'manual_browser_closed_refill',
   'browser_close_all_requested', 'last_tab_closed_auto', 'thankyou_completed', 'sweepstakes_completed', 'lead_sub_offers_finished',
   'traffic_blocked', 'toffers_duplicate_ip', 'adtrapper_disabled_close', 'adtrapper_stuck_close',
+  'offer_2615_invalid_landing',
 ]);
 
 /**

@@ -24,6 +24,7 @@ import { recordProxyOutcome, sessionLabel } from './record-proxy-outcome.mjs';
 import { getEmptyOfferPageReason } from './get-empty-offer-page-reason.mjs';
 import { isSessionWorkingOnOffer } from './is-session-working-on-offer.mjs';
 import { readSubOfferCloseReason, matchSubOfferCloseReason } from './get-sub-offer-close-reason.mjs';
+import { usesOffer2615CloseRules, finishOffer2615Session } from '../../autofill/offers/2615/session-close/finish-offer2615-session.mjs';
 
 /**
  * Đọc DOM mỗi tab con tối đa mỗi chừng này (giảm tải 2026-11-16): trước đây mỗi giây quét toàn DOM của mọi tab con
@@ -200,6 +201,8 @@ export function watchTrafficBlockedPage(session) {
     try {
       if (blocked || checking || !p || (typeof p.isClosed === 'function' && p.isClosed())) return;
       const u = typeof p.url === 'function' ? p.url() : '';
+      // Offer 2615 có luật đóng phiên riêng: chỉ financialhelpfinder.com/thankyou.php, không áp thankyou chung.
+      if (usesOffer2615CloseRules(session)) { if (isFinancialhelpThankyouUrl(u)) await finishOffer2615Session(session, closeSessionAndRefill); return; }
       if (isFinancialhelpThankyouUrl(u)) { await completeFinancialhelpSession(session, closeSessionAndRefill); return; }
       if (protectConfirmedLeadSession(session)) return;
       if (isThankYouUrl(u)) {
@@ -277,11 +280,16 @@ export function watchTrafficBlockedPage(session) {
         // Đóng tab offer phụ TRƯỚC nhánh bảo vệ phiên có lead: offer phụ chỉ mở sau khi có lead, mà nhánh đó
         // return sớm nên trước đây (log 2026-11-13 slot 2) tab lifepointspanel 404 không bao giờ bị đóng.
         await closeFinishedSubOfferTabs(session, pages);
-        if (await completeFinancialhelpSession(session, closeSessionAndRefill)) return;
-        // Màn card sweepstakes: tab con quá 5 phút thì đóng; hết tab con và hết thẻ thì đóng trình duyệt nhường slot.
-        if (await finishSweepstakesCardSession(session, closeSessionAndRefill)) return;
-        // Phiên có lead: offer con đã đóng hết thì đóng trình duyệt lấy slot mới (người dùng chốt 2026-11-16).
-        if (await finishLeadSessionAfterSubOffers(session, closeSessionAndRefill)) return;
+        if (usesOffer2615CloseRules(session)) {
+          // Offer 2615: luật đóng phiên riêng (src/autofill/offers/2615/session-close), không ăn theo luật offer khác.
+          if (await finishOffer2615Session(session, closeSessionAndRefill)) return;
+        } else {
+          if (await completeFinancialhelpSession(session, closeSessionAndRefill)) return;
+          // Màn card sweepstakes: tab con quá 5 phút thì đóng; hết tab con và hết thẻ thì đóng trình duyệt nhường slot.
+          if (await finishSweepstakesCardSession(session, closeSessionAndRefill)) return;
+          // Phiên có lead: offer con đã đóng hết thì đóng trình duyệt lấy slot mới (người dùng chốt 2026-11-16).
+          if (await finishLeadSessionAfterSubOffers(session, closeSessionAndRefill)) return;
+        }
         if (protectConfirmedLeadSession(session)) {
           for (const page of pages) await recoverConfirmedLeadErrorPage(session, page);
           return;
@@ -296,7 +304,7 @@ export function watchTrafficBlockedPage(session) {
           const currentUrl = typeof page.url === 'function' ? page.url() : '';
           if (isFinancialhelpThankyouUrl(currentUrl)) continue;
           if (isThankYouUrl(currentUrl)) {
-            await handleThankYouClose(page, currentUrl);
+            if (!usesOffer2615CloseRules(session)) await handleThankYouClose(page, currentUrl);
             continue;
           }
 

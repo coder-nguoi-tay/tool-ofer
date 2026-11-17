@@ -1,3 +1,5 @@
+import { pendingObscuraSessions } from '../../obscura-engine/sessions.mjs';
+import { activeBrowsers } from '../../browser/sessions.mjs';
 import { shutdownGoLoginSessions } from './shutdown-gologin-sessions.mjs';
 import { savePersistedBrowserLogs } from '../../logging/browser-logs.mjs';
 
@@ -9,11 +11,15 @@ let shutdown = null;
  * @param {object|null} server Máy chủ HTTP cần đóng để lần mở app sau dùng được cổng ngay.
  * @return {Promise<void>} Kết thúc bằng process.exit(0).
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-17
  */
 export function shutdownAppGracefully(reason, server = null) {
   shutdown ||= (async () => {
     server?.close();
+    await Promise.allSettled([...new Set([...activeBrowsers, ...pendingObscuraSessions])].filter(session => session.isObscura).map(session => {
+      session.suppressAutoRefill = true;
+      return session.close();
+    }));
     if (process.platform === 'win32') {
       const { closeActiveBrowsers } = await import('../../browser/actions/close-active-browsers.mjs');
       await Promise.race([closeActiveBrowsers().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10000))]);

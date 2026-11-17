@@ -3,6 +3,7 @@ import { activeBrowsers } from '../sessions.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
 import { lastLaunchSettingsPath } from '../../runtime/constants/last-launch-settings-path.mjs';
 import { launchGoLoginBrowsers } from './launch-gologin-browsers.mjs';
+import { launchObscuraBrowsers } from './launch-obscura-browsers.mjs';
 import { launchRequestedBrowsers } from './launch-requested-browsers.mjs';
 import { maxAliveBrowsers } from '../../runtime/constants/max-alive-browsers.mjs';
 import { queueAutomaticRefill } from '../../refill/actions/queue-automatic-refill.mjs';
@@ -30,8 +31,12 @@ export async function launchUserRequestedBrowsers(requestBody) {
   if (body.scheduleStop && body.scheduleStop.enabled && body.scheduleStop.time) {
     scheduleAutoStop(body.scheduleStop.time, closeActiveBrowsers);
   }
-  const isGoLogin = body.useGoLogin === true || String(body.browserMode).toLowerCase() === 'gologin';
-  if (!isGoLogin) {
+  const mode = String(body.browserMode || '').toLowerCase();
+  const isObscura = body.useObscura === true || mode === 'obscura';
+  const isGoLogin = !isObscura && (body.useGoLogin === true || mode === 'gologin');
+  if (isObscura) {
+    body.browserMode = 'Obscura';
+  } else if (!isGoLogin) {
     body.browserMode = 'Chrome';
   } else {
     body.browserMode = 'GoLogin';
@@ -46,13 +51,23 @@ export async function launchUserRequestedBrowsers(requestBody) {
     savedAt: new Date().toISOString()
   }), 'utf8').catch(() => {});
   const activeBeforeLaunch = activeBrowsers.size;
-  const result = isGoLogin ? await launchGoLoginBrowsers(JSON.stringify(body)) : await launchRequestedBrowsers(requestBody);
+  let result;
+  if (isObscura) {
+    result = await launchObscuraBrowsers(JSON.stringify(body));
+  } else if (isGoLogin) {
+    result = await launchGoLoginBrowsers(JSON.stringify(body));
+  } else {
+    result = await launchRequestedBrowsers(requestBody);
+  }
   const countParam = body.requestedCount !== undefined && body.requestedCount !== '' ? body.requestedCount : body.concurrency;
   const requestedCount = countParam === undefined || countParam === '' ? Math.min(maxAliveBrowsers, selectProxies(body.proxyList, body.proxyType ?? 'socks5', '').length) : Number(countParam);
 
   // Luôn lưu cấu hình tự bù khi người dùng bấm Start (kể cả lượt đầu đang thử hoặc chưa kịp mở cửa sổ nào)
   autoRefill.settings = {
-    browserMode: isGoLogin ? 'GoLogin' : 'Chrome',
+    browserMode: isObscura ? 'Obscura' : isGoLogin ? 'GoLogin' : 'Chrome',
+    useObscura: Boolean(isObscura),
+    multiTab: body.multiTab !== false,
+    runMode: body.runMode,
     useGoLogin: Boolean(isGoLogin),
     gologinDevices: isGoLogin ? body.gologinDevices ?? autoRefill.settings?.gologinDevices : undefined,
     proxyList: body.proxyList,

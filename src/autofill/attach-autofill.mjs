@@ -6,6 +6,8 @@ import { fillPageForms } from './fill-page-forms.mjs';
 import { startContinuousAgent } from '../continuous-agent/index.mjs';
 import { runModeState } from '../runtime/constants/run-mode-state.mjs';
 import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
+import { isOffer2615Configured } from './offers/2615/match-offer.mjs';
+import { attachAutofill as attachOffer2615Autofill } from './offers/2615/solver/attach-autofill.mjs';
 
 /**
  * Gắn con trỏ cho mọi tab rồi điều phối tự điền, gửi form và kiểm tra kết quả cho phiên.
@@ -19,6 +21,12 @@ import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
  * @since 2026-11-12
  */
 function attachAutofill(context, records, allowedOrigin, session = {}, options = {}) {
+  // Offer 2615 chạy bản giải riêng (src/autofill/offers/2615/solver, người dùng chốt 2026-11-17): sửa giải chung không
+  // ảnh hưởng 2615 và ngược lại. Cách giải "generic" vẫn ép chạy giải chung.
+  if (isOffer2615Configured(session)) {
+    session.solverPipeline = '2615';
+    return attachOffer2615Autofill(context, records, allowedOrigin, session, options);
+  }
   protectConfirmedLeadSession(session);
   context.on('page', page => configurePageMousePolicy(page, session));
   for (const page of context.pages()) configurePageMousePolicy(page, session);

@@ -1,10 +1,10 @@
 /**
- * Mở phiên Chrome hoặc GoLogin theo lựa chọn và lịch chạy trên giao diện.
+ * Mở phiên theo lựa chọn/lịch chạy; Obscura headless luôn chuyển sang preview để điều khiển.
  * @param {object} options Tùy chọn thực thi lịch hẹn và chỉ số offer được chọn.
  * @return {Promise<void>} Hoàn tất khi API khởi chạy trả kết quả.
  * @throws {Error} Khi giao diện không thể gửi yêu cầu mở trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-17
  */
 async function handleStart(options = {}) {
       const btnStart = document.getElementById('btnStart');
@@ -107,8 +107,14 @@ async function handleStart(options = {}) {
         // "Chạy trong app": đọc trạng thái checkbox thật (bật = chạy ngầm thu nhỏ, tắt = mở cửa sổ Desktop thường)
         const runInApp = Boolean(document.getElementById('cbxRunInApp')?.checked);
 
-        document.getElementById('lbStatus').textContent = 'Starting Chrome...';
-        if (hideUntilTarget || hideUntilLead) {
+        const useObscura = Boolean(document.getElementById('cbxObscura')?.checked);
+        const useGoLogin = !useObscura && Boolean(document.getElementById('cbxGoLogin')?.checked);
+        const browserMode = useObscura ? 'Obscura' : (useGoLogin ? 'GoLogin' : 'Chrome');
+
+        document.getElementById('lbStatus').textContent = useObscura
+          ? 'Starting Obscura...'
+          : (useGoLogin ? 'Starting GoLogin...' : 'Starting Chrome...');
+        if (useObscura || hideUntilTarget || hideUntilLead) {
           switchTab('ScreenView');
         } else {
           switchTab('tabRunning');
@@ -166,9 +172,10 @@ async function handleStart(options = {}) {
                 hideUntilLead,
                 runInApp,
                 screenPreviewOnly: runInApp,
-                useGoLogin: Boolean(document.getElementById('cbxGoLogin')?.checked),
-                gologinDevices: document.getElementById('cbxGoLogin')?.checked && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,
-                browserMode: Boolean(document.getElementById('cbxGoLogin')?.checked) ? 'GoLogin' : 'Chrome',
+                useObscura,
+                useGoLogin,
+                gologinDevices: useGoLogin && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,
+                browserMode,
                 dataSaver,
                 offerSolver: document.getElementById('cbbOfferSolver')?.value || 'auto',
                 scheduleStop: typeof getScheduleStopSettings === 'function' ? getScheduleStopSettings() : null,
@@ -226,9 +233,10 @@ async function handleStart(options = {}) {
               screenPreviewOnly: runInApp,
               runMode: mode,
               multiTab: document.getElementById('cbxMultiTab') ? document.getElementById('cbxMultiTab').checked : true,
-              useGoLogin: Boolean(document.getElementById('cbxGoLogin')?.checked),
-                gologinDevices: document.getElementById('cbxGoLogin')?.checked && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,
-              browserMode: Boolean(document.getElementById('cbxGoLogin')?.checked) ? 'GoLogin' : 'Chrome',
+              useObscura,
+              useGoLogin,
+              gologinDevices: useGoLogin && typeof getGoLoginDeviceChoices === 'function' ? getGoLoginDeviceChoices() : undefined,
+              browserMode,
               dataSaver,
               offerSolver: document.getElementById('cbbOfferSolver')?.value || 'auto',
               scheduleStop: typeof getScheduleStopSettings === 'function' ? getScheduleStopSettings() : null,

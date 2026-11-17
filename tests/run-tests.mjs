@@ -16,6 +16,9 @@ import { homedir } from 'node:os';
  * @since 2026-11-10
  */
 const TEST_FILES = [
+  'obscura-engine.test.mjs',
+  'obscura-runtime.test.mjs',
+  'obscura-full-flow-e2e.test.mjs',
   'gologin-ip-display.test.mjs',
   'windows-server.test.mjs',
   'offer-2615.test.mjs',
@@ -32,6 +35,7 @@ const TEST_FILES = [
   'adsmith-processing-stuck.test.mjs',
   'sweepstakes-card-finish.test.mjs',
   'lead-sub-offers-finish.test.mjs',
+  'offer-2615-solver.test.mjs',
   'addept-offerwall-once.test.mjs',
   'stop-after-lead.test.mjs',
   'desktop-lead-check-options.test.mjs',

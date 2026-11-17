@@ -9,7 +9,7 @@ import { queueAutomaticRefill } from '../../../refill/actions/queue-automatic-re
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-17
  */
 export async function handlePostBrowserClose(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/browser/close/')) {
@@ -28,6 +28,14 @@ export async function handlePostBrowserClose(request, response) {
         respondWithJson(response, 500, { error: session._gologinProfileStopped ? 'Orbita đã dừng nhưng chưa xóa được profile trên GoLogin. Kiểm tra nhật ký GoLogin.' : 'Chưa dừng được Orbita; giữ profile và khóa IP/proxy để tránh xóa phiên còn chạy.' });
         return true;
       }
+    } else if (session.isObscura || session.engine === 'obscura') {
+      try { await session.close(); }
+      catch {
+        respondWithJson(response, 500, { error: 'Obscura chưa dừng; giữ phiên và khóa proxy/IP.' });
+        return true;
+      }
+      activeBrowsers.delete(session);
+      if (refill) queueAutomaticRefill();
     } else {
       await session.browser?.close?.().catch(() => {});
       if (refill) queueAutomaticRefill();

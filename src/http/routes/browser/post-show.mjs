@@ -7,7 +7,7 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-17
  */
 export async function handlePostBrowserShow(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/browser/show/')) {
@@ -17,6 +17,10 @@ export async function handlePostBrowserShow(request, response) {
       respondWithJson(response, 404, {
         error: `Không tìm thấy luồng Slot ${slot}`
       });
+      return true;
+    }
+    if (session.supportsNativeWindow === false) {
+      respondWithJson(response, 409, { error: 'Obscura chạy trong app; hãy mở Screen View.' });
       return true;
     }
     try {

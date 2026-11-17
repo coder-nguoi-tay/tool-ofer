@@ -444,3 +444,19 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
   trên PATH hệ thống. Kiểm tra Telegram, remote agent, Mini App và tunnel khi dùng.
 - Đóng cửa sổ app khi có phiên thử: backend, browser thuộc app và relay phải dừng;
   mở lại không chiếm cổng cũ hoặc tự chạy phiên. Thử lỗi mạng/force quit riêng.
+
+## Obscura: kiểm tra tính năng trên máy đích
+
+- Build native trên đúng OS; cài bundle sạch, xác nhận không cần Rust/Node trên máy người dùng và không có Config/Settings trong gói.
+- Start nhiều slot bằng HTTP/SOCKS5 có xác thực. Hết proxy phải báo thiếu; không được mở trực tiếp. Hai proxy cùng IP không được chạy đồng thời. IP app/trong browser và geo/timezone phải khớp trước offer.
+- Chạy 2–4 offer, thử `multiTab=false`, strategy manual/consent/skip và chọn solver generic/2615. Kiểm tra slot bù giữ offer và các cài đặt Start.
+- Kiểm tra input/click/select/checkbox trang chính, iframe và iframe lồng nhau. Mỗi tab nhận record riêng; email phiên thắng email của record; record/email bị từ chối được thay đúng queue.
+- Kiểm tra autofill thật, AI khi kẹt, script/captcha, Check Lead 20/30 giây, không tự đóng khi cấu hình giữ mở, theo dõi lead thụ động và dừng tự động sau confirmed lead. Dùng tài khoản/dữ liệu QA, không dùng phiên thật để smoke test.
+- Kiểm tra Complete text, Giới hạn, delay Start/Stop/choice, Chờ tối đa, popup rác, tab lỗi, trần tab và bảo vệ IP có lead.
+- Screen View: ảnh/stream, đổi tab, input, đóng tab/slot. Nút Desktop của Obscura phải hướng về Screen View hoặc thông báo không hỗ trợ, không báo cửa sổ đã hiện giả.
+- Ngắt CDP khi đang điền rồi nối lại: URL, DOM/giá trị nhập, record và lead phải giữ nguyên. Không mở phiên bù khi process cũ còn sống. Thử Stop ngay lúc kiểm IP và Stop rồi Start lại; lượt cũ không được mở muộn.
+- Đóng slot/tab cuối/Đóng tất cả/thoát app: PID đúng phiên phải kết thúc, relay và stream được nhả, chỉ bù theo chính sách. Không kill engine/process thuộc app khác.
+- Remote worker quảng bá Obscura: task giữ đúng engine/offer/config. Worker không có engine không được nhận task Obscura.
+- So sánh băng thông với proxy provider; xác nhận Data Saver giữ captcha/ảnh/form API. Chế độ access không tạo HTML/snapshot; full/debug giữ cùng recording qua reconnect.
+
+- Regression preview Obscura iPhone/iPad: bỏ chọn Chạy trong app và hai ô ẩn chờ; Start phải vẫn có slot trong bảng/Screen View dù `chromeVersion` rỗng. Obscura xem trong app; đóng phiên phải bỏ đúng ô. Khi slot cũ Chrome được tái dùng bởi Obscura, nút điều khiển chuyển sang Trong app và mở Screen View.

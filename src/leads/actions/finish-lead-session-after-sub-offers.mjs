@@ -61,7 +61,7 @@ export async function finishLeadSessionAfterSubOffers(session, closeSession, now
     if (state.stableUrl !== url) { state.stableUrl = url; state.stableSince = null; }
     state.stableSince ??= now;
     if (now - state.stableSince < LEAD_FINISH_STABLE_MS) return false;
-    session.addBrowserLog?.({ type: 'lead_sub_offers_finished', detail: `IP ${session.exitIp ?? 'chưa rõ'} đã có lead và các offer con đã đóng hết; đóng trình duyệt để lấy slot mới.` });
+    session.addBrowserLog?.({ type: 'lead_sub_offers_finished', detail: `IP ${session.exitIp ?? 'chưa rõ'} đã có lead và các offer con đã đóng hết; đóng trình duyệt để lấy slot mới. Trang chính: ${url}` });
     await closeSession({ completedFinancialFlow: true });
     return session.isClosed === true;
   } catch { return false; }

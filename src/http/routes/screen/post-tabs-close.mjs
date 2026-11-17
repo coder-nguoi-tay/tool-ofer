@@ -54,6 +54,9 @@ export async function handlePostScreenTabsClose(request, response) {
         if (session.isGoLogin && session.closeGoLoginSession) {
           await session.closeGoLoginSession();
           if (!session._gologinProfileStopped || session._gologinProfileDeleted !== true) throw new Error('Chưa hoàn tất dừng/xóa profile GoLogin; kiểm tra nhật ký GoLogin.');
+        } else if (session.isObscura || session.engine === 'obscura') {
+          await session.close?.().catch(() => {});
+          activeBrowsers.delete(session);
         } else await session.browser?.close?.().catch(() => {});
         respondWithJson(response, 200, {
           ok: true,

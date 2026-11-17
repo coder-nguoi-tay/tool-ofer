@@ -35,6 +35,9 @@ jobs:
 
       # npm ci cài đúng theo package-lock.json để CI không lệch bản local.
       # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: test đều chạy với mock, không mở trình duyệt thật.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Obscura native
+        run: node scripts/build-obscura.mjs
       - name: Install dependencies
         run: npm ci
         env:

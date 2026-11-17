@@ -10,10 +10,11 @@ import { requestManagedProfileStop } from '../../browser/actions/request-managed
  *
  * @return {Promise<void>} Hoàn tất sau khi dọn trạng thái phiên.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-17
  */
 export async function pruneDeadManagedSessions() {
   for (const s of [...activeBrowsers]) {
+    if (s.isObscuraProcessAlive?.()) continue;
     if (s.isGoLogin && s.isGoLoginProcessAlive?.()) continue;
     if (s.isManagedProfile && s.profileId && !s._cdpBrowser?.isConnected()) {
       if (s._monitorInterval) {

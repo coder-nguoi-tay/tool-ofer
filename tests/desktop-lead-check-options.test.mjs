@@ -131,3 +131,18 @@ test('hẹn giờ app chính: tới giờ Offer 2 chỉ chạy link Offer 2 bằ
   await manual.context.handleStart();
   assert.deepEqual(JSON.parse(JSON.stringify(manual.requests.find(request => request.path === '/launch').body.offerUrls)), ['https://a.test/1', 'https://a.test/2']);
 });
+
+
+for (const mode of ['parallel', 'sequential']) {
+  test(`Obscura ${mode}: Start tự mở preview dù không tích Chạy trong app; Chrome giữ bảng chạy`, async () => {
+    for (const useObscura of [true, false]) {
+      const { context, getElement } = createDashboard(mode);
+      const selectedTabs = [];
+      context.switchTab = tab => selectedTabs.push(tab);
+      getElement('cbxObscura').checked = useObscura;
+      getElement('cbxRunInApp').checked = false;
+      await context.handleStart();
+      assert.deepEqual(selectedTabs, [useObscura ? 'ScreenView' : 'tabRunning']);
+    }
+  });
+}

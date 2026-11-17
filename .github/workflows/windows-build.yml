@@ -16,6 +16,9 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Obscura native
+        run: node scripts/build-obscura.mjs
       - name: Cài công cụ đóng gói
         run: npm ci
         env:

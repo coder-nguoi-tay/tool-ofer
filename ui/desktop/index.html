@@ -387,6 +387,12 @@
                     <span class="option-pill-text"><span class="option-pill-icon">🚀</span> GoLogin Orbita</span>
                   </label>
 
+                  <label class="option-pill" id="pillObscura" title="Sử dụng trình duyệt headless Obscura V8 siêu nhẹ (~30MB RAM, khởi động 0.5ms) tích hợp Anti-Detect.">
+                    <input type="checkbox" id="cbxObscura"
+                      onchange="syncObscuraSetting(this.checked); syncOptionPills();">
+                    <span class="option-pill-text"><span class="option-pill-icon">⚡</span> Obscura V8</span>
+                  </label>
+
                   <label class="option-pill" id="pillChoiceDelay"
                     title="Tăng thời gian delay suy nghĩ trước khi chọn đáp án / khảo sát (mô phỏng người thật đọc câu hỏi, tránh bị phát hiện bot do chọn quá nhanh).">
                     <input type="checkbox" id="cbxChoiceDelayPill"

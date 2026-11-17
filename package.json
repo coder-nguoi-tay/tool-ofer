@@ -10,7 +10,8 @@
     "start": "node app.mjs",
     "test": "node tests/run-tests.mjs",
     "relay": "node relay.mjs",
-    "build:windows": "node scripts/build-windows.mjs"
+    "build:windows": "node scripts/build-windows.mjs",
+    "build:obscura": "node scripts/build-obscura.mjs"
   },
   "dependencies": {
     "@openai/codex-sdk": "^0.163.0",

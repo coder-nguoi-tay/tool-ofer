@@ -43,7 +43,7 @@ test('phiên có lead: offer con làm xong và đóng hết thì đóng trình d
   assert.equal(await finishLeadSessionAfterSubOffers(session, closeSession, SUB_OFFER_MIN_LIFETIME_MS + 1000 + LEAD_FINISH_STABLE_MS, deps), true);
   assert.equal(closes.length, 1);
   assert.equal(closes[0].completedFinancialFlow, true, 'đóng cả IP có lead để lấy slot mới');
-  assert.ok(logs.some(entry => entry.type === 'lead_sub_offers_finished'));
+  assert.ok(logs.some(entry => entry.type === 'lead_sub_offers_finished' && entry.detail.includes('https://offer.test/path1d.php')), 'log ghi URL trang chính');
 });
 
 test('chưa từng có offer con, hoặc offer con chỉ chớp mở rồi đóng ngay (bị chặn/trùng) thì không đóng trình duyệt', async () => {
@@ -186,4 +186,42 @@ test('Chromium: đếm offer Addept chưa bấm trong mọi iframe offerwall c�
   const plain = await context.newPage();
   await plain.goto('https://offer.test/no-wall');
   assert.equal(await countPendingAddeptOffers(plain), 0, 'trang không có offerwall');
+});
+
+test('tích hợp: phiên lead offer 2615 không bị luật chung (lead + hết offer con, thankyou chung) đóng; chỉ thankyou.php của FinancialHelpFinder', async t => {
+  const { watchTrafficBlockedPage } = await import('../src/leads/actions/watch-traffic-blocked-page.mjs');
+  const { captureLeadWatcherTicks, createLeadTestSession } = await import('./helpers/lead-session-fixture.mjs');
+  const { recordLeadIpStats, leadIpStatsMap } = await import('../lead-check.mjs');
+  const { autoRefill } = await import('../src/runtime/constants/auto-refill.mjs');
+  const previous = { enabled: autoRefill.enabled, stopRequested: autoRefill.stopRequested };
+  autoRefill.enabled = false;
+  t.after(() => { Object.assign(autoRefill, previous); leadIpStatsMap.clear(); });
+  const ticks = captureLeadWatcherTicks(t);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const ip = '198.51.100.62';
+  const { session, page, counters, browser } = createLeadTestSession(ip);
+  session.websiteUrl = 'https://toffers.top/click/?key=1&offer_id=2615&aff_id=x';
+  page.currentUrl = 'https://blog.financialhelpfinder.com/path1d.php';
+  page.frames = () => [page];
+  page.evaluate = async callback => callback?.name === 'detectOfferContentInPage' ? { loading: false, challenge: false, hasForm: false, hasChoices: false, hasFormProgress: false, hasOfferEntry: false, hasOfferWork: false } : 0;
+  recordLeadIpStats({ ip });
+  // Popup rác (searchcactus) sống quá 10 giây rồi đóng: trước đây được tính là "offer con đã làm" và đóng cả phiên.
+  const popup = await browser.newPage();
+  popup.currentUrl = 'https://www.searchcactus.com/publisher/landing';
+  const logs = [];
+  session.addBrowserLog = entry => logs.push(entry);
+  watchTrafficBlockedPage(session);
+  const run = async seconds => {
+    for (let i = 0; i < seconds; i++) {
+      now += 1000;
+      for (const tick of ticks) tick();
+      for (let k = 0; k < 30; k++) await new Promise(resolve => setImmediate(resolve));
+    }
+  };
+  await run(15);
+  await popup.close();
+  await run(40);
+  assert.ok(!logs.some(entry => entry.type === 'lead_sub_offers_finished'), `log: ${logs.map(entry => entry.type).join(', ')}`);
+  assert.equal(counters.browserCloses, 0, 'phiên lead 2615 chưa tới thankyou.php: giữ trình duyệt');
 });

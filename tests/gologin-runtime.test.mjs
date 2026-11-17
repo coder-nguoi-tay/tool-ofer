@@ -229,7 +229,7 @@ test('mở đủ các URL duy nhất, gán record và session chuột riêng cho
 
 test('autofill nhận đúng record/session/options; chỉ check lead sau email hợp lệ và có tick', async () => {
   const calls = [], checks = [];
-  const { attachGoLoginAutofill } = await loadFixtureModule('src/browser/gologin/attach-autofill.mjs', {
+  const { attachSessionAutofill: attachGoLoginAutofill } = await loadFixtureModule('src/browser/actions/attach-session-autofill.mjs', {
     attachAutofill: (...args) => calls.push(args), startLeadVerification: (...args) => { checks.push(args); }
   });
   const session = { browser: {}, mainPage: { _assignedRecord: { email: 'fixture@example.invalid' } }, websiteUrl: 'https://offer.test/path', offerNumber: 2 };
@@ -845,7 +845,7 @@ test('GoLogin nhận ô Chờ tối đa (phút) để tự tắt phiên chạy q
 
 test('GoLogin như Chrome: tiến độ lead sau khi có lead, AI bỏ qua trang không có form, AI dùng email của phiên', async () => {
   const calls = [], progress = [], ai = [];
-  const { attachGoLoginAutofill } = await loadFixtureModule('src/browser/gologin/attach-autofill.mjs', {
+  const { attachSessionAutofill: attachGoLoginAutofill } = await loadFixtureModule('src/browser/actions/attach-session-autofill.mjs', {
     attachAutofill: (...args) => calls.push(args), startLeadVerification: () => {},
     recordConfirmedLeadProgress: (...args) => progress.push(args),
     runAiAssist: async (page, record) => { ai.push(record); }, resumeAutofillAfterAi: () => {}
@@ -1112,7 +1112,60 @@ test('dòng proxy chết hoặc mở lỗi bị chuyển sang đã dùng (không
       openGoLoginBrowser: async () => assert.fail('không được mở') });
     await limited.launchGoLoginBrowsers(JSON.stringify({ concurrency: 1, websiteUrl: 'https://offer.test/' }));
     assert.deepEqual([...proxyQueue.available], ['127.0.0.1:9603'], 'lỗi hạn mức profile không phải lỗi proxy: giữ dòng');
+    activeExitIpLocks.clear(); activeProxyLocks.clear();
+    const stoppedInSetup = await loadFixtureModule('src/browser/actions/launch-gologin-browsers.mjs', { ...base,
+      waitForStableProxyIp: async proxy => ({ ip: `192.0.2.${proxy.server.slice(-2)}`, geo: null }),
+      checkProxyExitIp: async () => null,
+      openGoLoginBrowser: async () => null });
+    await stoppedInSetup.launchGoLoginBrowsers(JSON.stringify({ concurrency: 1, websiteUrl: 'https://offer.test/' }));
+    assert.deepEqual([...proxyQueue.available], [], 'phiên tự dừng lúc khởi tạo (sai trang đích): bỏ dòng, không lặp lại cùng IP');
   } finally {
+    proxyQueue.available.splice(0, Infinity, ...saved.available);
+    proxyQueue.used.splice(0, Infinity, ...saved.used);
+    activeBrowsers.clear(); activeExitIpLocks.clear(); activeProxyLocks.clear();
+  }
+});
+
+test('cổng proxy trả 429/407 thì giữ nguyên hàng proxy và dừng lượt; Stop cắt vòng chọn proxy', async () => {
+  const { proxyQueue } = await import('../src/runtime/constants/proxy-queue.mjs');
+  const saved = { available: [...proxyQueue.available], used: [...proxyQueue.used] };
+  const lines = ['127.0.0.1:9701', '127.0.0.1:9702', '127.0.0.1:9703'];
+  let probes = 0, stopDuringProbe = false;
+  try {
+    for (const status of ['429', '407']) {
+      proxyQueue.available.splice(0, Infinity, ...lines);
+      proxyQueue.used.splice(0, Infinity);
+      probes = 0;
+      const { launchGoLoginBrowsers, proxyGatewayCooldown } = await loadFixtureModule('src/browser/actions/launch-gologin-browsers.mjs', {
+        waitForStableProxyIp: async (proxy, probe) => probe(),
+        fetchProxyGeo: async (proxy, request) => request(proxy).then(() => null, () => null),
+        requestProxyIpInfo: async () => {
+          probes++;
+          if (stopDuringProbe) { autoRefill.stopRequested = true; throw new Error('dead'); }
+          throw new Error(`HTTP ${status}`);
+        },
+        checkProxyExitIp: async () => stopDuringProbe ? null : assert.fail('cổng đã từ chối thì không tra lại'),
+        queueAutomaticRefill: () => {}, pickGoLoginDeviceHardware: async () => null,
+        readGoLoginConfig: async () => ({ token: 'fixture-token' }), saveAutoRefillSettings: async () => {}, saveProxyQueue: async () => {},
+        readProxyUsageHistory: async () => ({ version: 1, proxies: {} }), persistProxyUsageHistory: async () => {},
+        openGoLoginBrowser: async () => assert.fail('không được mở')
+      });
+      const result = await launchGoLoginBrowsers(JSON.stringify({ concurrency: 3, websiteUrl: 'https://offer.test/' }));
+      assert.deepEqual([...proxyQueue.used], [], `HTTP ${status}: không loại dòng nào`);
+      assert.deepEqual([...proxyQueue.available], lines);
+      assert.match(result.warnings.join(' '), new RegExp(`HTTP ${status}`));
+      probes = 0;
+      const cooling = await launchGoLoginBrowsers(JSON.stringify({ concurrency: 1, websiteUrl: 'https://offer.test/' }), true);
+      assert.equal(probes, 0, 'đang nghỉ sau 429/407 thì lượt bù không gọi cổng');
+      assert.match(cooling.warnings.join(' '), new RegExp(`HTTP ${status}`));
+      proxyGatewayCooldown.until = 0;
+      stopDuringProbe = true; probes = 0;
+      await launchGoLoginBrowsers(JSON.stringify({ concurrency: 1, websiteUrl: 'https://offer.test/' }));
+      assert.equal(probes, 1, 'Stop giữa lúc tra proxy thì không tra dòng tiếp theo');
+      stopDuringProbe = false; autoRefill.stopRequested = false;
+    }
+  } finally {
+    autoRefill.stopRequested = false;
     proxyQueue.available.splice(0, Infinity, ...saved.available);
     proxyQueue.used.splice(0, Infinity, ...saved.used);
     activeBrowsers.clear(); activeExitIpLocks.clear(); activeProxyLocks.clear();

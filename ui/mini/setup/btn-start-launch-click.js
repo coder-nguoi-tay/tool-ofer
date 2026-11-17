@@ -68,7 +68,9 @@
       const iPad = document.getElementById('chkIpad').checked;
       // Anti-fingerprint và biến thể thiết bị GoLogin lấy từ tab Cài đặt (cùng giá trị app chính gửi).
       const overrides = typeof miniSetGetLaunchOverrides === 'function' ? miniSetGetLaunchOverrides() : {};
-      const useGoLogin = currentBrowserMode === 'GoLogin';
+      const useObscura = currentBrowserMode === 'Obscura';
+      const useGoLogin = !useObscura && currentBrowserMode === 'GoLogin';
+      const browserMode = useObscura ? 'Obscura' : (useGoLogin ? 'GoLogin' : 'Chrome');
 
       // Khóa và làm mờ nút Start ngay khi bắt đầu bấm
       if (btnStart) {
@@ -87,7 +89,8 @@
         }
         const streamCount = Math.max(concurrency, offerUrls.length >= 2 ? offerUrls.length : 1);
         const settings = {
-          browserMode: useGoLogin ? 'GoLogin' : 'Chrome',
+          browserMode,
+          useObscura,
           useGoLogin,
           ...(useGoLogin && overrides.gologinDevices ? { gologinDevices: overrides.gologinDevices } : {}),
           websiteUrl,

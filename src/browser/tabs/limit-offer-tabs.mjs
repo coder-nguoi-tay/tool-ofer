@@ -1,5 +1,7 @@
 import { MAX_OFFER_TABS } from '../../runtime/constants/max-offer-tabs.mjs';
 import { closePageBestEffort } from '../../proxy/actions/close-page-best-effort.mjs';
+import { isOffer2615Configured } from '../../autofill/offers/2615/match-offer.mjs';
+import { OFFER_2615_MAX_TABS } from '../../autofill/offers/2615/limits.mjs';
 
 const attached = new WeakSet();
 const closing = new WeakSet();
@@ -14,7 +16,8 @@ const closing = new WeakSet();
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-14
  */
-export function limitOfferTabs(context, session, maxTabs = MAX_OFFER_TABS) {
+// Offer 2615 có trần riêng 2 tab (src/autofill/offers/2615/limits.mjs); offer khác giữ MAX_OFFER_TABS.
+export function limitOfferTabs(context, session, maxTabs = isOffer2615Configured(session) ? OFFER_2615_MAX_TABS : MAX_OFFER_TABS) {
   if (attached.has(context)) return;
   attached.add(context);
   const limit = Math.max(1, Math.floor(Number(maxTabs) || MAX_OFFER_TABS));

@@ -4,11 +4,12 @@ import { attachBrowserLogger } from '../actions/attach-browser-logger.mjs';
 /**
  * Tạo nhật ký trước SDK/CDP/IP; relay giữ cùng một recording khi kết nối CDP được thay thế.
  * @param {object} session Metadata phiên chưa cần có browser.
+ * @param {string} provider Tên engine được ghi nhận trong mốc khởi tạo.
  * @return {void} Gắn callback log, bind context và chốt recording đúng một lần.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-17
  */
-export function startGoLoginSessionRecording(session) {
+export function startGoLoginSessionRecording(session, provider = 'GoLogin') {
   const relay = new EventEmitter();
   const bound = new WeakSet();
   let finished = false;
@@ -26,7 +27,7 @@ export function startGoLoginSessionRecording(session) {
     finished = true;
     relay.emit('close');
   };
-  session.addBrowserLog({ type: 'gologin_starting', detail: 'Bắt đầu mở profile GoLogin.' });
+  session.addBrowserLog({ type: provider === 'Obscura' ? 'obscura_starting' : 'gologin_starting', detail: `Bắt đầu mở profile ${provider}.` });
 }
 
 /**
@@ -35,7 +36,7 @@ export function startGoLoginSessionRecording(session) {
  * @param {Error} error Lỗi khởi tạo.
  * @return {void} Ghi một lỗi gốc cho mỗi lượt mở.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-17
  */
 export function recordGoLoginStartupFailure(session, error) {
   if (session.startupFailureLogged) return;

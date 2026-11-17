@@ -27,6 +27,7 @@ export function queueAutomaticRefill(delayMs = 0) {
 
     // Dọn các phiên đã đóng hoặc mất kết nối khỏi activeBrowsers
     for (const session of [...activeBrowsers]) {
+      if (session.isObscuraProcessAlive?.()) continue;
       const isDead = session.isClosed ||
         (session.browser && typeof session.browser.isClosed === 'function' && session.browser.isClosed()) ||
         (session.browser && typeof session.browser.isConnected === 'function' && !session.browser.isConnected()) ||
@@ -38,6 +39,7 @@ export function queueAutomaticRefill(delayMs = 0) {
     }
 
     const liveBrowsers = [...activeBrowsers].filter(s => {
+      if (s.isObscuraProcessAlive?.()) return true;
       if (s.isClosed) return false;
       if (s.browser && typeof s.browser.isClosed === 'function' && s.browser.isClosed()) return false;
       if (s.browser && typeof s.browser.isConnected === 'function' && !s.browser.isConnected()) return false;

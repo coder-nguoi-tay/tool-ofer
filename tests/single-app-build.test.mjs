@@ -23,7 +23,9 @@ function createBuildFixture(context) {
   const commands = join(directory, 'commands');
   mkdirSync(applications);
   mkdirSync(commands);
-  const rootFiles = ['AutoLeadPCMacApp.swift', 'AutoLeadPC2.icns', 'autoleadpc-icon.svg', 'app.mjs', 'autofill.mjs', 'option-scorer.mjs', 'observer.mjs', 'analyze-ops.mjs', 'stealth.mjs', 'survey-solver.mjs', 'ai-assist.mjs', 'lead-check.mjs', 'chrome-versions.mjs', 'adspower-profile.mjs', 'multilogin-profile.mjs', 'gologin-profile.mjs', 'codex-form-agent.mjs', 'local-profile-engine.mjs', 'playwright-mcp-human.cjs', 'pc-app.png', 'package.json', 'package-lock.json', 'relay.mjs', 'useragents.txt', 'QA_TEST_CASES.md', 'README.md', 'tgbot.mjs', 'tunnel.mjs', 'mcp-server.mjs', 'script.mjs', 'captcha.mjs'];
+  mkdirSync(join(directory, 'demo-obscura-antidetect/target/release'), { recursive: true });
+  writeFileSync(join(directory, 'demo-obscura-antidetect/target/release/obscura_antidetect_demo'), 'fixture native binary', { mode: 0o755 });
+  const rootFiles = ['AutoLeadPCMacApp.swift', 'AutoLeadPC2.icns', 'autoleadpc-icon.svg', 'app.mjs', 'autofill.mjs', 'option-scorer.mjs', 'observer.mjs', 'analyze-ops.mjs', 'stealth.mjs', 'survey-solver.mjs', 'ai-assist.mjs', 'lead-check.mjs', 'chrome-versions.mjs', 'adspower-profile.mjs', 'multilogin-profile.mjs', 'gologin-profile.mjs', 'obscura-engine.mjs', 'codex-form-agent.mjs', 'local-profile-engine.mjs', 'playwright-mcp-human.cjs', 'pc-app.png', 'package.json', 'package-lock.json', 'relay.mjs', 'useragents.txt', 'QA_TEST_CASES.md', 'README.md', 'tgbot.mjs', 'tunnel.mjs', 'mcp-server.mjs', 'script.mjs', 'captcha.mjs'];
   for (const name of rootFiles) cpSync(join(sourceDirectory, name), join(directory, name));
   for (const folder of ['src', 'ui', 'tests', 'mock-pages', 'Config/Browser', 'Config/Settings', 'node_modules', 'runtime-node']) mkdirSync(join(directory, folder), { recursive: true });
   cpSync(join(sourceDirectory, 'packaging/windows'), join(directory, 'packaging/windows'), { recursive: true });

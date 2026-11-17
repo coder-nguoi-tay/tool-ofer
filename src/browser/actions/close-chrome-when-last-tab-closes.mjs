@@ -11,7 +11,7 @@ import { prepareManualBrowserClose } from './prepare-manual-browser-close.mjs';
  * @return {void} Đăng ký theo dõi thao tác đóng tab cuối.
  * @throws {never} Đăng ký callback đóng tab không thực thi thao tác trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-17
  */
 export function closeChromeWhenLastTabCloses(session) {
   const watchedPages = new WeakSet();
@@ -23,10 +23,10 @@ export function closeChromeWhenLastTabCloses(session) {
    * @return {Promise<void>} Kết thúc sau khi đóng phiên hoặc bỏ qua nếu còn tab.
    * @throws {never} Lỗi khi đóng phiên được xử lý tại callback.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-14
+   * @since 2026-11-17
    */
   async function closeEmptyChromeSession(closedPage) {
-    if (session.isGoLogin) {
+    if (session.isGoLogin || session.isObscura) {
       await new Promise(resolve => setTimeout(resolve, 150));
       if (session._cdpBrowser?.isConnected?.() === false) return;
     }
@@ -53,7 +53,8 @@ export function closeChromeWhenLastTabCloses(session) {
       if (refillAfterManualClose) {
         session.isClosed = true;
         activeBrowsers.delete(session);
-        await session.browser.close().catch(() => {});
+        if (session.isObscura || session.engine === 'obscura') await session.close?.().catch(() => {});
+        else await session.browser.close().catch(() => {});
         queueAutomaticRefill();
         return;
       }
@@ -67,7 +68,8 @@ export function closeChromeWhenLastTabCloses(session) {
         session.suppressAutoRefill = false;
         session.isClosed = true;
         activeBrowsers.delete(session);
-        await session.browser.close().catch(() => {});
+        if (session.isObscura || session.engine === 'obscura') await session.close?.().catch(() => {});
+        else await session.browser.close().catch(() => {});
         if (autoRefill.enabled && !autoRefill.stopRequested) {
           queueAutomaticRefill();
         }
@@ -77,7 +79,8 @@ export function closeChromeWhenLastTabCloses(session) {
       session.suppressAutoRefill = true;
       session.isClosed = true;
       activeBrowsers.delete(session);
-      await session.browser.close().catch(() => {});
+      if (session.isObscura || session.engine === 'obscura') await session.close?.().catch(() => {});
+      else await session.browser.close().catch(() => {});
     } catch {
       // Khi trình duyệt đã mất kết nối, browser close/disconnect handlers xử lý phiên.
     }

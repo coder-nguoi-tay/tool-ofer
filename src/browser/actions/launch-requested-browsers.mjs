@@ -46,19 +46,31 @@ import { watchTrafficBlockedPage } from '../../leads/actions/watch-traffic-block
  * Dừng lượt và tạm tắt tự bù nếu dịch vụ xác minh IP không hoạt động.
  *
  * @param {string} requestBody Nội dung JSON nhận từ giao diện.
- * @param {{layoutTarget?: number, assignedStreamRoles?: number[]}} options Vị trí ô và offer được phân cho mỗi phiên.
+ * @param {{layoutTarget?: number, assignedStreamRoles?: number[], browserEngine?: string, openBrowser?: Function, isAutomaticRefill?: boolean}} options Vị trí ô và offer được phân cho mỗi phiên.
  * @return {Promise<{results: string[], warnings: string[]}>} Kết quả proxy thành công/thất bại và cảnh báo.
  * @throws {Error} Khi cấu hình không hợp lệ hoặc sổ proxy không đọc/ghi được.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-17
  */
 export async function launchRequestedBrowsers(requestBody, {
   layoutTarget = null,
-  assignedStreamRoles = null
+  assignedStreamRoles = null,
+  browserEngine = 'chrome',
+  openBrowser = openBrowserWithInstalledChrome,
+  isAutomaticRefill = false
 } = {}) {
   const body = JSON.parse(requestBody);
+  const isObscura = browserEngine === 'obscura';
+  const launchGeneration = autoRefill.launchGeneration;
+  /**
+   * Hủy cấp phiên khi đã Stop hoặc người dùng cấm lượt tự bù đang chờ.
+   * @return {boolean} True khi lượt mở phải dừng.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-17
+   */
+  const shouldStopLaunch = () => (isObscura && launchGeneration !== autoRefill.launchGeneration) || autoRefill.stopRequested || !autoRefill.enabled || (isAutomaticRefill && autoRefill.noSlotRefill);
   syncDeviceProfilesFromSettings(body);
-  if (applicationState.templateProfileContext) {
+  if (!isObscura && applicationState.templateProfileContext) {
     throw new Error('Hãy đóng cửa sổ profile mẫu RoboForm trước khi tạo profile Chrome mới.');
   }
   const scriptPath = body.scriptPath ?? '';
@@ -225,7 +237,7 @@ export async function launchRequestedBrowsers(requestBody, {
   if (!Number.isInteger(requestedCount) || requestedCount < 1) {
     throw new Error('Số trình duyệt cần mở phải là số nguyên lớn hơn 0.');
   }
-  if (isDualStream && requestedCount < 2) {
+  if (isDualStream && requestedCount < 2 && !isAutomaticRefill) {
     requestedCount = 2; // Chạy 2 luồng yêu cầu tối thiểu 2 cửa sổ
   }
   if (requestedCount > maxAliveBrowsers) {
@@ -242,6 +254,7 @@ export async function launchRequestedBrowsers(requestBody, {
 
   // Dọn các phiên đã đóng hoặc mất kết nối khỏi activeBrowsers trước khi tính toán slot
   for (const session of [...activeBrowsers]) {
+      if (session.isObscuraProcessAlive?.()) continue;
     const isDead = session.isClosed ||
       (session.browser && typeof session.browser.isClosed === 'function' && session.browser.isClosed()) ||
       (session.browser && typeof session.browser.isConnected === 'function' && !session.browser.isConnected()) ||
@@ -263,7 +276,7 @@ export async function launchRequestedBrowsers(requestBody, {
   const availableTileIndexes = Array.from({
     length: layoutCount
   }, (_, index) => index).filter(index => !occupiedTileIndexes.has(index));
-  const allInstalledBuilds = await listInstalledChromeChannels();
+  const allInstalledBuilds = isObscura ? [{ channel: 'obscura', major: 0, version: 'Obscura' }] : await listInstalledChromeChannels();
   if (allInstalledBuilds.length === 0) {
     throw new Error('Chưa cài đặt phiên bản Google Chrome nào.');
   }
@@ -282,7 +295,7 @@ export async function launchRequestedBrowsers(requestBody, {
       poolIndex++;
     }
   }
-  warnings.push('Các phiên bản Google Chrome thường của lượt này: ' + availableChromeBuilds.slice(0, targetSuccessCount).map(build => build.version).join(', ') + '.');
+  if (!isObscura) warnings.push('Các phiên bản Google Chrome thường của lượt này: ' + availableChromeBuilds.slice(0, targetSuccessCount).map(build => build.version).join(', ') + '.');
   if (!autoRefill.settings) {
     autoRefill.settings = {
       proxyList: body.proxyList,
@@ -338,8 +351,8 @@ export async function launchRequestedBrowsers(requestBody, {
    * @param {number} workerIndex Chỉ số slot và bản Chrome được giao.
    * @return {Promise<void>} Kết thúc khi slot mở được hoặc hết proxy phù hợp.
    * @throws {Error} Khi không thể ghi lịch sử sử dụng proxy.
-   * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>
-   * @since 2026-10-15
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-17
    */
   const attemptProxy = async workerIndex => {
     // Giãn cách khởi động giữa các worker (staggered launch) để tránh giật lag CPU và nghẽn mạng
@@ -353,7 +366,7 @@ export async function launchRequestedBrowsers(requestBody, {
     const streamRole = offerNumber;
     const streamLabel = offerCount > 1 ? `Offer ${offerNumber}` : '';
     while (successfulBrowsers < targetSuccessCount) {
-      if (autoRefill.stopRequested || !autoRefill.enabled) {
+      if (shouldStopLaunch()) {
         console.log(`[attemptProxy] Stop đã được kích hoạt, dừng worker ${workerIndex + 1}.`);
         break;
       }
@@ -367,7 +380,7 @@ export async function launchRequestedBrowsers(requestBody, {
       if (proxy.resetUrl) {
         await rotateProxyIfNeeded(proxy);
       }
-      if (autoRefill.stopRequested || !autoRefill.enabled) break;
+      if (shouldStopLaunch()) { releaseProxyLock(proxy); break; }
       const proxyKey = createProxyUsageKey(proxy, 1, targetUrl);
       const installedChrome = availableChromeBuilds[workerIndex];
       const browserProfileId = 'chrome-' + installedChrome.channel + '-' + installedChrome.major;
@@ -417,9 +430,11 @@ export async function launchRequestedBrowsers(requestBody, {
         if (delayStart > 0) {
           await new Promise(r => setTimeout(r, delayStart * 1000));
         }
-        if (autoRefill.stopRequested || !autoRefill.enabled) break;
-        const openedBrowser = await openBrowserWithInstalledChrome({
+        if (shouldStopLaunch()) { releaseProxyLock(proxy); break; }
+        const openedBrowser = await openBrowser({
           build: installedChrome,
+          offerUrls: body.multiTab === false ? [targetUrl] : [targetUrl, ...offerUrls],
+          shouldAbort: shouldStopLaunch,
           proxy: proxy,
           proxyKey: proxyKey,
           websiteUrl: targetUrl,
@@ -480,10 +495,15 @@ export async function launchRequestedBrowsers(requestBody, {
         };
         await persistProxyUsageHistory(usageHistory);
         watchTrafficBlockedPage(activeSession);
-        results.push('Trình duyệt ' + successfulBrowsers + ' [Google Chrome ' + installedChrome.version + (streamLabel ? ` - ${streamLabel}` : '') + ']: mở đúng trang đích ' + targetUrl + ' qua IP ' + exitIp + ' (' + proxy.server + ').');
+        results.push('Trình duyệt ' + successfulBrowsers + (isObscura ? ' [Obscura ' : ' [Google Chrome ') + installedChrome.version + (streamLabel ? ` - ${streamLabel}` : '') + ']: mở đúng trang đích ' + targetUrl + ' qua IP ' + exitIp + ' (' + proxy.server + ').');
         return;
       } catch (error) {
-        releaseProxyLock(proxy, exitIp);
+        if (isObscura && error.obscuraStopUnconfirmed) {
+          warnings.push('Obscura chưa dừng; giữ phiên và khóa proxy/IP, không bù chồng phiên.');
+          return;
+        }
+        releaseProxyLock(proxy, isObscura ? null : exitIp);
+        if (isObscura) availableProxies.splice(availableProxies.indexOf(proxy), 1);
         const pKey = getProxyUniqueKey(proxy);
         if (pKey) {
           multiOfferState.offerUsed.get(offerNumber)?.delete(pKey);
@@ -492,13 +512,14 @@ export async function launchRequestedBrowsers(requestBody, {
         if (activeSession) {
           activeSession.suppressAutoRefill = true;
           activeSession.isClosed = true;
-          await activeSession.browser?.close?.().catch(() => {});
-          if (activeSession.proxyKey) {
+          if (isObscura) await activeSession.close();
+          else await activeSession.browser?.close?.().catch(() => {});
+          if (!isObscura && activeSession.proxyKey) {
             await executeFile('pkill', ['-9', '-f', `user-data-dir.*${activeSession.proxyKey}`]).catch(() => {});
           }
         }
-        await executeFile('pkill', ['-9', '-f', `user-data-dir.*${proxyKey}`]).catch(() => {});
-        if (autoRefill.stopRequested || !autoRefill.enabled) {
+        if (!isObscura) await executeFile('pkill', ['-9', '-f', `user-data-dir.*${proxyKey}`]).catch(() => {});
+        if (shouldStopLaunch()) {
           console.log(`[attemptProxy] Stop đã được kích hoạt sau lỗi proxy, dừng worker ${workerIndex + 1}.`);
           break;
         }

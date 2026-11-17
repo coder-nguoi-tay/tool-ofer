@@ -4,10 +4,10 @@
  * @param {object} session Phiên trình duyệt được app quản lý, gồm AdsPower và GoLogin.
  * @return {Promise<void>} Kết quả dừng profile đã được ghi log nếu thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-17
  */
 export function requestManagedProfileStop(session) {
-  const profileProvider = session.isGoLogin ? 'GoLogin' : 'AdsPower';
+  const profileProvider = session.isObscura ? 'Obscura' : session.isGoLogin ? 'GoLogin' : 'AdsPower';
   if (!session._profileStopPromise) {
     session._profileStopPromise = (async () => {
       try {

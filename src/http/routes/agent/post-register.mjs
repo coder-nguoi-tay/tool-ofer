@@ -9,7 +9,7 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-17
  */
 export async function handlePostAgentRegister(request, response) {
   if (request.method === 'POST' && request.url === '/agent/register') {
@@ -18,6 +18,7 @@ export async function handlePostAgentRegister(request, response) {
     const existing = remoteAgents.get(agentId);
     remoteAgents.set(agentId, {
       platform: body.platform ?? 'unknown',
+      supportedEngines: Array.isArray(body.supportedEngines) ? body.supportedEngines.filter(engine => ['Chrome', 'Obscura'].includes(engine)) : ['Chrome'],
       hostname: body.hostname ?? agentId,
       maxSlots: body.maxSlots ?? 5,
       freeSlots: existing?.freeSlots ?? body.maxSlots ?? 5,

@@ -9,7 +9,7 @@ const executeFile = promisify(execFile);
 const projectDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const buildDirectory = join(projectDirectory, '.windows-build');
 const backendDirectory = join(buildDirectory, 'backend');
-const runtimeFiles = ['app.mjs', 'autofill.mjs', 'option-scorer.mjs', 'observer.mjs', 'analyze-ops.mjs', 'stealth.mjs', 'survey-solver.mjs', 'ai-assist.mjs', 'lead-check.mjs', 'chrome-versions.mjs', 'adspower-profile.mjs', 'multilogin-profile.mjs', 'gologin-profile.mjs', 'codex-form-agent.mjs', 'local-profile-engine.mjs', 'playwright-mcp-human.cjs', 'relay.mjs', 'tgbot.mjs', 'tunnel.mjs', 'mcp-server.mjs', 'captcha.mjs', 'script.mjs', 'pc-app.png', 'useragents.txt', 'autoleadpc-icon.svg', 'src', 'ui', 'Config/Browser'];
+const runtimeFiles = ['app.mjs', 'autofill.mjs', 'option-scorer.mjs', 'observer.mjs', 'analyze-ops.mjs', 'stealth.mjs', 'survey-solver.mjs', 'ai-assist.mjs', 'lead-check.mjs', 'chrome-versions.mjs', 'adspower-profile.mjs', 'multilogin-profile.mjs', 'gologin-profile.mjs', 'obscura-engine.mjs', 'codex-form-agent.mjs', 'local-profile-engine.mjs', 'playwright-mcp-human.cjs', 'relay.mjs', 'tgbot.mjs', 'tunnel.mjs', 'mcp-server.mjs', 'captcha.mjs', 'script.mjs', 'pc-app.png', 'useragents.txt', 'autoleadpc-icon.svg', 'src', 'ui', 'Config/Browser'];
 
 /**
  * Tải nội dung đóng gói từ nguồn chính thức và từ chối phản hồi HTTP lỗi.
@@ -17,7 +17,7 @@ const runtimeFiles = ['app.mjs', 'autofill.mjs', 'option-scorer.mjs', 'observer.
  * @return {Promise<Buffer>} Dữ liệu đã tải.
  * @throws {Error} Khi mạng hoặc HTTP thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-17
  */
 async function downloadBuildResource(address) {
   const response = await fetch(address, { signal: AbortSignal.timeout(180000) });
@@ -30,13 +30,21 @@ async function downloadBuildResource(address) {
  * @return {Promise<void>} Backend sẵn sàng cho bộ cài.
  * @throws {Error} Khi tải, checksum, dependency hoặc đóng gói thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-17
  */
 async function buildWindowsInstaller() {
   const manifest = JSON.parse(await readFile(join(projectDirectory, 'package.json'), 'utf8'));
   await rm(backendDirectory, { recursive: true, force: true });
   await mkdir(backendDirectory, { recursive: true });
   for (const filename of runtimeFiles) await cp(join(projectDirectory, filename), join(backendDirectory, filename), { recursive: true });
+  const obscuraBinary = process.env.AUTOLEADPC_OBSCURA_WINDOWS_BIN || join(projectDirectory, 'bin/obscura_antidetect_demo.exe');
+  if (process.platform === 'win32' && !process.env.AUTOLEADPC_OBSCURA_WINDOWS_BIN) {
+    try { await access(obscuraBinary); } catch { await executeFile(process.execPath, [join(projectDirectory, 'scripts/build-obscura.mjs')], { cwd: projectDirectory, maxBuffer: 10 * 1024 * 1024 }); }
+  }
+  const obscuraBytes = await readFile(obscuraBinary);
+  if (obscuraBytes.toString('ascii', 0, 2) !== 'MZ') throw new Error('Thiếu binary Obscura Windows x64 hợp lệ; chạy node scripts/build-obscura.mjs trên Windows.');
+  await mkdir(join(backendDirectory, 'bin'), { recursive: true });
+  await cp(obscuraBinary, join(backendDirectory, 'bin/obscura_antidetect_demo.exe'));
   // Chỉ lấy tài nguyên trong allowlist, không đóng gói Config/Settings, profile, log hoặc dữ liệu người dùng.
   await cp(join(projectDirectory, 'package-lock.json'), join(backendDirectory, 'package-lock.json'));
   await writeFile(join(backendDirectory, 'package.json'), JSON.stringify(manifest, null, 2));
@@ -75,7 +83,7 @@ async function buildWindowsInstaller() {
   console.log(stdout);
   if (stderr) console.error(stderr);
   const packagedBackend = join(projectDirectory, 'dist/windows/win-unpacked/resources/backend');
-  for (const filename of ['runtime-node/node.exe', 'node_modules/sqlite3/build/Release/node_sqlite3.node', 'node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe']) {
+  for (const filename of ['bin/obscura_antidetect_demo.exe', 'runtime-node/node.exe', 'node_modules/sqlite3/build/Release/node_sqlite3.node', 'node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe']) {
     const binary = await readFile(join(packagedBackend, filename));
     if (binary.toString('ascii', 0, 2) !== 'MZ') throw new Error(`Bundle thiếu binary Windows hợp lệ: ${filename}`);
   }

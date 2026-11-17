@@ -8,11 +8,11 @@ import { leadIpStatsMap } from '../../../lead-check.mjs';
 import { pruneDeadManagedSessions } from '../../runtime/actions/prune-dead-managed-sessions.mjs';
 
 /**
- * Trả trạng thái tự bù và IP đã xác minh của từng cửa sổ Chrome đang mở.
+ * Trả trạng thái tự bù và phiên trình duyệt cho bảng chạy/preview, kể cả Obscura không có phiên bản Chrome.
  *
  * @return {object} Trạng thái hiện tại của trình duyệt và cơ chế tự bù.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-17
  */
 export function getAutoRefillStatus() {
   void pruneDeadManagedSessions().catch(() => {});
@@ -24,7 +24,7 @@ export function getAutoRefillStatus() {
     targetCount: autoRefill.targetCount,
     message: autoRefill.message,
     bandwidth: getBandwidthSummary(),
-    chromeSessions: [...activeBrowsers].filter(session => !session.isClosed && session.chromeVersion && (session.exitIp || session.isManagedProfile)).map(session => {
+    chromeSessions: [...activeBrowsers].filter(session => !session.isClosed && (session.chromeVersion || session.isObscura || session.engine === 'obscura') && (session.exitIp || session.isManagedProfile)).map(session => {
       protectConfirmedLeadSession(session);
       const stoppedAfterLead = shouldStopAfterLead(session);
       const livePages = session.browser?.pages ? session.browser.pages().filter(p => !p.isClosed()) : [];
@@ -44,7 +44,7 @@ export function getAutoRefillStatus() {
       return {
         slot: session.slot ?? session.tileIndex + 1,
         version: session.chromeVersion,
-        engine: session.isGoLogin ? 'GoLogin' : session.isAdsPower ? 'AdsPower' : session.isMultilogin ? 'Multilogin' : 'Chrome',
+        engine: session.isObscura || session.engine === 'obscura' ? 'Obscura' : session.isGoLogin ? 'GoLogin' : session.isAdsPower ? 'AdsPower' : session.isMultilogin ? 'Multilogin' : 'Chrome',
         deviceProfile: session.deviceProfile ?? 'windows',
         deviceVersion: session.deviceVersion ?? (session.deviceSummary ? session.deviceSummary.split(' · ')[0] : session.deviceProfile),
         deviceSummary: session.deviceSummary ?? null,

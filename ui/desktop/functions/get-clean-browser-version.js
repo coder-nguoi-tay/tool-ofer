@@ -7,7 +7,10 @@
  * @since 2026-11-10
  */
 function getCleanBrowserVersion(ver, engine = 'Chrome') {
-      const m = String(ver || '').match(/^(\d+)/);
+  if (String(engine).toLowerCase() === 'obscura') {
+    return 'Obscura V8 (Anti-Detect)';
+  }
+  const m = String(ver || '').match(/^(\d+)/);
       const version = m ? m[1] : String(ver || '');
       if (!version) return engine;
       return version.includes(engine) ? version : `${engine} ${version}`;

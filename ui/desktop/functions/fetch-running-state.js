@@ -2,7 +2,7 @@
  * Fetch running state.
  * @return {Promise<void>} Kết quả xử lý fetch running state.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-17
  */
 async function fetchRunningState() {
       const state = await api('/state');
@@ -246,14 +246,15 @@ async function fetchRunningState() {
         `;
 
         const isWinVis = Boolean(s.isWindowVisible);
+        const isHeadlessObscura = s.engine === 'Obscura';
         const winBtnLabel = isWinVis ? '🔽 Ẩn' : '🖥️ Hiện';
-        const winBtnTitle = isWinVis ? 'Thu nhỏ cửa sổ về chạy ngầm' : 'Bung cửa sổ trình duyệt ra màn hình Desktop';
+        const winBtnTitle = isHeadlessObscura ? 'Xem Obscura trong app qua Screen View' : isWinVis ? 'Thu nhỏ cửa sổ về chạy ngầm' : 'Bung cửa sổ trình duyệt ra màn hình Desktop';
         const winBtnStyle = isWinVis
           ? 'background:#1e293b;color:#cbd5e1;border:1px solid #334155;'
           : 'background:#0284c7;color:#fff;border:1px solid #0369a1;font-weight:600;';
         const actionButtons = `
           <div style="display:flex;gap:4px;justify-content:center;align-items:center;">
-            <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;${winBtnStyle}" onclick="event.stopPropagation(); toggleBrowserWindow(${s.slot}, ${isWinVis});" title="${winBtnTitle}">${winBtnLabel}</button>
+            <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;${winBtnStyle}" onclick="event.stopPropagation(); ${isHeadlessObscura ? `openScreenModal(${s.slot})` : `toggleBrowserWindow(${s.slot}, ${isWinVis})`};" title="${winBtnTitle}">${isHeadlessObscura ? '📺 Trong app' : winBtnLabel}</button>
             <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;" onclick="event.stopPropagation(); openScreenModal(${s.slot});" title="Xem trực tiếp trong app">📺 Xem</button>
             <button type="button" class="win-btn win-btn-sm" style="padding:1px 6px;font-size:10px;background:rgba(239,68,68,0.2);color:#fca5a5;border:1px solid rgba(239,68,68,0.4);font-weight:700;" onclick="event.stopPropagation(); closeSingleBrowser(${s.slot});" title="Tắt riêng trình duyệt Slot ${s.slot} (không tự bù slot)">✕</button>
           </div>
@@ -267,7 +268,6 @@ async function fetchRunningState() {
         if (!tr) {
           tr = document.createElement('tr');
           tr.dataset.slot = String(slot);
-          tr.title = 'Nhấp đúp chuột để bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop';
           tr.innerHTML = `
             <td class="cell-selector">${selText}</td>
             <td style="text-align:center;white-space:nowrap;">${threadBadge}</td>
@@ -282,7 +282,7 @@ async function fetchRunningState() {
             <td style="color:#94a3b8;font-size:10.5px;">${recText}</td>
           `;
           tr._cached = {
-            selText, threadBadge, isWinVis, exitIpBadge, bandwidthCell, actionText, webUrl, leadBadge, deviceInfo, emailCell, passCell, recText
+            selText, threadBadge, isWinVis, isHeadlessObscura, exitIpBadge, bandwidthCell, actionText, webUrl, leadBadge, deviceInfo, emailCell, passCell, recText
           };
           tbody.appendChild(tr);
         } else {
@@ -291,7 +291,7 @@ async function fetchRunningState() {
           const tds = tr.children;
           if (c.selText !== selText) { tds[0].textContent = selText; c.selText = selText; }
           if (c.threadBadge !== threadBadge) { tds[1].innerHTML = threadBadge; c.threadBadge = threadBadge; }
-          if (c.isWinVis !== isWinVis) { tds[2].innerHTML = actionButtons; c.isWinVis = isWinVis; }
+          if (c.isWinVis !== isWinVis || c.isHeadlessObscura !== isHeadlessObscura) { tds[2].innerHTML = actionButtons; c.isWinVis = isWinVis; c.isHeadlessObscura = isHeadlessObscura; }
           if (c.exitIpBadge !== exitIpBadge) { tds[3].innerHTML = exitIpBadge; c.exitIpBadge = exitIpBadge; }
           if (c.bandwidthCell !== bandwidthCell) { tds[4].innerHTML = bandwidthCell; c.bandwidthCell = bandwidthCell; }
           if (c.actionText !== actionText || c.webUrl !== webUrl) {
@@ -309,6 +309,7 @@ async function fetchRunningState() {
           tbody.appendChild(tr); // Duy trì thứ tự đúng mà không tạo mới DOM
         }
 
-        tr.ondblclick = () => toggleBrowserWindow(s.slot, isWinVis);
+        tr.title = isHeadlessObscura ? 'Nhấp đúp chuột để xem Obscura trong app' : 'Nhấp đúp chuột để bung hoặc thu nhỏ cửa sổ trình duyệt ra Desktop';
+        tr.ondblclick = () => isHeadlessObscura ? openScreenModal(s.slot) : toggleBrowserWindow(s.slot, isWinVis);
       });
     }
