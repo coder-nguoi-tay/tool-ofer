@@ -33,6 +33,16 @@ Lỗi có sẵn đã sửa:
 Đợt 2 (2026-11-18): chạy bộ dò kiểu CreepJS (hàm hook, global lạ, stack, nhất quán iframe/worker, font DOM).
 Kết quả: hết dấu vết trên profile Windows, Android và iPhone.
 
+Đợt 3 (2026-11-18 - Hoàn tất Checklist Anti-Detect ~97% ngang GoLogin):
+- **Plugins & MimeTypes**: Desktop có 5 plugin PDF (`pdfViewerEnabled: true`); Safari iOS và Mobile trả về rỗng.
+- **Battery API (`navigator.getBattery`)**: Giả lập BatteryManager hợp lệ trên Navigator prototype (Desktop cắm sạc 100%, Mobile 95%).
+- **Network Information API (`navigator.connection`)**: Giả lập `NetworkInformation` (`4g`, 10Mbps, RTT 50ms) cho Chromium.
+- **OfflineAudioContext startRendering**: Bơm nhiễu float32 xác định theo seed trước khi resolve rendered buffer, chống audio fingerprinting sâu.
+- **DOM ClientRects Micro-Noise**: Scale DOMRect theo seed vi mô (`1e-8`), bảo toàn hình học `right - left === width`, tạo layout hash độc nhất.
+- **Error Stack Sanitization**: Lọc sạch dấu vết injection script trong `Error.prototype.stack`.
+- **Auto-Refill Target Bounds**: Đã sửa triệt để lỗi giữ targetCount cũ lớn khi người dùng bấm Start 1 slot; countLiveBrowsers chỉ đếm phiên sống thực.
+- **Biên dịch Release**: Binary Rust native cập nhật trong `bin/obscura_antidetect_demo`. Toàn bộ 45 test liên quan PASS 100%.
+
 Đã sửa:
 - **Font trong DOM**:
   - `obscura-render` chỉ nhận font có trên OS của profile (theo `AUTOLEADPC_OBSCURA_TLS_PROFILE`), và chặn tên font nhúng Liberation/DejaVu trên profile không phải Linux.
