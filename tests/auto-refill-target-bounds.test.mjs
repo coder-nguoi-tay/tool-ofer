@@ -120,7 +120,10 @@ test('launchUserRequestedBrowsers đặt đúng targetCount = requestedCount khi
   const prevAutoRefill = { ...autoRefill };
   const prevBrowsers = new Set(activeBrowsers);
   t.after(() => {
-    Object.assign(autoRefill, prevAutoRefill);
+    autoRefill.stopRequested = true;
+    autoRefill.enabled = false;
+    autoRefill.queued = false;
+    autoRefill.isRefilling = false;
     activeBrowsers.clear();
     for (const b of prevBrowsers) activeBrowsers.add(b);
   });
@@ -139,4 +142,43 @@ test('launchUserRequestedBrowsers đặt đúng targetCount = requestedCount khi
 
   await launchUserRequestedBrowsers(JSON.stringify(body)).catch(() => {});
   assert.equal(autoRefill.targetCount, 1, 'launchUserRequestedBrowsers phải đặt targetCount = 1');
+});
+
+test('queueAutomaticRefill với nhiều offer URLs và targetCount = 1 không bị ép seqTarget = offerCount', async t => {
+  const prevAutoRefill = { ...autoRefill };
+  const prevBrowsers = new Set(activeBrowsers);
+  t.after(() => {
+    Object.assign(autoRefill, prevAutoRefill);
+    activeBrowsers.clear();
+    for (const b of prevBrowsers) activeBrowsers.add(b);
+  });
+
+  activeBrowsers.clear();
+  autoRefill.enabled = true;
+  autoRefill.stopRequested = false;
+  autoRefill.noSlotRefill = false;
+  autoRefill.sequential = true;
+  autoRefill.queued = false;
+  autoRefill.isRefilling = false;
+  autoRefill.pendingRefillRequest = false;
+  autoRefill.targetCount = 1;
+  autoRefill.settings = {
+    browserMode: 'Chrome',
+    offerUrls: Array.from({ length: 20 }, (_, i) => `https://offer.test/${i + 1}`),
+    concurrency: 1,
+    requestedCount: 1,
+  };
+
+  // 1 session đang sống
+  activeBrowsers.add({ isClosed: false, browser: { isClosed: () => false, isConnected: () => true } });
+
+  const { applicationState } = await import('../src/runtime/application-state.mjs');
+  applicationState.exclusiveQueue = Promise.resolve();
+
+  const { queueAutomaticRefill } = await import('../src/refill/actions/queue-automatic-refill.mjs');
+  queueAutomaticRefill();
+  await new Promise(r => setTimeout(r, 100));
+  // Đã có 1 browser sống = targetCount, sau khi microtask kết thúc không được bù thêm slot nào
+  assert.equal(autoRefill.isRefilling, false);
+  assert.equal(autoRefill.queued, false);
 });

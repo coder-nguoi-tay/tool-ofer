@@ -59,8 +59,8 @@ test('attachDataSaver xử lý lọc ảnh thông minh trong luồng route của
   await attachDataSaver(mockContext, session);
 
   assert.equal(session._dataSaverAttached, true);
-  assert.equal(emulatedMediaArg?.reducedMotion, 'reduce');
-  assert.equal(initScriptAdded, true);
+  assert.equal(emulatedMediaArg, null, 'không thay reduced-motion của website');
+  assert.equal(initScriptAdded, false, 'không ép animation/transition của form');
 
   // Kiểm tra route: ảnh captcha được tiếp tục
   let captchaAction = null;

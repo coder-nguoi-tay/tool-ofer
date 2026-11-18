@@ -14,51 +14,27 @@ import { isNonessentialImageUrl } from './is-nonessential-image-url.mjs';
  *    - Chỉ chặn script/API bên thứ ba của dịch vụ video quảng cáo và ghi lại phiên đã biết.
  *    - Không chặn XHR/Fetch gọi API câu hỏi & nộp đáp án.
  * 3. CHẶN TRIỆT ĐỂ MEDIA (video / audio / m3u8 / ts / m4s / webm streaming).
- * 4. TRIỆT TIÊU ANIMATION CSS VÔ ÍCH: Đưa animation về 0.001ms để GPU/CPU không render 60fps ngầm.
+ * 4. Giữ CSS/animation gốc để không phá transition/animation callback của form JavaScript.
  *
  * @param {object} context BrowserContext của Playwright.
  * @param {object} session Phiên duyệt web.
  * @return {Promise<void>} Hoàn tất đăng ký bộ lọc tài nguyên.
+ * @throws {never} Lỗi đăng ký được ghi nhận, không cản trở khởi động browser.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-18
  */
 async function attachDataSaver(context, session) {
   if (!context || !session) return;
   if (session._dataSaverAttached) return;
   session._dataSaverAttached = true;
   try {
-    await context.emulateMedia?.({ reducedMotion: 'reduce' }).catch(() => {});
-    await context.addInitScript?.(() => {
-      try {
-        if (/(?:cloudflare|turnstile|recaptcha|hcaptcha|arkose|geetest)/i.test(window.location.hostname)) return;
-        const style = document.createElement('style');
-        style.id = '__autolead_perf_style';
-        style.textContent = `
-          *, *::before, *::after {
-            animation-duration: 0.001ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.001ms !important;
-            scroll-behavior: auto !important;
-          }
-        `;
-        const inject = () => {
-          const root = document.head || document.documentElement;
-          if (root && !document.getElementById('__autolead_perf_style')) {
-            root.appendChild(style);
-          }
-        };
-        inject();
-        if (!document.getElementById('__autolead_perf_style')) {
-          document.addEventListener('DOMContentLoaded', inject, { once: true });
-        }
-      } catch {}
-    }).catch(() => {});
-
     await context.route('**/*', async route => {
       try {
         const req = route.request();
         const type = req.resourceType();
         const url = req.url() || '';
+        // Loại tài nguyên của browser thắng đuôi URL/query, tránh CSS bị nhận nhầm thành ảnh/pixel.
+        if (['document', 'subdocument', 'stylesheet', 'font'].includes(type)) return route.continue().catch(() => {});
         if (isEssentialOfferUrl(url)) return route.continue().catch(() => {});
 
         // 1. Lọc ảnh: bảo vệ ảnh câu hỏi, Captcha, logo; chỉ chặn ảnh pixel/banner quảng cáo rác bên thứ 3

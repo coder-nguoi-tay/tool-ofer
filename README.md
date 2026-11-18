@@ -219,7 +219,7 @@ GoLogin bật **Chạy trong app** được khởi chạy bằng `--headless=new
 Nhật ký GoLogin bắt đầu trước tạo profile/SDK/CDP/IP, giữ pha khởi tạo và mã lỗi an toàn trong chế độ log tối giản. Mất CDP khi tiến trình còn sống không được kill hoặc nhả IP: thử nối lại ba lần vào Orbita cũ, giữ lead/record/lịch sử link và dựng lại Screen View/autofill. Nếu chưa nối được thì giữ browser và ghi một mốc lỗi; chỉ dọn khi có lệnh đóng hoặc tiến trình đã thoát. Bộ prune và tab cuối cũng áp dụng guard này.
 # Màn card cuối SweepstakesAlerts
 
-Autofill chỉ bật luồng này khi tab `sweepstakesalerts.com`/`www.sweepstakesalerts.com` có tiến độ 98–100% và card có link hiển thị. App giữ tab card, dọn các tab cũ trong cùng browser một lần rồi mở URL của từng card trong tab riêng, giữ tham số tracking. Tối đa 10 tab gồm trang gốc; card còn lại đợi tab con đóng. Reload không dọn lại các tab mới hoặc mở lại card đã thử. Không áp dụng khi dừng/chờ lead, manual/skip/consent-only hoặc tắt autoSubmit. Trang gốc được giữ khỏi nhánh trang rỗng và không gọi AI/F5 chỉ vì đang chờ tab con. Những site khác giữ luồng offerwall hiện tại.
+Autofill chỉ bật luồng này khi tab `sweepstakesalerts.com`/`www.sweepstakesalerts.com` có tiến độ 98–100% và card có link hiển thị. App dọn các tab cũ trong cùng browser một lần rồi bấm CTA thật của từng card. HTML/JavaScript của website quyết định điều hướng tab hiện tại, iframe, tái dùng tab có tên hoặc mở tab mới; app không ép mở tab con và không bỏ qua preventDefault. Giữ trần tab hiện có; chỉ CTA mở tab con phải chờ quota, điều hướng tab hiện tại vẫn được chạy khi hết quota. Reload không dọn lại các tab mới hoặc mở lại card đã thử. Không áp dụng khi dừng/chờ lead, manual/skip/consent-only hoặc tắt autoSubmit. Trang gốc được giữ khỏi nhánh trang rỗng và không gọi AI/F5 chỉ vì đang chờ tab con. Những site khác giữ luồng offerwall hiện tại.
 
 Màn cuối SweepstakesAlerts có `#ow-placement iframe[data-content-iframe]` từ HTTPS `sdk.scrptk.com/content/render` được giữ trong lúc iframe tải; chỉ dọn tab cũ khi iframe có card. Đọc offer trong đúng frame, bỏ link Powered by/Privacy ở trang cha. Task Addept tái dùng luồng card → CTA → Skip, reset dấu CTA khi chọn task mới; đủ 10 tab thì chờ chỗ trống.
 
@@ -339,3 +339,23 @@ Bộ cài Windows cần binary Rust Windows x64. Trên Windows, `npm run build:w
 Profile iPhone/iPad của Obscura dùng danh sách cố định: iOS/iPadOS 17.4.1, 17.5.1, 17.6.1 và 18.0, tương ứng `Version/17.4`, `17.5`, `17.6` và `18.0`. Token `Safari/604.1` được giữ theo định dạng tương thích. OS được hiển thị trong preview; đây là cấu hình giả lập, không phải các bản Safari/WebKit thật. Danh sách áp dụng khi mở phiên mới.
 
 Khi bù Obscura, phiên cũ phải dừng/dọn xong trước. Phiên thay thế dùng context sạch, seed/fingerprint và phiên bản Chrome hoặc Safari khác phiên vừa đóng; đổi nhóm thiết bị trong lựa chọn đã bật nếu có nhóm khác. Chỉ chọn một nhóm thì vẫn đổi fingerprint/phiên bản trong nhóm đó. IP cũ bị loại ngay cả khi tắt kiểm tra lịch sử trùng; proxy xoay có thể giữ endpoint nếu đã cấp IP mới. Thiếu IP hoặc profile mới sẽ báo lỗi thay vì tái dùng phiên cũ. Pool phiên bản hữu hạn được xoay giữa các lượt.
+
+### Sửa hồi quy autofill và info song song (2026-11-18)
+
+Mỗi info được khóa theo phiên trên bộ cấp phát chung của Chrome, AdsPower, GoLogin và Obscura.
+Pool quay vòng, record trùng hoặc đổi dữ liệu bị form từ chối không được lấy info đang thuộc phiên khác.
+Thiếu info thì ghi thông báo để nạp thêm; không tự tạo dữ liệu hoặc lấy info đang chạy.
+Reload và reconnect giữ info của phiên. Khóa chỉ được giải phóng sau khi phiên đã đóng và rời tập active.
+
+Dropdown chỉ khớp chính xác, không ép DOM để báo thành công, không dùng Submit làm trigger,
+không lách khóa busy và không phát change lần hai. Ô chưa tải options nhả về vòng quét thay vì chờ 1,5s mỗi lượt.
+Obscura dùng CPU chưa có backend WebGL: getContext trả null để website dùng fallback; không trả pixel giả.
+Các thay đổi tương thích API không phải bằng chứng đạt một tỷ lệ chống phát hiện hay vượt mọi website.
+
+Obscura giữ method/body POST và query GET khi form mở tab mới, tôn trọng base href, formtarget/formaction/formmethod của submitter và target có tên. Core Rust sở hữu vòng đời tab, target có tên, opener và hàng đợi điều hướng; không dùng script của app bắt click/submit hoặc cầu nối Node tạo tab. Dữ liệu form không được ghi vào console hay phát ra Runtime.bindingCalled cho client. Reference cửa sổ hỗ trợ điều hướng, đóng, focus và postMessage cơ bản; chưa tương đương đầy đủ WindowProxy/DOM đồng bộ giữa hai cửa sổ.
+
+Cấu hình Obscura được truyền vào core Rust, không cài script vá Web API từ app. Core xử lý bộ đếm meta refresh sau sự kiện load, giữ lịch đã nhận khi thẻ bị xóa và bỏ qua khai báo lỗi. DPR thuộc page và được chia sẻ với các iframe; UA/header riêng cho từng page được áp dụng lên cả hai HTTP transport, bao gồm fetch/XHR. API Web Audio context chưa có backend nên không được quảng cáo; engine không tạo PCM, phổ tần hoặc kết quả decode giả. `AudioBuffer` chỉ còn là vùng chứa dữ liệu. Các mô hình font/giọng đọc theo profile vẫn là mô phỏng, chưa thay thế font hệ điều hành hay bộ phát tiếng nói thật.
+
+Cấu hình chạy theo offer được lưu đầy đủ ở backend và nạp lại qua cùng bộ chuẩn hóa checkbox: chế độ chạy, hiển thị, đa tab, chờ/dừng sau lead, delay và chống trùng. Cache giao diện chỉ được ghép khi thuộc cùng offer. Sequential dùng số luồng đã chọn, giữ lựa chọn đa tab và khởi động lại được sau Stop. Stop/Start thu hồi quyền điều phối của job bù cũ; kết quả đến muộn không nhả khóa hoặc sửa thông báo của lượt mới. Các lựa chọn Fonts/API Fake IP được giữ khi bù; Không bù slot vẫn được lưu độc lập.
+
+Tương tác form (2026-11-18): humanClick giữ nhịp nhấn ngắn 15–25ms trước nhấn, 25–40ms giữ, 20–30ms sau nhả; nhịp nhập 160ms trước/sau fill vẫn giữ. Data Saver ưu tiên resourceType document/stylesheet/font trước mẫu đuôi URL để CSS có query giống ảnh/pixel không bị chặn nhầm. Không tiêm __autolead_perf_style hoặc ép reduced-motion/animation-duration của trang; giữ callback và transition của form JS.

@@ -12,3 +12,8 @@ export { fetchLeadDatas } from './src/lead-check/fetch-lead-datas.mjs';
 export { fetchCurrentPoint } from './src/lead-check/fetch-current-point.mjs';
 export { fetchToffersOverview } from './src/lead-check/fetch-toffers-overview.mjs';
 export { updateLeadConfig } from './src/lead-check/update-lead-config.mjs';
+export { fetchToffersOffers } from './src/lead-check/toffers-offers/fetch-toffers-offers.mjs';
+export { fetchToffersCountries } from './src/lead-check/toffers-offers/fetch-toffers-countries.mjs';
+export { fetchToffersNetworks } from './src/lead-check/toffers-offers/fetch-toffers-networks.mjs';
+export { parseToffersOfferRow } from './src/lead-check/toffers-offers/parse-toffers-offer-row.mjs';
+

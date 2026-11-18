@@ -144,7 +144,7 @@ test('click timeout sau lần thử vẫn không bấm lại offer hoặc chạy
   const context = {};
   const page = { context: () => context, url: () => 'https://offer.test/wall', isClosed: () => false };
   const button = { count: async () => 1, isVisible: async () => true, evaluate: async () => ({ ready: true }), click: async () => { clicks++; throw new Error('Timeout after dispatch'); } };
-  const frame = { evaluate: async callback => callback.name === 'readOfferwallCards' ? [{ uid: 'one', offerId: 'offer-42', hasBtn: true, destUrl: '' }] : undefined,
+  const frame = { url: () => 'https://offer.test/wall', evaluate: async callback => callback.name === 'readOfferwallCards' ? [{ uid: 'one', offerId: 'offer-42', hasBtn: true, destUrl: '' }] : undefined,
     locator: () => ({ first: () => ({ count: async () => 1, locator: () => ({ first: () => button }) }) }) };
   await handleOfferwallCards(frame, page);
   await handleOfferwallCards(frame, page);

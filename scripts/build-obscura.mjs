@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, copyFile, chmod } from 'node:fs/promises';
+import { mkdir, copyFile, chmod, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,7 +11,7 @@ const project = dirname(dirname(fileURLToPath(import.meta.url)));
  * @return {Promise<void>} Binary render/CDP đã được dựng, không chép dữ liệu người dùng.
  * @throws {Error} Khi thiếu Rust toolchain hoặc build/copy thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-18
  */
 async function buildObscura() {
   const name = `obscura_antidetect_demo${process.platform === 'win32' ? '.exe' : ''}`;
@@ -19,8 +19,16 @@ async function buildObscura() {
     cwd: project, env: { ...process.env, CARGO_BUILD_JOBS: '2', CARGO_INCREMENTAL: '0' }, maxBuffer: 10 * 1024 * 1024,
   });
   await mkdir(join(project, 'bin'), { recursive: true });
-  await copyFile(join(project, 'demo-obscura-antidetect/target/release', name), join(project, 'bin', name));
-  if (process.platform !== 'win32') await chmod(join(project, 'bin', name), 0o755);
+  // Replace the inode atomically: overwriting a signed Mach-O in place leaves
+  // macOS with stale code-signing pages and the next launch is killed (SIGKILL).
+  const stagingBinary = join(project, 'bin', `${name}.tmp-${process.pid}`);
+  try {
+    await copyFile(join(project, 'demo-obscura-antidetect/target/release', name), stagingBinary);
+    if (process.platform !== 'win32') await chmod(stagingBinary, 0o755);
+    await rename(stagingBinary, join(project, 'bin', name));
+  } finally {
+    await rm(stagingBinary, { force: true });
+  }
   console.log(`Đã build Obscura native: bin/${name}`);
 }
 await buildObscura();

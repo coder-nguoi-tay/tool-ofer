@@ -1,3 +1,4 @@
+import { invalidateRefillJobs } from '../../refill/actions/invalidate-refill-jobs.mjs';
 import { DEFAULT_LEAD_CONFIG } from '../../../lead-check.mjs';
 import { isExitIpConsumed } from '../../proxy/actions/is-exit-ip-consumed.mjs';
 import { DEVICE_PROFILES } from '../../runtime/constants/device-profiles.mjs';
@@ -46,7 +47,7 @@ import { stopAdsPowerProfile } from '../../../adspower-profile.mjs';
  * @return {Promise<{results: object[], warnings: string[]}>} Kết quả mở các slot.
  * @throws {Error} Khi thiếu API key hoặc không thể chuẩn bị profile.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-18
  */
 export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
@@ -54,6 +55,8 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
   if (!apiToken) throw new Error('Nhập AdsPower API key trong Settings > Browser trước khi chạy.');
   const installedAdsPowerKernelVersions = await listInstalledAdsPowerKernelVersions();
   if (!isAutomaticRefill) {
+    if (autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
+    invalidateRefillJobs();
     autoRefill.stopRequested = false;
     autoRefill.enabled = true;
   }
@@ -61,7 +64,7 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
   const websiteUrl = body.websiteUrl || '';
   const offerUrls = body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 || body.websiteUrl2 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : [websiteUrl].filter(Boolean));
   const multiTab = body.multiTab !== false; // Mặc định chạy đa luồng là đa tab trong 1 trình duyệt
-  const screenPreviewOnly = Boolean(body.screenPreviewOnly ?? body.runInApp ?? true); // "Chạy trong app": false = mở cửa sổ thường
+  const screenPreviewOnly = body.screenPreviewOnly !== undefined ? Boolean(body.screenPreviewOnly) : (body.runInApp !== undefined ? Boolean(body.runInApp) : false); // "Chạy trong app": false = mở cửa sổ thường
 
   // Lưu mục tiêu của lượt Start; lần bù chỉ mở số slot còn thiếu.
   if (!isAutomaticRefill) {
@@ -86,7 +89,7 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
   const maxRunMinutes = Math.max(0, Number(body.maxRunMinutes) || 0);
   const delayStart = Math.max(0, Number(body.delayStart) || 0);
   const delayStop = Math.max(0, Number(body.delayStop) || 0);
-  const choiceDelay = body.enableChoiceDelay !== false && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0;
+  const choiceDelay = body.enableChoiceDelay === true && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0;
   const antiFingerprint = {
     canvas: Boolean(body.antiFpCanvas),
     clientRects: Boolean(body.antiFpClientRects),

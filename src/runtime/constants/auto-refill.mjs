@@ -3,6 +3,10 @@ const autoRefill = {
   settings: null,
   targetCount: 0,
   queued: false,
+  isRefilling: false,
+  isStopping: false,
+  pendingRefillRequest: false,
+  refillJob: null,
   message: 'Sẵn sàng. Bấm Start để bắt đầu.',
   sequential: false,
   // Chế độ tuần tự: 1 tab, delay 5s giữa các phiên

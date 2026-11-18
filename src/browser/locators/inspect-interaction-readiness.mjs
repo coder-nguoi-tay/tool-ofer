@@ -8,7 +8,18 @@
  * @since 2026-11-15
  */
 export function inspectInteractionReadiness(element, formScope) {
-  if (element.closest?.('header, footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="banner"], [role="contentinfo"], .site-header, .site-footer, .ow-attribution')) return { ready: false, reason: 'outside_business_content' };
+  if (element.closest?.('footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="contentinfo"], .site-footer, .ow-attribution')) return { ready: false, reason: 'outside_business_content' };
+  const header = element.closest?.('header, [role="banner"], .site-header');
+  if (header) {
+    const candidateScope = element.closest?.('form, [role="form"], .hero, .form, .form-container, .survey-container, .lead-form, [id*="form" i], [class*="form" i], [id*="lead" i]');
+    const businessScope = candidateScope && header.contains(candidateScope) ? candidateScope : null;
+    const hasVisibleBusinessField = businessScope && Array.from(businessScope.querySelectorAll('input:not([type="hidden"]), select, textarea')).some(field => {
+      const style = typeof getComputedStyle === 'function' ? getComputedStyle(field) : (field.style || {});
+      const bounds = typeof field.getBoundingClientRect === 'function' ? field.getBoundingClientRect() : { width: 0, height: 0 };
+      return !field.disabled && style.display !== 'none' && !['hidden', 'collapse'].includes(style.visibility) && bounds.width > 0 && bounds.height > 0;
+    });
+    if (!hasVisibleBusinessField) return { ready: false, reason: 'outside_business_content' };
+  }
   const consumed = element.closest?.('[data-ux-offer-action-label]');
   if (consumed && (consumed.innerText || consumed.value || '').replace(/\s+/g, ' ').trim() === consumed.getAttribute('data-ux-offer-action-label')) return { ready: false, reason: 'offer_already_opened' };
   if (formScope && !element.matches?.(formScope.memberSelector)) return { ready: false, reason: 'outside_active_form' };

@@ -295,12 +295,8 @@ test('Full Flow E2E: Giả lập đa phiên bản OS & Trình duyệt trên Obsc
         );
         assert.equal(fp.platform, tc.expectedPlatform, `Platform phải khớp ${tc.expectedPlatform}`);
 
-        // 4. Kiểm tra GPU WebGL Spoofing
-        const matchesGPU = tc.expectedGPU.some((g) => fp.webglRenderer.includes(g));
-        assert.ok(
-          matchesGPU,
-          `WebGL Renderer (${fp.webglRenderer}) phải chứa một trong các GPU: ${tc.expectedGPU.join(', ')}`
-        );
+        // Engine CPU chưa hỗ trợ WebGL: phải báo không hỗ trợ thay vì trả pixel giả.
+        assert.equal(fp.webglRenderer, 'none');
 
         // 5. Kiểm tra Canvas Noise có sinh dữ liệu hợp lệ
         assert.ok(fp.canvasLength > 100, 'Canvas toDataURL phải hợp lệ');

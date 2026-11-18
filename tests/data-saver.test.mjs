@@ -206,3 +206,47 @@ test('attachDataSaver intercepts routes and never blocks images', async () => {
   assert.equal(isMediaUrl('https://example.com/stream.m3u8'), true);
   assert.equal(isMediaUrl('https://example.com/segment.m4s'), true);
 });
+
+test('Data Saver giữ stylesheet/document/font dù URL trùng mẫu ảnh/pixel/media', async () => {
+  let handler;
+  const session = {};
+  await attachDataSaver({ route: async (pattern, route) => { handler = route; } }, session);
+  for (const type of ['stylesheet', 'document', 'font']) {
+    for (const url of ['https://doubleclick.net/style.css?asset=tracking.png', 'https://cdn.other.test/pixel.png', 'https://cdn.other.test/chunk.mp4']) {
+      let result;
+      await handler({ request: () => ({ resourceType: () => type, url: () => url, frame: () => ({ page: () => ({ url: () => 'https://offer.test/form' }) }) }), continue: async () => { result = 'continue'; }, abort: async () => { result = 'abort'; } });
+      assert.equal(result, 'continue', `${type}: ${url}`);
+    }
+  }
+  assert.equal(session.blockedAdsCount, undefined);
+});
+
+test('CSS khác origin có đuôi pixel vẫn tải được và animation của form giữ nguyên', async t => {
+  const { existsSync } = await import('node:fs');
+  const { chromium } = await import('playwright');
+  const { createServer } = await import('node:http');
+  if (!existsSync(chromium.executablePath())) { t.skip('Chưa cài Chromium'); return; }
+  const server = createServer((request, response) => {
+    if (request.url.startsWith('/pixel.png')) {
+      response.writeHead(200, { 'content-type': 'text/css' });
+      response.end('@keyframes formReveal { from { opacity:0.5 } to { opacity:1 } } #continue { color: rgb(12, 34, 56); animation: formReveal 2s linear; transition: color 0.4s; }');
+    } else {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(`<link rel="stylesheet" href="http://localhost:${server.address().port}/pixel.png"><button id="continue">Continue</button>`);
+    }
+  });
+  await new Promise(resolve => server.listen(0, resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  const session = {};
+  await attachDataSaver(context, session);
+  const page = await context.newPage();
+  await page.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load' });
+  const style = await page.locator('#continue').evaluate(element => {
+    const css = getComputedStyle(element);
+    return { color: css.color, animation: css.animationDuration, transition: css.transitionDuration, forcedStyle: Boolean(document.getElementById('__autolead_perf_style')) };
+  });
+  assert.deepEqual(style, { color: 'rgb(12, 34, 56)', animation: '2s', transition: '0.4s', forcedStyle: false });
+});

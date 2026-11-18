@@ -1,3 +1,4 @@
+import { invalidateRefillJobs } from '../../refill/actions/invalidate-refill-jobs.mjs';
 import { countLiveBrowsers } from '../count-live-browsers.mjs';
 import { stopAbandonedGoLoginLaunch } from '../gologin/stop-abandoned-launch.mjs';
 import { buildGoLoginLaunchOptions } from '../../gologin-profile/build-launch-options.mjs';
@@ -62,7 +63,7 @@ export const proxyGatewayCooldown = { until: 0, detail: '' };
  * @return {Promise<{results: string[], warnings: string[]}>} Phiên đã mở và các slot không thể cấp.
  * @throws {Error} Khi thiếu token, URL hoặc cấu hình/lịch sử không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-18
  */
 export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
@@ -79,6 +80,8 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
   }
   const requestedCount = Math.min(maxAliveBrowsers, Math.max(1, Math.floor(Number(body.requestedCount ?? body.concurrency) || 1)));
   if (!isAutomaticRefill) {
+    if (autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
+    invalidateRefillJobs();
     autoRefill.stopRequested = false;
     autoRefill.enabled = true;
     autoRefill.settings = { ...body, browserMode: 'GoLogin', useGoLogin: true, gologinDevices: selectedDevices };
@@ -285,11 +288,11 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
           intervalSeconds: Number(body.leadCheckInterval) || 30, maxAttempts: Number(body.leadCheckMaxAttempts) || 2 },
         scriptSteps, scriptPath: body.scriptPath || '', captchaApiKey: body.captchaApiKey || '',
         hideUntilTarget: Boolean(body.hideUntilTarget ?? body.hideBrowser), hideUntilLead: Boolean(body.hideUntilLead),
-        totalCount: autoRefill.targetCount, screenPreviewOnly: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
+        totalCount: autoRefill.targetCount, screenPreviewOnly: body.screenPreviewOnly !== undefined ? Boolean(body.screenPreviewOnly) : (body.runInApp !== undefined ? Boolean(body.runInApp) : false),
         deviceProfile, deviceLabel, userAgent: profileRequest.navigator.userAgent, delayStop: Math.max(0, Number(body.delayStop) || 0),
-        deleteProfile, adoptDetectedExitIp, shouldAbort: () => attempt.abandoned, maxRunMinutes: Number(body.maxRunMinutes) || 0, completeText: String(body.completeText || '').trim(), startProfile: appGeo => startGoLoginProfile(apiToken, profileId, { ...buildGoLoginLaunchOptions({ screenPreviewOnly: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true), hideUntilTarget: body.hideUntilTarget ?? body.hideBrowser, hideUntilLead: body.hideUntilLead, mobileScreen: profileRequest.os === 'android' ? startupSession.mobileScreen : undefined }), ...((appGeo || timezone) ? { timezone: appGeo || timezone } : {}) }, error => recordGoLoginStartupFailure(startupSession, error)), stopProfile: gl => stopGoLoginProfile(gl),
+        deleteProfile, adoptDetectedExitIp, shouldAbort: () => attempt.abandoned, maxRunMinutes: Number(body.maxRunMinutes) || 0, completeText: String(body.completeText || '').trim(), startProfile: appGeo => startGoLoginProfile(apiToken, profileId, { ...buildGoLoginLaunchOptions({ screenPreviewOnly: body.screenPreviewOnly !== undefined ? Boolean(body.screenPreviewOnly) : (body.runInApp !== undefined ? Boolean(body.runInApp) : false), hideUntilTarget: body.hideUntilTarget ?? body.hideBrowser, hideUntilLead: body.hideUntilLead, mobileScreen: profileRequest.os === 'android' ? startupSession.mobileScreen : undefined }), ...((appGeo || timezone) ? { timezone: appGeo || timezone } : {}) }, error => recordGoLoginStartupFailure(startupSession, error)), stopProfile: gl => stopGoLoginProfile(gl),
         offerUrls: body.multiTab === false ? [websiteUrl] : [websiteUrl, ...offerUrls],
-        choiceDelay: body.enableChoiceDelay !== false ? Math.max(0, Number(body.choiceDelay) || 0) : 0,
+        choiceDelay: body.enableChoiceDelay === true ? Math.max(0, Number(body.choiceDelay) || 0) : 0,
         dataSaver: body.dataSaver !== false,
         offerSolver: body.offerSolver || 'auto'
       });

@@ -17,7 +17,6 @@ import { attachFullHtmlLoggerToBrowser } from '../../logging/html-capture.mjs';
 import { attachFullHtmlLoggerToContext } from '../../logging/html-capture.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
 import { autofillQueue } from '../../runtime/constants/autofill-queue.mjs';
-import { autofillRecordIdentity } from '../../records/actions/autofill-record-identity.mjs';
 import { browserIpCheckUrls } from '../../runtime/constants/browser-ip-check-urls.mjs';
 import { buildBrandLists } from '../../../stealth.mjs';
 import { buildStealthConfig } from '../../../stealth.mjs';
@@ -29,7 +28,6 @@ import { handleFormRejected } from "../../records/actions/handle-form-rejected.m
 import { hideWindowOffscreen } from './hide-window-offscreen.mjs';
 import { isToffersDuplicateOfferUrl } from '../../leads/actions/is-toffers-duplicate-offer-url.mjs';
 import { limitOfferTabs } from "../tabs/limit-offer-tabs.mjs";
-import { markAutofillRecordUsed } from '../../records/actions/mark-autofill-record-used.mjs';
 import { navigationTimeout } from '../../runtime/constants/navigation-timeout.mjs';
 import { offerStrategyState } from '../../runtime/constants/offer-strategy-state.mjs';
 import { queueAutomaticRefill } from '../../refill/actions/queue-automatic-refill.mjs';
@@ -42,7 +40,6 @@ import { runAiAssist } from '../../../ai-assist.mjs';
 import { runScript } from '../../../script.mjs';
 import { safeCloneRecord } from '../../records/actions/safe-clone-record.mjs';
 import { saveAndRecordLeadIpStats } from "../../leads/statistics/save-and-record-lead-ip-stats.mjs";
-import { saveAutofillQueue } from '../../records/actions/save-autofill-queue.mjs';
 import { screencastSessions } from '../../runtime/constants/screencast-sessions.mjs';
 import { startLeadVerification } from '../../leads/actions/start-lead-verification.mjs';
 import { startManualOpsRecorder } from '../../../observer.mjs';
@@ -53,7 +50,6 @@ import { takeNextRecord } from '../../records/actions/take-next-record.mjs';
 import { tgNotify } from '../../../tgbot.mjs';
 import { tileAt } from './tile-at.mjs';
 import { watchTrafficBlockedPage } from '../../leads/actions/watch-traffic-blocked-page.mjs';
-import { withoutSessionEmail } from '../../records/actions/without-session-email.mjs';
 import { attachMaxRunTimer } from './attach-max-run-timer.mjs';
 
 /**
@@ -63,7 +59,7 @@ import { attachMaxRunTimer } from './attach-max-run-timer.mjs';
  * @return {Promise<object>} Session trình duyệt đã kết nối.
  * @throws {Error} Khi trình duyệt, CDP hoặc IP proxy không khớp.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-18
  */
 export async function openAdsPowerBrowser({
   tileIndex,
@@ -552,7 +548,7 @@ export async function openAdsPowerBrowser({
   page._offerNumber = offer;
   // Khai báo trước khi gán record cho tab (trước đây khai báo phía dưới nên dòng này lỗi TDZ).
   const recordPool = autofillQueue.available.length > 0 ? autofillQueue.available : autofillRecords.length > 0 ? autofillRecords : autofillQueue.used;
-  page._assignedRecord = session.currentRecord ? safeCloneRecord(session.currentRecord) : takeNextRecord(recordPool, autofillRecords);
+  page._assignedRecord = session.currentRecord ? safeCloneRecord(session.currentRecord) : takeNextRecord(recordPool, autofillRecords, session);
   const tabUrlsToOpen = selectUniqueOfferUrls(offerUrls, websiteUrl);
   const primaryUrl = tabUrlsToOpen[0] || websiteUrl;
   if (primaryUrl) {
@@ -599,7 +595,7 @@ export async function openAdsPowerBrowser({
         extraPage._tabIndex = t;
         extraPage._uxPlanned = true;
         extraPage._offerNumber = t % (offerUrls.length || 1) + 1;
-        extraPage._assignedRecord = takeNextRecord(recordPool, autofillRecords); // mỗi tab một record riêng
+        extraPage._assignedRecord = takeNextRecord(recordPool, autofillRecords, session); // mỗi tab một record riêng
         extraPage._uxOriginTab = true;
         await applyOverridesSafely(extraPage);
         if (tabUrl) {
@@ -709,15 +705,6 @@ export async function openAdsPowerBrowser({
           record.assignedEmail = session.assignedEmail;
         }
         session.currentRecord = record;
-        // Đưa record GỐC (chưa gắn email phiên) vào danh sách đã dùng: trước đây đẩy bản đã gắn email,
-        // nên khi tái dùng danh sách đã dùng, phiên khác nhận luôn email của phiên này.
-        const idx = autofillQueue.available.findIndex(r => r === record || autofillRecordIdentity(r) === autofillRecordIdentity(record));
-        const original = idx !== -1 ? autofillQueue.available.splice(idx, 1)[0] : null;
-        if (original) {
-          autofillQueue.used.push(original);
-          void saveAutofillQueue();
-        }
-        void markAutofillRecordUsed(original ?? withoutSessionEmail(record));
       },
       onScreen5Reached: (sess, p) => {
         if (sess?.emailFilled) void startLeadVerification(sess, leadConfig);

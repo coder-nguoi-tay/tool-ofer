@@ -1,3 +1,4 @@
+import { invalidateRefillJobs } from '../../refill/actions/invalidate-refill-jobs.mjs';
 import { DEFAULT_LEAD_CONFIG } from '../../../lead-check.mjs';
 import { isExitIpConsumed } from '../../proxy/actions/is-exit-ip-consumed.mjs';
 import { DEVICE_PROFILES } from '../../runtime/constants/device-profiles.mjs';
@@ -44,7 +45,7 @@ import { stopMultiloginProfile } from '../../../multilogin-profile.mjs';
  * @return {Promise<{results: object[], warnings: string[]}>} Kết quả mở các slot.
  * @throws {Error} Khi thiếu API token hoặc không thể chuẩn bị profile.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-18
  */
 export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
@@ -58,6 +59,8 @@ export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = 
   }
 
   if (!isAutomaticRefill) {
+    if (autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
+    invalidateRefillJobs();
     autoRefill.stopRequested = false;
     autoRefill.enabled = true;
   }
@@ -66,8 +69,8 @@ export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = 
   const websiteUrl = body.websiteUrl ? String(body.websiteUrl).trim() : '';
   const offerUrls = (body.offerUrls || [websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4]).filter(Boolean);
   const multiTab = body.multiTab !== false;
-  const screenPreviewOnly = Boolean(body.screenPreviewOnly ?? body.runInApp ?? true);
-  const choiceDelay = body.enableChoiceDelay !== false && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0;
+  const screenPreviewOnly = body.screenPreviewOnly !== undefined ? Boolean(body.screenPreviewOnly) : (body.runInApp !== undefined ? Boolean(body.runInApp) : false);
+  const choiceDelay = body.enableChoiceDelay === true && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0;
 
   // Đọc danh sách profile đang chạy để tránh chiếm dụng
   const activeProfileIds = new Set(

@@ -1,3 +1,4 @@
+import { invalidateRefillJobs } from '../../refill/actions/invalidate-refill-jobs.mjs';
 import { countLiveBrowsers } from '../count-live-browsers.mjs';
 import { saveGoLoginConfig } from '../../runtime/actions/save-gologin-config.mjs';
 import { activeBrowsers } from '../sessions.mjs';
@@ -20,12 +21,15 @@ import { writeFile } from 'node:fs/promises';
  * @param {string} requestBody JSON cấu hình mở trình duyệt từ giao diện.
  * @return {Promise<*>} Kết quả xử lý launch user requested browsers.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-18
  */
 export async function launchUserRequestedBrowsers(requestBody) {
+  if (autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
   const body = JSON.parse(requestBody);
   // Làm thủ công: chỉ tắt autofill/AI (xem attachAutofill); tự bù slot giữ nguyên để trình duyệt chết vẫn được thay.
   // Cờ được đặt lại ở mỗi lần Start nên không dính sang lần auto; các phiên bù mở sau vẫn theo cờ này.
+  invalidateRefillJobs();
+  autoRefill.sequential = false;
   applyRunMode(body.runMode);
   autoRefill.stopRequested = false;
   autoRefill.enabled = true;
@@ -96,13 +100,15 @@ export async function launchUserRequestedBrowsers(requestBody) {
     maxRunMinutes: Math.max(0, Number(body.maxRunMinutes) || 0),
     delayStart: Math.max(0, Number(body.delayStart) || 0),
     delayStop: Math.max(0, Number(body.delayStop) || 0),
-    choiceDelay: body.enableChoiceDelay !== false && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0,
+    choiceDelay: body.enableChoiceDelay === true && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0,
     enableChoiceDelay: Boolean(body.enableChoiceDelay && Number(body.choiceDelay) > 0),
     limitRun: Math.max(0, Number(body.limitRun) || 0),
     antiFpCanvas: Boolean(body.antiFpCanvas),
     antiFpClientRects: Boolean(body.antiFpClientRects),
     antiFpWebgl: Boolean(body.antiFpWebgl),
     antiFpWebrtc: Boolean(body.antiFpWebrtc),
+    antiFpFonts: Boolean(body.antiFpFonts),
+    antiFpApiFakeIP: Boolean(body.antiFpApiFakeIP),
     Windows: Boolean(body.Windows),
     Mac: Boolean(body.Mac),
     Linux: Boolean(body.Linux),
@@ -112,15 +118,15 @@ export async function launchUserRequestedBrowsers(requestBody) {
     hideUntilTarget: Boolean(body.hideUntilTarget ?? body.hideBrowser),
     hideBrowser: Boolean(body.hideUntilTarget ?? body.hideBrowser),
     hideUntilLead: Boolean(body.hideUntilLead),
-    runInApp: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
-    screenPreviewOnly: Boolean(body.screenPreviewOnly ?? body.runInApp ?? true),
+    runInApp: body.runInApp !== undefined ? Boolean(body.runInApp) : Boolean(body.screenPreviewOnly ?? false),
+    screenPreviewOnly: body.screenPreviewOnly !== undefined ? Boolean(body.screenPreviewOnly) : Boolean(body.runInApp ?? false),
     dataSaver: Boolean(body.dataSaver !== false),
     offerSolver: body.offerSolver || 'auto'
   };
   autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(1, requestedCount));
   autoRefill.message = `Tự bù ${autoRefill.enabled ? 'đang bật' : 'đang tắt'}: ${countLiveBrowsers()}/${autoRefill.targetCount} trình duyệt.`;
   void saveAutoRefillSettings();
-  if (autoRefill.enabled && countLiveBrowsers() < autoRefill.targetCount) {
+  if (autoRefill.enabled && countLiveBrowsers() < autoRefill.targetCount && !autoRefill.isRefilling && !autoRefill.queued) {
     queueAutomaticRefill(2000);
   }
   return {

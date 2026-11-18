@@ -1,3 +1,5 @@
+import { invalidateRefillJobs } from '../../../refill/actions/invalidate-refill-jobs.mjs';
+import { maxAliveBrowsers } from '../../../runtime/constants/max-alive-browsers.mjs';
 import { applyRunMode } from '../../../runtime/constants/run-mode-state.mjs';
 import { autoRefill } from '../../../runtime/constants/auto-refill.mjs';
 import { normalizeUrl } from '../../../proxy/configuration.mjs';
@@ -11,13 +13,16 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-18
  */
 export async function handlePostAutoRefillSequential(request, response) {
   if (request.method === 'POST' && request.url === '/auto-refill/sequential') {
     const body = JSON.parse(await readRequestBody(request));
+    if (autoRefill.isStopping && body.enabled !== false) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
     autoRefill.sequential = body.enabled !== false;
     if (autoRefill.sequential) {
+      invalidateRefillJobs();
+      autoRefill.stopRequested = false;
       applyRunMode('auto'); // Tuần tự là chế độ tự động: bỏ cờ thủ công của lần Start trước
       autoRefill.enabled = true;
       const s = body.settings ?? autoRefill.settings ?? {};
@@ -31,16 +36,18 @@ export async function handlePostAutoRefillSequential(request, response) {
         }
       }
       const isDual = Boolean(url1 && url2 && url1 !== url2);
-      autoRefill.targetCount = isDual ? 2 : 1;
+      const requestedCount = Number(s.requestedCount ?? s.concurrency ?? (isDual ? 2 : 1));
+      autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(1, Math.trunc(requestedCount) || 1));
       autoRefill.settings = {
         ...s,
         websiteUrl: url1 || s.websiteUrl,
         websiteUrl2: url2 || s.websiteUrl2,
         checkDuplicate: s.checkDuplicate !== false
       };
-      autoRefill.message = isDual ? 'Chế độ tuần tự 2 luồng đã bật: chạy đồng thời cả 2 link (Luồng 1 từ đầu, Luồng 2 từ cuối), delay 5s giữa các phiên.' : 'Chế độ tuần tự đã bật: mở 1 tab mỗi lần, delay 5s giữa các phiên.';
+      autoRefill.message = `Chế độ tuần tự đã bật: mục tiêu ${autoRefill.targetCount} phiên, delay 5s giữa các phiên.`;
       if (body.settings) queueAutomaticRefill(0);
     } else {
+      invalidateRefillJobs();
       autoRefill.sequential = false;
       autoRefill.message = 'Chế độ tuần tự đã tắt.';
     }

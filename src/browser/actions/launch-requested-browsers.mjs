@@ -81,7 +81,7 @@ export async function launchRequestedBrowsers(requestBody, {
   const maxRunMinutes = Math.max(0, Number(body.maxRunMinutes) || 0); // ô Chờ tối đa: phút
   const delayStart = Math.max(0, Number(body.delayStart) || 0); // giây
   const delayStop = Math.max(0, Number(body.delayStop) || 0); // giây
-  const choiceDelay = body.enableChoiceDelay !== false && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0; // giây delay chọn kết quả
+  const choiceDelay = body.enableChoiceDelay === true && Number(body.choiceDelay) > 0 ? Number(body.choiceDelay) : 0; // giây delay chọn kết quả
   const newLimitRun = Math.max(0, Number(body.limitRun) || 0);
   if (newLimitRun > 0) applicationState.limitRunMax = newLimitRun;
   const antiFingerprint = {
@@ -96,7 +96,7 @@ export async function launchRequestedBrowsers(requestBody, {
   const hideUntilLead = Boolean(body.hideUntilLead);
   // "Chạy trong app" (checkbox cbxRunInApp): true = chạy ngầm thu nhỏ (ScreenView),
   // false = mở cửa sổ Chrome bình thường ra Desktop. Mặc định true giữ hành vi cũ.
-  const screenPreviewOnly = Boolean(body.screenPreviewOnly ?? body.runInApp ?? true);
+  const screenPreviewOnly = body.screenPreviewOnly !== undefined ? Boolean(body.screenPreviewOnly) : (body.runInApp !== undefined ? Boolean(body.runInApp) : false);
   let scriptSteps = null;
   if (scriptPath) {
     try {

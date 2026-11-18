@@ -17,7 +17,13 @@ export function inspectFrameValidation(formScope = null) {
   const isVisible = el => {
     if (!el || el.disabled || formScope && !el.matches(formScope.memberSelector)) return false;
     if (formScope?.nativeForm && el.form && el.form !== document.querySelector(formScope.rootSelector)) return false;
-    if (el.closest('header, footer, nav')) return false;
+    if (el.closest('footer, nav')) return false;
+    const headerEl = el.closest('header');
+    if (headerEl) {
+      const headerHasInputs = Boolean(headerEl.querySelector('input:not([type="hidden"]), select, textarea'));
+      const headerIsHeroContainer = Boolean(headerEl.matches('.hero, [id*="form" i], [class*="form" i], .lead-form, [id*="lead" i]') || headerEl.querySelector('form, [role="form"]'));
+      if (!headerHasInputs && !headerIsHeroContainer) return false;
+    }
     // Loại trừ trường nằm trong step ẩn, tab ẩn, carousel ẩn hoặc aria-hidden
     if (el.closest('[aria-hidden="true"], [inert], .inactive, .hidden, .hide, .step:not(.active):not(.current):not(.is-active):not([class*="active"]), .tab-pane:not(.active):not(.is-active), .carousel-item:not(.active)')) return false;
     const style = window.getComputedStyle ? window.getComputedStyle(el) : null;

@@ -15,7 +15,7 @@
   color: #94a3b8;
   box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.3);
   box-sizing: border-box;
-  user-select: none;
+  user-select: text;
 }
 
 .status-panel {

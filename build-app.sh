@@ -78,15 +78,16 @@ echo "=== Compiling native Swift binary ==="
 TMP_BIN="$BUILD_DIRECTORY/AutoLeadPCMac_bin"
 swiftc -O -parse-as-library AutoLeadPCMacApp.swift -o "$TMP_BIN"
 
-# Tạo bundle Mac từ source chung với luồng Chrome và AdsPower.
+# Tạo bundle Mac và luôn dựng Obscura từ source trước khi đóng gói binary.
 # @param $1 Tên bundle .app.
 # @param $2 Số instance.
 # @param $3 Cổng giao diện.
 # @param $4 Bundle ID.
 # @param $5 Tên hiển thị.
 # @return Bundle đã đóng gói và ký trong staging, sẵn sàng thay app duy nhất.
+# @throws Dừng build nếu Swift, Obscura, đóng gói hoặc ký ứng dụng thất bại.
 # @author ductv <ductv@getflycrm.com>
-# @since 2026-11-11
+# @since 2026-11-19
 build_app_bundle() {
   local APP_NAME="$1"
   local INSTANCE_ID="$2"
@@ -188,16 +189,12 @@ EOF
     cp -p captcha.mjs "$LAUNCHER_DIR/"
   fi
 
-  # Đóng gói Obscura Anti-Detect Rust native binary độc lập
+  # Luôn kiểm tra/build source Rust mới nhất; Cargo tái sử dụng cache khi không có thay đổi.
   local OBSCURA_RELEASE_BIN="demo-obscura-antidetect/target/release/obscura_antidetect_demo"
-  if [ ! -f "$OBSCURA_RELEASE_BIN" ]; then
-    node scripts/build-obscura.mjs
-  fi
-  if [ -f "$OBSCURA_RELEASE_BIN" ]; then
-    mkdir -p "$LAUNCHER_DIR/bin"
-    cp -p "$OBSCURA_RELEASE_BIN" "$LAUNCHER_DIR/bin/obscura_antidetect_demo"
-    chmod +x "$LAUNCHER_DIR/bin/obscura_antidetect_demo"
-  fi
+  node scripts/build-obscura.mjs
+  mkdir -p "$LAUNCHER_DIR/bin"
+  cp -p "$OBSCURA_RELEASE_BIN" "$LAUNCHER_DIR/bin/obscura_antidetect_demo"
+  chmod +x "$LAUNCHER_DIR/bin/obscura_antidetect_demo"
 
   # Copy node_modules
   if [ -d "node_modules" ]; then

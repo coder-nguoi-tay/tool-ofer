@@ -1,7 +1,5 @@
-//! Obscura Anti-Detect Module
-//!
-//! Provides deterministic profile generation (fingerprint spoofing) and stealth
-//! JavaScript injection for Obscura (Rust + V8 Headless Browser).
+//! Native device-profile configuration and CDP controls for Obscura.
+//! Browser identity is stored in Rust. The legacy script API emits no page patches.
 
 pub mod cdp_bridge;
 pub mod engine_hook;

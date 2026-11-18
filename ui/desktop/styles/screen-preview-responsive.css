@@ -171,3 +171,15 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Cho phép người dùng bôi đen tất cả các text trên app để sao chép thông tin */
+*, *::before, *::after {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+::selection {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+

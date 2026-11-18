@@ -4,18 +4,18 @@
 //! avoiding WebSocket/CDP serialization overhead.
 
 use crate::profile::AntiDetectProfile;
-use crate::stealth_script::generate_stealth_js;
 
 /// Quản lý cấu hình Anti-Detect tích hợp ở tầng Rust Context của Obscura.
 pub struct ObscuraEngineHook;
 
 impl ObscuraEngineHook {
-    /// Chuẩn bị script injection để truyền vào `obscura::Page::add_preload_script`.
-    ///
-    /// Khi Obscura nạp trang qua `page.goto(url).await`, V8 sẽ tự động thực thi
-    /// preload script này trước khi bất kỳ file JS nào của trang web tải về.
-    pub fn get_page_preload_script(profile: &AntiDetectProfile) -> String {
-        generate_stealth_js(profile)
+    /// Cấu hình trực tiếp native identity trước khi trang được điều hướng.
+    /// @param page Trang Obscura. @param profile Danh tính thiết bị.
+    /// @return Kết quả cấu hình. @throws anyhow::Error Khi cấu hình không hợp lệ.
+    /// @author ductv <ductv@getflycrm.com> @since 2026-11-18
+    pub fn apply_browser_identity(page: &mut obscura::Page, profile: &AntiDetectProfile) -> anyhow::Result<()> {
+        page.set_browser_identity(&serde_json::to_string(profile)?)?;
+        Ok(())
     }
 
     /// Trích xuất danh sách HTTP headers phù hợp với profile để thiết lập cho Request Client của Obscura:

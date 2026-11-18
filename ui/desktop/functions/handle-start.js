@@ -4,7 +4,7 @@
  * @return {Promise<void>} Hoàn tất khi API khởi chạy trả kết quả.
  * @throws {Error} Khi giao diện không thể gửi yêu cầu mở trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-18
  */
 async function handleStart(options = {}) {
       const btnStart = document.getElementById('btnStart');
@@ -102,26 +102,46 @@ async function handleStart(options = {}) {
         const dataSaver = document.getElementById('cbxDataSaver') ? document.getElementById('cbxDataSaver').checked : true;
         const { enableLeadCheck, leadCheckInterval, stopAutofillOnLead } = getLeadCheckSettings();
         const autoCloseNoLead = enableLeadCheck;
-        const hideUntilTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
-        const hideUntilLead = Boolean(document.getElementById('cbxHideUntilLead')?.checked);
-        // "Chạy trong app": đọc trạng thái checkbox thật (bật = chạy ngầm thu nhỏ, tắt = mở cửa sổ Desktop thường)
-        const runInApp = Boolean(document.getElementById('cbxRunInApp')?.checked);
 
         const useObscura = Boolean(document.getElementById('cbxObscura')?.checked);
         const useGoLogin = !useObscura && Boolean(document.getElementById('cbxGoLogin')?.checked);
         const browserMode = useObscura ? 'Obscura' : (useGoLogin ? 'GoLogin' : 'Chrome');
 
+        const rawRunInApp = Boolean(document.getElementById('cbxRunInApp')?.checked);
+        const rawHideTarget = Boolean(document.getElementById('cbxHideUntilTarget')?.checked);
+        const rawHideLead = Boolean(document.getElementById('cbxHideUntilLead')?.checked);
+
+        // Chuẩn hoá logic hiển thị cửa sổ loại trừ tương hỗ:
+        // - Obscura là headless native engine bắt buộc chạy trong app
+        // - Tắt cả 3 nút: mở cửa sổ Desktop bình thường ngay từ đầu
+        let runInApp = false;
+        let hideUntilTarget = false;
+        let hideUntilLead = false;
+
+        if (useObscura) {
+          runInApp = true;
+        } else if (rawHideLead) {
+          hideUntilLead = true;
+        } else if (rawHideTarget) {
+          hideUntilTarget = true;
+        } else if (rawRunInApp) {
+          runInApp = true;
+        }
+
         document.getElementById('lbStatus').textContent = useObscura
           ? 'Starting Obscura...'
           : (useGoLogin ? 'Starting GoLogin...' : 'Starting Chrome...');
-        if (useObscura || hideUntilTarget || hideUntilLead) {
+        if (runInApp || useObscura) {
           switchTab('ScreenView');
         } else {
           switchTab('tabRunning');
+          if (typeof _screenViewActive !== 'undefined' && _screenViewActive && typeof toggleScreenView === 'function') {
+            toggleScreenView();
+          }
         }
         fetchRunningState();
 
-        const streamCount = Math.max(concurrency, offerUrls.length >= 2 ? offerUrls.length : 1);
+        const streamCount = concurrency;
 
         if (mode === 'sequential') {
           const res = await api('/auto-refill/sequential', {
@@ -137,6 +157,7 @@ async function handleStart(options = {}) {
                 offerList: offerUrls,
                 concurrency: streamCount,
                 requestedCount: streamCount,
+                multiTab: document.getElementById('cbxMultiTab')?.checked ?? true,
                 proxyList: proxyLines,
                 proxyType,
                 scriptPath,
@@ -182,6 +203,7 @@ async function handleStart(options = {}) {
               }
             })
           });
+          if (res.error) throw new Error(res.error);
           document.getElementById('lbStatus').textContent = res.message || 'Sequential mode active.';
           if (typeof syncStopSchedulerState === 'function') syncStopSchedulerState();
         } else {

@@ -86,15 +86,8 @@ test('Obscura Engine Integration Suite', async (t) => {
     assert.ok(observedMajors.size >= 4, `Phải có ít nhất 4 phiên bản Chrome khác nhau trong 30 seed, thực tế: ${observedMajors.size}`);
   });
 
-  await t.test('4. buildObscuraStealthScript generates executable stealth JavaScript', () => {
-    const script = buildObscuraStealthScript({ seed: 101, os: 'windows' });
-    assert.ok(script.length > 1000);
-    assert.ok(script.includes('navigator.webdriver'));
-    assert.ok(script.includes('window.chrome'));
-    // Canvas/audio/WebGL do engine tự lo theo danh tính phiên; script tiêm không còn hook các API này.
-    assert.ok(!script.includes('HTMLCanvasElement.prototype.getContext'));
-    // Không để lại global đánh dấu cho trang dò.
-    assert.ok(!script.includes('__obscura_antidetect_active'));
+  await t.test('4. API script cũ không phát JavaScript vá browser', () => {
+    assert.equal(buildObscuraStealthScript({ seed: 101, os: 'windows' }), '');
   });
 
   await t.test('5. Root facade re-exports matches src/obscura-engine', () => {

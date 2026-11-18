@@ -1,3 +1,4 @@
+import { normalizeOfferRunOptions } from '../../../config/normalize-offer-run-options.mjs';
 import { existsSync } from 'node:fs';
 import { getAutoLeadPCDir } from '../../../config/paths.mjs';
 import { join } from 'node:path';
@@ -14,12 +15,13 @@ import { writeFileSync } from 'node:fs';
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-18
  */
 export async function handlePostPcOfferSave(request, response) {
   if (request.method === 'POST' && request.url === '/pc/offer/save') {
     try {
       const body = JSON.parse(await readRequestBody(request));
+      const runOptions = normalizeOfferRunOptions(body);
       const baseDir = getAutoLeadPCDir();
       const offerDir = join(baseDir, 'Config', 'Offer');
       if (!existsSync(offerDir)) {
@@ -32,7 +34,7 @@ export async function handlePostPcOfferSave(request, response) {
       const link2 = (body.LinkOffer2 || '').trim();
       const link3 = (body.LinkOffer3 || '').trim();
       const link4 = (body.LinkOffer4 || '').trim();
-      const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=False\n[Data]\nLinkOffer=${link1}\nLinkOffer2=${link2}\nLinkOffer3=${link3}\nLinkOffer4=${link4}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nMaxRunMinutes=${body.MaxRunMinutes ?? '10'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\nThread=${body.Thread || '1'}\nLimitRun=${body.LimitRun || '0'}\nscheduleStopEnabled=${body.scheduleStop?.enabled ? 'True' : 'False'}\nscheduleStopTime=${body.scheduleStop?.time || '23:00'}\n`;
+      const iniContent = `[Setting]\nProxy=Direct\nAuto=Manual work\nCheckDuplicate=${runOptions.CheckDuplicate ? 'True' : 'False'}\n[Data]\nLinkOffer=${link1}\nLinkOffer2=${link2}\nLinkOffer3=${link3}\nLinkOffer4=${link4}\nNameOffer=${body.NameOffer || ''}\nScript=${body.Script || ''}\nComplete=${body.Complete || ''}\nTimeload1=${body.TimeLimit || '30'}\nMaxRunMinutes=${body.MaxRunMinutes ?? '10'}\nTimeload2=40\ndelayStart=${body.delayStart || '1'}\ndelayStop=${body.delayStop || '1'}\nThread=${body.Thread || '1'}\nLimitRun=${body.LimitRun || '0'}\nscheduleStopEnabled=${body.scheduleStop?.enabled ? 'True' : 'False'}\nscheduleStopTime=${body.scheduleStop?.time || '23:00'}\nRunOptions=${JSON.stringify(runOptions)}\n`;
       writeFileSync(filePath, iniContent, 'utf8');
 
       // Lưu / cập nhật danh sách preset saved-offers.json
@@ -63,6 +65,7 @@ export async function handlePostPcOfferSave(request, response) {
         schedules: Array.isArray(body.schedules) ? body.schedules : [],
         scheduleStop: body.scheduleStop || null,
         methodConfigs: Array.isArray(body.methodConfigs) ? body.methodConfigs : [],
+        ...runOptions,
         updatedAt: new Date().toISOString()
       };
       const existingIdx = savedList.findIndex(item => item.id && item.id === offerItem.id || item.NameOffer === offerName);

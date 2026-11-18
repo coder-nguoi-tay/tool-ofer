@@ -389,7 +389,7 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 
 - Màn 98–100% phải có card/link hiển thị; chỉ phần trăm, card ẩn hoặc trang khác không kích hoạt dọn tab.
 - Có nhiều tab cũ trong một IP: tới màn card thì giữ chính tab đó, đóng tab cũ trong cùng context; browser/IP khác không đổi, cờ lead vẫn giữ.
-- Card lồng form/wrapper vẫn mở đủ link riêng; link trùng/đã mở và URL bị loại trừ không mở lại. Trang card không điều hướng theo offer con.
+- Card lồng form/wrapper bấm CTA thật; link trùng/đã mở và URL bị loại trừ không mở lại. Link không target/_self phải chuyển tab hiện tại; _blank mở tab con; target có tên tái dùng đúng cửa sổ/iframe. preventDefault phải chặn điều hướng.
 - Có 12 card: mở tối đa 9 tab con; đóng một tab thì mở card tiếp theo, không vượt 10 tab tính cả trang gốc. Link tải chậm không khóa các card sau.
 - Reload trang card hoặc hai lượt quét đồng thời không dọn tab con vừa mở và không mở trùng. Watchdog không gọi AI/F5 trang gốc khi chờ chỗ trống.
 - Bật dừng sau lead hoặc đang chờ lead: không dọn/mở thêm tab. Stop/lead về trong lúc tạo tab phải chặn điều hướng tiếp.
@@ -477,3 +477,41 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - Bù cùng slot nhiều lượt: xác nhận PID cũ đã thoát trước PID mới, không reconnect vào cũ; seed, fingerprint thiết bị, IP và phiên bản Chrome/Safari đổi so với phiên vừa đóng. Chỉ xoay thiết bị trong các nhóm được chọn. Không tái dùng cookie/localStorage/tab/record/lead của phiên cũ.
 - IP cũ do proxy xoay cấp lại phải bị loại trước offer; hết IP/profile khác phải báo thiếu tài nguyên. Slot có native chưa dừng vẫn chiếm chỗ, không mở chồng để đủ target.
 - Trang duplicate/traffic blocked đi qua lifecycle native; chỉ nhả khóa và bù sau khi PID đã dừng. Phiên đã có lead vẫn áp dụng các guard giữ lead hiện có.
+
+### Hồi quy dropdown và phân phối info (2026-11-18)
+
+- Nạp ít nhất 20 info khác nhau, chạy 20 slot; tên/phone của các trình duyệt phải khác nhau.
+- Nạp record trùng, hoặc chạy số slot vượt info; app báo thiếu, không dùng lại info đang chạy.
+- Reload, đi qua iframe/bước mới và reconnect CDP: giữ info đúng phiên.
+- Form từ chối info: record thay thế chưa thuộc bất kỳ phiên đang chạy nào.
+- Virginia/West Virginia: chọn đúng VA; custom widget không cập nhật select thì không báo thành công.
+- Select ẩn cạnh Continue không bấm Submit; form busy không thay giá trị; native select chỉ một change.
+- Lead về trong khi chờ widget: bật Dừng sau lead thì không sửa DOM/phát sự kiện tiếp.
+- Trang có WebGL và fallback: Obscura nhận nhánh fallback; 2D canvas vẫn render được.
+- Kiểm tra các mục trên trên Windows thật trước khi khẳng định tương đương bản macOS.
+
+### Điều hướng Obscura theo HTML (2026-11-18)
+
+- Kiểm tra bằng fixture offline cả HTML đầy đủ: link hủy click, form hủy submit không sinh request/tab; POST giữ body và GET giữ query.
+- Kiểm tra base href, formtarget/formaction/formmethod trên nút submit, target _self/_parent/_top và iframe có tên.
+- Màn cuối 2615: CTA không target chuyển tab hiện tại; CTA _blank mới mở tab con. Đủ quota tab con vẫn cho phép điều hướng tab hiện tại. Không điều hướng URL data-destination-url nếu website không yêu cầu.
+- Reference từ window.open có tên phải tái dùng tab; kiểm tra location, close, closed, opener và postMessage cơ bản. Các luồng đọc/ghi document đồng bộ qua WindowProxy cần QA riêng, hiện chưa hỗ trợ đầy đủ.
+
+### Obscura core: cấu hình và điều hướng (2026-11-18)
+
+- Hai page chung context: đặt UA/ngôn ngữ khác nhau qua native/CDP, kiểm tra HTTP document, fetch, XHR, iframe và reload không lẫn nhau.
+- Profile Android DPR khác 1: kiểm tra root/iframe sau load và reload; thay device metrics trên trang đang mở phải cập nhật cả iframe.
+- Meta refresh 1 giây với script chặn load 1,3 giây: chuyển hướng sau khi load xong khoảng 1 giây; xóa thẻ sau 100ms vẫn chuyển hướng; khai báo đầu sai không chặn khai báo hợp lệ tiếp theo.
+- Web Audio context không được quảng cáo khi chưa có backend xử lý PCM; không coi việc thiếu API là bằng chứng chạy đủ chức năng audio.
+
+### Chuyển chế độ và khôi phục lựa chọn chạy (2026-11-18)
+
+- Auto/Manual → Stop → Sequential: chạy lại được, mục tiêu đúng số luồng (1 và 4 với hai link), bỏ tick đa tab được giữ.
+- Job bù đang chờ proxy/mở browser → Stop → Start mới: kết quả/job/finally cũ không mở tiếp, sửa message hoặc nhả khóa lượt mới.
+- Lưu hai offer có checkbox đối lập → chọn lần lượt → reload/trình duyệt mới: khôi phục đúng chế độ, hiển thị, đa tab, delay, chống trùng và lead; không ghép cache của offer khác.
+- Chọn Obscura rồi nạp preset yêu cầu Desktop: vẫn giữ Obscura và preview trong app. Fonts/API Fake IP được giữ trong cấu hình phiên bù.
+- Không bù slot được giữ qua Stop/Start; bỏ chọn mới cho phép bù tiếp.
+
+- Trong lúc Stop đang đóng browser: Start phải bị khóa trên giao diện và API từ chối Start/Sequential; khi Stop hoàn tất mới cho phép chạy lại.
+
+- Độ nhạy form/CSS: request resourceType=stylesheet có URL /pixel.png hoặc query kết thúc tracking.png vẫn được tải, style áp dụng ở iframe/cross-origin. Data Saver không thêm __autolead_perf_style và không đổi animation/transition của form. Kiểm tra click/nhập giữ đúng thứ tự trên các slot, nhịp 160ms và bảo vệ lead vẫn hoạt động. Benchmark Chromium offline 3 lượt: click trước 408–424ms/sau 238–273ms, fast input trước 712–754ms/sau 575–592ms; đây không phải SLA hoặc số đo proxy thật.

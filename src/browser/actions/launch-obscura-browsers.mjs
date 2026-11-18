@@ -1,3 +1,4 @@
+import { invalidateRefillJobs } from '../../refill/actions/invalidate-refill-jobs.mjs';
 import { countLiveBrowsers } from '../count-live-browsers.mjs';
 import { launchRequestedBrowsers } from './launch-requested-browsers.mjs';
 import { openObscuraSession } from '../../obscura-engine/open-obscura-session.mjs';
@@ -15,13 +16,14 @@ import { applyRunMode } from '../../runtime/constants/run-mode-state.mjs';
  * @return {Promise<object>} Kết quả mở từng proxy cùng cảnh báo của bộ cấp phát chung.
  * @throws {Error} Khi cấu hình, binary hoặc tài nguyên không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-18
  */
 export async function launchObscuraBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = typeof requestBody === 'string' ? JSON.parse(requestBody) : requestBody;
   if (!isAutomaticRefill) {
+    if (autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
     applyRunMode(body.runMode);
-    autoRefill.launchGeneration = (autoRefill.launchGeneration || 0) + 1;
+    invalidateRefillJobs();
     autoRefill.stopRequested = false;
     autoRefill.enabled = true;
     autoRefill.settings = { ...body, browserMode: 'Obscura', useObscura: true, useGoLogin: false };

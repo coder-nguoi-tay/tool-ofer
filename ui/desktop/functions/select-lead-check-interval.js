@@ -8,12 +8,21 @@
  */
 function selectLeadCheckInterval(seconds, checked) {
   const selected = document.getElementById('cbxCheckLead');
-  if (selected) selected.checked = checked;
+  if (selected) selected.checked = Boolean(checked);
+  try {
+    localStorage.setItem('autoleadpc_check_lead', String(Boolean(checked)));
+  } catch { }
   if (!getLeadCheckSettings().enableLeadCheck) {
     const hideUntilLead = document.getElementById('cbxHideUntilLead');
-    if (hideUntilLead) hideUntilLead.checked = false;
+    if (hideUntilLead) {
+      hideUntilLead.checked = false;
+      try { localStorage.setItem('autoleadpc_hide_until_lead', 'false'); } catch { }
+    }
     const stopAfterLead = document.getElementById('cbxStopAutofillOnLead');
-    if (stopAfterLead) stopAfterLead.checked = false;
+    if (stopAfterLead) {
+      stopAfterLead.checked = false;
+      try { localStorage.setItem('autoleadpc_stop_autofill_on_lead', 'false'); } catch { }
+    }
   }
   syncOptionPills();
 }

@@ -1,6 +1,7 @@
 
     :root { color-scheme: light; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17243a; background: #eef2f8; }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; user-select: text !important; -webkit-user-select: text !important; }
+    ::selection { background-color: #245fce !important; color: #ffffff !important; }
     body { margin: 0; padding: 12px; }
     main { max-width: 560px; min-height: 570px; margin: auto; padding: 20px 22px; border: 1px solid #e1e7f0; border-radius: 16px; background: white; box-shadow: 0 12px 36px #172b4d12; }
     header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }

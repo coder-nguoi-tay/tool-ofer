@@ -74,6 +74,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   if (typeof field.evaluate === 'function') {
     await field.evaluate(el => {
       if (el && el.value) {
+        if (el._valueTracker) el._valueTracker.setValue('');
         el.value = '';
         el.dispatchEvent(new Event('input', {
           bubbles: true
@@ -212,6 +213,9 @@ async function humanTypeCore(field, text, page = null, options = {}) {
       } else {
         el.value = val;
       }
+      if (el && el._valueTracker) {
+        el._valueTracker.setValue('');
+      }
       el.dispatchEvent(new Event('input', {
         bubbles: true
       }));
@@ -225,6 +229,9 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   if (typeof field.evaluate === 'function') {
     await field.evaluate(el => {
       try {
+        if (el && el._valueTracker) {
+          el._valueTracker.setValue('');
+        }
         el.dispatchEvent(new Event('input', {
           bubbles: true
         }));

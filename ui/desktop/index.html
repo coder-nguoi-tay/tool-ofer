@@ -28,6 +28,8 @@
       <div class="win-tab active" data-tab="Dashboard" onclick="switchTab('Dashboard')">🚀 Vận hành</div>
       <div class="win-tab" data-tab="tabRunning" onclick="switchTab('tabRunning')">⚡ Đang chạy (<span
           id="tabRunCount">0</span>)</div>
+      <div class="win-tab" data-tab="ToffersOffers" onclick="switchTab('ToffersOffers')">🎯 Danh sách Offer Toffers (<span
+          id="tabToffersOffersCount">--</span>)</div>
       <div class="win-tab" data-tab="ToffersLeads" onclick="switchTab('ToffersLeads')">💎 Toffers Leads (<span
           id="tabLeadPointHeader">-- pt</span>)</div>
       <div class="win-tab" data-tab="Info" onclick="switchTab('Info')">📦 Tài nguyên (Email &amp; Data)</div>
@@ -80,6 +82,9 @@
                 placeholder="Nhập tên offer để lưu và phân loại">
             </div>
             <div class="offer-toolbar-actions">
+              <button type="button" class="win-btn" id="btnBrowseToffersOffers" onclick="switchTab('ToffersOffers')"
+                style="padding:3px 10px;font-size:11px;background:#059669;color:#ffffff;border-color:#10b981;font-weight:600;"
+                title="Mở danh sách Offer từ Toffers.top để chọn">🎯 Lấy Offer Toffers</button>
               <button type="button" class="win-btn win-btn-save-offer" id="btnSaveOffer" onclick="saveOfferConfig()"
                 style="font-weight:bold;padding:3px 12px;font-size:11px;background:#0284c7;color:#ffffff;border-color:#38bdf8;">💾
                 Lưu Offer</button>
@@ -99,7 +104,7 @@
               placeholder="Dán URL Offer (hoặc dán nhiều link, mỗi dòng 1 link để tự động luân phiên)">
             <div class="link-offer-actions" style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;">
               <label
-                style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
+                style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:text;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
                 title="Tích vào để hẹn giờ tự động chạy Link Offer 1">
                 <input type="checkbox" id="cbxScheduleOffer1" onchange="toggleScheduleOffer(1, this.checked)"
                   style="cursor:pointer;">
@@ -122,7 +127,7 @@
               <input type="text" id="txtLinkOffer2" class="win-input" style="flex:1;min-width:240px;"
                 placeholder="URL Offer 2 (tùy chọn)">
               <label
-                style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
+                style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:text;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
                 title="Tích vào để hẹn giờ tự động chạy Link Offer 2">
                 <input type="checkbox" id="cbxScheduleOffer2" onchange="toggleScheduleOffer(2, this.checked)"
                   style="cursor:pointer;">
@@ -137,7 +142,7 @@
               <input type="text" id="txtLinkOffer3" class="win-input" style="flex:1;min-width:240px;"
                 placeholder="URL Offer 3 (tùy chọn)">
               <label
-                style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
+                style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:text;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
                 title="Tích vào để hẹn giờ tự động chạy Link Offer 3">
                 <input type="checkbox" id="cbxScheduleOffer3" onchange="toggleScheduleOffer(3, this.checked)"
                   style="cursor:pointer;">
@@ -152,7 +157,7 @@
               <input type="text" id="txtLinkOffer4" class="win-input" style="flex:1;min-width:240px;"
                 placeholder="URL Offer 4 (tùy chọn)">
               <label
-                style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
+                style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:text;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap;"
                 title="Tích vào để hẹn giờ tự động chạy Link Offer 4">
                 <input type="checkbox" id="cbxScheduleOffer4" onchange="toggleScheduleOffer(4, this.checked)"
                   style="cursor:pointer;">
@@ -293,7 +298,7 @@
 
                   <div class="input-inline-unit delay-choice-box"
                     style="margin-left:6px;padding:2px 8px;background:rgba(15,23,42,0.6);border:1px solid #334155;border-radius:4px;">
-                    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;"
+                    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:text;"
                       title="Tích vào để tăng thời gian delay đọc và suy nghĩ trước khi chọn đáp án / survey (mô phỏng người thật tránh bot)">
                       <input type="checkbox" id="cbxChoiceDelay" onchange="toggleChoiceDelay(this.checked)"
                         style="cursor:pointer;">
@@ -324,21 +329,22 @@
                 <div class="options-group-pills">
                   <label class="option-pill is-checked active"
                     title="Không mở cửa sổ trình duyệt ra ngoài màn hình Desktop; chạy hoàn toàn ngầm trong app (xem trực tiếp qua tab Xem màn hình), khi bấm mới hiện cửa sổ Desktop.">
-                    <input type="checkbox" id="cbxRunInApp" checked onchange="syncOptionPills()">
+                    <input type="checkbox" id="cbxRunInApp" checked
+                      onchange="if(typeof syncWindowDisplayMode==='function'){syncWindowDisplayMode('runInApp',this.checked);}else{syncOptionPills();}">
                     <span class="option-pill-text"><span class="option-pill-icon">💻</span> Chạy trong app</span>
                   </label>
 
                   <label class="option-pill"
                     title="Chạy ngầm ẩn trình duyệt trong lúc kiểm tra IP và chuyển hướng; chỉ hiển thị lên màn hình khi đã vào trang đích thành công.">
                     <input type="checkbox" id="cbxHideUntilTarget"
-                      onchange="if(this.checked){const el=document.getElementById('cbxHideUntilLead');if(el)el.checked=false;} syncOptionPills();">
+                      onchange="if(typeof syncWindowDisplayMode==='function'){syncWindowDisplayMode('hideUntilTarget',this.checked);}else{if(this.checked){const el=document.getElementById('cbxHideUntilLead');if(el)el.checked=false;const r=document.getElementById('cbxRunInApp');if(r)r.checked=false;}syncOptionPills();}">
                     <span class="option-pill-text"><span class="option-pill-icon">🏁</span> Ẩn đến trang đích</span>
                   </label>
 
                   <label class="option-pill option-pill-hidelead"
                     title="Chạy ngầm ẩn trình duyệt hoàn toàn; chỉ những IP nào kiểm tra có lead mới hiển thị lên màn hình, không có lead sẽ tự động đóng.">
                     <input type="checkbox" id="cbxHideUntilLead"
-                      onchange="if(this.checked){const t=document.getElementById('cbxHideUntilTarget');if(t)t.checked=false;if(!getLeadCheckSettings().enableLeadCheck)selectLeadCheckInterval(30,true);} syncOptionPills();">
+                      onchange="if(typeof syncWindowDisplayMode==='function'){syncWindowDisplayMode('hideUntilLead',this.checked);}else{if(this.checked){const t=document.getElementById('cbxHideUntilTarget');if(t)t.checked=false;const r=document.getElementById('cbxRunInApp');if(r)r.checked=false;if(!getLeadCheckSettings().enableLeadCheck)selectLeadCheckInterval(30,true);}syncOptionPills();}">
                     <span class="option-pill-text"><span class="option-pill-icon">🎯</span> Chỉ hiện khi có Lead</span>
                   </label>
                 </div>
@@ -442,7 +448,7 @@
                 onclick="handleCloseAll()">✕ Close Chrome</button>
             </div>
             <div class="controls-schedule-stop-group" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(15,23,42,0.7);border:1px solid #334155;border-radius:6px;">
-              <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-size:11.5px;color:#f87171;font-weight:600;white-space:nowrap;"
+              <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:text;font-size:11.5px;color:#f87171;font-weight:600;white-space:nowrap;"
                 title="Tích vào để hẹn giờ tự động dừng luồng và đóng tất cả trình duyệt khi đến mốc giờ này">
                 <input type="checkbox" id="cbxScheduleStop" onchange="toggleScheduleStop(this.checked)" style="cursor:pointer;">
                 <span>⏰ Chạy đến:</span>
@@ -1694,6 +1700,78 @@
       <!-- Hidden Alias DOM nodes for legacy compatibility -->
       <div id="panel-Logs" style="display:none !important;"></div>
       <div id="panel-AI" style="display:none !important;"></div>
+
+      <!-- 9. TOFFERS OFFERS LIST -->
+      <div class="tab-panel" id="panel-ToffersOffers">
+        <!-- Header: Chuyển 3 danh sách & Nút hành động nhanh toàn bộ -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px;">
+          <!-- 3 Tab danh sách Toffers -->
+          <div class="sub-tabs" style="margin-bottom:0;border-bottom:none;">
+            <div class="sub-tab active toffers-type-btn" id="btnToffersTypeWorking" onclick="switchOfferType('working')">🔥 Offers Working <span id="cntOffersWorking">--</span></div>
+            <div class="sub-tab toffers-type-btn" id="btnToffersTypeNew" onclick="switchOfferType('new')">✨ Offers New <span id="cntOffersNew">--</span></div>
+            <div class="sub-tab toffers-type-btn" id="btnToffersTypeLive" onclick="switchOfferType('live')">⚡ Live <span id="cntOffersLive">--</span></div>
+          </div>
+
+          <!-- Nút thao tác nhanh với tất cả link -->
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span id="toffersOfferCountText" style="font-size:11px;color:#94a3b8;font-weight:600;">--</span>
+            <button type="button" class="win-btn" onclick="copyAllToffersLinks()" style="padding:2px 8px;font-size:11px;" title="Sao chép toàn bộ các link trong trang hiện tại (mỗi dòng 1 link)">📋 Copy tất cả link</button>
+            <button type="button" class="win-btn" onclick="useAllToffersOffers()" style="padding:2px 10px;font-size:11px;background:#059669;color:#fff;font-weight:600;border-color:#10b981;" title="Nạp toàn bộ link trong trang vào ô chạy luân phiên">⚡ Nạp tất cả vào ô chạy</button>
+            <button type="button" class="win-btn win-btn-primary" id="btnRefreshToffersOffers" onclick="fetchToffersOffersData(true)" style="padding:2px 10px;font-size:11px;gap:4px;">🔄 Làm mới</button>
+          </div>
+        </div>
+
+        <!-- Filter Bar: 1 dòng duy nhất tinh gọn, không rườm rà -->
+        <div style="display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #22324e;border-radius:6px;padding:6px 10px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="font-weight:bold;color:#38bdf8;font-size:11px;">🔍 Tìm link:</span>
+          <input type="text" id="toffersFilterName" class="win-input" placeholder="Nhập tên offer hoặc ID (vd: 2684)..." style="flex:1;min-width:180px;font-size:11px;padding:3px 8px;" onkeydown="if(event.key==='Enter') searchToffersOffers()">
+          
+          <select id="toffersFilterCountry" class="win-select" style="font-size:11px;padding:2px 6px;max-width:160px;" onchange="searchToffersOffers()">
+            <option value="">-- Tất cả Quốc gia --</option>
+          </select>
+
+          <button type="button" class="win-btn win-btn-primary" id="btnSearchToffersOffers" onclick="searchToffersOffers()" style="padding:2px 10px;font-size:11px;">Tìm</button>
+          <button type="button" class="win-btn" onclick="resetToffersFilters()" style="padding:2px 8px;font-size:11px;">Xoá</button>
+
+          <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+            <span style="font-size:11px;color:#94a3b8;">Số link/trang:</span>
+            <select id="toffersPageSizeSelect" class="win-select" style="font-size:11px;padding:1px 4px;width:55px;" onchange="changeToffersPageSize(this.value)">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Offers Table Grid: Tập trung hoàn toàn vào CÁC LINK OFFER -->
+        <div class="grid-container" id="toffersOffersTableWrap" style="height:calc(100% - 130px);overflow:auto;">
+          <table class="win-grid" id="dgvToffersOffers">
+            <thead>
+              <tr>
+                <th style="width:35px;text-align:center;">#</th>
+                <th style="width:210px;">Offer &amp; Quốc gia</th>
+                <th style="width:65px;text-align:center;" title="Số lượt click của offer">Clicks</th>
+                <th style="width:70px;text-align:center;" title="Số lượt lead của offer">Leads</th>
+                <th>Link Offer (Link Lead - NO_CLICK)</th>
+                <th style="width:230px;">Link Click (Tracking)</th>
+                <th style="width:70px;text-align:center;">Xem</th>
+              </tr>
+            </thead>
+            <tbody id="dgvToffersOffersBody">
+              <tr>
+                <td colspan="7" style="text-align:center;color:#888888;padding:25px;">
+                  <div>Đang nạp danh sách Link Offer từ toffers.top...</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination Toolbar -->
+        <div style="display:flex;align-items:center;justify-content:flex-end;margin-top:6px;padding:4px 0;" id="toffersPaginationControls">
+        </div>
+      </div>
 
       <!-- 10. TOFFERS LEADS & POINT -->
       <div class="tab-panel" id="panel-ToffersLeads">

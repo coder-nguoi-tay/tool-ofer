@@ -1,3 +1,4 @@
+import { normalizeOfferRunOptions } from '../../../config/normalize-offer-run-options.mjs';
 import { existsSync } from 'node:fs';
 import { getAutoLeadPCDir } from '../../../config/paths.mjs';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-18
  */
 export async function handleGetPcOfferRead(request, response) {
   if (request.method === 'GET' && request.url === '/pc/offer/read') {
@@ -31,7 +32,13 @@ export async function handleGetPcOfferRead(request, response) {
           const m = text.match(new RegExp(`^${key}=(.*)$`, 'm'));
           return m ? m[1].trim().replace(/\\n/g, '\n') : '';
         };
+        let runOptions = {};
+        try {
+          const savedRunOptions = getVal('RunOptions');
+          if (savedRunOptions) runOptions = normalizeOfferRunOptions(JSON.parse(savedRunOptions));
+        } catch { /* Offer cũ/hỏng lựa chọn vẫn đọc được link và dữ liệu còn lại. */ }
         data = {
+          ...runOptions,
           NameOffer: getVal('NameOffer'),
           LinkOffer: getVal('LinkOffer'),
           LinkOffer2: getVal('LinkOffer2'),

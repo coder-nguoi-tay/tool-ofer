@@ -1,8 +1,8 @@
 /**
- * Fetch running state.
+ * Cập nhật trạng thái chạy và khóa Start trong suốt quá trình Stop đang đóng browser.
  * @return {Promise<void>} Kết quả xử lý fetch running state.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-18
  */
 async function fetchRunningState() {
       const state = await api('/state');
@@ -29,12 +29,12 @@ async function fetchRunningState() {
       if (elTotalRunSb) elTotalRunSb.textContent = totalRunVal;
 
       // Cập nhật trạng thái nút Start: làm mờ & vô hiệu hóa khi đang có luồng/offer chạy
-      const isRunning = (state.enabled && !state.stopRequested) || sessions.length > 0 || ((state.activeCount || 0) > 0);
+      const isRunning = state.isStopping || (state.enabled && !state.stopRequested) || sessions.length > 0 || ((state.activeCount || 0) > 0);
       const btnStart = document.getElementById('btnStart');
       if (btnStart) {
         if (isRunning) {
           btnStart.disabled = true;
-          if (state.stopRequested) {
+          if (state.isStopping || state.stopRequested) {
             btnStart.textContent = '🛑 Đang dừng...';
           } else {
             btnStart.textContent = `⏳ Đang chạy (${sessions.length} luồng)...`;

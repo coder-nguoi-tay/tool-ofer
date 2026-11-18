@@ -18,7 +18,7 @@ import { recordInputFillHtml } from '../logging/record-input-fill-html.mjs';
  * @return {Promise<boolean>} True khi cần bỏ qua trường hiện tại.
  * @throws {never} Lỗi từng thao tác nhập được xử lý, HTML chỉ là bằng chứng bổ sung.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-18
  */
 export async function fillSelectOrTextField({
   metadata,

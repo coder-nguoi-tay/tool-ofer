@@ -50,7 +50,7 @@
       align-items: center;
       justify-content: center;
       gap: 4px;
-      user-select: none;
+      user-select: text;
     }
     .trackpad-btn:active {
       background: #0284c7;

@@ -1,14 +1,11 @@
 import { pendingObscuraSessions } from './sessions.mjs';
 import { chromium } from 'playwright';
 import { createFreshObscuraProfile } from './create-fresh-profile.mjs';
-import { buildObscuraStealthScript } from './build-obscura-stealth-script.mjs';
 import { startObscuraSession } from './start-obscura-session.mjs';
 import { stopObscuraSession } from './stop-obscura-session.mjs';
 import { findFreePort } from './find-free-port.mjs';
 import { activeBrowsers } from '../browser/sessions.mjs';
 import { localeForCountry } from '../stealth/locale-for-country.mjs';
-import { buildStealthConfig } from '../stealth/build-stealth-config.mjs';
-import { stealthInitScript } from '../stealth/stealth-init-script.mjs';
 import { buildClientHintHeaders } from '../stealth/build-client-hint-headers.mjs';
 
 /**
@@ -48,7 +45,7 @@ export function obscuraViewport(profile) {
  * @return {Promise<object>} Phiên có BrowserContext, kết nối CDP và điều khiển vòng đời engine.
  * @throws {Error} Khi binary, proxy, cấu hình hoặc kết nối CDP thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-18
  */
 export async function openObscuraBrowser({ slot = 1, port = null, seed = null, os = 'windows', proxy = null,
   targetUrl = null, geo = null, registerSession = true, antiFingerprint = {}, startupSession = null, previousIdentity = null } = {}) {
@@ -57,7 +54,6 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
   const deviceVersion = profile.is_safari_ios ? profile.os : profile.platform;
   if (geo?.timezone) profile.timezone = geo.timezone;
   if (geo?.country) profile.languages = [localeForCountry(geo.country).locale, 'en'];
-  const script = buildObscuraStealthScript({ seed: profileSeed, os: deviceOs, profile, antiFingerprint });
   const hints = profile.client_hints;
   const metadata = hints ? { ...hints, platformVersion: hints.platform_version, fullVersion: profile.chrome_version,
     fullVersionList: hints.brands.map(brand => ({ ...brand, version: brand.brand.includes('Not') ? brand.version : profile.chrome_version })) } : null;
@@ -103,7 +99,8 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
   try {
     engine = await startObscuraSession({ port: await findFreePort(port ?? 9220 + slot), proxy: proxyUrl,
       timezone: profile.timezone, userAgent: profile.user_agent, headers,
-      tlsProfile: obscuraTlsProfile(profile), identity: { ...profile, seed: String(profileSeed), public_ip: geo?.ip || null },
+      tlsProfile: obscuraTlsProfile(profile), identity: { ...profile, seed: String(profileSeed), public_ip: geo?.ip || null, anti_fingerprint: antiFingerprint,
+        geolocation: geo?.ll?.length === 2 ? { latitude: geo.ll[0], longitude: geo.ll[1] } : null },
       onSpawn: child => { startingChild = child; pendingObscuraSessions.add(startingSession); },
     });
     browser = await chromium.connectOverCDP(engine.cdpEndpoint, { timeout: 15000 });
@@ -144,23 +141,7 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
        */
       async configureContext(currentContext) {
         if (configuredContexts.has(currentContext)) return;
-        await currentContext.addInitScript(script);
-        const device = { isMobile: profile.is_mobile, platform: profile.platform, uaData: metadata, spoof: {
-          platform: profile.platform, vendor: profile.vendor, maxTouchPoints: profile.max_touch_points,
-          hardwareConcurrency: profile.hardware_concurrency, deviceMemory: profile.device_memory, uaPlatform: profile.is_safari_ios ? 'iOS' : hints?.platform,
-          webglVendor: profile.webgl.unmasked_vendor, webglRenderer: profile.webgl.unmasked_renderer,
-        } };
-        const noiseConfig = buildStealthConfig(device, { ...antiFingerprint, canvas: false }, profileSeed, profile.user_agent);
-        noiseConfig.noise.audio = false;
-        // Worker của Obscura chạy chung realm với trang (đã có danh tính); bọc Worker bằng XHR đồng bộ làm worker treo.
-        noiseConfig.patchWorkers = false;
-        await currentContext.addInitScript(stealthInitScript, noiseConfig);
         await currentContext.setExtraHTTPHeaders(headers);
-        if (geo?.ll?.length === 2) {
-          await currentContext.addInitScript(({ latitude, longitude }) => {
-            Object.assign(globalThis, { __obscura_geo_lat: latitude, __obscura_geo_lon: longitude });
-          }, { latitude: geo.ll[0], longitude: geo.ll[1] });
-        }
         /**
          * Đặt danh tính mạng và viewport cho tab trước điều hướng.
          * @param {object} currentPage Tab thuộc context hiện tại.
@@ -173,7 +154,17 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
           const cdp = await currentContext.newCDPSession(currentPage);
           try {
             await cdp.send('Network.setUserAgentOverride', { userAgent: profile.user_agent, acceptLanguage: profile.languages.join(','), userAgentMetadata: metadata });
-            await currentPage.setViewportSize(obscuraViewport(profile));
+            const viewport = obscuraViewport(profile);
+            await currentPage.setViewportSize(viewport);
+            await cdp.send('Emulation.setDeviceMetricsOverride', { ...viewport, mobile: profile.is_mobile,
+              screenWidth: profile.screen.width, screenHeight: profile.screen.height, deviceScaleFactor: profile.screen.device_pixel_ratio });
+            if (geo?.ll?.length === 2 && antiFingerprint?.apiFakeIP !== false) {
+              await cdp.send('Emulation.setGeolocationOverride', {
+                latitude: Number(geo.ll[0]),
+                longitude: Number(geo.ll[1]),
+                accuracy: 100,
+              }).catch(() => {});
+            }
           } finally { await cdp.detach(); }
         };
         await Promise.all(currentContext.pages().map(session.prepareDevicePage));

@@ -13,12 +13,13 @@ import { pruneDeadManagedSessions } from '../../runtime/actions/prune-dead-manag
  *
  * @return {object} Trạng thái hiện tại của trình duyệt và cơ chế tự bù.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-18
  */
 export function getAutoRefillStatus() {
   void pruneDeadManagedSessions().catch(() => {});
   return {
     enabled: autoRefill.enabled,
+    isStopping: autoRefill.isStopping === true,
     noSlotRefill: autoRefill.noSlotRefill === true,
     sequential: autoRefill.sequential,
     activeCount: countLiveBrowsers(),

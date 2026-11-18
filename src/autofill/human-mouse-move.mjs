@@ -12,7 +12,7 @@ import { renderBrowserMousePointer } from './interaction/render-browser-mouse-po
  * @param {number} targetY Toạ độ Y đích.
  * @return {Promise<void>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-18
  */
 async function humanMouseMove(page, targetX, targetY) {
   if (!shouldAnimatePageMouse(page)) return;
@@ -35,7 +35,7 @@ async function humanMouseMove(page, targetX, targetY) {
     };
     return;
   }
-  const steps = Math.min(22, Math.max(7, Math.round(distance / 28)));
+  const steps = Math.min(10, Math.max(7, Math.round(distance / 70)));
   const dx = targetX - startX;
   const dy = targetY - startY;
   const normalX = -dy / distance;
@@ -45,6 +45,7 @@ async function humanMouseMove(page, targetX, targetY) {
   const cp1Y = startY + dy * 0.25 + normalY * curvature + (Math.random() - 0.5) * 12;
   const cp2X = startX + dx * 0.75 + normalX * curvature * 0.5 + (Math.random() - 0.5) * 12;
   const cp2Y = startY + dy * 0.75 + normalY * curvature * 0.5 + (Math.random() - 0.5) * 12;
+  const midStep = Math.floor(steps / 2);
   for (let i = 1; i <= steps; i++) {
     if (!shouldAnimatePageMouse(page)) return;
     const t = i / steps;
@@ -53,8 +54,12 @@ async function humanMouseMove(page, targetX, targetY) {
     const x = u * u * u * startX + 3 * u * u * easedT * cp1X + 3 * u * easedT * easedT * cp2X + easedT * easedT * easedT * targetX;
     const y = u * u * u * startY + 3 * u * u * easedT * cp1Y + 3 * u * easedT * easedT * cp2Y + easedT * easedT * easedT * targetY;
     const jitter = i < steps ? (Math.random() - 0.5) * 1.5 : 0;
-    await page.mouse.move(Math.round(x + jitter), Math.round(y + jitter)).catch(() => {});
-    await renderBrowserMousePointer(page, Math.round(x + jitter), Math.round(y + jitter));
+    const currentX = Math.round(x + jitter);
+    const currentY = Math.round(y + jitter);
+    await page.mouse.move(currentX, currentY).catch(() => {});
+    if (i === midStep) {
+      await renderBrowserMousePointer(page, currentX, currentY);
+    }
   }
   if (!shouldAnimatePageMouse(page)) return;
   await page.mouse.move(targetX, targetY).catch(() => {});

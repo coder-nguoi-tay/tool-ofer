@@ -1,3 +1,10 @@
+> Cập nhật 2026-11-18: các tỷ lệ chống phát hiện trong kế hoạch này là mục tiêu, chưa phải kết quả đo.
+> Đã bỏ WebGL giả: engine CPU trả null để trang dùng fallback. Danh tính được giữ trong closure nội bộ.
+> Plugin PDF dùng interface Plugin/MimeType sẵn có. Adapter chỉ loại các hook trùng với engine, giữ API mới phía sau.
+> Core Rust sở hữu cấu hình, font model, canvas readback và lịch meta refresh; app không còn tiêm script vá Web API.
+> WebRTC và Web Audio context chưa có backend: không quảng cáo API hoặc tạo SDP/ICE/PCM giả. AudioBuffer chỉ là vùng chứa dữ liệu.
+> Các mục lịch sử bên dưới không phải trạng thái QA hiện tại; không suy ra tỷ lệ chống phát hiện từ việc test API chạy qua.
+
 # KẾ HOẠCH NÂNG CẤP VÂN TAY (ANTI-DETECT) OBSCURA V8 ENGINE
 
 ## Trạng thái triển khai (2026-11-17)

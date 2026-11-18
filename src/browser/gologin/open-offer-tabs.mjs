@@ -12,7 +12,7 @@ import { verifyOffer2615Landing } from '../../autofill/offers/2615/verify-offer-
  * @return {Promise<void>} Các tab đã được mở hoặc ghi lỗi điều hướng.
  * @throws {Error} Khi context đã đóng hoặc không tạo được tab.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-18
  */
 export async function openGoLoginOfferTabs(session, offerUrls, records) {
   const urls = selectUniqueOfferUrls(offerUrls, session.websiteUrl);
@@ -27,7 +27,7 @@ export async function openGoLoginOfferTabs(session, offerUrls, records) {
     page._uxPlanned = true;
     page._tabIndex = index;
     page._offerNumber = session.offerNumber;
-    page._assignedRecord = takeNextRecord(records);
+    page._assignedRecord = index === 0 && session.currentRecord ? session.currentRecord : takeNextRecord(records, [], session);
     await session.prepareDevicePage?.(page);
     configurePageMousePolicy(page, session);
     if (index === 0) session.currentRecord = page._assignedRecord;

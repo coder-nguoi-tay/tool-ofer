@@ -329,3 +329,38 @@ for (const os of ['iphone', 'ipad']) {
     }
   });
 }
+
+test('hai process Obscura chạy song song submit hai info riêng từ các bản sao cùng pool', { skip: !hasNativeBinary, timeout: 35000 }, async t => {
+  const { initializeObscuraRuntime } = await import('../src/obscura-engine/initialize-obscura-runtime.mjs');
+  const { globalAiConfig } = await import('../src/ai-assist/state/global-ai-config.mjs');
+  globalAiConfig.enabled = false;
+  const submitted = new Map();
+  const server = http.createServer((request, response) => {
+    response.setHeader('Content-Type', 'text/html');
+    const url = new URL(request.url, 'http://fixture.invalid');
+    if (url.pathname === '/result') {
+      submitted.set(url.searchParams.get('slot'), Object.fromEntries(url.searchParams));
+      response.end('<html><body>Fixture received</body></html>');
+    } else response.end(`<html><body><form action="/result"><input name="slot" type="hidden" value="${url.searchParams.get('slot') === 'a' ? 'a' : 'b'}"><label>First name<input name="firstName" required></label><label>Email<input name="email" type="email" required></label><button type="submit">Continue</button></form></body></html>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const sessions = [];
+  t.after(async () => { await Promise.all(sessions.map(session => session.close())); await new Promise(resolve => server.close(resolve)); });
+  const records = [{ firstname: 'NativeParallelAlpha' }, { firstname: 'NativeParallelBeta' }];
+  await Promise.all(['a', 'b'].map(async (key, index) => {
+    const session = await openObscuraBrowser({ slot: 993 + index, port: 0 });
+    sessions.push(session);
+    await session.browser.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    const websiteUrl = `${origin}/?slot=${key}`;
+    Object.assign(session, { websiteUrl, offerNumber: 1, offerSolver: 'generic', enableLeadCheck: false, assignedEmail: `${key}@example.invalid` });
+    await initializeObscuraRuntime(session, { autofillRecords: structuredClone(records), offerUrls: [websiteUrl], leadConfig: { enabled: false }, autoSubmit: true });
+  }));
+  const deadline = Date.now() + 25000;
+  while (submitted.size < 2 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(submitted.size, 2, 'cả hai process phải submit bằng autofill thật');
+  assert.notEqual(submitted.get('a').firstName, submitted.get('b').firstName);
+  assert.equal(submitted.get('a').email, 'a@example.invalid');
+  assert.equal(submitted.get('b').email, 'b@example.invalid');
+  assert.equal(new Set(sessions.map(session => session.currentRecord.firstname)).size, 2);
+});

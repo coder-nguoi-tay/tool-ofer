@@ -31,7 +31,17 @@ export async function findScopedSubmitButton(frame, formScope) {
       return bounds.width > 4 && bounds.height > 4;
     };
     const controls = Array.from(document.querySelectorAll(scope.memberSelector));
-    const buttons = controls.filter(element => !element.closest('header, footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="banner"], [role="contentinfo"], .site-header, .site-footer, .ow-attribution') && element.matches('button, input[type="submit"], input[type="image"], input[type="button"], a, [role="button"], div.btn, div.button, .sbtn, #sub-btn') && (!scope.nativeForm || !element.form || element.form === root) && visible(element));
+    const isExcludedNav = element => {
+      if (element.closest?.('footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="contentinfo"], .site-footer, .ow-attribution')) return true;
+      const headerEl = element.closest?.('header, [role="banner"], .site-header');
+      if (headerEl) {
+        const headerHasInputs = Boolean(headerEl.querySelector?.('input:not([type="hidden"]), select, textarea'));
+        const headerIsHeroContainer = Boolean(headerEl.matches?.('.hero, [id*="form" i], [class*="form" i], .lead-form, [id*="lead" i]') || headerEl.querySelector?.('form, [role="form"], .form, .form-container, .survey-container'));
+        if (!headerHasInputs && !headerIsHeroContainer) return true;
+      }
+      return false;
+    };
+    const buttons = controls.filter(element => !isExcludedNav(element) && element.matches('button, input[type="submit"], input[type="image"], input[type="button"], a, [role="button"], div.btn, div.button, .sbtn, #sub-btn') && (!scope.nativeForm || !element.form || element.form === root) && visible(element));
     const native = buttons.filter(button => root.tagName === 'FORM' && button.form === root && ['submit', 'image'].includes(button.type));
     /**
      * Tôn trọng trạng thái khóa hoặc đang gửi dữ liệu của nút.

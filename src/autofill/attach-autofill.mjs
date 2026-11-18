@@ -1,3 +1,4 @@
+import { takeNextRecord } from '../records/actions/take-next-record.mjs';
 import { isLeadWaitEnabled } from './is-lead-wait-enabled.mjs';
 import { configurePageMousePolicy } from './interaction/configure-page-mouse-policy.mjs';
 import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-lead-session.mjs';
@@ -18,11 +19,11 @@ import { attachAutofill as attachOffer2615Autofill } from './offers/2615/solver/
  * @param {object} options options.
  * @return {void} Kết quả xử lý attach autofill.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-18
  */
 function attachAutofill(context, records, allowedOrigin, session = {}, options = {}) {
-  // Offer 2615 chạy bản giải riêng (src/autofill/offers/2615/solver, người dùng chốt 2026-11-17): sửa giải chung không
-  // ảnh hưởng 2615 và ngược lại. Cách giải "generic" vẫn ép chạy giải chung.
+  // Offer 2615 giữ pipeline đặc thù; các primitive chọn dữ liệu và tương tác dùng chung lõi.
+  // Cách giải "generic" vẫn ép chạy pipeline chung.
   if (isOffer2615Configured(session)) {
     session.solverPipeline = '2615';
     return attachOffer2615Autofill(context, records, allowedOrigin, session, options);
@@ -41,8 +42,7 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
   // Không tự tạo record mẫu: chỉ dùng record trong danh sách app cung cấp. Hết record thì dùng record rỗng
   // (không điền gì từ record) và báo log để người dùng nạp thêm dữ liệu.
   const hasRecords = Array.isArray(records) && records.length > 0;
-  const effectiveRecords = hasRecords ? records : [{}];
-  if (!hasRecords) {
+  if (!hasRecords && !Object.keys(session.mainPage?._assignedRecord || session.currentRecord || {}).length) {
     options.onLog?.({
       type: 'autofill_records_empty',
       detail: 'Hết record trong danh sách "Dữ liệu tự điền"; không tự tạo dữ liệu, hãy nạp thêm record.'
@@ -102,29 +102,16 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
     return;
   }
 
-  // Chọn 1 bản ghi duy nhất cho toàn bộ phiên này để nhất quán xuyên suốt các trang/bước/frame.
-  // Chọn theo con trỏ xoay vòng (không random): tránh việc lượt sau điền lại đúng record
-  // của lượt trước khi pool tái dùng (used) hoặc khi available được nạp lại toàn bộ.
-  if (session.recordIndex === undefined || session.recordIndex < 0 || session.recordIndex >= effectiveRecords.length) {
-    // Con trỏ chia sẻ trên chính mảng pool: nhiều session (các cửa sổ chạy song song) dùng chung
-    // pool sẽ lần lượt lấy record khác nhau, không trùng cho tới khi đi hết vòng.
-    const cursorKey = '__uxRecordCursor';
-    if (!(cursorKey in effectiveRecords)) effectiveRecords.__uxRecordCursor = 0;
-    session.recordIndex = effectiveRecords.__uxRecordCursor % effectiveRecords.length;
-    effectiveRecords.__uxRecordCursor = session.recordIndex + 1;
-  }
-  // BẢO VỆ ĐA TRÌNH DUYỆT: clone bản ghi ra 1 object riêng cho phiên này.
-  // Pool (effectiveRecords) là mảng DÙNG CHUNG giữa các slot chạy song song — nếu không clone,
-  // mutation ghi email/session của slot này sẽ đè lên record mà slot khác đang dùng cùng lúc.
-  const sourceRecord = effectiveRecords[session.recordIndex];
-  const record = sourceRecord && typeof sourceRecord === 'object' ? JSON.parse(JSON.stringify(sourceRecord)) : sourceRecord;
+  // Giữ info đã cấp cho phiên qua mọi trang; cấp phát mới dùng khóa chung giữa các engine.
+  const record = session.mainPage?._assignedRecord || session.currentRecord || takeNextRecord(hasRecords ? records : [], [], session);
   if (session.assignedEmail && record) {
     record.email = session.assignedEmail;
     record.emailaddress = session.assignedEmail;
     record.mail = session.assignedEmail;
     record.assignedEmail = session.assignedEmail;
   }
-  session.autofillRecord = session.recordIndex + 1;
+  session.currentRecord = record;
+  session.autofillRecord = Object.keys(record || {}).length ? (session.recordIndex ?? 0) + 1 : null;
   options.onRecordPicked?.(record);
   // Bản sao riêng của phiên, dùng khi tab chưa có record riêng (fillVisibleForms che tên `record` bằng biến cục bộ).
   const sessionRecord = record;

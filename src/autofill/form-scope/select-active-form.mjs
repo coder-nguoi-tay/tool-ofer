@@ -7,7 +7,17 @@
  */
 export function selectActiveForm({ previousId, nextId, flowId }) {
   const controlSelector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea';
-  const excluded = 'header, footer, nav, aside, [role="search"], .site-footer, .site-header, .offerwall-card, form[data-tf-element-role="offer"]';
+  const isExcluded = el => {
+    if (!el) return false;
+    if (el.closest?.('footer, nav, aside, [role="search"], .site-footer, .offerwall-card, form[data-tf-element-role="offer"]')) return true;
+    const headerEl = el.closest?.('header, .site-header, [role="banner"]');
+    if (headerEl) {
+      const headerHasInputs = Boolean(headerEl.querySelector?.('input:not([type="hidden"]), select, textarea'));
+      const headerIsHeroContainer = Boolean(headerEl.matches?.('.hero, [id*="form" i], [class*="form" i], .lead-form, [id*="lead" i]') || headerEl.querySelector?.('form, [role="form"], .form, .form-container, .survey-container'));
+      if (!headerHasInputs && !headerIsHeroContainer) return true;
+    }
+    return false;
+  };
   /**
    * Kiểm tra phần tử của biểu mẫu còn hiển thị qua toàn bộ các phần tử cha.
    * @param {Element} element Control hoặc vùng biểu mẫu cần kiểm tra.
@@ -28,7 +38,7 @@ export function selectActiveForm({ previousId, nextId, flowId }) {
   const candidates = new Map();
   for (const control of document.querySelectorAll(controlSelector)) {
     const labelVisible = control.matches('input[type="radio"],input[type="checkbox"]') && Array.from(control.labels || []).some(visible);
-    if ((!visible(control) && !labelVisible) || control.closest(excluded) || control.type === 'search') continue;
+    if ((!visible(control) && !labelVisible) || isExcluded(control) || control.type === 'search') continue;
     let root = control.closest('[id^="sign_up_step"]') || control.closest('[id^="twy-campaigns-"], .twy-campaigns') || control.form || control.closest('[role="form"], .form-step.active, .step.active, .form-container, .survey-container, .quiz-container, [id^="twy-campaigns-"], .twy-campaigns, .twy-customquestion, .loco-widget, #reg-container, #ai-funnel, .form');
     if (!root) {
       for (let parent = control.parentElement; parent && !parent.matches('body, html'); parent = parent.parentElement) {
@@ -36,18 +46,18 @@ export function selectActiveForm({ previousId, nextId, flowId }) {
         if (Array.from(parent.querySelectorAll('button, input[type="submit"], [role="button"]')).some(visible)) { root = parent; break; }
       }
     }
-    if (!root || root.closest(excluded)) continue;
+    if (!root || isExcluded(root)) continue;
     if (!candidates.has(root)) candidates.set(root, { root, count: 0, focused: false, modal: Boolean(root.closest('[role=dialog], [aria-modal=true], .modal.show, .MuiDialog-root')) });
     const candidate = candidates.get(root);
     candidate.count++;
     if (document.activeElement === control) candidate.focused = true;
   }
   for (const form of document.forms) {
-    if (candidates.has(form) || form.closest(excluded)) continue;
+    if (candidates.has(form) || isExcluded(form)) continue;
     if (Array.from(form.elements).some(element => element.type === 'submit' && visible(element))) candidates.set(form, { root: form, count: 0, focused: false, modal: Boolean(form.closest('[role=dialog], [aria-modal=true], .modal.show, .MuiDialog-root')) });
   }
   for (const container of document.querySelectorAll('[id^="sign_up_step"], [role="form"], .form-step.active, .step.active, .current-step, .survey-step.active, #questionText, #ai-funnel, .survey-container, .quiz-container, [id^="twy-campaigns-"], .twy-campaigns')) {
-    if (candidates.has(container) || container.closest(excluded) || !visible(container)) continue;
+    if (candidates.has(container) || isExcluded(container) || !visible(container)) continue;
     if (Array.from(container.querySelectorAll('button, [role="button"]')).some(visible)) candidates.set(container, { root: container, count: 0, focused: false });
   }
   const previous = previousId ? document.querySelector('[data-ux-autofill-scope="' + previousId + '"]') : null;

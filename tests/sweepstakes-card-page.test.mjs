@@ -37,10 +37,10 @@ async function createFixture(t, cards) {
 
 test('màn card giữ root, dọn đúng context một lần, mở mọi card lồng form/wrapper và chống trùng qua reload', { skip }, async t => {
   const { browser, context, root, session } = await createFixture(t, `<div class="offerwall-card-wrap">
-    <div class="card"><a href="https://offer.test/one?utm_source=first">One</a></div>
-    <div class="card"><a href="https://offer.test/one?utm_source=duplicate">One again</a></div>
-    <div class="card"><a href="https://offer.test/two">Two</a></div>
-    <div class="card" hidden><a href="https://offer.test/hidden">Hidden</a></div>
+    <div class="card"><a target="_blank" href="https://offer.test/one?utm_source=first">One</a></div>
+    <div class="card"><a target="_blank" href="https://offer.test/one?utm_source=duplicate">One again</a></div>
+    <div class="card"><a target="_blank" href="https://offer.test/two">Two</a></div>
+    <div class="card" hidden><a target="_blank" href="https://offer.test/hidden">Hidden</a></div>
     <div class="card"><a href="https://yougov.com/">Excluded</a></div></div>`);
   const old = await context.newPage();
   await old.goto('https://old.test/question');
@@ -69,7 +69,7 @@ test('màn card giữ root, dọn đúng context một lần, mở mọi card l�
 test('màn card mở tối đa MAX_CONCURRENT_SUB_OFFERS tab con cùng lúc (3, giảm tải máy 2026-11-16) và mở tiếp khi có chỗ, cho tới hết thẻ', { skip }, async t => {
   const { MAX_CONCURRENT_SUB_OFFERS } = await import('../src/runtime/constants/max-concurrent-sub-offers.mjs');
   assert.equal(MAX_CONCURRENT_SUB_OFFERS, 3);
-  const cards = Array.from({ length: 12 }, (_, index) => `<div class="card"><a href="https://offer.test/${index}">Offer ${index}</a></div>`).join('');
+  const cards = Array.from({ length: 12 }, (_, index) => `<div class="card"><a target="_blank" href="https://offer.test/${index}">Offer ${index}</a></div>`).join('');
   const { context, root, session } = await createFixture(t, cards);
   limitOfferTabs(context, session);
   attachUniqueOfferTabs(context, session);
@@ -87,7 +87,7 @@ test('màn card mở tối đa MAX_CONCURRENT_SUB_OFFERS tab con cùng lúc (3, 
 });
 
 test('dừng sau lead hoặc chờ lead không dọn tab và không mở card', { skip }, async t => {
-  const { context, root, session } = await createFixture(t, '<div class="card"><a href="https://offer.test/one">One</a></div>');
+  const { context, root, session } = await createFixture(t, '<div class="card"><a target="_blank" href="https://offer.test/one">One</a></div>');
   const old = await context.newPage();
   session.enableLeadCheck = true;
   session.stopAutofillOnLead = true;
@@ -103,7 +103,7 @@ test('dừng sau lead hoặc chờ lead không dọn tab và không mở card', 
 });
 
 test('98% thiếu card/link thật, card ẩn hoặc sai host không kích hoạt dọn tab', { skip }, async t => {
-  const { root, context, session } = await createFixture(t, '<div class="card"><a href="https://offer.test/one">One</a></div>');
+  const { root, context, session } = await createFixture(t, '<div class="card"><a target="_blank" href="https://offer.test/one">One</a></div>');
   const old = await context.newPage();
   await root.evaluate(() => document.documentElement.style.setProperty('--progressPercentage', '80%'));
   assert.equal(await isSweepstakesCardPage(root), false);
@@ -118,17 +118,17 @@ test('98% thiếu card/link thật, card ẩn hoặc sai host không kích hoạ
 });
 
 test('hai lượt quét đồng thời không mở card trùng', { skip }, async t => {
-  const { context, root, session } = await createFixture(t, '<div class="card"><a href="https://offer.test/one">One</a></div><div class="card"><a href="https://offer.test/two">Two</a></div>');
+  const { context, root, session } = await createFixture(t, '<div class="card"><a target="_blank" href="https://offer.test/one">One</a></div><div class="card"><a target="_blank" href="https://offer.test/two">Two</a></div>');
   await Promise.all([handleSweepstakesCardPage(root, session, {}), handleSweepstakesCardPage(root, session, {})]);
   assert.equal(context.pages().length, 3);
   assert.equal(root.url(), 'https://sweepstakesalerts.com/wall');
 });
 
-test('card data-destination-url mở tab con; link hash hoặc chính sách không đủ để dọn tab', { skip }, async t => {
+test('data-destination-url không tự mở tab khi CTA không yêu cầu; link hash hoặc chính sách không đủ để dọn tab', { skip }, async t => {
   const { context, root, session } = await createFixture(t, '<div class="offerwall-card" data-destination-url="https://offer.test/data"><button type="button">Claim</button></div>');
   assert.equal(await handleSweepstakesCardPage(root, session, {}), true);
-  assert.equal(context.pages().length, 2);
-  assert.ok(context.pages().some(page => page.url() === 'https://offer.test/data'));
+  assert.equal(context.pages().length, 1);
+  assert.equal(root.url(), 'https://sweepstakesalerts.com/wall');
   await root.setContent('<html style="--progressPercentage:98%"><div class="card"><a href="#details">Details</a><a href="/privacy-policy">Privacy</a></div></html>');
   assert.equal(await isSweepstakesCardPage(root), false);
 });
@@ -152,7 +152,7 @@ test('link tải chậm không giữ lượt mở card và vẫn giữ nguyên t
 });
 
 test('watcher chờ card không gọi AI hoặc phục hồi reload khi chưa có chỗ mở tab', { skip }, async t => {
-  const { root, session } = await createFixture(t, '<div class="card"><a href="https://offer.test/one">One</a></div>');
+  const { root, session } = await createFixture(t, '<div class="card"><a target="_blank" href="https://offer.test/one">One</a></div>');
   let scans = 0, aiCalls = 0;
   root._uxSweepstakesCardPageUrl = root.url();
   attachAutofillPageWatcher(root, {
@@ -179,7 +179,7 @@ test('Addept cross-origin giữ trang chờ iframe, bỏ attribution và mở ca
   assert.equal(await handleSweepstakesCardPage(root, session, {}), true);
   assert.equal(old.isClosed(), false, 'iframe chưa có card không dọn tab cũ');
   assert.equal(context.pages().length, 2, 'không bấm attribution khi đợi iframe');
-  await frame.setContent('<div class="card"><a href="https://offer.test/iframe-one">One</a></div><div class="card"><a href="https://offer.test/iframe-two">Two</a></div>');
+  await frame.setContent('<div class="card"><a target="_blank" href="https://offer.test/iframe-one">One</a></div><div class="card"><a target="_blank" href="https://offer.test/iframe-two">Two</a></div>');
   await handleSweepstakesCardPage(root, session, {});
   assert.equal(old.isClosed(), true);
   assert.equal(context.pages().length, 3);
@@ -213,19 +213,19 @@ test('Addept chọn task rồi bấm CTA và Skip trong iframe, không bấm lin
 });
 
 test('chỉ mở card vùng trung tâm, bỏ mọi card ở header/footer/sidebar/attribution và ngoài main', { skip }, async t => {
-  const { root, context, session } = await createFixture(t, `<header><div class="card"><a href="https://offer.test/header">Header</a></div></header>
-    <main><div class="card"><footer><a class="offer-button" href="https://offer.test/footer-in-card">Continue</a></footer><a href="https://offer.test/central">Central</a></div>
-    <aside><div class="card"><a href="https://offer.test/aside">Aside</a></div></aside>
+  const { root, context, session } = await createFixture(t, `<header><div class="card"><a target="_blank" href="https://offer.test/header">Header</a></div></header>
+    <main><div class="card"><footer><a class="offer-button" href="https://offer.test/footer-in-card">Continue</a></footer><a target="_blank" href="https://offer.test/central">Central</a></div>
+    <aside><div class="card"><a target="_blank" href="https://offer.test/aside">Aside</a></div></aside>
     <div class="ow-attribution"><div class="card"><a href="https://addept.com">Addept</a></div></div></main>
-    <div class="card"><a href="https://offer.test/outside">Outside main</a></div>
-    <footer><div class="card"><a href="https://offer.test/footer">Footer</a></div></footer>`);
+    <div class="card"><a target="_blank" href="https://offer.test/outside">Outside main</a></div>
+    <footer><div class="card"><a target="_blank" href="https://offer.test/footer">Footer</a></div></footer>`);
   assert.equal(await handleSweepstakesCardPage(root, session, {}), true);
   assert.equal(context.pages().length, 2);
   assert.equal(context.pages().find(page => page !== root).url(), 'https://offer.test/central');
 });
 
 test('chỉ có card ngoài vùng nội dung thì không nhận màn card và không dọn tab', { skip }, async t => {
-  const { root, context, session } = await createFixture(t, '<main><p>Đang tải offer</p></main><footer><div class="card"><a href="https://offer.test/footer">Claim</a></div></footer><div class="card"><a href="https://offer.test/outside">Offer ngoài main</a></div>');
+  const { root, context, session } = await createFixture(t, '<main><p>Đang tải offer</p></main><footer><div class="card"><a target="_blank" href="https://offer.test/footer">Claim</a></div></footer><div class="card"><a target="_blank" href="https://offer.test/outside">Offer ngoài main</a></div>');
   const old = await context.newPage();
   assert.equal(await handleSweepstakesCardPage(root, session, {}), false);
   assert.equal(old.isClosed(), false);
@@ -285,7 +285,7 @@ test('CTA có lỗi input chỉ thử một lần, dựng lại nút không clic
 });
 
 test('thứ tự mở theo vị trí hiển thị dù CSS đảo thứ tự DOM, quét đồng thời không vượt trước', { skip }, async t => {
-  const { root, context, session } = await createFixture(t, '<div class="card" style="order:2"><a href="https://offer.test/last">Last</a></div><div class="card" style="order:1"><a href="https://offer.test/first">First</a></div>');
+  const { root, context, session } = await createFixture(t, '<div class="card" style="order:2"><a target="_blank" href="https://offer.test/last">Last</a></div><div class="card" style="order:1"><a target="_blank" href="https://offer.test/first">First</a></div>');
   await root.locator('#wall').evaluate(element => { element.style.display = 'flex'; element.style.flexDirection = 'column'; });
   await Promise.all([handleSweepstakesCardPage(root, session, {}), handleSweepstakesCardPage(root, session, {})]);
   assert.deepEqual(context.pages().filter(page => page !== root).map(page => page.url()), ['https://offer.test/first', 'https://offer.test/last']);
@@ -293,7 +293,7 @@ test('thứ tự mở theo vị trí hiển thị dù CSS đảo thứ tự DOM,
 
 test('link đầu đang được giữ chỗ thì chờ, không mở link sau vượt trước hoặc đánh dấu link đầu đã xong', { skip }, async t => {
   const { reserveOfferLink } = await import('../src/browser/tabs/reserve-offer-link.mjs');
-  const { root, context, session } = await createFixture(t, '<div class="card"><a href="https://offer.test/first">First</a></div><div class="card"><a href="https://offer.test/second">Second</a></div>');
+  const { root, context, session } = await createFixture(t, '<div class="card"><a target="_blank" href="https://offer.test/first">First</a></div><div class="card"><a target="_blank" href="https://offer.test/second">Second</a></div>');
   const releasePending = reserveOfferLink(root, 'https://offer.test/first');
   await handleSweepstakesCardPage(root, session, {});
   assert.equal(context.pages().length, 1);
@@ -323,3 +323,17 @@ test('bấm card nhưng chưa hiện panel thì chờ xác minh, không bấm l�
   assert.equal(child.url(), 'https://offer.test/late-panel');
   assert.deepEqual(await frame.evaluate(() => window.attempts), [0], 'panel hiện muộn vẫn tiếp tục mà không click lại card');
 });
+
+for (const solver of ['common', '2615']) {
+  test(`card ${solver} để HTML quyết định điều hướng cha hoặc hủy click`, { skip }, async t => {
+    const { handleOfferwallCards } = await import(solver === '2615' ? '../src/autofill/offers/2615/solver/handle-offerwall-cards.mjs' : '../src/autofill/handle-offerwall-cards.mjs');
+    const { root, context } = await createFixture(t, '<div class="card"><a href="https://offer.test/final" onclick="event.preventDefault()">Final</a></div>');
+    await handleOfferwallCards(root.mainFrame(), root, { cardSelector: '.card', orderedCards: true, maxConcurrentSubOffers: 0 });
+    assert.equal(context.pages().length, 1);
+    assert.equal(root.url(), 'https://sweepstakesalerts.com/wall');
+    await root.locator('.card').evaluate(card => { card.removeAttribute('data-ux-opened'); card.querySelector('a').removeAttribute('onclick'); card.querySelector('a').removeAttribute('data-ux-offer-action-label'); card.querySelector('a').href = 'https://offer.test/final-self'; });
+    await handleOfferwallCards(root.mainFrame(), root, { cardSelector: '.card', orderedCards: true, maxConcurrentSubOffers: 0 });
+    await root.waitForURL('https://offer.test/final-self', { timeout: 3000 });
+    assert.equal(context.pages().length, 1, 'chuyển trang cha vẫn chạy khi hết quota tab con');
+  });
+}

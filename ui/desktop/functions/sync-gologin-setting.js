@@ -55,6 +55,9 @@ function syncObscuraSetting(enabled) {
       cbxGoLogin.checked = false;
       try { localStorage.setItem('autolead_use_gologin', '0'); } catch {}
     }
+    if (typeof syncWindowDisplayMode === 'function') {
+      syncWindowDisplayMode('runInApp', true);
+    }
   }
   try {
     localStorage.setItem('autolead_use_obscura', enabled ? '1' : '0');

@@ -1,0 +1,13 @@
+window.fetchToffersOffersData = fetchToffersOffersData;
+window.switchOfferType = switchOfferType;
+window.searchToffersOffers = searchToffersOffers;
+window.resetToffersFilters = resetToffersFilters;
+window.goToToffersPage = goToToffersPage;
+window.changeToffersPageSize = changeToffersPageSize;
+window.renderToffersOffers = renderToffersOffers;
+window.loadToffersFilterOptions = loadToffersFilterOptions;
+window.useToffersOffer = useToffersOffer;
+window.useAllToffersOffers = useAllToffersOffers;
+window.copyAllToffersLinks = copyAllToffersLinks;
+window.saveToffersOfferToSaved = saveToffersOfferToSaved;
+window.copyToffersLink = copyToffersLink;

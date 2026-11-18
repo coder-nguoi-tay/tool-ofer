@@ -24,7 +24,7 @@
       color: #cbd5e1;
       white-space: nowrap;
       cursor: pointer;
-      user-select: none;
+      user-select: text;
       transition: all 0.15s ease;
     }
     .autofill-chip:active {
@@ -61,7 +61,7 @@
       font-weight: 700;
       white-space: nowrap;
       cursor: pointer;
-      user-select: none;
+      user-select: text;
       transition: all 0.15s ease;
     }
     .result-opt-btn:active {

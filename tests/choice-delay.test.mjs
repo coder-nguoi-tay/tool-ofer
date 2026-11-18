@@ -11,13 +11,12 @@ test('waitForInputPacing chạy 160ms khi không cấu hình choiceDelay', async
   assert.ok(elapsed >= 140 && elapsed < 350, `Thời gian ${elapsed}ms nằm trong khoảng 160ms`);
 });
 
-test('waitForInputPacing tăng thời gian delay theo choiceDelay của session', async () => {
-  // choiceDelay = 0.5s (500ms) -> jitter 80%-120% (400ms - 600ms)
-  const page = { mouse: {}, _autofillSession: { choiceDelay: 0.5 } };
+test('waitForInputPacing luôn giữ 160ms để nhập form nhanh, không bị ảnh hưởng bởi choiceDelay của câu hỏi', async () => {
+  const page = { mouse: {}, _autofillSession: { choiceDelay: 2.0 } };
   const start = Date.now();
   await waitForInputPacing(page);
   const elapsed = Date.now() - start;
-  assert.ok(elapsed >= 350 && elapsed < 800, `Thời gian ${elapsed}ms phản ánh choiceDelay 0.5s`);
+  assert.ok(elapsed >= 140 && elapsed < 350, `Thời gian ${elapsed}ms giữ đúng nhịp 160ms, không bị delay theo choiceDelay 2s`);
 });
 
 test('performSurveyAnswer áp dụng choiceDelay trước khi dispatch câu trả lời', async () => {

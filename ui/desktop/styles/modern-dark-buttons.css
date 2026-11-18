@@ -13,7 +13,7 @@
       font-weight: 600;
       color: #f8fafc;
       cursor: pointer;
-      user-select: none;
+      user-select: text;
       white-space: nowrap;
       transition: all 0.15s ease;
     }

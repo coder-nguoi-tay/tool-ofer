@@ -16,8 +16,13 @@ import { homedir } from 'node:os';
  * @since 2026-11-10
  */
 const TEST_FILES = [
+  'header-form-submit.test.mjs',
+  'autofill-review-regressions.test.mjs',
   'obscura-engine.test.mjs',
   'obscura-runtime.test.mjs',
+  'obscura-window-navigation.test.mjs',
+  'obscura-native-configuration.test.mjs',
+  'obscura-dynamic-stylesheet.test.mjs',
   'obscura-lead-refill.test.mjs',
   'obscura-stop-and-fresh-session.test.mjs',
   'obscura-full-flow-e2e.test.mjs',
@@ -119,6 +124,8 @@ const TEST_FILES = [
   'http-routes.test.mjs',
   'module-storage.test.mjs',
   'ui-assets.test.mjs',
+  'ui-mode-toggles.test.mjs',
+  'ui-run-lifecycle-regressions.test.mjs',
   'proxy-queue-manual-import.test.mjs',
   'adspower-profile.test.mjs',
   'multilogin-profile.test.mjs',
@@ -157,6 +164,7 @@ const TEST_FILES = [
   'survey-solver.test.mjs',
   'toffers-lead.test.mjs',
   'toffers-duplicate-close.test.mjs',
+  'toffers-offers.test.mjs',
   'proxy711-balance.test.mjs',
   'data-saver.test.mjs',
   'tgbot-features.test.mjs',

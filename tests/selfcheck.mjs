@@ -898,6 +898,7 @@ assert.equal(clickedHomeChoiceId, '[data-ux-choice-id="home_own"]');
 // Test handleOfferwallCards: Phát hiện và mở đồng thời tất cả các offer cards
 const clickedOfferwallCards = [];
 const mockOfferwallFrame = {
+  url: () => 'https://wall.example/',
   locator: (sel) => ({
     first: () => ({
       count: async () => 1,

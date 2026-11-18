@@ -66,17 +66,17 @@
         <textarea id="autofill-data" name="autofillData" spellcheck="false" placeholder="Họ tên,Address,năm sinh,Số điện thoại,Email&#10;Juan Suarez,2609 NW 162nd st,8/18/1967,4059335582,juan@example.com&#10;John Doe,742 Evergreen Terrace,11/24/1982,5558675309,johndoe@gmail.com"></textarea>
         <p class="hint">Dòng đầu CSV là tên cột; hoặc dán mảng JSON gồm các object cùng cột. Hỗ trợ mọi trường: Họ tên, Address / Địa chỉ, Năm sinh / Ngày sinh (8/18/1967 hoặc MM/DD/YYYY), SĐT, Zipcode, City, State, SSN, Email, Banking. App tự động phân tách ngày/tháng/năm hoặc chuyển đổi định dạng date picker phù hợp với mọi form.</p>
         <div style="margin-top: 10px; margin-bottom: 6px;">
-          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; user-select: none;">
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; user-select: text;">
             <input type="checkbox" id="auto-submit-form" name="autoSubmitForm" checked style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
             <span>Tự động tích ô điều khoản (consent checkbox) và bấm Gửi/Tiếp tục (Submit / Continue)</span>
           </label>
         </div>
         <div style="margin-top: 10px; margin-bottom: 12px; border: 1px solid #d8dfeb; border-radius: 8px; padding: 10px 12px; background: #ffffff;">
-          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;">
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: text;">
             <input type="checkbox" id="enable-lead-check" name="enableLeadCheck" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
             <span>Kiểm tra lead khi đến màn số 5 (gọi API toffers.top, trùng IP mới làm tiếp, không thì tắt Chrome đổi sock)</span>
           </label>
-          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; margin-top: 6px;">
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: text; margin-top: 6px;">
             <input type="checkbox" id="auto-close-no-lead" name="autoCloseNoLead" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
             <span>Tự tắt Chrome nếu đợi 30s × 2 lần không có lead về (bỏ tick để giữ trình duyệt mở khi hết lượt check)</span>
           </label>
@@ -117,7 +117,7 @@
         </div>
 
         <details id="script-config-panel" style="margin-top:14px;border:1px solid #d8dfeb;border-radius:8px;padding:10px 12px;background:#fff;">
-          <summary style="cursor:pointer;font-weight:700;font-size:13px;color:#25334b;user-select:none;">
+          <summary style="cursor:pointer;font-weight:700;font-size:13px;color:#25334b;user-select:text;">
             🤖 Script &amp; Giới hạn chạy <span style="font-size:11px;font-weight:400;color:#768197;">(từ Windows exe)</span>
           </summary>
           <div style="margin-top:12px;display:flex;flex-direction:column;gap:4px;">

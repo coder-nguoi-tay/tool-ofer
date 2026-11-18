@@ -2,7 +2,7 @@
  * Handle select saved offer.
  * @return {void} Kết quả xử lý handle select saved offer.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-18
  */
 function handleSelectSavedOffer() {
       const cbb = document.getElementById('cbbSavedOffers');
@@ -17,10 +17,6 @@ function handleSelectSavedOffer() {
         document.getElementById('txtLinkOffer4').value = found.LinkOffer4 || '';
         if (found.LinkOffer2 || found.LinkOffer3 || found.LinkOffer4) toggleExtraOfferLinks(true);
         applyOfferMethods(Array.isArray(found.methodConfigs) ? found.methodConfigs : []);
-        if (found.offerSolver && document.getElementById('cbbOfferSolver')) {
-          document.getElementById('cbbOfferSolver').value = found.offerSolver;
-          try { localStorage.setItem('autoleadpc_offer_solver', found.offerSolver); } catch { }
-        }
         document.getElementById('txtTimeLimit').value = found.MaxRunMinutes ?? '10';
         if (found.Complete && found.Complete !== 'id') {
           document.getElementById('txtTextComplete').value = found.Complete;
@@ -29,27 +25,8 @@ function handleSelectSavedOffer() {
         }
         if (found.delayStart) document.getElementById('nudDelayStart').value = found.delayStart;
         if (found.delayStop) document.getElementById('nudDelayStop').value = found.delayStop;
-        if (typeof found.CheckDuplicate === 'boolean') {
-          const cbxDup = document.getElementById('cbxCheckDuplicateIP');
-          if (cbxDup) {
-            cbxDup.checked = found.CheckDuplicate;
-            try { localStorage.setItem('autoleadpc_check_duplicate', String(found.CheckDuplicate)); } catch { }
-          }
-        }
-        if (typeof found.HideUntilLead === 'boolean') {
-          const cbxHL = document.getElementById('cbxHideUntilLead');
-          if (cbxHL) {
-            cbxHL.checked = found.HideUntilLead;
-            try { localStorage.setItem('autoleadpc_hide_until_lead', String(found.HideUntilLead)); } catch { }
-          }
-        }
-        if (typeof found.HideUntilTarget === 'boolean') {
-          const cbxHT = document.getElementById('cbxHideUntilTarget');
-          if (cbxHT) {
-            cbxHT.checked = found.HideUntilTarget;
-            try { localStorage.setItem('autoleadpc_hide_until_target', String(found.HideUntilTarget)); } catch { }
-          }
-        }
+        applyOfferRunOptions(found);
+        try { localStorage.setItem('autoleadpc_current_offer', JSON.stringify(found)); } catch { }
         if (Array.isArray(found.schedules)) {
           found.schedules.forEach(s => {
             if (s && s.offerIndex) {

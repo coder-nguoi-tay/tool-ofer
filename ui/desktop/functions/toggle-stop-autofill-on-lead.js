@@ -7,7 +7,10 @@
  */
 function toggleStopAutofillOnLead(checked) {
   const checkbox = document.getElementById('cbxStopAutofillOnLead');
-  if (checkbox) checkbox.checked = checked;
+  if (checkbox) checkbox.checked = Boolean(checked);
+  try {
+    localStorage.setItem('autoleadpc_stop_autofill_on_lead', String(Boolean(checked)));
+  } catch { }
   if (checked && !getLeadCheckSettings().enableLeadCheck) selectLeadCheckInterval(30, true);
   syncOptionPills();
 }

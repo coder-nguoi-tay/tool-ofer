@@ -68,7 +68,13 @@ async function findSubmitButton(frame, formScope) {
               reason: 'container_tag'
             };
           }
-          if (el.closest?.('header, footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="banner"], [role="contentinfo"], .site-header, .site-footer, .ow-attribution')) return { valid: false, reason: 'outside_business_content' };
+          if (el.closest?.('footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="contentinfo"], .site-footer, .ow-attribution')) return { valid: false, reason: 'outside_business_content' };
+          const headerEl = el.closest?.('header, [role="banner"], .site-header');
+          if (headerEl) {
+            const headerHasInputs = Boolean(headerEl.querySelector?.('input:not([type="hidden"]), select, textarea'));
+            const headerIsHeroContainer = Boolean(headerEl.matches?.('.hero, [id*="form" i], [class*="form" i], .lead-form, [id*="lead" i]') || headerEl.querySelector?.('form, [role="form"], .form, .form-container, .survey-container'));
+            if (!headerHasInputs && !headerIsHeroContainer) return { valid: false, reason: 'outside_business_content' };
+          }
           if (el.closest?.('form[role="search"], form:has(input[type="search"][name="q"])')) {
             return {
               valid: false,
@@ -238,9 +244,15 @@ async function findSubmitButton(frame, formScope) {
         return rect.width > 4 && rect.height > 4;
       };
       const isNoiseOrNav = el => {
-        if (el.closest('header, footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="banner"], [role="contentinfo"], .site-header, .site-footer, .ow-attribution')) return true;
+        const inForm = Boolean(el.closest('form, [role="form"], .hero, [id*="form" i], [class*="form" i], .lead-form, [id*="lead" i]') || el.form);
+        if (el.closest('footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="contentinfo"], .site-footer, .ow-attribution')) return true;
+        const headerEl = el.closest('header, [role="banner"], .site-header, #header, #nav, .site-nav');
+        if (headerEl) {
+          const headerHasInputs = Boolean(headerEl.querySelector?.('input:not([type="hidden"]), select, textarea'));
+          const headerIsHeroContainer = Boolean(headerEl.matches?.('.hero, [id*="form" i], [class*="form" i], .lead-form, [id*="lead" i]') || headerEl.querySelector?.('form, [role="form"], .form, .form-container, .survey-container'));
+          if (!headerHasInputs && !headerIsHeroContainer) return true;
+        }
         if (el.closest('form[role="search"], form:has(input[type="search"][name="q"])')) return true;
-        const inForm = Boolean(el.closest('form') || el.form);
         const isSubmitTag = (el.tagName || '').toUpperCase() === 'BUTTON' || (el.type || '').toLowerCase() === 'submit';
         const text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
         const href = (el.getAttribute ? el.getAttribute('href') : '') || '';

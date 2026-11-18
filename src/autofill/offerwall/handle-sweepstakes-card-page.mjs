@@ -18,7 +18,7 @@ const activeCardScans = new WeakSet();
  * @return {Promise<boolean>} True khi màn card đã nhận diện và thuộc handler này.
  * @throws {Error} Khi context bị ngắt trong lúc chuẩn bị; watcher giữ quyền phục hồi phiên.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-18
  */
 export async function handleSweepstakesCardPage(page, session, options) {
   if (!await isSweepstakesCardPage(page)) { page._uxSweepstakesCardPageUrl = null; return false; }
@@ -42,7 +42,7 @@ export async function handleSweepstakesCardPage(page, session, options) {
       const opened = hasTasks ? await handleOfferwallTasks(page, frame, {
         ...options, isCancelled: () => session.isClosed || page.isClosed() || shouldPauseForLead(session, options)
       }) : await handleOfferwallCards(frame, page, {
-        ...options, cardSelector, preserveCardPage: true,
+        ...options, cardSelector, orderedCards: true,
         isCancelled: () => session.isClosed || page.isClosed() || shouldPauseForLead(session, options)
       });
       if (opened) { addActionCount(session, opened); session.lastActionTime = Date.now(); }

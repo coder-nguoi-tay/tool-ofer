@@ -61,7 +61,7 @@ import { writeFile } from 'node:fs/promises';
  * @return {Promise<void>} Hoàn tất khi giao diện được mở.
  * @throws {Error} Khi máy chủ giao diện không thể lắng nghe cổng cục bộ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-18
  */
 export async function startLocalInterface() {
   void cleanupStaleProfiles();
@@ -83,7 +83,7 @@ export async function startLocalInterface() {
         }
       }
       const aliveCount = [...activeBrowsers].filter(s => !s.isClosed && !s.browser?.isClosed?.()).length;
-      const target = autoRefill.sequential ? 1 : autoRefill.targetCount;
+      const target = autoRefill.targetCount;
       if (aliveCount < target) {
         queueAutomaticRefill(0);
       }

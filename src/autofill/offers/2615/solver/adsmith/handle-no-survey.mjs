@@ -65,6 +65,9 @@ export async function handleNoSurvey(frame, page, options = {}) {
       if (!await humanClick(page, choice)) break;
       // li của đáp án vừa bấm (No, hoặc Yes với câu chỉ có Yes) phải có class Active.
       if (await choice.evaluate(element => Boolean(element.closest('li.No.Active, li.Yes.Active'))).catch(() => false)) verifiedCount++;
+      // Giữ nhịp tự nhiên giữa các câu hỏi liên tiếp (140ms - 220ms) để AJAX hoàn tất và tránh đơ giao diện
+      const pacingMs = Math.floor(Math.random() * 80) + 140;
+      await new Promise(r => setTimeout(r, pacingMs));
     }
     state.nextAt = Date.now() + 400;
     if (verifiedCount) options.onLog?.({ type: 'survey_answered', detail: `Adsmith AS_IFRAME: đã xác minh ${verifiedCount} câu theo quy tắc riêng (Yes; quảng cáo Dove/khung radio thì No).` }, page);

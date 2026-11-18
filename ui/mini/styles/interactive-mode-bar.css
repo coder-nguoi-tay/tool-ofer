@@ -25,7 +25,7 @@
       justify-content: center;
       gap: 4px;
       transition: all 0.15s ease;
-      user-select: none;
+      user-select: text;
     }
     .interact-pill.active {
       background: #0284c7;

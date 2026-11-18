@@ -18,7 +18,13 @@
       margin: 0;
       padding: 0;
       -webkit-tap-highlight-color: transparent;
-      user-select: none;
+      user-select: text !important;
+      -webkit-user-select: text !important;
+    }
+
+    ::selection {
+      background-color: #38bdf8 !important;
+      color: #0b0f19 !important;
     }
 
     body {

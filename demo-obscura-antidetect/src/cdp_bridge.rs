@@ -4,26 +4,16 @@
 //! through Chrome DevTools Protocol (CDP) commands supported by Obscura (`obscura serve --port 9222`).
 
 use crate::profile::AntiDetectProfile;
-use crate::stealth_script::generate_stealth_js;
 use serde_json::{json, Value};
 
 pub struct CdpBridge;
 
 impl CdpBridge {
-    /// 1. Tạo payload CDP `Page.addScriptToEvaluateOnNewDocument`
-    ///
-    /// Lệnh này yêu cầu Obscura tiêm script stealth vào mọi target/page mới
-    /// trước khi bất kỳ script HTML/JS nào của trang web bắt đầu thực thi.
-    pub fn build_add_script_to_evaluate_payload(id: u64, profile: &AntiDetectProfile) -> Value {
-        let script = generate_stealth_js(profile);
-        json!({
-            "id": id,
-            "method": "Page.addScriptToEvaluateOnNewDocument",
-            "params": {
-                "source": script,
-                "worldName": "" // default main execution context
-            }
-        })
+    /// Cấu hình danh tính tại core Rust qua CDP trước điều hướng, không tiêm JavaScript.
+    /// @param id CDP request ID. @param profile Danh tính thiết bị.
+    /// @return Payload native. @author ductv <ductv@getflycrm.com> @since 2026-11-18
+    pub fn build_browser_identity_payload(id: u64, profile: &AntiDetectProfile) -> Value {
+        json!({"id":id,"method":"Emulation.setBrowserIdentity","params":{"profile":profile}})
     }
 
     /// 2. Tạo payload CDP `Network.setUserAgentOverride`
@@ -91,7 +81,7 @@ impl CdpBridge {
     /// Trả về danh sách các bản tin JSON CDP cần gửi đến WebSocket session của tab Obscura.
     pub fn build_full_init_sequence(start_id: u64, profile: &AntiDetectProfile) -> Vec<Value> {
         vec![
-            Self::build_add_script_to_evaluate_payload(start_id, profile),
+            Self::build_browser_identity_payload(start_id, profile),
             Self::build_user_agent_override_payload(start_id + 1, profile),
             Self::build_device_metrics_override_payload(start_id + 2, profile),
         ]
@@ -109,7 +99,8 @@ mod tests {
         let seq = CdpBridge::build_full_init_sequence(1, &profile);
 
         assert_eq!(seq.len(), 3);
-        assert_eq!(seq[0]["method"], "Page.addScriptToEvaluateOnNewDocument");
+        assert_eq!(seq[0]["method"], "Emulation.setBrowserIdentity");
+        assert_eq!(seq[0]["params"]["profile"]["platform"], profile.platform);
         assert_eq!(seq[1]["method"], "Network.setUserAgentOverride");
         assert_eq!(seq[2]["method"], "Emulation.setDeviceMetricsOverride");
 

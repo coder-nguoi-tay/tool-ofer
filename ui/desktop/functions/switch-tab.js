@@ -49,4 +49,7 @@ function switchTab(tabId) {
       if (tabId === 'ToffersLeads') {
         fetchToffersLeads(false);
       }
+      if (tabId === 'ToffersOffers') {
+        fetchToffersOffersData(false);
+      }
     }

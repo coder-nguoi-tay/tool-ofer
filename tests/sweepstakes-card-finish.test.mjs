@@ -100,9 +100,9 @@ test('Chromium: màn card thật — đếm thẻ chưa mở, mở hết, tab co
   t.after(() => browser.close());
   const context = await browser.newContext();
   const html = `<html style="--progressPercentage:99%"><body><main><div class="offerwall-card-wrap">
-    <div class="card"><a href="https://offer.test/one">One</a></div>
-    <div class="card"><a href="https://offer.test/two">Two</a></div>
-    <div class="card" hidden><a href="https://offer.test/hidden">Hidden</a></div>
+    <div class="card"><a target="_blank" href="https://offer.test/one">One</a></div>
+    <div class="card"><a target="_blank" href="https://offer.test/two">Two</a></div>
+    <div class="card" hidden><a target="_blank" href="https://offer.test/hidden">Hidden</a></div>
     <div class="card"><a href="#top">Hash only</a></div></div></main></body></html>`;
   await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: route.request().url().includes('/wall') ? html : '<p>offer</p>' }));
   const root = await context.newPage();
@@ -131,7 +131,7 @@ test('tích hợp: bộ canh phiên thật (watchTrafficBlockedPage) đóng tab 
   const browser = await chromium.launch();
   t.after(() => browser.close());
   const context = await browser.newContext();
-  const html = '<html style="--progressPercentage:99%"><body><main><div class="offerwall-card-wrap"><div class="card"><a href="https://offer.test/one">One</a></div><div class="card"><a href="https://offer.test/two">Two</a></div></div></main></body></html>';
+  const html = '<html style="--progressPercentage:99%"><body><main><div class="offerwall-card-wrap"><div class="card"><a target="_blank" href="https://offer.test/one">One</a></div><div class="card"><a target="_blank" href="https://offer.test/two">Two</a></div></div></main></body></html>';
   // Tab con còn form để làm: chỉ quy tắc 5 phút mới được đóng nó (không phải quy tắc "trang trống").
   await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: route.request().url().includes('/wall') ? html : '<main style="text-align:center"><form><h3>Your email?</h3><input name="email"><button type="submit">Continue</button></form></main>' }));
   const root = await context.newPage();

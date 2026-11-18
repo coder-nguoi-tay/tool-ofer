@@ -10,17 +10,18 @@ import { renderBrowserMousePointer } from './interaction/render-browser-mouse-po
  * Click qua input trình duyệt với quỹ đạo và nhịp nhấn chuột mô phỏng trên mọi slot.
  * - Tìm toạ độ bounding box thật của phần tử.
  * - Di chuyển chuột mượt theo đường cong Bézier (humanMouseMove) tới điểm ngẫu nhiên bên trong phần tử.
- * - Nghỉ ngắn tiền phản xạ (pre-dwell: 30ms - 70ms).
+ * - Nghỉ ngắn trước nhấn (15ms - 25ms), không chồng thêm nhịp nhập form.
  * - Nhấn chuột xuống (mouse.down).
- * - Giữ chuột (hold click: 55ms - 105ms) mô phỏng lực ấn nút của ngón tay người.
+ * - Giữ chuột 25ms - 40ms để nút nhận input rồi nhả ngay.
  * - Thả chuột (mouse.up).
  * - Fallback an toàn nếu phần tử ẩn, boundingBox rỗng hoặc môi trường unit test.
  *
  * @param {object} page Page của Playwright.
  * @param {object} target Locator hoặc ElementHandle cần click.
  * @return {Promise<boolean>} True khi đã dispatch click qua input trình duyệt.
+ * @throws {never} Lỗi input trả về false; không click dự phòng sau khi đã bắt đầu nhấn.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-18
  */
 async function humanClick(page, target) {
   if (!target) return false;
@@ -46,7 +47,7 @@ async function humanClick(page, target) {
         const clickX = box.x + box.width * (0.2 + 0.6 * Math.random());
         const clickY = box.y + box.height * (0.2 + 0.6 * Math.random());
         await humanMouseMove(activePage, clickX, clickY);
-        const preDwell = Math.floor(Math.random() * 40) + 30;
+        const preDwell = Math.floor(Math.random() * 10) + 15;
         await new Promise(r => setTimeout(r, preDwell));
         if (shouldStopAfterLead(activePage?._autofillSession)) return false;
         let pressed = false;
@@ -55,7 +56,7 @@ async function humanClick(page, target) {
           inputStarted = true;
           pressed = true;
           await activePage.mouse.down();
-          const holdDuration = Math.floor(Math.random() * 50) + 55;
+          const holdDuration = Math.floor(Math.random() * 15) + 25;
           await new Promise(r => setTimeout(r, holdDuration));
           await activePage.mouse.up();
           pressed = false;
@@ -63,6 +64,8 @@ async function humanClick(page, target) {
           if (pressed) await activePage.mouse.up().catch(() => {});
           await renderBrowserMousePointer(activePage, clickX, clickY, false);
         }
+        const postDwell = Math.floor(Math.random() * 10) + 20;
+        await new Promise(r => setTimeout(r, postDwell));
         return true;
       }
     }
@@ -76,6 +79,8 @@ async function humanClick(page, target) {
         force: false,
         timeout: 2000
       });
+      const postDwell = Math.floor(Math.random() * 10) + 20;
+      await new Promise(r => setTimeout(r, postDwell));
       return true;
     }
   } catch {}

@@ -1,12 +1,7 @@
-import { applicationState } from "../../runtime/application-state.mjs";
+import { takeNextRecord } from './take-next-record.mjs';
 import { autofillQueue } from "../../runtime/constants/autofill-queue.mjs";
-import { autofillRecordIdentity } from "./autofill-record-identity.mjs";
-import { autofillRecordKey } from "./autofill-record-key.mjs";
-import { markAutofillRecordUsed } from "./mark-autofill-record-used.mjs";
 import { rejectAutofillRecord } from "./reject-autofill-record.mjs";
 import { rejectEmail } from "../../queues/email.mjs";
-import { safeCloneRecord } from "./safe-clone-record.mjs";
-import { saveAutofillQueue } from "./save-autofill-queue.mjs";
 import { takeNextEmail } from "../../queues/email.mjs";
 
 /**
@@ -16,7 +11,7 @@ import { takeNextEmail } from "../../queues/email.mjs";
  * @param {{kind: 'email'|'record', record: object}} info Loại dữ liệu bị từ chối và record hiện tại.
  * @return {Promise<object|null>} `{ email }` hoặc record mới; null nếu hết dữ liệu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-18
  */
 export async function handleFormRejected(session, {
   kind,
@@ -32,15 +27,9 @@ export async function handleFormRejected(session, {
     };
   }
   await rejectAutofillRecord(record);
-  const nextIndex = autofillQueue.available.findIndex(r => !applicationState.autofillUsedKeys.has(autofillRecordKey(r)) && !applicationState.autofillRejectedKeys.has(autofillRecordIdentity(r)));
-  if (nextIndex === -1) return null;
-  const [next] = autofillQueue.available.splice(nextIndex, 1);
-  autofillQueue.used.push(next);
-  void saveAutofillQueue();
-  void markAutofillRecordUsed(next);
-  // Bản sao: currentRecord sẽ bị gắn email phiên, không được ghi lên object nằm trong danh sách đã dùng.
-  session.currentRecord = safeCloneRecord(next);
-  return {
-    ...next
-  };
+  const next = takeNextRecord(autofillQueue.available, [], session);
+  if (!Object.keys(next).length) return null;
+  session.currentRecord = next;
+  if (session.mainPage) session.mainPage._assignedRecord = next;
+  return { ...next };
 }

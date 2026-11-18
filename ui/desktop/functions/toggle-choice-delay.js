@@ -11,9 +11,16 @@ function toggleChoiceDelay(checked) {
   const cb2 = document.getElementById('cbxChoiceDelayPill');
   const input = document.getElementById('nudChoiceDelay');
   const unit = document.getElementById('lblChoiceDelayUnit');
-  if (cb1 && cb1.checked !== checked) cb1.checked = checked;
-  if (cb2 && cb2.checked !== checked) cb2.checked = checked;
-  if (input) input.style.display = checked ? 'inline-block' : 'none';
-  if (unit) unit.style.display = checked ? 'inline-block' : 'none';
+  const isChecked = Boolean(checked);
+  if (cb1 && cb1.checked !== isChecked) cb1.checked = isChecked;
+  if (cb2 && cb2.checked !== isChecked) cb2.checked = isChecked;
+  if (input) input.style.display = isChecked ? 'inline-block' : 'none';
+  if (unit) unit.style.display = isChecked ? 'inline-block' : 'none';
+  try {
+    localStorage.setItem('autoleadpc_enable_choice_delay', String(isChecked));
+  } catch { }
+  if (typeof syncOptionPills === 'function') {
+    syncOptionPills();
+  }
 }
 window.toggleChoiceDelay = toggleChoiceDelay;
