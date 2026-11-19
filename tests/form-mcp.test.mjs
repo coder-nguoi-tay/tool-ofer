@@ -136,7 +136,7 @@ test('Obscura điền từ đúng record qua backend thật và giữ nguyên kh
   const server = createServer(async (req, res) => {
     if (await handleFormMcpRequest(req, res)) return;
     res.setHeader('Content-Type', 'text/html');
-    res.end('<form data-autoleadpc-mcp="record"><input type="tel" data-autoleadpc-field="zipcode"><select data-autoleadpc-field="state"><option value="">Choose</option><option value="TX">Texas</option></select></form>');
+    res.end('<form data-autoleadpc-mcp="record"><input type="tel" data-autoleadpc-field="zipcode"><select data-autoleadpc-field="state"><option value="">Choose</option><option value="TX">Texas</option></select><select multiple data-autoleadpc-field="channels"><option selected>A</option><option>B</option><option>C</option></select></form>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
@@ -144,7 +144,7 @@ test('Obscura điền từ đúng record qua backend thật và giữ nguyên kh
   const session = await openObscuraBrowser({ port: 0, slot: 995, registerSession: false });
   t.after(() => session.close());
   await session.page.goto(origin);
-  session.page._assignedRecord = { zipcode: '01234', state: 'missing' };
+  session.page._assignedRecord = { zipcode: '01234', state: 'missing', mcpanswerchannels: '["B","C"]' };
   activeBrowsers.add(session); t.after(() => activeBrowsers.delete(session));
   const pair = issuePairing(origin);
   const share = await fetch(origin + '/form-mcp/share/995', { method: 'POST', headers: { Origin: origin },
@@ -153,11 +153,15 @@ test('Obscura điền từ đúng record qua backend thật và giữ nguyên kh
   const call = (action, args) => fetch(origin + '/form-mcp/' + action, { method: 'POST',
     headers: { Authorization: 'Bearer ' + pair.token }, body: JSON.stringify(args) });
   assert.equal((await call('fill', { field: 'state' })).status, 409);
-  assert.equal(await session.page.locator('select').inputValue(), '');
+  assert.equal(await session.page.locator('select:not([multiple])').inputValue(), '');
   assert.equal((await call('fill', { field: 'zipcode' })).status, 200);
   assert.equal(await session.page.locator('input').inputValue(), '01234');
   session.page._assignedRecord.state = 'Texas';
   assert.equal((await call('fill', { field: 'state' })).status, 200);
-  assert.equal(await session.page.locator('select').inputValue(), 'TX');
+  assert.equal(await session.page.locator('select:not([multiple])').inputValue(), 'TX');
+  const inspected = await (await call('inspect', {})).json();
+  assert.equal(inspected.fields.find(item => item.field === 'channels').kind, 'select-multiple');
+  assert.equal((await call('fill', { field: 'channels' })).status, 200);
+  assert.deepEqual(await session.page.evaluate(() => Array.from(document.querySelector('select[multiple]').options, option => option.selected)), [false,true,true]);
   await call('disconnect', {});
 });

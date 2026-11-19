@@ -1,7 +1,7 @@
 import { resolveProvidedFieldValue } from '../autofill/record-values/resolve-provided-field-value.mjs';
 import { normalizeFieldName } from '../autofill/normalize-field-name.mjs';
 
-const profileFields = new Set(['firstname', 'lastname', 'fullname', 'email', 'phone', 'address', 'city', 'state', 'zipcode', 'country', 'contact', 'contactmethod', 'preferredcontact', 'language']);
+export const profileFields = new Set(['firstname', 'lastname', 'fullname', 'email', 'phone', 'address', 'city', 'state', 'zipcode', 'country', 'contact', 'contactmethod', 'preferredcontact', 'language']);
 
 /**
  * Đọc trường hồ sơ hoặc cột đáp án MCP đã được parser CSV/JSON của app chuẩn hóa.
@@ -17,6 +17,18 @@ export function suppliedValue(record, field, session) {
     const value = resolveProvidedFieldValue({ name: field }, record, session);
     if (value != null && value !== '') return String(value);
   }
+  return explicitChoiceValue(record, field);
+}
+
+/**
+ * Đọc đáp án người vận hành khai báo riêng cho một trường, kể cả danh sách lựa chọn.
+ * @param {object} record Record đã chuẩn hóa của tab.
+ * @param {string} field Khóa control mà form công bố.
+ * @return {string|null} Đáp án tường minh hoặc null nếu thiếu.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+export function explicitChoiceValue(record, field) {
   const key = normalizeFieldName('mcp_answer_' + field);
   if (!Object.hasOwn(record, key)) return null;
   const value = record[key];

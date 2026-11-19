@@ -29,13 +29,18 @@ export function startContinuousAgent(page, getRecord, session, options = {}) {
   const agentConfig = options.agentConfig || loadAgentConfig();
   const timeoutMs = resolveAiTimeoutSeconds(cfg.timeoutSeconds) * 1000;
   const useApi = !options.createTransport && agentConfig.transport === 'api';
-  if (!useApi && String(cfg.cliBinary || 'agy').includes('codex')) return null; // transport CLI chỉ hỗ trợ agy
+  const unsupportedCli = !useApi && String(cfg.cliBinary || 'agy').includes('codex');
   let transport;
-  if (options.createTransport) transport = options.createTransport({ bin: cfg.cliBinary || 'agy', timeoutMs });
+  if (unsupportedCli) {
+    if (cfg.mode !== 'form_agent') return null;
+    log({ time: new Date().toISOString(), type: 'continuous_config_invalid', detail: 'Cần chọn agy hoặc cấu hình API để nhận diện nhãn.' });
+  } else if (options.createTransport) transport = options.createTransport({ bin: cfg.cliBinary || 'agy', timeoutMs });
   else if (useApi) {
-    // Thiếu/sai cấu hình API thì dừng và báo, không âm thầm đổi sang agy.
     try { transport = createApiChatSession({ format: agentConfig.apiFormat, baseUrl: agentConfig.apiBaseUrl, apiKey: agentConfig.apiKey, model: agentConfig.apiModel, timeoutMs }); }
-    catch (error) { log({ time: new Date().toISOString(), type: 'continuous_config_invalid', detail: `[Continuous AI] Cấu hình API chưa hợp lệ: ${error.message}` }); return null; }
+    catch (error) {
+      log({ time: new Date().toISOString(), type: 'continuous_config_invalid', detail: `[Continuous AI] Cấu hình API chưa hợp lệ: ${error.message}` });
+      if (cfg.mode !== 'form_agent') return null;
+    }
   } else {
     transport = createAgySession({ bin: cfg.cliBinary || 'agy', timeoutMs });
   }

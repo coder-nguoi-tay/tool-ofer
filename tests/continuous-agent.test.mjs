@@ -242,7 +242,7 @@ test('AI Vận hành giữ tab, chỉ điền form đã khai báo, hủy phản 
         delayed.emit('waiting');
         await new Promise(resolve => delayed.once('release', resolve));
       }
-      return { text: '["zipcode","state","unknown"]' };
+      return { text: '[{"field":"entryA","source":"zipcode"},{"field":"entryB","source":"state"}]' };
     }
   };
   setGlobalAiConfig({ enabled: true, mode: 'form_agent' });
@@ -263,14 +263,19 @@ test('AI Vận hành giữ tab, chỉ điền form đã khai báo, hủy phản 
   await page.waitForFunction(() => document.querySelector('#state')?.value === 'TX');
   assert.equal(await page.inputValue('#zip'), '01234');
   assert.equal(autoPasses, 0);
-  assert.ok(prompts.every(prompt => !prompt.includes('01234') && !prompt.includes('Texas')));
+  assert.equal(prompts.length, 0);
 
   holding = true;
   const waiting = new Promise(resolve => delayed.once('waiting', resolve));
   // Chuyển document nhưng giữ cùng tab để kiểm tra vòng đời của agent.
   await page.reload();
-  await page.setContent(form);
+  await page.setContent('<form data-autoleadpc-mcp="record"><input aria-label="Postal district" id="zip" data-autoleadpc-field="entryA"><input aria-label="Region of residence" id="region" data-autoleadpc-field="entryB"></form>');
   await waiting;
+  assert.equal(prompts.length, 1);
+  assert.ok(prompts[0].includes('entryA') && prompts[0].includes('entryB'));
+  assert.ok(!prompts[0].includes('01234') && !prompts[0].includes('Texas'));
+  await page.locator('form').evaluate(form => form.insertAdjacentHTML('beforeend', '<input id="local" data-autoleadpc-field="zipcode">'));
+  await page.waitForFunction(() => document.querySelector('#local').value === '01234');
   const stopped = page._continuousAgent;
   setGlobalAiConfig({ enabled: false, mode: 'disabled' });
   assert.equal(page._continuousAgent, null);
@@ -284,9 +289,115 @@ test('AI Vận hành giữ tab, chỉ điền form đã khai báo, hủy phản 
   setGlobalAiConfig({ enabled: true, mode: 'form_agent' });
   session.triggerAutofillScan();
   await page.waitForFunction(() => document.querySelector('#zip')?.value === '01234');
+  assert.equal(await page.inputValue('#region'), 'Texas');
+  assert.equal(prompts.length, 2);
   const restarted = page._continuousAgent;
   await browser.close();
   await restarted.done;
   assert.equal(getContinuousAgentState(page), null);
   assert.equal(kills, 2);
+});
+
+test('Vận hành sửa mặc định, xác minh lựa chọn theo nhóm và chỉ thử lại một lần trên mỗi tab', { timeout: 18000 }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const html = `<form data-autoleadpc-mcp="record">
+    <select data-autoleadpc-field="language"><option>English</option><option>Vietnamese</option></select>
+    <select data-autoleadpc-field="state"><option>Ohio</option><option value="TX">Texas</option></select>
+    <input data-autoleadpc-field="zipcode" value="01234"><input id="missing" required data-autoleadpc-field="email">
+    <input type="radio" name="contact" data-autoleadpc-field="contact" value="mail" checked>
+    <input type="radio" name="contact" data-autoleadpc-field="contact" value="sms">
+    <input type="checkbox" value="a" data-autoleadpc-field="topics" checked><input type="checkbox" value="b" data-autoleadpc-field="topics">
+    <input type="checkbox" data-autoleadpc-field="consent"><input type="checkbox" data-autoleadpc-field="optout" checked>
+    <select multiple data-autoleadpc-field="channels"><option selected>A</option><option>B</option><option>C</option></select>
+    <select multiple data-autoleadpc-field="clear"><option selected>A</option><option selected>B</option></select>
+    <select multiple data-autoleadpc-field="ambiguous"><option selected>A</option><option>B</option><option>B</option></select>
+  </form><script>
+    window.edits = {};
+    document.addEventListener('change', ({target}) => {
+      const key = target.dataset.autoleadpcField;
+      edits[key] = (edits[key] || 0) + 1;
+      if (key === 'state' && edits[key] === 1)
+        setTimeout(() => { target.selectedIndex = 0; target.add(new Option('Other'), 1); }, 100);
+      if (key === 'language') setTimeout(() => {
+        const form = document.querySelector('form');
+        form.querySelector('[data-autoleadpc-field=language]').selectedIndex = 0;
+        const replacement = form.cloneNode(true);
+        for (const select of form.querySelectorAll('select:not([multiple])')) {
+          replacement.querySelector('[data-autoleadpc-field=' + select.dataset.autoleadpcField + ']').value = select.value;
+        }
+        for (const option of form.querySelectorAll('select[multiple] option')) {
+          const group = replacement.querySelector('[data-autoleadpc-field=' + option.parentNode.dataset.autoleadpcField + ']');
+          group.options[option.index].selected = option.selected;
+        }
+        form.replaceWith(replacement);
+      }, 180);
+    });
+  </script>`;
+  const { page, context, session } = await createFormScopeFixture(browser, html);
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await other.setContent('<form data-autoleadpc-mcp="record"><input id="zip" data-autoleadpc-field="zipcode"></form>');
+  const { parseAutofillRecords } = await import('../src/autofill/parse-autofill-records.mjs');
+  [page._assignedRecord] = parseAutofillRecords(JSON.stringify({ language: 'Vietnamese', state: 'Texas', contact: 'sms', zipcode: '01234',
+    mcp_answer_topics: ['b'], mcp_answer_optout: false, mcp_answer_channels: ['B','C'], mcp_answer_clear: [], mcp_answer_ambiguous: ['A','B'] }));
+  other._assignedRecord = { zipcode: '98765' };
+  const logs = [];
+  const options = { aiConfig: { enabled: true, mode: 'form_agent' }, allowedOrigin: new URL(page.url()).origin,
+    agentConfig: { transport: 'api', apiBaseUrl: '', apiKey: '', apiModel: '' }, onLog: entry => logs.push(entry) };
+  const mainAgent = startContinuousAgent(page, () => page._assignedRecord, session, options);
+  const otherAgent = startContinuousAgent(other, () => page._assignedRecord, session, options);
+  t.after(() => { stopContinuousAgent(page); stopContinuousAgent(other); });
+  assert.ok(mainAgent && otherAgent);
+  await other.waitForFunction(() => document.querySelector('#zip').value === '98765');
+  await page.waitForFunction(() => edits.language === 2 && edits.state === 2);
+  await page.waitForTimeout(1700);
+  const result = await page.evaluate(() => ({
+    edits, state: document.querySelector('[data-autoleadpc-field=state]').value,
+    contact: document.querySelector('[name=contact]:checked').value,
+    topics: Array.from(document.querySelectorAll('[data-autoleadpc-field=topics]:checked'), item => item.value),
+    consent: document.querySelector('[data-autoleadpc-field=consent]').checked, optout: document.querySelector('[data-autoleadpc-field=optout]').checked,
+    groups: Array.from(document.querySelectorAll('select[multiple]'), group => Array.from(group.selectedOptions, item => item.value)) }));
+  assert.equal(result.state, 'TX');
+  assert.equal(result.contact, 'sms');
+  assert.deepEqual(result.topics, ['b']);
+  assert.equal(result.consent, false);
+  assert.equal(result.optout, false);
+  assert.deepEqual(result.groups, [['B','C'], [], ['A']]);
+  assert.equal(result.edits.language, 2);
+  assert.equal(result.edits.zipcode, undefined);
+  assert.equal(result.edits.ambiguous, undefined);
+  for (const key of ['language','email','ambiguous']) {
+    assert.equal(logs.filter(entry => entry.type === 'form_agent_field_blocked' && entry.field === key).length, 1);
+  }
+  assert.equal(mainAgent.turnCount + otherAgent.turnCount, 0);
+});
+
+test('Vận hành chỉ nhận tên cột khả dụng và hỏi riêng nhãn mới của form', { timeout: 12000 }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<form data-autoleadpc-mcp="record">
+    <input aria-label="Where is the household located?" data-autoleadpc-field="entryA">
+    <input data-autoleadpc-field="entryB"><input data-autoleadpc-field="entryC">
+    <input type="checkbox" required data-autoleadpc-field="permission"></form>`);
+  page._assignedRecord = { state: 'Texas', zipcode: '01234', secret: 'fixture-only' };
+  const batches = [];
+  const agent = startContinuousAgent(page, () => page._assignedRecord, session, {
+    allowedOrigin: new URL(page.url()).origin, aiConfig: { enabled: true, mode: 'form_agent', cliBinary: 'agy' },
+    createTransport: () => ({ kill() {}, close() {}, async send(prompt) {
+      batches.push(JSON.parse(prompt.split('\n').at(-1)));
+      return { text: JSON.stringify([{ field: 'entryA', source: 'state' }, { field: 'entryB', source: 'secret' },
+        { field: 'entryC', source: 'zipcode', value: 'untrusted' }, { field: 'entryD', source: 'zipcode' }]) };
+    } })
+  });
+  t.after(() => stopContinuousAgent(page));
+  await page.waitForFunction(() => document.querySelector('[data-autoleadpc-field=entryA]').value === 'Texas');
+  await page.locator('form').evaluate(form => form.insertAdjacentHTML('beforeend', '<input data-autoleadpc-field="entryD">'));
+  await page.waitForFunction(() => document.querySelector('[data-autoleadpc-field=entryD]').value === '01234');
+  assert.deepEqual(batches.map(batch => batch.fields.map(item => item.field)), [['entryA','entryB','entryC'],['entryD']]);
+  assert.deepEqual(batches[0].sources.sort(), ['city','state','zipcode']);
+  assert.equal(await page.inputValue('[data-autoleadpc-field=entryB]'), '');
+  assert.equal(await page.inputValue('[data-autoleadpc-field=entryC]'), '');
+  assert.equal(await page.locator('[type=checkbox]').isChecked(), false);
+  assert.equal(agent.turnCount, 2);
 });

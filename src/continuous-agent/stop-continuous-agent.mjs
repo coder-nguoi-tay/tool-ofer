@@ -17,7 +17,7 @@ export function stopContinuousAgent(page, reason = 'stopped') {
   clearInterval(agent.watchdog);
   page.off?.('close', agent.onClose);
   agent.abortController.abort();
-  agent.transport.kill();
+  agent.transport?.kill();
   agent.session.aiRunningPages?.delete(page);
   if (page._aiAssistRunning && page._continuousAgent === agent) page._aiAssistRunning = false;
   agent.session.aiAssistRunning = (agent.session.aiRunningPages?.size ?? 0) > 0;

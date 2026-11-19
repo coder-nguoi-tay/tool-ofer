@@ -1,4 +1,4 @@
-import { suppliedValue } from './supplied-value.mjs';
+import { suppliedValue, explicitChoiceValue } from './supplied-value.mjs';
 import { setTimeout as wait } from 'node:timers/promises';
 import { activeBrowsers } from '../browser/sessions.mjs';
 import { resolveDebugPage } from '../browser/screen/resolve-debug-page.mjs';
@@ -115,16 +115,23 @@ export async function handleFormMcpRequest(request, response) {
     }
     const value = fill ? suppliedValue(record, args.field, session) : null;
     if (fill && value === null) return send(422, { error: 'Record của app thiếu dữ liệu cho trường này.' });
-    const operation = { origin: grant.origin, field: args.field, value, candidates: fill ? buildSelectCandidates(value, { name: args.field }) : [] };
+    const operation = {
+      origin: grant.origin, field: args.field, value,
+      choiceValue: fill ? explicitChoiceValue(record, args.field) : null,
+      candidates: fill ? buildSelectCandidates(value, { name: args.field }) : []
+    };
     let result = await grant.form.evaluate(operateOnForm, operation);
     if (fill && result.verified) {
       await wait(550);
       if (grants.get(token) !== grant || (page._assignedRecord || (page === session.mainPage && session.currentRecord)) !== record ||
-          suppliedValue(record, args.field, session) !== value) return send(409, { error: 'Quyền hoặc dữ liệu đã đổi khi xác minh.' });
+          suppliedValue(record, args.field, session) !== value || explicitChoiceValue(record, args.field) !== operation.choiceValue) return send(409, { error: 'Quyền hoặc dữ liệu đã đổi khi xác minh.' });
       result = await grant.form.evaluate(operateOnForm, { ...operation, verifyOnly: true });
     }
     if (result.fields) {
-      for (const item of result.fields) item.available = suppliedValue(record, item.field, session) !== null;
+      for (const item of result.fields) {
+        const explicitOnly = item.kind === 'checkbox' || item.kind === 'select-multiple';
+        item.available = (explicitOnly ? explicitChoiceValue(record, item.field) : suppliedValue(record, item.field, session)) !== null;
+      }
     }
     return send(result.error || result.verified === false ? 409 : 200, result);
   } catch {

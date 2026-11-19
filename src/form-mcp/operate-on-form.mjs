@@ -1,95 +1,110 @@
 /**
- * Đọc trường hoặc điền một đáp án trên chính form đã cấp quyền. Hàm thực thi trong realm của tab.
- * @param {HTMLFormElement} form Form công bố ánh xạ trường sang dữ liệu app.
- * @param {object} operation Origin, tên trường và giá trị do backend tự lấy từ record.
- * @return {object} Mô tả trường hoặc kết quả xác minh, không trả giá trị đã điền.
+ * Đọc trường đã khai báo hoặc áp dụng đúng đáp án record trong realm của form đã cấp quyền.
+ * @param {HTMLFormElement} form Form công bố các trường cho app.
+ * @param {object} operation Origin, trường, metadata dự kiến và đáp án lấy từ record.
+ * @return {object} Metadata khi đọc, trạng thái xác minh khi điền hoặc lý do không thể điền.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-19
  */
-export function operateOnForm(form, { origin, field, value, candidates = [], verifyOnly = false, pendingOnly = false, requireSingle = false, onlyIfPending = false }) {
+export function operateOnForm(form, { origin, field, value, choiceValue, candidates = [], verifyOnly = false, requireSingle = false, expected }) {
   if (!form.isConnected || form.ownerDocument.location.origin !== origin ||
       (requireSingle && form.ownerDocument.querySelectorAll('form[data-autoleadpc-mcp="record"]').length !== 1) ||
-      !form.matches('form[data-autoleadpc-mcp="record"]')) return { error: 'Form đã đổi. Hãy ghép lại.' };
-  const controls = Array.from(form.elements).filter(control =>
-    control.hasAttribute('data-autoleadpc-field') && control.form === form &&
-    control.matches('textarea, select:not([multiple]), input') &&
-    (control.tagName !== 'INPUT' || ['text','email','tel','url','number','date','radio'].includes(control.type)) &&
-    !control.matches(':disabled, [readonly]') && !control.closest('[inert], [hidden], [aria-hidden="true"], [aria-disabled="true"]') &&
-    control.getClientRects().length && getComputedStyle(control).visibility === 'visible');
+      !form.matches('form[data-autoleadpc-mcp="record"]')) {
+    return requireSingle ? { stale: true } : { error: 'Form đã đổi. Hãy ghép lại.' };
+  }
+  const elements = Array.from(form.elements);
   const groups = new Map();
-  for (const control of controls) {
+  for (const control of elements) {
     const key = control.getAttribute('data-autoleadpc-field');
-    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key)) continue;
+    if ((field && key !== field) || !key || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key) || control.form !== form ||
+        !control.matches('textarea, select, input') ||
+        (control.tagName === 'INPUT' && !['text','email','tel','url','number','date','radio','checkbox'].includes(control.type)) ||
+        control.matches(':disabled, [readonly]') || control.closest('[inert], [hidden], [aria-hidden="true"], [aria-disabled="true"]') ||
+        !control.getClientRects().length || getComputedStyle(control).visibility !== 'visible') continue;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(control);
   }
-  /**
-   * Xác định trường còn trống hoặc đang báo lỗi từ các control có cùng khóa.
-   * @param {HTMLElement[]} members Các control hiển thị mà form đã khai báo.
-   * @return {boolean} Agent cần xử lý trường này.
-   * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-19
-   */
-  const needsInput = members => {
+  const fields = [];
+  const invalidFields = [];
+  for (const [key, members] of groups) {
+    if (field && key !== field) continue;
     const control = members[0];
-    return control.type === 'radio' ? !members.some(item => item.checked) :
-      !control.value.trim() || control.getAttribute('aria-invalid') === 'true' || control.validity?.valid === false;
-  };
-  if (!field) {
-    const fields = [];
-    for (const [key, members] of groups) {
-      const control = members[0];
-      if (pendingOnly && !needsInput(members)) continue;
-      const labelElement = control.type === 'radio' ? control.closest('fieldset')?.querySelector('legend') : control.labels?.[0];
-      const labelCopy = labelElement?.cloneNode(true);
-      for (const nested of labelCopy?.querySelectorAll('input,select,textarea') || []) nested.remove();
-      fields.push({ field: key, label: (control.getAttribute('aria-label') || labelCopy?.textContent || key).trim().slice(0, 160),
-        kind: control.tagName === 'INPUT' ? control.type : control.localName });
-    }
-    return { fields };
+    const grouped = control.type === 'radio' || (control.type === 'checkbox' && members.length > 1);
+    const labelElement = grouped ? control.closest('fieldset')?.querySelector('legend') : control.labels?.[0];
+    const labelCopy = labelElement?.cloneNode(true);
+    for (const nested of labelCopy?.querySelectorAll('input,select,textarea') || []) nested.remove();
+    const label = (control.getAttribute('aria-label') || labelCopy?.textContent || key).trim().slice(0, 160);
+    if (!field && requireSingle && members.some(item => item.validity?.valid === false || item.getAttribute('aria-invalid') === 'true')) invalidFields.push(key);
+    const kind = control.tagName === 'INPUT' ? control.type : control.localName === 'select' && control.hasAttribute('multiple') ? 'select-multiple' : control.localName;
+    fields.push({ field: key, label, kind });
   }
+  if (!field) return requireSingle ? { fields, invalidFields } : { fields };
   const members = groups.get(field);
-  if (!members?.length) return { error: 'Trường không còn sẵn sàng.' };
-  if (onlyIfPending && !verifyOnly && !needsInput(members)) return { skipped: true };
-  let control = members[0];
-  let expectedOption;
-  /**
-   * Xác nhận đúng control vẫn thuộc form được ghép và trang đã giữ đáp án của record.
-   * @return {{verified: boolean}} Trạng thái ngay sau thao tác hiện tại.
-   * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-19
-   */
-  function verifyAnswer() {
-    return { verified: form.isConnected && control.isConnected && control.form === form &&
-      control.getAttribute('data-autoleadpc-field') === field && control.getAttribute('aria-invalid') !== 'true' &&
-      control.validity?.valid !== false && (control.type === 'radio' ? control.checked :
-        expectedOption ? control.selectedIndex === expectedOption.index : control.value === value) };
+  if (!members || (expected && (expected.label !== fields[0].label || expected.kind !== fields[0].kind))) {
+    return requireSingle ? { stale: true } : { error: 'Trường hoặc nhãn đã đổi.' };
   }
-  if (control.type === 'radio') {
-    if (!control.name || members.some(item => item.type !== 'radio' || item.name !== control.name) ||
-        Array.from(form.elements).some(item => item.type === 'radio' && item.name === control.name && !members.includes(item))) {
-      return { error: 'Nhóm lựa chọn không rõ ràng.' };
+  const control = members[0];
+  const ambiguous = { error: 'Record không khớp một lựa chọn duy nhất.' };
+  const changes = [];
+  let matchesAnswer;
+  const multiSelect = control.localName === 'select' && control.hasAttribute('multiple');
+  if (control.type === 'checkbox' || multiSelect) {
+    if (choiceValue == null) return { error: 'Thiếu đáp án khai báo riêng cho trường chọn.' };
+    if (elements.some(item => item.getAttribute('data-autoleadpc-field') === field && !members.includes(item)) ||
+        members.some(item => item.type !== control.type) || (multiSelect && members.length !== 1)) return ambiguous;
+    const choices = multiSelect ? Array.from(control.options) : members;
+    const wanted = new Set();
+    if (control.type === 'checkbox' && members.length === 1 && /^(true|false)$/i.test(choiceValue)) {
+      if (choiceValue.toLowerCase() === 'true') wanted.add(control);
+    } else {
+      let answers = [choiceValue];
+      if (choiceValue.startsWith('[')) {
+        try { answers = JSON.parse(choiceValue); } catch { return ambiguous; }
+      }
+      if (!Array.isArray(answers) || answers.some(answer => typeof answer !== 'string' || !answer.trim())) return ambiguous;
+      for (const answer of answers) {
+        const options = choices.filter(item => item.value === answer || (multiSelect && item.label.trim() === answer));
+        if (options.length !== 1 || wanted.has(options[0])) return ambiguous;
+        wanted.add(options[0]);
+      }
     }
+    const property = multiSelect ? 'selected' : 'checked';
+    const differing = choices.filter(item => item[property] !== wanted.has(item));
+    if (differing.some(item => item.disabled || item.closest('optgroup[disabled]'))) return ambiguous;
+    matchesAnswer = () => choices.every(item => item[property] === wanted.has(item));
+    if (!verifyOnly) {
+      for (const item of differing) item[property] = wanted.has(item);
+      if (multiSelect && differing.length) changes.push(control);
+      else changes.push(...differing);
+    }
+  } else if (control.type === 'radio') {
+    if (!control.name || members.some(item => item.type !== 'radio' || item.name !== control.name) ||
+        elements.some(item => item.type === 'radio' && item.name === control.name && !members.includes(item))) return ambiguous;
     const matches = members.filter(item => candidates.includes(item.value));
-    if (matches.length !== 1) return { error: 'Record không khớp một lựa chọn duy nhất.' };
-    control = matches[0];
-    if (verifyOnly || control.checked) return verifyAnswer();
-    control.checked = true;
+    if (matches.length !== 1) return ambiguous;
+    const target = matches[0];
+    matchesAnswer = () => target.checked;
+    if (!verifyOnly && !matchesAnswer()) { target.checked = true; changes.push(target); }
   } else {
     if (members.length !== 1) return { error: 'Có nhiều trường trùng khóa.' };
+    let targetValue = value;
+    let property = 'value';
     if (control.localName === 'select') {
       const matches = Array.from(control.options).filter(option => !option.disabled && !option.closest('optgroup[disabled]') &&
         (candidates.includes(option.value) || candidates.includes(option.label.trim())));
-      if (matches.length !== 1) return { error: 'Record không khớp một lựa chọn duy nhất.' };
-      expectedOption = matches[0];
-      if (verifyOnly || control.selectedIndex === expectedOption.index) return verifyAnswer();
-      control.selectedIndex = expectedOption.index;
-    } else {
-      if (verifyOnly || control.value === value) return verifyAnswer();
-      control.value = value;
+      if (matches.length !== 1) return ambiguous;
+      property = 'selectedIndex';
+      targetValue = matches[0].index;
     }
+    matchesAnswer = () => control[property] === targetValue;
+    if (!verifyOnly && !matchesAnswer()) { control[property] = targetValue; changes.push(control); }
   }
-  control.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-  if (control.isConnected) control.dispatchEvent(new Event('change', { bubbles: true }));
-  return verifyAnswer();
+  for (const changed of changes) {
+    if (!changed.isConnected || changed.form !== form) continue;
+    changed.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    if (changed.isConnected) changed.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  const verified = form.isConnected && matchesAnswer() && members.every(item => item.isConnected && item.form === form &&
+    item.getAttribute('data-autoleadpc-field') === field && item.getAttribute('aria-invalid') !== 'true' && item.validity?.valid !== false);
+  return requireSingle ? { verified, changed: changes.length > 0 } : { verified };
 }

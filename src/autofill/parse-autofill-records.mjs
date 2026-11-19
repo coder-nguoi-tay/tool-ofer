@@ -6,13 +6,14 @@ import { normalizeFieldName } from './normalize-field-name.mjs';
 /**
  * Đọc dữ liệu CSV hoặc JSON để mỗi form có thể chọn một bản ghi.
  * Hỗ trợ mọi trường dữ liệu (họ tên, địa chỉ, sđt, ngày sinh, email, SSN, bank, routing...).
+ * Chấp nhận mảng chuỗi cho cột mcp_answer_ của trường chọn nhiều.
  * Tự động phục hồi nếu JSON bị cắt cụt đuôi hoặc chứa trailing comma.
  *
  * @param {string} source Nội dung người dùng dán vào ô dữ liệu.
  * @return {object[]} Các bản ghi có tên cột và giá trị dạng chuỗi.
  * @throws {Error} Khi cấu trúc hoặc số lượng dữ liệu không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-19
  */
 function parseAutofillRecords(source) {
   const content = String(source ?? '').trim();
@@ -142,6 +143,9 @@ function parseAutofillRecords(source) {
     }
     const normalized = Object.fromEntries(headers.map(header => {
       const value = record[header] ?? '';
+      if (/^mcp_answer_/i.test(header) && Array.isArray(value) && value.every(item => typeof item === 'string' && item.trim())) {
+        return [normalizeFieldName(header), JSON.stringify(value)];
+      }
       if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) {
         throw new Error('Giá trị tự điền phải là chữ, số hoặc true/false.');
       }
