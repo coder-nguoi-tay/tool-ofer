@@ -1,7 +1,11 @@
+import './helpers/obscura-data-fixture.mjs';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import test from 'node:test';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { openObscuraBrowser } from '../src/obscura-engine/open-obscura-browser.mjs';
+import { resolveObscuraBinary } from '../src/obscura-engine/resolve-obscura-binary.mjs';
 import { findSubmitButton } from '../src/autofill/find-submit-button.mjs';
 import { submitFrameForm } from '../src/autofill/submit-frame-form.mjs';
 import { resolveActiveFormScope } from '../src/autofill/form-scope/resolve-active-form-scope.mjs';
@@ -48,6 +52,86 @@ test('tìm và gửi đúng form đang xử lý trên Chromium', { skip: !exists
       assert.equal(await (await findSubmitButton(page, scope)).getAttribute('id'), 'linked');
       assert.equal((await page.evaluate(inspectFrameValidation, scope)).id, 'email');
     } finally { await context.close(); }
+  });
+
+  await t.test('State về placeholder và ZIP bị từ chối được báo đúng nhãn trước khi bấm gửi', async t => {
+    const { context, page, session } = await createFormScopeFixture(browser, `
+      <form id="main" onsubmit="event.preventDefault();this.dataset.sent=1">
+        <label for="q1">Country</label><select id="q1"><option>US</option><option>CA</option></select>
+        <label for="q7">State</label><select id="q7" required><option value="">Choose</option><option selected>TX</option></select>
+        <span id="zip-label">Postal code</span><input form="main" type="tel" id="q8" aria-labelledby="zip-label" value="12345">
+        <input value="untouched"><button onclick="this.dataset.clicked=1">Continue</button>
+      </form><form id="other"><input required aria-label="Other form"></form>`);
+    t.after(() => context.close());
+    const formScope = await resolveActiveFormScope(page);
+    await page.evaluate(() => {
+      document.getElementById('q1').onchange = () => {
+        const state = document.getElementById('q7').cloneNode(true);
+        document.getElementById('q7').replaceWith(state);
+        state.value = '';
+        document.getElementById('q8').setAttribute('aria-invalid', 'true');
+      };
+    });
+    await page.locator('#q1').selectOption('CA');
+    const events = [];
+    await submitFrameForm({ options: { aiConfig: { enabled: false }, onLog: event => events.push(event) }, frame: page, page, session,
+      frameProgress: { formScope, filledInThisPass: 1 }, record: {}, screenInfo: {}, scanStartUrl: page.url() });
+    assert.equal(await page.locator('button').getAttribute('data-clicked'), null);
+    const blocked = events.find(event => event.type === 'submit_blocked_fields');
+    assert.deepEqual(blocked?.fields, [
+      { label: 'State', reason: 'valueMissing' },
+      { label: 'Postal code', reason: 'aria-invalid' },
+    ]);
+    assert.equal(JSON.stringify(blocked).includes('12345'), false);
+    assert.equal(session.autofillActions || 0, 0);
+    assert.equal(await page.locator('#other input').inputValue(), '');
+  });
+
+  await t.test('select bị thay bằng giá trị khác vẫn hợp lệ theo HTML thì giữ lần gửi', async t => {
+    const { context, page, session } = await createFormScopeFixture(browser, `
+      <form><label for="state">State</label><select id="state" required>
+        <option>TX</option><option selected>CA</option></select><button>Continue</button></form>`);
+    t.after(() => context.close());
+    const events = [];
+    await submitFrameForm({ options: { aiConfig: { enabled: false }, onLog: event => events.push(event) },
+      frame: page, page, session, frameProgress: { verifiedSelections: [{ id: 'state', value: 'TX' }] },
+      record: {}, screenInfo: {}, scanStartUrl: page.url() });
+    assert.deepEqual(events.find(event => event.type === 'submit_blocked_fields')?.fields,
+      [{ label: 'State', reason: 'selectionChanged' }]);
+    assert.equal(await page.locator('select').inputValue(), 'CA');
+  });
+
+  await t.test('lỗi đến muộn thuộc lần click, giữ nguyên dữ liệu và tiến độ màn', async t => {
+    const { context, page, session } = await createFormScopeFixture(browser, `
+      <form id="main">
+        <label>State<select id="q7"><option selected>Texas</option></select></label>
+        <label for="q8">Postal code</label><input type="tel" id="q8" value="12345">
+        <button type="button" onclick="setTimeout(() => q7.setAttribute('aria-invalid','true'), 60);
+          setTimeout(() => q8.setAttribute('aria-invalid','true'), 140)">Continue</button>
+      </form>`);
+    t.after(() => context.close());
+    const events = [];
+    await submitFrameForm({ options: { aiConfig: { enabled: false }, onLog: event => events.push(event) },
+      frame: page, page, session, frameProgress: { filledInThisPass: 1 }, record: {}, screenInfo: {}, scanStartUrl: page.url() });
+    const rejection = events.find(event => event.type === 'submit_rejected_fields');
+    assert.deepEqual(rejection?.fields.map(field => field.label), ['State', 'Postal code']);
+    assert.equal(session.autofillActions || 0, 0);
+    assert.equal(session.hasSubmittedCurrentScreen, false);
+    assert.equal(await page.locator('#q8').inputValue(), '12345');
+  });
+
+  await t.test('requestSubmit dự phòng cũng tôn trọng lỗi của trường nằm ngoài form', async t => {
+    const { context, page, session } = await createFormScopeFixture(browser, `
+      <form id="main" onsubmit="event.preventDefault();this.dataset.sent=1"><input value="ready"></form>
+      <input form="main" aria-label="Postal code" aria-describedby="hint err" type="tel" value="12345">
+      <span id="hint">Five digits</span><span class="field-error" id="err">Invalid ZIP</span>`);
+    t.after(() => context.close());
+    const events = [];
+    await submitFrameForm({ options: { aiConfig: { enabled: false }, onLog: event => events.push(event) },
+      frame: page, page, session, frameProgress: { filledInThisPass: 1 }, record: {}, screenInfo: {}, scanStartUrl: page.url() });
+    assert.equal(await page.locator('form').getAttribute('data-sent'), null);
+    assert.deepEqual(events.find(event => event.type === 'submit_blocked_fields')?.fields,
+      [{ label: 'Postal code', reason: 'linkedError' }]);
   });
 
   await t.test('DOM thay form hoặc chuyển bước thì xác định lại scope, không dùng nút cũ', async () => {
@@ -122,4 +206,28 @@ test('tìm và gửi đúng form đang xử lý trên Chromium', { skip: !exists
       assert.equal(await page.locator('form').getAttribute('data-submitted'), '1');
     } finally { await context.close(); }
   });
+});
+
+test('Obscura chặn select required về placeholder và ZIP được đánh dấu sai', { timeout: 30000 }, async t => {
+  try { resolveObscuraBinary(); } catch { t.skip('Chưa có binary Obscura'); return; }
+  const server = http.createServer((request, response) => {
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.end(`<!doctype html><form><label for="q7">State</label>
+      <select id="q7" required><option value="">Choose</option><option>Texas</option></select>
+      <label for="q8">Postal code</label><input id="q8" type="tel" aria-invalid="true">
+      <button type="button" onclick="this.dataset.clicked=1">Continue</button></form>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+  const session = await openObscuraBrowser({ port: 0, slot: 993, registerSession: false });
+  t.after(() => session.close());
+  const page = session.page;
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  const events = [];
+  await submitFrameForm({ options: { aiConfig: { enabled: false }, onLog: event => events.push(event) },
+    frame: page, page, session: { firstSubmitHandled: true }, frameProgress: { filledInThisPass: 1 },
+    record: {}, screenInfo: {}, scanStartUrl: page.url() });
+  assert.equal(await page.locator('button').getAttribute('data-clicked'), null);
+  assert.deepEqual(events.find(event => event.type === 'submit_blocked_fields')?.fields,
+    [{ label: 'State', reason: 'valueMissing' }, { label: 'Postal code', reason: 'aria-invalid' }]);
 });

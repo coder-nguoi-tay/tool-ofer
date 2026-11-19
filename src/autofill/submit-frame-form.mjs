@@ -1,6 +1,7 @@
 import { handleYesNoStep } from './handle-yes-no-step.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { readQuestionState, didQuestionAdvance } from '../survey-solver/verification/read-question-state.mjs';
+import { observeFormValidation } from './form-scope/observe-form-validation.mjs';
 import { inspectSubmitErrors } from './form-scope/inspect-submit-errors.mjs';
 import { isControlInActiveForm } from './form-scope/is-control-in-active-form.mjs';
 import { resolveActiveFormScope } from './form-scope/resolve-active-form-scope.mjs';
@@ -16,11 +17,53 @@ import { rotateRejectedFormData } from './rotate-rejected-form-data.mjs';
 import { selectFirstAddressSuggestion } from './select-first-address-suggestion.mjs';
 
 /**
+ * Gửi trong phạm vi đã chọn khi các trường hợp lệ và trả kết quả khi trang chưa báo lỗi.
+ * @param {object} frame Frame xử lý biểu mẫu.
+ * @param {object|null} formScope Phạm vi của bước đang xử lý.
+ * @param {object} session Phiên nhận thông báo lỗi.
+ * @param {object} options Callback nhật ký của lượt quét.
+ * @param {object} page Tab nhận thông báo.
+ * @param {Function} dispatch Thao tác gửi hiện có, trả false/null nếu chưa gửi.
+ * @return {Promise<*>} Kết quả thao tác, hoặc null khi validation chặn gửi.
+ * @throws {Error} Khi thao tác gửi phát sinh lỗi.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+async function submitWithValidation(frame, formScope, session, options, page, dispatch) {
+  if (!formScope) return dispatch();
+  const observation = await frame.evaluateHandle(observeFormValidation, formScope);
+  try {
+    const state = await observation.evaluate(check => check && { fields: check.initialErrors, watching: check.watching });
+    if (!state) return null;
+    let fields = state.fields;
+    let eventType = 'submit_blocked_fields';
+    if (!fields.length) {
+      const outcome = await dispatch();
+      if (!outcome || !state.watching || outcome.method === 'none' || outcome.method === 'error') return outcome;
+      // Dùng đồng hồ Node để chờ các validator bất đồng bộ của trang sau thao tác gửi.
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // Điều hướng có thể hủy realm ngay sau khi gửi. Phần theo dõi chuyển bước xử lý trường hợp này.
+      fields = await observation.evaluate(check => check.readFeedback()).catch(() => []);
+      if (!fields.length) return outcome;
+      eventType = 'submit_rejected_fields';
+    }
+    const detail = 'Kiểm tra lại trường trên form: ' + fields.map(field => field.label).join(', ');
+    session.hasSubmittedCurrentScreen = false;
+    session.autofillError = detail;
+    options.onLog?.({ type: eventType, fields, detail }, page);
+    return null;
+  } finally {
+    await observation.evaluate(check => check?.close()).catch(() => {});
+    await observation.dispose().catch(() => {});
+  }
+}
+
+/**
  * Gửi form của frame, theo dõi chuyển màn và kích hoạt kiểm tra lead sau email.
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần dừng lượt quét trang.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-19
  */
 export async function submitFrameForm({
   options,
@@ -42,6 +85,7 @@ export async function submitFrameForm({
     }
     try {
       const formScope = frameProgress.formScope ?? await resolveActiveFormScope(frame);
+      const validationScope = formScope && { ...formScope, verifiedSelections: frameProgress.verifiedSelections };
       const submitBtn = await findSubmitButton(frame, formScope);
       if (submitBtn) {
         const btnInfo = await submitBtn.evaluate((btn, currentFields) => {
@@ -156,18 +200,6 @@ export async function submitFrameForm({
           if (!submitStillReady) return false;
 
           const submitLabel = btnInfo.text || btnInfo.id || 'Submit';
-          console.log(`[Autofill] Bấm nút submit: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id}" class="${btnInfo.className || ''}"`);
-
-          // Ghi log submit rõ ràng vào session logs
-          options.onLog?.({
-            type: 'submit_attempt',
-            tag: btnInfo.tag,
-            id: btnInfo.id,
-            className: btnInfo.className || null,
-            text: submitLabel,
-            detail: `Đang thử bấm nút submit/tiếp tục: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id || '?'}" class="${btnInfo.className || '?'}"`
-          }, page);
-
           if (formScope && !await submitBtn.evaluate(isControlInActiveForm, formScope).catch(() => false)) return false;
 
           const isFirstSubmitOfSession = !session.firstSubmitHandled && !session.screen1Completed;
@@ -183,10 +215,28 @@ export async function submitFrameForm({
           // Thao tác click tự nhiên bằng humanClick (Bézier curves + CDP mouse events)
           const beforeSubmitState = await readQuestionState(frame);
           const clickStartedAt = Date.now();
-          let submitDispatched = await humanClick(page, submitBtn);
-          if (!submitDispatched) {
-            submitDispatched = await submitBtn.click({ timeout: 2000 }).then(() => true).catch(() => false);
+          let submitDispatched;
+          try {
+            if (validationScope) validationScope.skipNativeValidation = btnInfo.skipNativeValidation;
+            submitDispatched = await submitWithValidation(frame, validationScope, session, options, page, async () => {
+              console.log(`[Autofill] Bấm nút submit: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id}" class="${btnInfo.className || ''}"`);
+
+              // Ghi log submit rõ ràng vào session logs
+              options.onLog?.({
+                type: 'submit_attempt',
+                tag: btnInfo.tag,
+                id: btnInfo.id,
+                className: btnInfo.className || null,
+                text: submitLabel,
+                detail: `Đang thử bấm nút submit/tiếp tục: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id || '?'}" class="${btnInfo.className || '?'}"`
+              }, page);
+              if (await humanClick(page, submitBtn)) return true;
+              return submitBtn.click({ timeout: 2000 }).then(() => true).catch(() => false);
+            });
+          } finally {
+            if (!submitDispatched) page.off?.('popup', popupHandler);
           }
+          if (submitDispatched === null) return false;
           // Website chặn ngay bằng alert lỗi nhập liệu ("Please enter a birthday…"): không tính là đã submit/tiến triển.
           // Trước đây mỗi lần vẫn cộng action nên watcher bấm Continue lặp mãi (log 2026-11-12: 54 lần).
           const rejectedDialog = submitDispatched && page._uxLastDialog?.validation && page._uxLastDialog.at >= clickStartedAt ? page._uxLastDialog : null;
@@ -323,9 +373,8 @@ export async function submitFrameForm({
         // FALLBACK NẾU THIẾU NÚT BẤM HOẶC NÚT BẤM KHÔNG ĐƯỢC NHẬN DIỆN:
         // Chỉ chạy khi TRONG LƯỢT QUÉT NÀY vừa điền thêm được ô mới.
         // Trả về định danh phần tử đã gửi (id/class của div/button/form) để log nâng cấp matcher.
-        const formSubmitted = await frame.evaluate(submitVisibleFormFallback, formScope).catch(() => ({
-          method: 'error'
-        }));
+        const formSubmitted = await submitWithValidation(frame, validationScope, session, options, page,
+          () => frame.evaluate(submitVisibleFormFallback, formScope).catch(() => ({ method: 'error' })));
         if (formSubmitted && formSubmitted.method !== 'none' && formSubmitted.method !== 'error') {
           const fallbackIdentity = formSubmitted.id || formSubmitted.className ? `${formSubmitted.tag || 'element'}#${formSubmitted.id || '?'} class="${formSubmitted.className || '?'}"` : 'không rõ định danh';
           console.log(`[Autofill] Không có nút submit chuẩn, đã kích hoạt fallback (${formSubmitted.method}) trên: ${fallbackIdentity}.`);

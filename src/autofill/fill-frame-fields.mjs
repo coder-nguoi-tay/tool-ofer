@@ -14,7 +14,7 @@ import { matchFieldValue } from './match-field-value.mjs';
  * @param {object} context Frame, dữ liệu lead và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần dừng quét trang.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-19
  */
 export async function fillFrameFields({
   fields,
@@ -217,6 +217,10 @@ export async function fillFrameFields({
       if (metadata.kind === 'select') {
         finalVal = await field.evaluate(el => el.value || '').catch(() => '');
         if (!fillResult?.verified || finalVal !== fillResult.value) continue;
+        if (metadata.id || metadata.name) {
+          frameProgress.verifiedSelections ??= [];
+          frameProgress.verifiedSelections.push({ id: metadata.id, name: metadata.name, value: finalVal });
+        }
       } else {
         finalVal = await field.inputValue().catch(() => '');
       }
