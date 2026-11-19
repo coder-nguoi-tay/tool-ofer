@@ -417,9 +417,13 @@ test('form agent giữ địa chỉ đã chọn khi widget chuẩn hóa chữ, c
       setTimeout(() => { address.removeAttribute('aria-invalid'); f.querySelector('#submit').disabled = false; }, 1100); };
   });
   page._assignedRecord = { address: '10 Oak St' };
+  const mappedFields = [];
   const agent = startContinuousAgent(page, () => page._assignedRecord, session, {
     allowedOrigin: new URL(page.url()).origin, aiConfig: { enabled: true, mode: 'form_agent', cliBinary: 'agy' },
-    createTransport: () => ({ kill() {}, close() {}, send() { throw new Error('Trường đã biết'); } })
+    createTransport: () => ({ kill() {}, close() {}, async send(prompt) {
+      mappedFields.push(...JSON.parse(prompt.split('\n').at(-1)).fields);
+      return { text: '[]' };
+    } })
   });
   t.after(() => stopContinuousAgent(page));
   await page.waitForFunction(() => document.querySelector('#address').value === '10 Oak St');
@@ -437,5 +441,66 @@ test('form agent giữ địa chỉ đã chọn khi widget chuẩn hóa chữ, c
   await page.waitForFunction(() => document.querySelector('#address').value === '10 Oak St');
   page._assignedRecord = { address: '99 Pine Rd' };
   await page.waitForFunction(() => document.querySelector('#address').value === '99 Pine Rd');
-  assert.equal(agent.turnCount, 0);
+  assert.ok(agent.turnCount > 0);
+  assert.ok(mappedFields.every(item => item.field !== 'address'));
+});
+
+test('AI ghép ô ngoài danh sách theo từng phần tử, giữ dữ liệu người dùng và giới hạn công cụ MCP', { timeout: 18000 }, async t => {
+  const { operateOnForm } = await import('../src/form-mcp/operate-on-form.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<meta charset="utf-8"><form id="allowed" data-autoleadpc-mcp="record">
+    <input id="known" data-autoleadpc-field="firstname">
+    <label>Where do you reside?<input></label><label>State abbreviation<input id="manual"></label>
+    <label>City<input id="bad" value="123" pattern="[A-Za-z ]+"></label>
+    <textarea aria-label="Where do you receive letters?"></textarea>
+    <input data-test-unlabelled><input data-autoleadpc-field="" id="ambiguous" aria-label="What else?">
+    <input id="wrongsource" aria-label="Số điện thoại" type="tel">
+    <input id="filled" aria-label="Prefilled" value="user-entry"><input type="password" aria-label="Password">
+    <input type="text" autocomplete="one-time-code" aria-label="Verify">
+    <input hidden aria-label="Hidden"><input disabled aria-label="Disabled"><input readonly aria-label="Locked">
+    <button type="submit">Submit</button></form>
+    <input aria-label="Outside"><form><input aria-label="Other form"></form>`);
+  const origin = new URL(page.url()).origin;
+  page._assignedRecord = { firstname: 'Ada', state: 'Texas', city: 'Austin', address: '10 Oak St', secret: 'never-send' };
+  const batches = [];
+  let release, firstSent;
+  const firstBatch = new Promise(resolve => { firstSent = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const agent = startContinuousAgent(page, () => page._assignedRecord, session, {
+    allowedOrigin: origin, aiConfig: { enabled: true, mode: 'form_agent' },
+    createTransport: () => ({ kill: release, close() {}, async send(prompt) {
+      const batch = JSON.parse(prompt.split('\n').at(-1));
+      batches.push(batch);
+      if (batches.length === 1) { firstSent(); await gate; }
+      const sources = { '': 'state', 'Where do you reside?': 'state', 'State abbreviation': 'state', City: 'city',
+        'Where do you receive letters?': 'address', 'Số điện thoại': 'address', 'What else?': 'secret', 'New town': 'city' };
+      return { text: JSON.stringify(batch.fields.map(({field, label}) => ({field, source: sources[label]}))) };
+    } })
+  });
+  t.after(() => { release(); stopContinuousAgent(page); });
+  await page.waitForFunction(() => document.querySelector('#known').value === 'Ada');
+  await firstBatch;
+  assert.equal(batches.length, 1);
+  assert.deepEqual(batches[0].fields.map(item => item.label).sort(), ['', 'Where do you reside?', 'State abbreviation', 'City',
+    'Where do you receive letters?', 'What else?', 'Số điện thoại'].sort());
+  assert.doesNotMatch(JSON.stringify(batches[0]), /Ada|Austin|Texas|10 Oak St|never-send|user-entry|secret/);
+  await page.locator('#manual').fill('typed while waiting');
+  await page.locator('#allowed').evaluate(form => form.prepend(form.querySelector('textarea')));
+  release();
+  await page.waitForFunction(() => document.querySelector('textarea').value === '10 Oak St' && document.querySelector('#bad').value === 'Austin');
+  assert.equal(await page.getByLabel('Where do you reside?').inputValue(), 'Texas');
+  assert.equal(await page.locator('#manual').inputValue(), 'typed while waiting');
+  assert.equal(await page.locator('#filled').inputValue(), 'user-entry');
+  assert.equal(await page.locator('#ambiguous').inputValue(), '');
+  assert.equal(await page.locator('[data-test-unlabelled]').inputValue(), '');
+  assert.equal(await page.locator('#wrongsource').inputValue(), '');
+  await page.locator('#allowed').evaluate(form => form.insertAdjacentHTML('afterend', '<input form="allowed" aria-label="New town">'));
+  await page.waitForFunction(() => document.querySelector('[aria-label="New town"]').value === 'Austin');
+  assert.deepEqual(batches.slice(1).map(batch => batch.fields.map(item => item.label)), [['New town']]);
+  const external = await page.locator('#allowed').evaluate(operateOnForm, { origin });
+  assert.deepEqual(external.fields.map(item => item.field), ['firstname']);
+  const privateKey = batches[0].fields[0].field;
+  assert.ok((await page.locator('#allowed').evaluate(operateOnForm, { origin, field: privateKey, value: 'wrong' })).error);
+  assert.equal(agent.turnCount, 2);
 });

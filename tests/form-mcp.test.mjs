@@ -179,3 +179,44 @@ test('Obscura điền từ đúng record qua backend thật và giữ nguyên kh
   assert.equal(await session.page.locator('[name=place_id]').inputValue(), 'local-10');
   await call('disconnect', {});
 });
+
+test('Obscura gọi API ghép nhãn cho ô thiếu khóa, lấy giá trị từ record của tab', { timeout: 20000 }, async t => {
+  try { resolveObscuraBinary(); } catch { return t.skip('Chưa có binary Obscura'); }
+  const { startContinuousAgent, stopContinuousAgent } = await import('../src/continuous-agent/index.mjs');
+  const requests = [];
+  const server = createServer(async (req, res) => {
+    if (req.url === '/v1/chat/completions') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const prompt = JSON.parse(body).messages.at(-1).content;
+      requests.push(prompt);
+      const { fields } = JSON.parse(prompt.split('\n').at(-1));
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify([{ field: fields[0].field, source: 'zipcode' }]) } }] }));
+      return;
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end('<form data-autoleadpc-mcp="record"><label>Where is your mail delivered?<input id="delivery"></label></form>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+  const origin = 'http://127.0.0.1:' + server.address().port;
+  const session = await openObscuraBrowser({ port: 0, slot: 996, registerSession: false });
+  t.after(() => session.close());
+  const { page } = session;
+  await page.goto(origin);
+  page._assignedRecord = { zipcode: '01234' };
+  const agent = startContinuousAgent(page, () => page._assignedRecord, session, {
+    allowedOrigin: origin, aiConfig: { enabled: true, mode: 'form_agent' },
+    agentConfig: { transport: 'api', apiBaseUrl: origin + '/v1', apiKey: 'fixture-key', apiModel: 'local-test' }
+  });
+  try {
+    await page.waitForFunction(() => document.querySelector('#delivery').value === '01234', undefined, { timeout: 8000, polling: 100 });
+    assert.equal(requests.length, 1);
+    assert.doesNotMatch(requests[0], /01234/);
+    assert.equal(await page.locator('#delivery').getAttribute('data-autoleadpc-field'), null);
+  } finally {
+    stopContinuousAgent(page);
+    await agent.done;
+  }
+});

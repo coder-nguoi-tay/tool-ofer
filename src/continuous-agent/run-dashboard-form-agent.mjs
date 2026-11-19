@@ -11,11 +11,11 @@ import { setOwner, setStatus } from './run-continuous-agent.mjs';
 import { sleep } from './wait-for-signature-change.mjs';
 
 /**
- * Theo dõi đúng form mà website đích công bố từ lúc mở tab đến khi hủy. App điền trực tiếp từ record và chỉ nhờ AI nhận diện nhãn chưa rõ.
+ * Theo dõi form công bố của tab, điền khóa đã biết từ record và nhờ AI ghép nguồn cho ô chưa khai báo hoặc nhãn chưa rõ.
  * @param {object} agent Agent của tab với origin lúc mở, nguồn record, transport và tín hiệu dừng.
  * @return {Promise<void>} Hoàn tất sau khi trả handle của form và lượt AI.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function runDashboardFormAgent(agent) {
   const { page, session, signal, allowedOrigin: origin, transport } = agent;
@@ -46,7 +46,8 @@ export async function runDashboardFormAgent(agent) {
     const secure = url.protocol === 'https:' || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname));
     return secure && url.origin === origin;
   };
-  let form, state, mappingTask;
+  let form, discovery, state, mappingTask;
+  let formRevision = 0;
   /**
    * Bắt đầu lại ngân sách sửa khi tab chuyển trang, giữ ngân sách khi framework dựng lại cùng form.
    * @param {object} frame Frame vừa điều hướng.
@@ -66,30 +67,37 @@ export async function runDashboardFormAgent(agent) {
           const forms = page.locator('form[data-autoleadpc-mcp="record"]');
           if (await forms.count() !== 1) continue;
           form = await forms.elementHandle({ timeout: 1200 });
+          discovery = await form.evaluateHandle((_, revision) => ({ revision, keys: new WeakMap(), count: 0 }), ++formRevision);
         }
-        const inspection = await form.evaluate(operateOnForm, { origin, requireSingle: true });
+        const inspection = await form.evaluate(operateOnForm, { origin, discovery, requireSingle: true });
         if (!inspection.fields) throw new Error('Form đã đổi');
         const record = currentRecord();
         if (!record || !allowed()) continue;
         if (state?.record !== record) state = { record, attempts: new Map(), mappings: new Map(), retryAt: 0 };
         const unknown = [];
         let sources;
-        const present = new Set();
+        const present = new Set(inspection.populatedFields);
+        for (const key of present) {
+          const attempt = state.attempts.get(key);
+          if (attempt) attempt.reported = '';
+        }
         const pending = [];
         for (const metadata of inspection.fields) {
           if (!allowed() || currentRecord() !== record) break;
           const { field, kind, label } = metadata;
           present.add(field);
+          const unlisted = field.startsWith('@');
           const explicitOnly = kind === 'checkbox' || kind === 'select-multiple';
-          const choiceValue = explicitChoiceValue(record, field);
+          const choiceValue = unlisted ? null : explicitChoiceValue(record, field);
           let source = field;
-          let value = explicitOnly ? choiceValue : suppliedValue(record, source, session);
+          let value = choiceValue;
+          if (!unlisted && !explicitOnly) value = suppliedValue(record, source, session);
           let waitingForMapping = false;
           if (value === null && !explicitOnly && !profileFields.has(field)) {
             const key = normalizeFieldName(field);
             const labelKey = normalizeFieldName(label);
-            if (profileFields.has(key)) source = key;
-            else if (profileFields.has(labelKey)) source = labelKey;
+            if (!unlisted && profileFields.has(key)) source = key;
+            else if (!unlisted && profileFields.has(labelKey)) source = labelKey;
             else {
               sources ??= [...profileFields].filter(name => suppliedValue(record, name, session) !== null);
               const mapping = state.mappings.get(field);
@@ -103,23 +111,28 @@ export async function runDashboardFormAgent(agent) {
             if (source) value = suppliedValue(record, source, session);
           }
           if (value === null) {
-            if (!waitingForMapping && inspection.invalidFields.includes(field)) {
+            if (!waitingForMapping && (unlisted || inspection.invalidFields.includes(field))) {
               const attempt = state.attempts.get(field) || {};
               state.attempts.set(field, attempt);
-              reportField(agent, field, attempt, 'Form báo lỗi và record chưa có đáp án phù hợp.');
+              attempt.label = unlisted ? label || 'Ô nhập chưa có nhãn' : field;
+              reportField(agent, field, attempt, 'Chưa xác định được cột có dữ liệu phù hợp.');
             } else state.attempts.delete(field);
             continue;
           }
-          const operation = { origin, field, source, value, choiceValue, candidates: buildSelectCandidates(value, { name: source }),
+          const operation = { origin, discovery, field, source, value, choiceValue, candidates: buildSelectCandidates(value, { name: source }),
             expected: metadata, requireSingle: true };
           const signature = JSON.stringify([metadata, source, value]);
           let attempt = state.attempts.get(field);
           if (attempt?.signature !== signature) {
-            attempt = { signature, writes: 0, reported: '' };
+            attempt = { signature, writes: 0, reported: '', label: unlisted ? label : field };
             state.attempts.set(field, attempt);
           }
           const result = await applyRecordFormField(form, { ...operation, verifyOnly: attempt.writes >= 2 });
-          if (result.stale) throw new Error('Trường đã đổi');
+          if (result.preserved) { attempt.reported = ''; continue; }
+          if (result.stale) {
+            if (unlisted) continue;
+            throw new Error('Trường đã đổi');
+          }
           if (result.changed) {
             attempt.writes++;
             pending.push({ operation, attempt, source, explicitOnly });
@@ -161,12 +174,14 @@ export async function runDashboardFormAgent(agent) {
           }
         }
         if (!mappingTask) {
-          const blocked = [...state.attempts].filter(([, attempt]) => attempt.reported).map(([field]) => field);
-          setStatus(agent, 'waiting_page', blocked.length ? 'Cần kiểm tra trường ' + blocked.join(', ') : 'Đang theo dõi các trường đã khai báo');
+          const blocked = [...state.attempts].filter(([, attempt]) => attempt.reported).map(([field, attempt]) => attempt.label || field);
+          setStatus(agent, 'waiting_page', blocked.length ? 'Cần kiểm tra trường ' + blocked.join(', ') : 'Đang theo dõi các ô của form');
         }
       } catch {
+        if (discovery) await discovery.dispose().catch(() => {});
         if (form) await form.dispose().catch(() => {});
         form = null;
+        discovery = null;
       } finally {
         await sleep(delay, signal);
       }
@@ -174,6 +189,7 @@ export async function runDashboardFormAgent(agent) {
   } finally {
     page.off('framenavigated', resetDocument);
     state = null;
+    if (discovery) await discovery.dispose().catch(() => {});
     if (form) await form.dispose().catch(() => {});
     await mappingTask;
   }
@@ -198,13 +214,13 @@ function reportField(agent, field, attempt, reason) {
 /**
  * Ghép một lô nhãn với khóa hồ sơ khả dụng, độc lập với việc điền các trường đã biết.
  * @param {object} agent Agent của tab.
- * @param {object[]} unknown Các trường đã khai báo còn thiếu ánh xạ.
+ * @param {object[]} unknown Các ô đang cần AI xác định cột dữ liệu.
  * @param {string[]} sources Tên khóa hồ sơ có dữ liệu.
  * @param {object} state Bộ nhớ của form và record này.
  * @param {()=>boolean} current Kiểm tra quyền của lượt trước và sau khi chờ AI.
  * @return {Promise<void>} Hoàn tất khi đã lưu ánh xạ hợp lệ và nhả lượt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function mapFormLabels(agent, unknown, sources, state, current) {
   let acquired = false;
@@ -225,7 +241,7 @@ async function mapFormLabels(agent, unknown, sources, state, current) {
     if (!Array.isArray(pairs)) throw new Error('Phản hồi không phải mảng.');
     for (const metadata of unknown) {
       const matches = pairs.filter(pair => pair?.field === metadata.field);
-      const valid = matches.length === 1 && Object.keys(matches[0]).length === 2 && sources.includes(matches[0].source);
+      const valid = Boolean(metadata.label) && matches.length === 1 && Object.keys(matches[0]).length === 2 && sources.includes(matches[0].source);
       state.mappings.set(metadata.field, { signature: JSON.stringify(metadata), sources: sources.join(','), source: valid ? matches[0].source : null });
     }
   } catch {
