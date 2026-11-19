@@ -1,4 +1,8 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/select-first-address-suggestion.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
+import { readAddressSelection } from '../../../read-address-selection.mjs';
+import { collectFieldMetadata } from '../../../collect-field-metadata.mjs';
+import { locateFormElements } from '../../../form-scope/locate-form-elements.mjs';
+import { resolveContactField } from '../../../resolve-contact-field.mjs';
 import { ADDRESS_SUGGESTION_SELECTORS } from './state/address-suggestion-selectors.mjs';
 
 /**
@@ -9,16 +13,38 @@ import { ADDRESS_SUGGESTION_SELECTORS } from './state/address-suggestion-selecto
  * @param {string} [expectedAddress] Địa chỉ cần đối chiếu với lựa chọn trong select.
  * @return {Promise<{success:boolean,text?:string}>} Kết quả kiểm tra hoặc chọn gợi ý.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function resolveAddressSuggestion(context, field, action, expectedAddress = '') {
   const scope = context?._activeAutofillFormScope;
   if (!scope?.rootSelector || !scope.memberSelector || scope.active === false || scope.unavailable) return { success: false };
   let handle;
   try {
-    if (field) {
-      handle = await field.elementHandle({ timeout: 500 });
-      if (!handle) return { success: false };
+    if (!field) {
+      const candidates = locateFormElements(context, 'input:not([type]), input[type=text], input[type=tel], input[type=search], textarea', scope);
+      const addresses = [];
+      for (const candidate of await candidates.filter({ visible: true }).all()) {
+        const metadata = await candidate.evaluate(collectFieldMetadata);
+        if (resolveContactField(metadata) === 'address') addresses.push(candidate);
+      }
+      if (addresses.length === 1) field = addresses[0];
+      else for (const candidate of addresses) {
+        if (await candidate.evaluate(input => input === input.ownerDocument.activeElement)) field = candidate;
+      }
+    }
+    if (!field) return { success: false };
+    handle = await field.elementHandle({ timeout: 500 });
+    if (!handle) return { success: false };
+    const belongs = await context.evaluate(({ input, scope }) => {
+      const root = document.querySelector(scope.rootSelector);
+      return root?.contains(input) && input.matches(scope.memberSelector) && (!root.matches('form') || input.form === root);
+    }, { input: handle, scope });
+    if (!belongs || !await handle.isVisible()) return { success: false };
+    const meaning = resolveContactField(await handle.evaluate(collectFieldMetadata));
+    if (meaning === 'conflict' || /^phone|^email$/.test(meaning) || action === 'select-native' && meaning !== 'address') return { success: false };
+    if (meaning === 'address') {
+      const selection = await handle.evaluate(readAddressSelection, expectedAddress || undefined);
+      if (selection.retained || selection.pending) return { success: selection.retained && action !== 'inspect', retained: selection.retained };
     }
     return await context.evaluate(({ scope, input, selectors, action, expectedAddress }) => {
       const root = document.querySelector(scope.rootSelector);
@@ -34,8 +60,6 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
       if (!visible(root)) return { success: false };
       const addressFields = [...root.querySelectorAll('input:not([type]), input[type="text"], input[type="search"], textarea')].filter(element =>
         visible(element) && /address|street|diachi/i.test([element.name, element.id, element.autocomplete, element.placeholder, element.getAttribute('aria-label')].join(' ')));
-      if (!input) input = addressFields.includes(document.activeElement) ? document.activeElement : addressFields.length === 1 ? addressFields[0] : null;
-      if (action === 'select-native' && !addressFields.includes(input)) return { success: false };
       if (!visible(input) || !root.contains(input) || !input.matches(scope.memberSelector) ||
           root.matches('form') && input.form !== root) return { success: false };
       const menuIds = field => ['aria-controls', 'aria-owns', 'list'].flatMap(attribute => (field.getAttribute(attribute) || '').split(/\s+/)).filter(Boolean);
@@ -77,13 +101,26 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
         const item = matching[0];
         const text = (item.textContent || item.value || '').trim();
         const prior = input._autoleadAddressChoice;
-        const sameOption = item.tagName === 'OPTION' && item.closest('select') && item.selected;
+        const sameOption = item.tagName === 'OPTION' && item.closest('select') && item.selected && prior?.item === item && prior.form === input.form && prior.query === (expectedAddress || input._autoleadAddressQuery || input.value);
         const sameChoice = prior?.item === item && prior.form === input.form && prior.display === input.value &&
           input.getAttribute('aria-invalid') !== 'true' && input.validity?.valid !== false &&
           (item.getAttribute('aria-selected') === 'true' || prior.display !== prior.query || input.getAttribute('aria-expanded') === 'false');
-        if (sameOption || sameChoice) return { success: action !== 'inspect', text, retained: true };
+        const owner = fieldGroup || input.form;
+        const tokens = [...(owner?.querySelectorAll('input[type=hidden]') || [])].filter(token =>
+          token.form === input.form && [token.name, token.id].some(name => /^(placeid|addressid)$/i.test((name || '').replace(/[-_]/g, ''))));
+        const hasToken = tokens.length === 1 && Boolean(tokens[0].value.trim());
+        if (hasToken && item.tagName === 'OPTION' && item.selected && addressFields.length === 1 && addressFields[0] === input) {
+          if (prior) prior.confirmed = true;
+          return { success: action !== 'inspect' && input.getAttribute('aria-invalid') !== 'true', text, retained: true };
+        }
+        const lostToken = tokens.length && !hasToken && prior?.confirmed;
+        if (!lostToken && (sameOption || sameChoice)) {
+          const confirmed = (!tokens.length || hasToken) && input.getAttribute('aria-invalid') !== 'true';
+          if (hasToken) prior.confirmed = true;
+          return { success: confirmed && action !== 'inspect', text, retained: confirmed };
+        }
         if (action === 'inspect') return { success: true };
-        const query = expectedAddress || input.value;
+        const query = expectedAddress || input._autoleadAddressQuery || input.value;
         const choice = { query, label: text, item, form: input.form, display: input.value };
         if (item.tagName === 'OPTION') {
           const select = item.closest('select');
@@ -94,7 +131,8 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
           target.dispatchEvent(new Event('change', { bubbles: true }));
           choice.display = input.value;
           input._autoleadAddressChoice = choice;
-          return { success: true, text };
+          choice.confirmed = tokens.length === 1 && Boolean(tokens[0].value.trim());
+          return { success: !tokens.length || choice.confirmed, text };
         }
         item.scrollIntoView({ block: 'nearest' });
         const rect = item.getBoundingClientRect();

@@ -182,3 +182,65 @@ test('agent giữ lựa chọn ARIA đã có trước lần quét đầu kể c�
     assert.equal(await page.locator('input').inputValue(), '10 Oak Street, Unit A');
   } finally { await form.dispose(); }
 });
+
+test('địa chỉ chưa xác nhận chặn cả nút và đường gửi dự phòng, select mặc định phát change đúng một lần', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
+  const { submitFrameForm } = await import('../src/autofill/submit-frame-form.mjs');
+  const { submitFrameForm: submitOffer } = await import('../src/autofill/offers/2615/solver/submit-frame-form.mjs');
+  const { readAddressSelection } = await import('../src/autofill/read-address-selection.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, '<form></form>');
+  const record = { address: '10 Oak St' };
+  for (const submit of [submitFrameForm, submitOffer]) {
+    for (const button of ['', '<button>Continue</button>']) {
+      await page.setContent(`<form onsubmit="event.preventDefault();this.dataset.submitted=1">
+        <label>Street address<input required aria-controls="choices" name="address" value="10 Oak St"></label>
+        <div role="listbox" id="choices"><div role="option">10 Oak St Unit A</div><div role="option">10 Oak St Unit B</div></div>${button}</form>`);
+      const scope = await resolveActiveFormScope(page);
+      await submit({ options: {}, frame: page, page, session, record, frameProgress: { formScope: scope, filledInThisPass: 1 },
+        screenInfo: {}, scanStartUrl: page.url() });
+      assert.equal(await page.locator('form').getAttribute('data-submitted'), null);
+    }
+  }
+  await page.setContent(`<form><input name="address" aria-controls="choices" value="10 Oak St">
+    <select id="choices" name="verified_address" onchange="this.form.dataset.changes=Number(this.form.dataset.changes||0)+1"><option value="id10">10 Oak St</option></select>
+    <input type="hidden" name="place_id"></form>`);
+  const input = page.locator('input[name=address]');
+  await resolveActiveFormScope(page);
+  assert.equal((await input.evaluate(readAddressSelection, record.address)).retained, false);
+  for (let scan = 0; scan < 2; scan++) {
+    assert.equal((await handleAddressSelectDropdown(page, record, input)).success, false);
+  }
+  assert.equal(await page.locator('form').getAttribute('data-changes'), '1');
+  await page.locator('[name=place_id]').evaluate(token => { token.value = 'id10'; });
+  assert.equal((await input.evaluate(readAddressSelection, record.address)).retained, true);
+});
+
+test('gương chữ địa chỉ đồng bộ lại một lần, mã của widget chỉ do form ghi', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
+  const { syncAlphaContactLocation } = await import('../src/autofill/alpha-intent/sync-alpha-contact-location.mjs');
+  const { syncAlphaHiddenContactData } = await import('../src/autofill/alpha-intent/sync-alpha-hidden-contact-data.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page } = await createFormScopeFixture(browser, '<form><input id="address" value="99 Pine Rd"><input readonly type="hidden" id="input-address" value="10 Oak St" onchange="this.dataset.changes=Number(this.dataset.changes||0)+1"></form>');
+  await page.evaluate(syncAlphaContactLocation, {});
+  await page.evaluate(syncAlphaHiddenContactData);
+  assert.equal(await page.locator('#input-address').inputValue(), '99 Pine Rd');
+  assert.equal(await page.locator('#input-address').getAttribute('data-changes'), '1');
+  await page.locator('#input-address').evaluate(token => { token.name = 'place_id'; token.value = 'widget-token'; });
+  await page.evaluate(syncAlphaContactLocation, {});
+  await page.evaluate(syncAlphaHiddenContactData);
+  assert.equal(await page.locator('#input-address').inputValue(), 'widget-token');
+});
+
+test('menu của ô mang nhãn điện thoại không được dùng như danh sách địa chỉ dù name là address', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<form><label>Phone number<input name="address" aria-controls="list" value="10 Oak St"></label><div id="list" role="listbox"><div role="option" onclick="this.dataset.clicked=1">10 Oak St</div></div></form>');
+  await resolveActiveFormScope(page);
+  assert.equal(await hasActiveAddressSuggestions(page, page), false);
+  assert.equal(await selectFirstAddressSuggestion(page, page, page.locator('input')), false);
+  assert.equal(await page.locator('[data-clicked]').count(), 0);
+});

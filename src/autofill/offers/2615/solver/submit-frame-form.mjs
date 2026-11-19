@@ -1,4 +1,5 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/submit-frame-form.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
+import { hasUnconfirmedAddress } from '../../../has-unconfirmed-address.mjs';
 import { handleYesNoStep } from './handle-yes-no-step.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { readQuestionState, didQuestionAdvance } from '../../../../survey-solver/verification/read-question-state.mjs';
@@ -21,7 +22,7 @@ import { selectFirstAddressSuggestion } from './select-first-address-suggestion.
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần dừng lượt quét trang.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-20
  */
 export async function submitFrameForm({
   options,
@@ -154,7 +155,7 @@ export async function submitFrameForm({
             }
             return true;
           }).catch(() => false);
-          if (!submitStillReady) return false;
+          if (!submitStillReady || await hasUnconfirmedAddress(frame, formScope, record?.address)) return false;
 
           const submitLabel = btnInfo.text || btnInfo.id || 'Submit';
           console.log(`[Autofill] Bấm nút submit: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id}" class="${btnInfo.className || ''}"`);
@@ -324,6 +325,7 @@ export async function submitFrameForm({
         // FALLBACK NẾU THIẾU NÚT BẤM HOẶC NÚT BẤM KHÔNG ĐƯỢC NHẬN DIỆN:
         // Chỉ chạy khi TRONG LƯỢT QUÉT NÀY vừa điền thêm được ô mới.
         // Trả về định danh phần tử đã gửi (id/class của div/button/form) để log nâng cấp matcher.
+        if (await hasUnconfirmedAddress(frame, formScope, record?.address)) return false;
         const formSubmitted = await frame.evaluate(submitVisibleFormFallback, formScope).catch(() => ({
           method: 'error'
         }));

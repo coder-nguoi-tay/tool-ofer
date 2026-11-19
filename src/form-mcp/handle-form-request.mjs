@@ -70,7 +70,7 @@ async function shareForm(slot, pair) {
  * @param {import('node:http').ServerResponse} response Phản hồi chỉ chứa metadata hoặc kết quả.
  * @return {Promise<boolean>} True nếu route thuộc MCP biểu mẫu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function handleFormMcpRequest(request, response) {
   if (!request.url?.startsWith('/form-mcp/')) return false;
@@ -122,7 +122,7 @@ export async function handleFormMcpRequest(request, response) {
       candidates: fill ? buildSelectCandidates(value, { name: args.field }) : []
     };
     let result = await applyRecordFormField(grant.form, operation);
-    if (fill && result.verified) {
+    if (fill && (result.verified || result.pending)) {
       await wait(550);
       if (grants.get(token) !== grant || (page._assignedRecord || (page === session.mainPage && session.currentRecord)) !== record ||
           suppliedValue(record, args.field, session) !== value || explicitChoiceValue(record, args.field) !== operation.choiceValue) return send(409, { error: 'Quyền hoặc dữ liệu đã đổi khi xác minh.' });

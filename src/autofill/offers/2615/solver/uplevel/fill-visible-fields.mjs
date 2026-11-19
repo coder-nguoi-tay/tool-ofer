@@ -1,4 +1,7 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/uplevel/fill-visible-fields.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
+import { collectFieldMetadata } from '../collect-field-metadata.mjs';
+import { resolveContactField } from '../../../../resolve-contact-field.mjs';
+import { readAddressSelection } from '../../../../read-address-selection.mjs';
 import { buildUplevelVisibleFieldValues } from './build-visible-field-values.mjs';
 import { locateFormElements } from '../form-scope/locate-form-elements.mjs';
 import { tryFastTextInput } from '../interaction/try-fast-text-input.mjs';
@@ -12,7 +15,7 @@ import { selectOptionWithHumanInteraction } from '../select/select-option-with-h
  * @return {Promise<number>} Số ô thực sự giữ được giá trị sau thao tác.
  * @throws {Error} Frame đóng hoặc đổi DOM giữa các thao tác; caller xử lý dừng lượt đồng bộ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-20
  */
 export async function fillUplevelVisibleFields(frame, record) {
   if (!await frame.locator('#reg-container, #global-reg, #cid-global').count()) return 0;
@@ -24,6 +27,10 @@ export async function fillUplevelVisibleFields(frame, record) {
     if (!await field.count() || !await field.isVisible() || !await field.isEnabled({ timeout: 1000 })) continue;
     const current = await field.inputValue({ timeout: 1000 }).catch(() => '');
     if (current.trim().length >= entry.minimum) continue;
+    const metadata = await field.evaluate(collectFieldMetadata);
+    const meaning = resolveContactField(metadata);
+    if (meaning && meaning !== entry.source) continue;
+    if (entry.source === 'address' && (await field.evaluate(readAddressSelection, entry.value)).requiresSelection) continue;
     let verified;
     if (entry.select) {
       verified = (await selectOptionWithHumanInteraction({ page, field, candidates: [entry.value] })).verified;

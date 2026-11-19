@@ -11,7 +11,7 @@ import { fillUplevelVisibleFields } from './uplevel/fill-visible-fields.mjs';
  * @param {object} record Dữ liệu người dùng.
  * @return {Promise<number>} Số trường/hành động đã hoàn thành trong pass này.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-20
  */
 async function syncUplevelRewardsFields(frame, record = {}) {
   let filledCount = 0;
@@ -53,24 +53,24 @@ async function syncUplevelRewardsFields(frame, record = {}) {
 
       // Ô hiển thị đã điền tuần tự bằng chuột; phần này chỉ đồng bộ payload điện thoại ẩn.
       const rawDigits = String(rec.phone || rec.phonenumber || rec.cellphone || '').replace(/\D/g, '');
-      const valid10 = rawDigits.length >= 10 ? rawDigits.slice(-10) : '8145551234';
+      const valid10 = rawDigits.length >= 10 ? rawDigits.slice(-10) : '';
 
       // Luôn đồng bộ 4 hidden input mà trang web dùng để gửi lead và validate
-      const telHidden = findControl('input[name="telephone"]');
-      if (telHidden && telHidden.value !== valid10) {
+      const telHidden = findControl('input[type="hidden"][name="telephone"]');
+      if (valid10 && telHidden && telHidden.value !== valid10) {
         telHidden.value = valid10;
         triggerFieldEvents(telHidden);
       }
-      const codeHidden = findControl('input[name="phonecode"]');
-      if (codeHidden && codeHidden.value !== valid10.slice(0, 3)) {
+      const codeHidden = findControl('input[type="hidden"][name="phonecode"]');
+      if (valid10 && codeHidden && codeHidden.value !== valid10.slice(0, 3)) {
         codeHidden.value = valid10.slice(0, 3);
       }
-      const prefixHidden = findControl('input[name="phoneprefix"]');
-      if (prefixHidden && prefixHidden.value !== valid10.slice(3, 6)) {
+      const prefixHidden = findControl('input[type="hidden"][name="phoneprefix"]');
+      if (valid10 && prefixHidden && prefixHidden.value !== valid10.slice(3, 6)) {
         prefixHidden.value = valid10.slice(3, 6);
       }
-      const suffixHidden = findControl('input[name="phonesuffix"]');
-      if (suffixHidden && suffixHidden.value !== valid10.slice(6, 10)) {
+      const suffixHidden = findControl('input[type="hidden"][name="phonesuffix"]');
+      if (valid10 && suffixHidden && suffixHidden.value !== valid10.slice(6, 10)) {
         suffixHidden.value = valid10.slice(6, 10);
       }
 

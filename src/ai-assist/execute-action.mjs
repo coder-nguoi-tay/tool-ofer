@@ -8,7 +8,7 @@ import { collectFieldMetadata } from '../autofill/collect-field-metadata.mjs';
 import { resolveProvidedFieldValue } from '../autofill/record-values/resolve-provided-field-value.mjs';
 import { buildSelectCandidates } from '../autofill/select/build-select-candidates.mjs';
 import { selectOptionWithHumanInteraction } from '../autofill/select/select-option-with-human-interaction.mjs';
-import { inspectActionField } from './inspect-action-field.mjs';
+import { resolveContactField } from '../autofill/resolve-contact-field.mjs';
 import { readAddressSelection } from '../autofill/read-address-selection.mjs';
 import { selectFirstAddressSuggestion } from '../autofill/select-first-address-suggestion.mjs';
 import { clickReadyControl } from '../browser/locators/click-ready-control.mjs';
@@ -25,7 +25,7 @@ import { addVerifiedFieldCount } from '../autofill/add-verified-field-count.mjs'
  * @param {object} policy Quyền repair và record có nguồn dữ liệu; không cho AI tự submit.
  * @return {Promise<{ok:boolean,verified:boolean,reason:string}>} Kết quả thao tác và xác minh.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function executeAction(page, act, session = null, policy = {}) {
   if (shouldStopAfterLead(session || page?._autofillSession)) return { ok: false, verified: false, reason: 'lead_confirmed_paused' };
@@ -62,6 +62,7 @@ async function executeAction(page, act, session = null, policy = {}) {
     if (policy.providedValuesOnly && !policy.choiceFromAutofill && !['fill', 'type', 'select'].includes(action)) {
       return { ok: false, verified: false, reason: 'choice_owned_by_autofill' };
     }
+    let fieldMetadata;
     if (policy.allowSubmit === false || policy.repairOnly || policy.providedValuesOnly) {
       const purpose = await locator.evaluate(inspectActionPurpose);
       if (action === 'click' && purpose.noise) return { ok: false, verified: false, reason: 'not_answer_control' };
@@ -69,7 +70,7 @@ async function executeAction(page, act, session = null, policy = {}) {
       if (action === 'click' && purpose.semanticOwned) return { ok: false, verified: false, reason: 'semantic_owned' };
       if (policy.repairOnly || policy.providedValuesOnly) {
         if (['fill','type','select'].includes(action)) {
-          const metadata = await locator.evaluate(collectFieldMetadata);
+          const metadata = fieldMetadata = await locator.evaluate(collectFieldMetadata);
           if (metadata.kind === 'select' && action !== 'select' || metadata.kind !== 'select' && action === 'select' ||
               !['input', 'textarea', 'select'].includes(metadata.kind) ||
               metadata.kind === 'input' && /^(checkbox|radio|button|submit|reset|file|hidden|image|password)$/i.test(metadata.type || '')) {
@@ -88,37 +89,35 @@ async function executeAction(page, act, session = null, policy = {}) {
       }
     }
     if (action === 'fill' || action === 'type') {
-      const fieldIdentity = await locator.evaluate(inspectActionField);
+      const fieldIdentity = fieldMetadata || await locator.evaluate(collectFieldMetadata);
+      const contact = resolveContactField(fieldIdentity);
+      if (contact === 'conflict') return { ok: false, verified: false, reason: 'field_identity_conflict' };
       if (fieldIdentity.readOnly) return { ok: false, verified: false, reason: 'element_readonly' };
       let fillValue = String(value ?? '');
-      if (!policy.providedValuesOnly && !policy.repairOnly && session?.assignedEmail && (fieldIdentity.email || /email|mail/i.test(selector) || /@/.test(fillValue))) {
+      if (!policy.providedValuesOnly && !policy.repairOnly && session?.assignedEmail && contact === 'email') {
         fillValue = session.assignedEmail;
       }
-      const isAddress = !fieldIdentity.email && (fieldIdentity.address || /address|street/i.test(selector));
+      const isAddress = contact === 'address';
+      let alreadyTyped = false;
       if (isAddress) {
         const choice = await locator.evaluate(readAddressSelection, fillValue);
         if (choice?.retained) return { ok: true, verified: true, reason: 'address_selection_retained' };
+        alreadyTyped = choice?.requiresSelection && choice.display === fillValue;
+        if (!choice?.retained && !choice?.pending && !alreadyTyped) await locator.evaluate((input, query) => {
+          if (input._autoleadAddressChoice?.query !== query) delete input._autoleadAddressChoice;
+          input._autoleadAddressQuery = query;
+        }, fillValue);
         if (choice?.pending) return { ok: false, verified: false, reason: 'address_selection_pending' };
       }
-      await humanType(locator, fillValue, page, { address: isAddress });
-      if (isAddress && (await locator.evaluate(readAddressSelection, fillValue))?.retained) {
-        return { ok: true, verified: true, reason: 'address_selection_retained' };
-      }
+      if (!alreadyTyped) await humanType(locator, fillValue, page, { address: isAddress });
       if (isAddress) {
-        await locator.evaluate(el => {
-          const field = el.matches?.('input, textarea') ? el : el.querySelector?.('input, textarea');
-          if (!field) return;
-          field.dispatchEvent(new Event('input', {
-            bubbles: true
-          }));
-          field.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'ArrowDown',
-            bubbles: true
-          }));
-        }).catch(() => {});
-        await new Promise(r => setTimeout(r, 450));
-        // Tự động tìm và chọn mục gợi ý hoặc thẻ <select> trả về sau khi gõ địa chỉ
+        let choice = await locator.evaluate(readAddressSelection, fillValue);
+        if (choice.retained) return { ok: true, verified: true, reason: 'address_selection_retained' };
+        if (choice.pending) return { ok: false, verified: false, reason: 'address_selection_pending' };
+        await new Promise(resolve => setTimeout(resolve, 450));
         await selectFirstAddressSuggestion(page, target.frame, locator).catch(() => false);
+        choice = await locator.evaluate(readAddressSelection, fillValue);
+        if (choice.requiresSelection && !choice.retained) return { ok: false, verified: false, reason: 'address_selection_pending' };
       } else {
         await locator.evaluate(el => {
           const field = el.matches?.('input, textarea') ? el : el.querySelector?.('input, textarea');
@@ -145,13 +144,17 @@ async function executeAction(page, act, session = null, policy = {}) {
       });
       const normalizedExpected = String(fillValue).trim().normalize('NFKC');
       const normalizedActual = String(actualValue ?? '').trim().normalize('NFKC');
-      const isEmail = fieldIdentity.email || /email|mail/i.test(selector) || /@/.test(fillValue);
+      const isEmail = contact === 'email';
       const matchesValue = isEmail ? normalizedActual.toLowerCase() === normalizedExpected.toLowerCase() : normalizedActual === normalizedExpected;
       if (!matchesValue && !(isAddress && (await locator.evaluate(readAddressSelection, fillValue))?.retained)) return {
         ok: false,
         verified: false,
         reason: 'value_not_present'
       };
+      if ((policy.repairOnly || policy.providedValuesOnly) && await locator.evaluate(input =>
+        input.getAttribute('aria-invalid') === 'true' || input.validity?.valid === false)) {
+        return { ok: false, verified: false, reason: 'field_validation_pending' };
+      }
       await locator.evaluate(el => {
         const field = el.matches?.('input, textarea') ? el : el.querySelector?.('input, textarea');
         field?.setAttribute('data-ux-ai-done', '1');

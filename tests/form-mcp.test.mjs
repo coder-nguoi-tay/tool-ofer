@@ -136,7 +136,7 @@ test('Obscura điền từ đúng record qua backend thật và giữ nguyên kh
   const server = createServer(async (req, res) => {
     if (await handleFormMcpRequest(req, res)) return;
     res.setHeader('Content-Type', 'text/html');
-    res.end('<form data-autoleadpc-mcp="record"><input type="tel" data-autoleadpc-field="zipcode"><select data-autoleadpc-field="state"><option value="">Choose</option><option value="TX">Texas</option></select><select multiple data-autoleadpc-field="channels"><option selected>A</option><option>B</option><option>C</option></select><input id="street" role="combobox" aria-controls="menu" data-autoleadpc-field="address"><div id="menu" role="listbox"><button type="button" role="option">10 Oak St</button></div><input name="place_id" type="hidden"></form>');
+    res.end('<form data-autoleadpc-mcp="record"><input type="tel" data-autoleadpc-field="zipcode"><select data-autoleadpc-field="state"><option value="">Choose</option><option value="TX">Texas</option></select><select multiple data-autoleadpc-field="channels"><option selected>A</option><option>B</option><option>C</option></select><div class="form-group"><input id="street" type="search" role="combobox" aria-controls="menu" data-autoleadpc-field="address"><div id="menu" role="listbox"><button type="button" role="option">10 Oak St</button></div><input name="place_id" type="hidden"></div><input type="search" data-autoleadpc-field="search"><span id="phone-label">Street address</span><input type="tel" data-autoleadpc-field="phone" aria-labelledby="phone-label"></form>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
@@ -144,7 +144,7 @@ test('Obscura điền từ đúng record qua backend thật và giữ nguyên kh
   const session = await openObscuraBrowser({ port: 0, slot: 995, registerSession: false });
   t.after(() => session.close());
   await session.page.goto(origin);
-  session.page._assignedRecord = { address: '10 Oak St', zipcode: '01234', state: 'missing', mcpanswerchannels: '["B","C"]' };
+  session.page._assignedRecord = { address: '10 Oak St', phone: '8175550147', zipcode: '01234', state: 'missing', mcpanswerchannels: '["B","C"]' };
   activeBrowsers.add(session); t.after(() => activeBrowsers.delete(session));
   const pair = issuePairing(origin);
   const share = await fetch(origin + '/form-mcp/share/995', { method: 'POST', headers: { Origin: origin },
@@ -155,11 +155,15 @@ test('Obscura điền từ đúng record qua backend thật và giữ nguyên kh
   assert.equal((await call('fill', { field: 'state' })).status, 409);
   assert.equal(await session.page.locator('select:not([multiple])').inputValue(), '');
   assert.equal((await call('fill', { field: 'zipcode' })).status, 200);
-  assert.equal(await session.page.locator('input[type=tel]').inputValue(), '01234');
+  assert.equal(await session.page.locator('[data-autoleadpc-field=zipcode]').inputValue(), '01234');
   session.page._assignedRecord.state = 'Texas';
   assert.equal((await call('fill', { field: 'state' })).status, 200);
   assert.equal(await session.page.locator('select:not([multiple])').inputValue(), 'TX');
   const inspected = await (await call('inspect', {})).json();
+  assert.equal(inspected.fields.some(item => item.field === 'search'), false);
+  assert.equal(inspected.fields.find(item => item.field === 'phone').label, 'Street address');
+  assert.equal((await call('fill', { field: 'phone' })).status, 409);
+  assert.equal(await session.page.locator('[data-autoleadpc-field=phone]').inputValue(), '');
   assert.equal(inspected.fields.find(item => item.field === 'channels').kind, 'select-multiple');
   assert.equal((await call('fill', { field: 'channels' })).status, 200);
   assert.deepEqual(await session.page.evaluate(() => Array.from(document.querySelector('select[multiple]').options, option => option.selected)), [false,true,true]);
@@ -168,7 +172,7 @@ test('Obscura điền từ đúng record qua backend thật và giữ nguyên kh
     street.addEventListener('input', () => { place.value = ''; });
     document.querySelector('[role=option]').addEventListener('click', () => { street.value = '10 Oak Street, Unit A'; place.value = 'local-10'; });
   });
-  assert.equal((await call('fill', { field: 'address' })).status, 200);
+  assert.equal((await call('fill', { field: 'address' })).status, 409);
   await session.page.evaluate(() => document.querySelector('[role=option]').click());
   assert.equal((await call('fill', { field: 'address' })).status, 200);
   assert.equal(await session.page.locator('#street').inputValue(), '10 Oak Street, Unit A');

@@ -1,4 +1,5 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/match-field-value.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
+import { resolveContactField } from '../../../resolve-contact-field.mjs';
 import { formatMatchedValue } from './format-matched-value.mjs';
 import { getAddressString } from './get-address-string.mjs';
 import { getDobString } from './get-dob-string.mjs';
@@ -19,9 +20,32 @@ import { semanticCategories } from './state/semantic-categories.mjs';
  * @return {string|null} Giá trị cần điền hoặc null nếu không khớp.
  * @throws {never} Nhãn địa chỉ không có dữ liệu phù hợp trả về null, không mượn phone.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-20
  */
 function matchFieldValue(candidateNames, record, metadata = {}) {
+  const contact = resolveContactField(metadata);
+  if (contact === 'conflict') return null;
+  if (contact === 'address') return getAddressString(record) || null;
+  if (contact === 'address2') return record.address2 || record.apt || record.suite || null;
+  if (contact) {
+    if (/^phone/.test(contact) && ![record.phonenumber, record.phone, record.cellphone, record.homephone, record.workphone]
+      .some(value => String(value || '').replace(/\D/g, '').length >= 7)) return null;
+    return matchIdentifiedValue([contact], record, { type: contact === 'email' ? 'email' : 'text',
+      names: [contact], maxLength: metadata.maxLength, kind: metadata.kind, assignedEmail: metadata.assignedEmail });
+  }
+  return matchIdentifiedValue(candidateNames, record, metadata);
+}
+
+/**
+ * Áp dụng quy tắc hiện hành lên các định danh đã đối chiếu với nhãn.
+ * @param {string[]} candidateNames Tên trường dùng để khớp dữ liệu.
+ * @param {object} record Record được gán cho form.
+ * @param {object} metadata Thuộc tính định dạng của trường.
+ * @return {string|null} Giá trị đã định dạng hoặc null nếu thiếu.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+function matchIdentifiedValue(candidateNames, record, metadata) {
   const accessibleName = metadata.accessibleName || metadata.ariaLabelledByText || metadata.ariaLabel;
   if (accessibleName && accessibleName.length <= 60) {
     const normalizedAccessibleName = normalizeFieldName(accessibleName.replace(/đ/gi, 'd'));
@@ -29,7 +53,7 @@ function matchFieldValue(candidateNames, record, metadata = {}) {
     const splitPhoneField = category?.type === 'phone' && [metadata.name, metadata.id].some(name => /^(areacode|phone[123]|tel[123]|prefix|phoneprefix|linenumber|phoneline)$/i.test(name || ''));
     if (category && normalizedAccessibleName.length <= 40 && !splitPhoneField) {
       // Chạy lại bộ so khớp hiện có với tên nghiệp vụ đã xác minh, bỏ các định danh mâu thuẫn.
-      return matchFieldValue([normalizedAccessibleName], record, {
+      return matchIdentifiedValue([normalizedAccessibleName], record, {
         ...metadata, accessibleName: '', ariaLabelledByText: '', ariaLabel: '', label: '', placeholder: '', name: '', id: '',
         names: [normalizedAccessibleName], type: category.type === 'email' ? 'email' : metadata.type === 'date' && category.type === 'dob' ? 'date' : 'text'
       });

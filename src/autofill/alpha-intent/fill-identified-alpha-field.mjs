@@ -1,3 +1,4 @@
+import { resolveContactField } from '../resolve-contact-field.mjs';
 import { collectFieldMetadata } from '../collect-field-metadata.mjs';
 import { matchFieldValue } from '../match-field-value.mjs';
 import { tryFastTextInput } from '../interaction/try-fast-text-input.mjs';
@@ -11,12 +12,12 @@ import { tryFastTextInput } from '../interaction/try-fast-text-input.mjs';
  * @return {Promise<boolean>} True khi giá trị đã nhập và được xác minh.
  * @throws {never} Không đọc được nhãn hoặc nhãn mâu thuẫn thì nhường luồng điền chung.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-20
  */
 export async function fillIdentifiedAlphaField(field, value, page, record) {
   const metadata = await field.evaluate(collectFieldMetadata, undefined, { timeout: 1000 }).catch(() => null);
   if (!metadata) return false;
-  if (metadata.accessibleName) {
+  if (metadata.accessibleName || resolveContactField(metadata)) {
     const matched = matchFieldValue(metadata.names, record, metadata);
     if (matched === null) return false;
     const expected = String(matched).trim().replace(/\s+/g, ' ').toLowerCase();

@@ -1,4 +1,5 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/fill-frame-fields.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
+import { isSwappedContactValue, resolveContactField } from '../../../resolve-contact-field.mjs';
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
 import { isControlInActiveForm } from './form-scope/is-control-in-active-form.mjs';
 import { collectFieldMetadata } from './collect-field-metadata.mjs';
@@ -15,7 +16,7 @@ import { matchFieldValue } from './match-field-value.mjs';
  * @param {object} context Frame, dữ liệu lead và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần dừng quét trang.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-20
  */
 export async function fillFrameFields({
   fields,
@@ -128,6 +129,9 @@ export async function fillFrameFields({
         // Lock quá hạn = vòng gõ cũ đã chết → dọn lock và cho phép gõ lại
         await field.evaluate(el => el.removeAttribute('data-ux-typing')).catch(() => {});
       }
+      const metadata = await field.evaluate(collectFieldMetadata, undefined, { timeout: 1500 });
+      const contact = resolveContactField(metadata);
+      const swapped = isSwappedContactValue(contact, metadata.value, record);
       const isMarkedFilled = (await field.getAttribute('data-ux-filled')) === '1';
       if (isMarkedFilled) {
         const isUncheckedBox = isCheckbox && !(await field.isChecked().catch(() => true));
@@ -141,17 +145,16 @@ export async function fillFrameFields({
         }).catch(() => false);
 
         // Nếu đã fill nhưng giá trị hiện tại bị rỗng hoặc đang bị báo lỗi hoặc là checkbox chưa được tích -> xóa mark để điền lại
-        if (currentVal !== null && currentVal.trim() === '' || hasError || isUncheckedBox) {
+        if (currentVal !== null && currentVal.trim() === '' || hasError || isUncheckedBox || swapped) {
           await field.evaluate(el => el.removeAttribute('data-ux-filled')).catch(() => {});
         } else {
           continue;
         }
       }
-      const metadata = await field.evaluate(collectFieldMetadata, undefined, { timeout: 1500 });
       session.autofillStep = `điền trường ${metadata.type || metadata.kind || 'input'} (${metadata.id || metadata.name || 'không có tên'})`;
 
       // Nhận diện trường email ngay khi lấy metadata của trường
-      const isEmailVal = (metadata.type === 'email' || metadata.names?.some(isEmailFieldName) || metadata.value && metadata.value.includes('@')) && !metadata.names?.some(n => /address|street|diachi/i.test(n));
+      const isEmailVal = contact ? contact === 'email' : (metadata.type === 'email' || metadata.names?.some(isEmailFieldName) || metadata.value && metadata.value.includes('@')) && !metadata.names?.some(n => /address|street|diachi/i.test(n));
       if (isEmailVal) {
         frameProgress.frameHasEmail = true;
         session.screenHasEmail = true;
@@ -194,7 +197,7 @@ export async function fillFrameFields({
       })) continue;
 
       // Bỏ qua nếu ô đã có giá trị thật (ngoại trừ mask rỗng như (___) ___-____, +1, mm/dd/yyyy hoặc email/zip chưa hợp lệ)
-      if (await handleExistingFieldValue({
+      if (!swapped && await handleExistingFieldValue({
         metadata,
         valueToFill,
         field
@@ -252,7 +255,7 @@ export async function fillFrameFields({
         text: String(valueToFill).slice(0, 50),
         detail: `Đã điền [${metadata.names?.[0] || metadata.id || 'ô'}]: ${String(valueToFill).slice(0, 30)}`
       }, page);
-      const isFilledEmail = (metadata.type === 'email' || metadata.names?.some(isEmailFieldName) || valueToFill && String(valueToFill).includes('@')) && !metadata.names?.some(n => /address|street|diachi/i.test(n));
+      const isFilledEmail = contact ? contact === 'email' : (metadata.type === 'email' || metadata.names?.some(isEmailFieldName) || valueToFill && String(valueToFill).includes('@')) && !metadata.names?.some(n => /address|street|diachi/i.test(n));
       if (isFilledEmail) {
         frameProgress.frameHasEmail = true;
         session.screenHasEmail = true;

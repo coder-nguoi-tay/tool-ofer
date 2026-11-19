@@ -1,3 +1,4 @@
+import { readAddressSelection } from './read-address-selection.mjs';
 import { humanClick } from './human-click.mjs';
 import { fillIdentifiedAlphaField } from './alpha-intent/fill-identified-alpha-field.mjs';
 import { syncAlphaHiddenFullName } from './alpha-intent/sync-alpha-hidden-full-name.mjs';
@@ -26,7 +27,7 @@ import { matchFieldValue } from './match-field-value.mjs';
  * @return {Promise<number>} Số trường/hành động đã hoàn thành trong pass này.
  * @throws {never} Lỗi xử lý an toàn không gián đoạn luồng chính.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-20
  */
 async function fillAlphaIntentSpecialFields(frame, record = {}) {
   let filledCount = 0;
@@ -82,33 +83,13 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
     const addrField = locateFormElements(frame, '#address, input[data-testid="address-input"], #ai-funnel input#address, #ai-funnel input[name="address"], #alpha-intent-content input#address, input[name="address1"]').first();
     if ((await addrField.count().catch(() => 0)) > 0 && (await addrField.isVisible().catch(() => false)) && (await addrField.isEditable({ timeout: 1000 }).catch(() => false))) {
       const curAddr = (await addrField.inputValue({ timeout: 1000 }).catch(() => '')).trim();
-      const targetAddr = record.address || '4125 N Inspiration Loop';
-      if (!curAddr || curAddr.length < 3) {
+      const targetAddr = record.address;
+      if (targetAddr && (!curAddr || curAddr.length < 3)) {
         if (await fillIdentifiedAlphaField(addrField, targetAddr, page, record)) {
-          await addrField.evaluate(el => {
-            el.dispatchEvent(new Event('input', {
-              bubbles: true
-            }));
-            el.dispatchEvent(new KeyboardEvent('keydown', {
-              key: 'ArrowDown',
-              bubbles: true
-            }));
-          }, undefined, { timeout: 1000 }).catch(() => {});
-
-          // Đợi API gợi ý SmartyStreets / debounce (tối đa 400ms)
-          await new Promise(r => setTimeout(r, 450));
-          const picked = await selectFirstAddressSuggestion(frame.page ? frame.page() : frame, frame, addrField);
-          if (!picked) {
-            const downSteps = Math.random() < 0.5 ? 1 : 2;
-            for (let d = 0; d < downSteps; d++) {
-              await addrField.press('ArrowDown', { timeout: 500 }).catch(() => {});
-            }
-            await addrField.press('Enter', { timeout: 500 }).catch(() => {});
-          }
-          await addrField.evaluate(el => {
-            el.dataset.uxFilled = '1';
-          }, undefined, { timeout: 1000 }).catch(() => {});
-          filledCount += 1;
+          await new Promise(resolve => setTimeout(resolve, 450));
+          await selectFirstAddressSuggestion(frame.page ? frame.page() : frame, frame, addrField);
+          const selection = await addrField.evaluate(readAddressSelection, targetAddr).catch(() => null);
+          if (selection && (!selection.requiresSelection || selection.retained)) filledCount += 1;
         }
       }
 

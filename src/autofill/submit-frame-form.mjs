@@ -1,3 +1,4 @@
+import { hasUnconfirmedAddress } from './has-unconfirmed-address.mjs';
 import { handleYesNoStep } from './handle-yes-no-step.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { readQuestionState, didQuestionAdvance } from '../survey-solver/verification/read-question-state.mjs';
@@ -23,19 +24,23 @@ import { selectFirstAddressSuggestion } from './select-first-address-suggestion.
  * @param {object} session Phiên nhận thông báo lỗi.
  * @param {object} options Callback nhật ký của lượt quét.
  * @param {object} page Tab nhận thông báo.
+ * @param {string} address Địa chỉ nguồn để xác minh widget của form.
  * @param {Function} dispatch Thao tác gửi hiện có, trả false/null nếu chưa gửi.
  * @return {Promise<*>} Kết quả thao tác, hoặc null khi validation chặn gửi.
  * @throws {Error} Khi thao tác gửi phát sinh lỗi.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
-async function submitWithValidation(frame, formScope, session, options, page, dispatch) {
+async function submitWithValidation(frame, formScope, session, options, page, address, dispatch) {
   if (!formScope) return dispatch();
   const observation = await frame.evaluateHandle(observeFormValidation, formScope);
   try {
     const state = await observation.evaluate(check => check && { fields: check.initialErrors, watching: check.watching });
     if (!state) return null;
     let fields = state.fields;
+    if (!fields.length && await hasUnconfirmedAddress(frame, formScope, address)) {
+      fields = [{ label: 'Địa chỉ', reason: 'addressSelectionPending' }];
+    }
     let eventType = 'submit_blocked_fields';
     if (!fields.length) {
       const outcome = await dispatch();
@@ -63,7 +68,7 @@ async function submitWithValidation(frame, formScope, session, options, page, di
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần dừng lượt quét trang.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function submitFrameForm({
   options,
@@ -218,7 +223,7 @@ export async function submitFrameForm({
           let submitDispatched;
           try {
             if (validationScope) validationScope.skipNativeValidation = btnInfo.skipNativeValidation;
-            submitDispatched = await submitWithValidation(frame, validationScope, session, options, page, async () => {
+            submitDispatched = await submitWithValidation(frame, validationScope, session, options, page, record?.address, async () => {
               console.log(`[Autofill] Bấm nút submit: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id}" class="${btnInfo.className || ''}"`);
 
               // Ghi log submit rõ ràng vào session logs
@@ -373,7 +378,7 @@ export async function submitFrameForm({
         // FALLBACK NẾU THIẾU NÚT BẤM HOẶC NÚT BẤM KHÔNG ĐƯỢC NHẬN DIỆN:
         // Chỉ chạy khi TRONG LƯỢT QUÉT NÀY vừa điền thêm được ô mới.
         // Trả về định danh phần tử đã gửi (id/class của div/button/form) để log nâng cấp matcher.
-        const formSubmitted = await submitWithValidation(frame, validationScope, session, options, page,
+        const formSubmitted = await submitWithValidation(frame, validationScope, session, options, page, record?.address,
           () => frame.evaluate(submitVisibleFormFallback, formScope).catch(() => ({ method: 'error' })));
         if (formSubmitted && formSubmitted.method !== 'none' && formSubmitted.method !== 'error') {
           const fallbackIdentity = formSubmitted.id || formSubmitted.className ? `${formSubmitted.tag || 'element'}#${formSubmitted.id || '?'} class="${formSubmitted.className || '?'}"` : 'không rõ định danh';

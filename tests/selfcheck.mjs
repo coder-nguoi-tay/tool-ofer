@@ -1183,6 +1183,7 @@ const mockAiPage = {
           tagName: 'INPUT',
           type: 'text',
           matches: (s) => (s ? !s.includes('disabled') && !s.includes('inert') : true),
+          closest: () => null,
           querySelector: () => null,
           getAttribute: () => null,
           classList: { contains: () => false, add: () => {} },

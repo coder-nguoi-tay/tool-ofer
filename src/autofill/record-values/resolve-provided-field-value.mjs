@@ -1,3 +1,4 @@
+import { resolveContactField } from '../resolve-contact-field.mjs';
 import { getAddressString } from '../get-address-string.mjs';
 import { getDobString } from '../get-dob-string.mjs';
 import { getNormalizedPhone } from '../get-normalized-phone.mjs';
@@ -11,10 +12,14 @@ import { resolveRecordCity } from './resolve-record-city.mjs';
  * @param {object} session Email đã được gán cho phiên.
  * @return {string|null} Giá trị có nguồn dữ liệu, hoặc null để giữ field chưa hoàn tất.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-20
  */
 export function resolveProvidedFieldValue(metadata, record = {}, session = {}) {
-  const names = [...(metadata.names || []), metadata.name, metadata.id, metadata.placeholder, metadata.label, metadata.type].filter(Boolean);
+  const contact = resolveContactField(metadata);
+  if (contact === 'conflict') return null;
+  if (contact === 'address2') return record.address2 || record.apt || record.suite || null;
+  if (/^phone[123]$/.test(contact)) return matchFieldValue([contact], record, metadata);
+  const names = contact ? [contact] : [...(metadata.names || []), metadata.name, metadata.id, metadata.placeholder, metadata.label, metadata.type].filter(Boolean);
   const identity = names.join(' ').toLowerCase();
   if (/e-?mail|\bmail\b/.test(identity) && !/mailing address/.test(identity)) {
     const email = session.assignedEmail || record.assignedEmail || record.email || record.emailaddress || record.mail;

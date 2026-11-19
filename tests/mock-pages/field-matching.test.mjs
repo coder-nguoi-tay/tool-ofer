@@ -50,7 +50,7 @@ test('nhãn và placeholder địa chỉ thắng id/name/type phone; thiếu đ�
     assert.equal(matchFieldValue(metadata.names, { phone: record.phone }, metadata), null);
   }
   assert.equal(matchFieldValue(['phone'], record, { label: 'Address Line 2', type: 'tel', name: 'phone' }), record.address2);
-  assert.equal(matchFieldValue(['email'], record, { label: 'Mailing Address', type: 'email', names: ['email'] }), record.address);
+  assert.equal(matchFieldValue(['email'], record, { label: 'Mailing Address', type: 'email', names: ['email'] }), null);
   assert.equal(matchFieldValue(['email'], record, { label: 'Email Address', type: 'email' }), record.email);
 });
 
@@ -124,4 +124,64 @@ test('aria-labelledby ghép nhiều ID đúng thứ tự, ưu tiên hơn aria-la
   for (const [id, expected] of [['phone', record.firstname], ['address', record.email], ['last', record.lastname], ['location', record.zipcode], ['street', record.address]]) {
     assert.equal(await page.locator('#' + id).inputValue(), expected, id);
   }
+});
+
+test('nhãn riêng quyết định dữ liệu trong autofill và repair, mâu thuẫn hoặc thiếu dữ liệu thì giữ trống', async () => {
+  const { resolveProvidedFieldValue } = await import('../../src/autofill/record-values/resolve-provided-field-value.mjs');
+  const record = { phone: '8175550147', address: '10 Oak St', email: 'fixture@example.invalid', zipcode: '01234' };
+  for (const [metadata, expected] of [
+    [{ name: 'address', label: 'Số điện thoại', type: 'tel' }, record.phone],
+    [{ name: 'address', placeholder: 'Số điện thoại', type: 'text' }, record.phone],
+    [{ name: 'phone', label: 'Địa chỉ đường phố', type: 'tel' }, record.address],
+    [{ name: 'address', label: 'Địa chỉ email', type: 'text' }, record.email],
+    [{ name: 'phone', autocomplete: 'postal-code', type: 'tel' }, record.zipcode],
+    [{ name: 'address', type: 'tel' }, null],
+    [{ name: 'phone', label: 'Phone verification code', autocomplete: 'one-time-code', type: 'tel' }, null],
+    [{ name: 'address', label: 'Phone or street address', type: 'text' }, null],
+    [{ name: 'phone', label: 'Số điện thoại', autocomplete: 'street-address' }, null],
+  ]) {
+    assert.equal(matchFieldValue([metadata.name], record, metadata), expected, JSON.stringify(metadata));
+    assert.equal(resolveProvidedFieldValue(metadata, record), expected, JSON.stringify(metadata));
+  }
+  for (const field of [{ label: 'Địa chỉ', name: 'phone' }, { label: 'Số điện thoại', name: 'address' }]) {
+    const incomplete = field.name === 'phone' ? { phone: record.phone } : { address: record.address };
+    assert.equal(matchFieldValue([field.name], incomplete, field), null);
+    assert.equal(resolveProvidedFieldValue(field, incomplete), null);
+  }
+});
+
+test('quét lại hai ô đã đánh dấu điền nhưng bị đảo giá trị, giữ nguyên số người dùng nhập riêng', async t => {
+  const { chromium } = await import('playwright');
+  const { existsSync } = await import('node:fs');
+  if (!existsSync(chromium.executablePath())) return t.skip('Chưa cài Chromium');
+  const { createFormScopeFixture } = await import('../helpers/form-scope-browser-fixture.mjs');
+  const { fillPageForms } = await import('../../src/autofill/fill-page-forms.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<meta charset="utf-8"><form>
+    <label>Điện thoại<input data-ux-filled="1" name="address" type="tel" value="10 Oak St"></label>
+    <label>Địa chỉ<input id="update-phone-modal-input" data-ux-filled="1" name="phone" type="text" value="8175550147"></label>
+    <button type="button" id="update-phone-modal-submit" onclick="this.dataset.sent=1">Save</button>
+    <label>Phone number<input name="other" type="tel" value="2025550142"></label></form>`);
+  await fillPageForms(page, { session, sessionRecord: { phone: '8175550147', address: '10 Oak St' },
+    options: { autoSubmit: false }, triggerLeadCheckAfterEmail() {} });
+  assert.equal((await page.locator('[name=address]').inputValue()).replace(/\D/g, ''), '8175550147');
+  assert.equal(await page.locator('[name=phone]').inputValue(), '10 Oak St');
+  assert.equal(await page.locator('[name=other]').inputValue(), '2025550142');
+  assert.equal(await page.locator('#update-phone-modal-submit').getAttribute('data-sent'), null);
+});
+
+test('đường nhập nhanh nhường ô có nhãn trái với selector, giữ số điện thoại và địa chỉ trống khi record thiếu', async t => {
+  const { chromium } = await import('playwright');
+  const { existsSync } = await import('node:fs');
+  if (!existsSync(chromium.executablePath())) return t.skip('Chưa cài Chromium');
+  const { fillUplevelVisibleFields } = await import('../../src/autofill/uplevel/fill-visible-fields.mjs');
+  const { buildUplevelVisibleFieldValues } = await import('../../src/autofill/uplevel/build-visible-field-values.mjs');
+  assert.equal(buildUplevelVisibleFieldValues({}).some(item => item.value), false);
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<form id="reg-container"><label>Street address<input id="tl" type="tel"></label><label>Phone number<input id="ad"></label></form>');
+  await fillUplevelVisibleFields(page, { address: '10 Oak St', phone: '8175550147' });
+  assert.deepEqual(await page.locator('input').evaluateAll(fields => fields.map(field => field.value)), ['', '']);
 });

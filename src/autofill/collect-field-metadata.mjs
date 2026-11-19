@@ -4,7 +4,7 @@
  * @return {object} Nhãn, placeholder, tên ứng viên, kiểu và trạng thái ô nhập.
  * @throws {never} Liên kết nhãn không còn tồn tại được bỏ qua.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-20
  */
 export function collectFieldMetadata(element) {
   const labels = [];
@@ -83,6 +83,8 @@ export function collectFieldMetadata(element) {
     required: isReq,
     ariaRequired: element.getAttribute('aria-required') === 'true',
     isRequired: isReq,
+    disabled: Boolean(element.matches?.(':disabled')) || Boolean(element.closest('[inert], [aria-hidden=true], [aria-disabled=true]')),
+    invalid: element.validity?.valid === false || element.getAttribute('aria-invalid') === 'true',
     checked: Boolean(element.checked),
     names: [accessibleName, vectorField, element.getAttribute('placeholder'), element.getAttribute('name'), element.id, element.getAttribute('autocomplete'), element.getAttribute('data-name'), element.getAttribute('data-field'), element.getAttribute('data-testid'), element.getAttribute('data-qa'), element.getAttribute('data-tf-element-role'), element.getAttribute('data-leadid-type'), ...Object.values(dataAttributes), ...fieldHints, element.getAttribute('title'), ...labels.filter(l => l && l.length <= 60)].filter(Boolean),
     containerText: containerText.slice(0, 400),

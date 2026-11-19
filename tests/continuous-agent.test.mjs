@@ -288,7 +288,7 @@ test('AI Vận hành giữ tab, chỉ điền form đã khai báo, hủy phản 
   holding = false;
   setGlobalAiConfig({ enabled: true, mode: 'form_agent' });
   session.triggerAutofillScan();
-  await page.waitForFunction(() => document.querySelector('#zip')?.value === '01234');
+  await page.waitForFunction(() => document.querySelector('#zip')?.value === '01234' && document.querySelector('#region')?.value === 'Texas');
   assert.equal(await page.inputValue('#region'), 'Texas');
   assert.equal(prompts.length, 2);
   const restarted = page._continuousAgent;
@@ -406,13 +406,15 @@ test('form agent giữ địa chỉ đã chọn khi widget chuẩn hóa chữ, c
   const browser = await chromium.launch();
   t.after(() => browser.close());
   const { page, session } = await createFormScopeFixture(browser, `<form data-autoleadpc-mcp="record">
-    <label>Street address<input id="address" role="combobox" aria-controls="streets" data-autoleadpc-field="address"></label>
+    <div class="form-group"><label>Street address<input id="address" role="combobox" aria-controls="streets" data-autoleadpc-field="address"></label></div>
+    <input type="email" name="emailAddress"><input role="combobox" aria-label="City">
     <div id="streets" role="listbox"><button type="button" role="option">10 Oak St</button></div>
     <input name="place_id" type="hidden"><button id="submit" disabled>Submit</button></form>`);
   await page.evaluate(() => {
     const f = document.querySelector('form'), address = f.querySelector('#address'), code = f.elements.place_id;
     address.oninput = () => { code.value = ''; f.querySelector('#submit').disabled = true; f.dataset.writes = String(Number(f.dataset.writes || 0) + 1); };
-    f.querySelector('[role=option]').onclick = () => { address.value = '10 Oak Street, Unit A'; code.value = 'test-10'; f.querySelector('#submit').disabled = false; };
+    f.querySelector('[role=option]').onclick = () => { address.value = '10 Oak Street, Unit A'; code.value = 'test-10'; address.setAttribute('aria-invalid', 'true');
+      setTimeout(() => { address.removeAttribute('aria-invalid'); f.querySelector('#submit').disabled = false; }, 1100); };
   });
   page._assignedRecord = { address: '10 Oak St' };
   const agent = startContinuousAgent(page, () => page._assignedRecord, session, {

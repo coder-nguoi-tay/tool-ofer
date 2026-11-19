@@ -4,7 +4,7 @@
  * @param {object|string|null} scopePayload Giá trị đồng bộ và phạm vi form từ phía ứng dụng.
  * @return {void} Cập nhật control cùng các sự kiện input/change cần thiết.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export function syncAlphaContactLocation(scopePayload) {
   const rec = scopePayload?.__formScopePayload ? scopePayload.value : scopePayload;
@@ -26,9 +26,11 @@ export function syncAlphaContactLocation(scopePayload) {
   
   const addrInput = findControl('#address') || findControl('input[data-testid="address-input"]');
   const hiddenAddr = findControl('#input-address') || findControl('input[data-testid="input-address"]');
-  const target = (addrInput?.value || rec.address || '4125 N Inspiration Loop').trim();
-  const addressWidget = addrInput?.matches?.('[role=combobox], [aria-autocomplete], [aria-controls], [list]') || addrInput?._autoleadAddressChoice;
-  if (hiddenAddr && !hiddenAddr.value && !addressWidget) {
+  const target = (addrInput?.value || '').trim();
+  const addressWidget = addrInput?.matches?.('[role=combobox], [aria-autocomplete], [aria-controls], [aria-owns], [list], .autocomplete, .typeahead') || addrInput?._autoleadAddressChoice ||
+    addrInput?.form?.querySelector('input[name=place_id], input[name=address_id], select[name*=address i], .address-suggestions') ||
+    /^(placeid|addressid)$/i.test((hiddenAddr?.name || '').replace(/[-_]/g, ''));
+  if (target && hiddenAddr?.readOnly && hiddenAddr.form === addrInput.form && hiddenAddr.value !== target && !addressWidget) {
     hiddenAddr.value = target;
     hiddenAddr.dispatchEvent(new Event('input', {
       bubbles: true
@@ -37,7 +39,7 @@ export function syncAlphaContactLocation(scopePayload) {
       bubbles: true
     }));
   }
-  if (addrInput) {
+  if (target && !addressWidget) {
     addrInput.dataset.populated = 'true';
     addrInput.dataset.uxFilled = '1';
     addrInput.classList.add('valid-address', 'has-value');

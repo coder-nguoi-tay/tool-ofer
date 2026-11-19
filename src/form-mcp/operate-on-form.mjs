@@ -4,9 +4,9 @@
  * @param {object} operation Origin, trường, metadata dự kiến và đáp án lấy từ record.
  * @return {object} Metadata hoặc trạng thái khi thao tác, hoặc control để kiểm tra địa chỉ cùng form.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
-export function operateOnForm(form, { origin, field, value, choiceValue, candidates = [], verifyOnly = false, requireSingle = false, expected, locateAddress = false, addressInput, choice }) {
+export function operateOnForm(form, { origin, field, value, choiceValue, candidates = [], verifyOnly = false, requireSingle = false, expected, describeField = false, expectedControl, locateAddress = false, addressInput, choice }) {
   if (!form.isConnected || form.ownerDocument.location.origin !== origin ||
       (requireSingle && form.ownerDocument.querySelectorAll('form[data-autoleadpc-mcp="record"]').length !== 1) ||
       !form.matches('form[data-autoleadpc-mcp="record"]')) {
@@ -18,7 +18,8 @@ export function operateOnForm(form, { origin, field, value, choiceValue, candida
     const key = control.getAttribute('data-autoleadpc-field');
     if ((field && key !== field) || !key || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key) || control.form !== form ||
         !control.matches('textarea, select, input') ||
-        (control.tagName === 'INPUT' && !['text','email','tel','url','number','date','radio','checkbox'].includes(control.type)) ||
+        (control.tagName === 'INPUT' && !['text','email','tel','url','number','date','radio','checkbox'].includes(control.type) &&
+          !(control.type === 'search' && key === 'address' && control.getAttribute('role') === 'combobox')) ||
         control.matches(':disabled, [readonly]') || control.closest('[inert], [hidden], [aria-hidden="true"], [aria-disabled="true"]') ||
         !control.getClientRects().length || getComputedStyle(control).visibility !== 'visible') continue;
     if (!groups.has(key)) groups.set(key, []);
@@ -33,7 +34,9 @@ export function operateOnForm(form, { origin, field, value, choiceValue, candida
     const labelElement = grouped ? control.closest('fieldset')?.querySelector('legend') : control.labels?.[0];
     const labelCopy = labelElement?.cloneNode(true);
     for (const nested of labelCopy?.querySelectorAll('input,select,textarea') || []) nested.remove();
-    const label = (control.getAttribute('aria-label') || labelCopy?.textContent || key).trim().slice(0, 160);
+    const referenced = (control.getAttribute('aria-labelledby') || '').split(/\s+/)
+      .map(id => control.getRootNode().getElementById?.(id)?.textContent?.trim()).filter(Boolean).join(' ');
+    const label = (referenced || control.getAttribute('aria-label') || labelCopy?.textContent?.trim() || control.placeholder || key).trim().slice(0, 160);
     if (!field && requireSingle && members.some(item => item.validity?.valid === false || item.getAttribute('aria-invalid') === 'true')) invalidFields.push(key);
     const kind = control.tagName === 'INPUT' ? control.type : control.localName === 'select' && control.hasAttribute('multiple') ? 'select-multiple' : control.localName;
     fields.push({ field: key, label, kind });
@@ -44,8 +47,11 @@ export function operateOnForm(form, { origin, field, value, choiceValue, candida
     return requireSingle ? { stale: true } : { error: 'Trường hoặc nhãn đã đổi.' };
   }
   const control = members[0];
+  const metadata = { ...fields[0], name: control.name, id: control.id, autocomplete: control.autocomplete, placeholder: control.placeholder };
+  if (describeField) return metadata;
+  if (expectedControl && Object.keys(metadata).some(key => metadata[key] !== expectedControl[key])) return { stale: true, verified: false };
   const ambiguous = { error: 'Record không khớp một lựa chọn duy nhất.' };
-  if (locateAddress && members.length === 1 && control.matches('input:not([type]), input[type=text], textarea')) return control;
+  if (locateAddress && members.length === 1 && control.matches('input:not([type]), input[type=text], input[type=search], input[type=tel], textarea')) return control;
   if (addressInput) {
     if (control !== addressInput || control.value !== choice.display) return { verified: false };
     if (choice.retained || choice.pending) {
@@ -118,7 +124,7 @@ export function operateOnForm(form, { origin, field, value, choiceValue, candida
     changed.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     if (changed.isConnected) changed.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  const verified = form.isConnected && matchesAnswer() && members.every(item => item.isConnected && item.form === form &&
+  const verified = !choice?.requiresSelection && form.isConnected && matchesAnswer() && members.every(item => item.isConnected && item.form === form &&
     item.getAttribute('data-autoleadpc-field') === field && item.getAttribute('aria-invalid') !== 'true' && item.validity?.valid !== false);
-  return requireSingle ? { verified, changed: changes.length > 0 } : { verified };
+  return requireSingle ? { verified, changed: changes.length > 0 } : choice?.requiresSelection && changes.length ? { verified, pending: true } : { verified };
 }

@@ -1,3 +1,4 @@
+import { resolveContactField } from './resolve-contact-field.mjs';
 import { reportSelectMismatch } from './report-select-mismatch.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { buildSelectCandidates } from './select/build-select-candidates.mjs';
@@ -19,7 +20,7 @@ import { recordInputFillHtml } from '../logging/record-input-fill-html.mjs';
  * @return {Promise<boolean>} True khi cần bỏ qua trường hiện tại.
  * @throws {never} Lỗi từng thao tác nhập được xử lý, HTML chỉ là bằng chứng bổ sung.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function fillSelectOrTextField({
   metadata,
@@ -128,11 +129,17 @@ export async function fillSelectOrTextField({
     unmatchedFieldNames.add(`${metadata.names?.[0] ?? 'date'} (date fill failed)`);
     return true;
   } else {
-    const isAddressField = metadata.names.some(n => /address|street|diachi/i.test(n) && !/email/i.test(n));
+    const contact = resolveContactField(metadata);
+    if (contact === 'conflict') return true;
+    const isAddressField = contact ? contact === 'address' : metadata.names.some(n => /address|street|diachi/i.test(n) && !/email/i.test(n));
     const requestedAddress = String(valueToFill);
     if (isAddressField) {
       const choice = await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
       if (choice?.retained || choice?.pending) return true;
+      if (choice?.requiresSelection && choice.display === requestedAddress) {
+        await selectFirstAddressSuggestion(page, frame, field, options);
+        return !(await field.evaluate(readAddressSelection, requestedAddress).catch(() => null))?.retained;
+      }
       await field.evaluate((input, query) => {
         if (input._autoleadAddressChoice?.query !== query) delete input._autoleadAddressChoice;
         input._autoleadAddressQuery = query;
@@ -140,7 +147,9 @@ export async function fillSelectOrTextField({
     }
     // Nhập từ từ mô phỏng nhịp gõ phím của người thật (chống bị phát hiện bot autofill)
     await humanType(field, valueToFill, page, { address: isAddressField });
-    if (isAddressField && (await field.evaluate(readAddressSelection, requestedAddress).catch(() => null))?.retained) return false;
+    const afterTyping = isAddressField && await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
+    if (afterTyping?.retained) return false;
+    if (afterTyping?.pending) return true;
 
     // XÁC MINH SAU GÕ (fix): framework có thể clear ô (type=tel + maxlength,
     // React/Angular reset) — trước đây chỉ set data-ux-filled="1" nên ô rỗng vẫn bị coi
@@ -150,12 +159,12 @@ export async function fillSelectOrTextField({
     {
       let expectVal = String(valueToFill);
       // Ô số điện thoại/zip: chỉ giữ chữ số, đúng maxlength nếu trang giới hạn
-      if (String(metadata.type || '').toLowerCase() === 'tel' || /zip|postal/i.test(metadata.names?.[0] || '')) {
+      if (/^phone/.test(contact) || contact === 'zipcode' || !contact && metadata.type === 'tel' && /^[\d ()+.\-]+$/.test(expectVal)) {
         const maxLen = Number(metadata.maxLength) > 0 ? metadata.maxLength : expectVal.length;
         expectVal = expectVal.replace(/\D/g, '').slice(0, maxLen);
       }
       // Ô có mask (814-362-6091, (814) 362-6091) hiển thị khác chuỗi đã gõ: ô số thì so theo chữ số.
-      const digitsOnly = String(metadata.type || '').toLowerCase() === 'tel' || /^\d+$/.test(expectVal);
+      const digitsOnly = /^phone/.test(contact) || /^\d+$/.test(expectVal);
       const sameValue = current => current.trim() === expectVal.trim() || (digitsOnly && current.replace(/\D/g, '') === expectVal.replace(/\D/g, ''));
       let okTyped = false;
       // 3 lần gõ lại + 1 lần kiểm tra cuối: trước đây lần fill() thứ 3 không được kiểm tra lại, nên ô đã đúng
@@ -210,7 +219,7 @@ export async function fillSelectOrTextField({
     if (isAddressField || isComboboxOrAutocomplete) {
       try {
         // 1. Kích hoạt trigger API gợi ý: focus và dispatch input
-        await field.evaluate(el => {
+        if (!afterTyping?.requiresSelection) await field.evaluate(el => {
           el.focus();
           el.dispatchEvent(new Event('input', {
             bubbles: true
@@ -248,9 +257,9 @@ export async function fillSelectOrTextField({
 
       // Đảm bảo sau khi xử lý autocomplete, ô địa chỉ không bị widget xóa trắng
       const postAddressVal = await field.inputValue().catch(() => '');
-      const retainedAfterPick = !selectedSuggestion && isAddressField && await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
+      const retainedAfterPick = isAddressField && await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
       if (retainedAfterPick?.retained) return false;
-      if (retainedAfterPick?.pending) return true;
+      if (retainedAfterPick?.pending || retainedAfterPick?.requiresSelection) return true;
       if (!selectedSuggestion && (!postAddressVal || postAddressVal.trim() === '')) {
         await field.evaluate((el, val) => {
           const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;

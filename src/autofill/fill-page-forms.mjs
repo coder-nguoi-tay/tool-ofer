@@ -20,7 +20,9 @@ import { handleOfferwallTasks } from './handle-offerwall-tasks.mjs';
 import { addActionCount } from './add-action-count.mjs';
 import { isAddeptOfferwallFrame } from './offerwall/is-addept-offerwall-frame.mjs';
 import { addVerifiedFieldCount } from './add-verified-field-count.mjs';
-import { getNormalizedPhone } from './get-normalized-phone.mjs';
+import { collectFieldMetadata } from './collect-field-metadata.mjs';
+import { resolveContactField } from './resolve-contact-field.mjs';
+import { resolveProvidedFieldValue } from './record-values/resolve-provided-field-value.mjs';
 import { humanType } from './human-type.mjs';
 import { humanWheelScroll } from './human-wheel-scroll.mjs';
 import { naturalMouseDrift } from './natural-mouse-drift.mjs';
@@ -33,7 +35,7 @@ import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
  * @return {Promise<void>} Hoàn tất thao tác trên tab.
  * @throws {Error} Khi thao tác trình duyệt thất bại ngoài các nhánh phục hồi hiện có.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-20
  */
 export async function fillPageForms(page, {
   session,
@@ -206,20 +208,23 @@ export async function fillPageForms(page, {
     try {
       const phoneModalInput = locateFormElements(frame, '#update-phone-modal-input, input.update-phone-modal-input').first();
       if ((await phoneModalInput.count().catch(() => 0)) > 0 && (await phoneModalInput.isVisible().catch(() => false))) {
-        const rawPhone = getNormalizedPhone(record);
-        const area = rawPhone.slice(0, 3);
-        const mid = rawPhone.slice(3, 6);
-        const last = rawPhone.slice(6, 10);
-        const formattedPhone = `(${area}) ${mid}-${last}`;
-        await humanType(phoneModalInput, formattedPhone, page);
-        const submitModalBtn = locateFormElements(frame, '#update-phone-modal-submit, button.update-phone-modal-submit').first();
-        if ((await submitModalBtn.count().catch(() => 0)) > 0 && (await submitModalBtn.isVisible().catch(() => false))) {
-          await submitModalBtn.click({
-            force: true,
-            timeout: 1500
-          });
-          frameProgress.filledInThisPass += 1;
-          addVerifiedFieldCount(session, 1);
+        const metadata = await phoneModalInput.evaluate(collectFieldMetadata);
+        const rawPhone = resolveContactField(metadata) === 'phone' && String(resolveProvidedFieldValue(metadata, record, session) || '').replace(/\D/g, '');
+        if (rawPhone && rawPhone.length === 10) {
+          const area = rawPhone.slice(0, 3);
+          const mid = rawPhone.slice(3, 6);
+          const last = rawPhone.slice(6, 10);
+          const formattedPhone = `(${area}) ${mid}-${last}`;
+          await humanType(phoneModalInput, formattedPhone, page);
+          const submitModalBtn = locateFormElements(frame, '#update-phone-modal-submit, button.update-phone-modal-submit').first();
+          if ((await submitModalBtn.count().catch(() => 0)) > 0 && (await submitModalBtn.isVisible().catch(() => false))) {
+            await submitModalBtn.click({
+              force: true,
+              timeout: 1500
+            });
+            frameProgress.filledInThisPass += 1;
+            addVerifiedFieldCount(session, 1);
+          }
         }
       }
     } catch {}

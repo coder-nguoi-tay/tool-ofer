@@ -114,3 +114,21 @@ test('repair nhả tab nếu app thay record giữa chẩn đoán và thao tác'
   assert.equal(result.status, 'record_changed');
   assert.equal(await page.locator('input').inputValue(), '');
 });
+
+test('sửa theo nhãn của ô bị báo lỗi và chỉ xác nhận khi validator chấp nhận', async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page } = await createFormScopeFixture(browser, `<meta charset="utf-8"><form>
+    <label>Số điện thoại<input id="address" type="tel" aria-invalid="true"></label>
+    <label>Địa chỉ<input id="phone" type="tel"></label></form>`);
+  const record = { address: '10 Oak St', phone: '8175550147' };
+  const policy = { repairOnly: true, record };
+  const rejected = await executeAction(page, { action: 'fill', selector: '#address', value: record.address }, {}, policy);
+  assert.equal((await page.locator('#address').inputValue()).replace(/\D/g, ''), record.phone);
+  assert.equal(rejected.verified, false);
+  assert.equal(rejected.reason, 'field_validation_pending');
+  await page.locator('#address').evaluate(input => input.removeAttribute('aria-invalid'));
+  assert.equal((await executeAction(page, { action: 'fill', selector: '#address' }, {}, policy)).verified, true);
+  assert.equal((await executeAction(page, { action: 'fill', selector: '#phone', value: record.phone }, {}, policy)).verified, true);
+  assert.equal(await page.locator('#phone').inputValue(), record.address);
+});

@@ -4,7 +4,7 @@
  * @param {object|string|null} scopePayload Giá trị đồng bộ và phạm vi form từ phía ứng dụng.
  * @return {void} Cập nhật control cùng các sự kiện input/change cần thiết.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export function syncAlphaHiddenContactData(scopePayload) {
   const scopeSelector = scopePayload?.__formScopePayload ? scopePayload.scopeSelector : null;
@@ -25,8 +25,10 @@ export function syncAlphaHiddenContactData(scopePayload) {
   
   const addr = findControl('#address');
   const hiddenAddr = findControl('#input-address');
-  const addressWidget = addr?.matches?.('[role=combobox], [aria-autocomplete], [aria-controls], [list]') || addr?._autoleadAddressChoice;
-  if (addr?.value && hiddenAddr?.readOnly && !hiddenAddr.value && !addressWidget) {
+  const addressWidget = addr?.matches?.('[role=combobox], [aria-autocomplete], [aria-controls], [aria-owns], [list], .autocomplete, .typeahead') || addr?._autoleadAddressChoice ||
+    addr?.form?.querySelector('input[name=place_id], input[name=address_id], select[name*=address i], .address-suggestions') ||
+    /^(placeid|addressid)$/i.test((hiddenAddr?.name || '').replace(/[-_]/g, ''));
+  if (addr?.value && hiddenAddr?.readOnly && hiddenAddr.form === addr.form && hiddenAddr.value !== addr.value && !addressWidget) {
     hiddenAddr.value = addr.value;
     hiddenAddr.dispatchEvent(new Event('input', {
       bubbles: true
