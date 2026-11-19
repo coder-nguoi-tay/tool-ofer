@@ -18,7 +18,7 @@ import { recordInputFillHtml } from '../logging/record-input-fill-html.mjs';
  * @return {Promise<boolean>} True khi cần bỏ qua trường hiện tại.
  * @throws {never} Lỗi từng thao tác nhập được xử lý, HTML chỉ là bằng chứng bổ sung.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-19
  */
 export async function fillSelectOrTextField({
   metadata,
@@ -186,8 +186,7 @@ export async function fillSelectOrTextField({
       }
     }
 
-    // Với ô địa chỉ (Street Address / City / State / Zip), nếu xuất hiện dropdown gợi ý autocomplete (Google Places, Loqate, PCA, ARIA listbox, Mapbox, v.v.),
-    // BẮT BUỘC phải chờ API trả về và click chọn mục gợi ý đầu tiên thì web mới hợp lệ hóa địa chỉ để cho phép submit!
+    // Chỉ chấp nhận gợi ý xác định được cho ô vừa nhập.
     const isAddressField = metadata.names.some(n => /address|street|diachi/i.test(n));
     const isCityOrStateField = metadata.names.some(n => /city|thanhpho|state|tinh|province|make|model|school|college|job/i.test(n));
     const isComboboxOrAutocomplete = Boolean(metadata.ariaAutoComplete || metadata.classes?.includes('autocomplete') || metadata.classes?.includes('typeahead') || metadata.names?.some(n => /autocomplete|suggest/i.test(n)));
@@ -200,10 +199,6 @@ export async function fillSelectOrTextField({
           el.dispatchEvent(new Event('input', {
             bubbles: true
           }));
-          el.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'ArrowDown',
-            bubbles: true
-          }));
         }).catch(() => {});
 
         // 2. Chờ API gợi ý hoặc dropdown select trả về: Kiểm tra ngay lập tức ở nhịp đầu (30ms), sau đó thăm dò mỗi 80ms (phản hồi siêu nhanh < 50ms)
@@ -214,14 +209,15 @@ export async function fillSelectOrTextField({
           } else {
             await new Promise(r => setTimeout(r, waitMs));
           }
-          const hasOpen = await hasActiveAddressSuggestions(page, frame);
+          const hasOpen = await hasActiveAddressSuggestions(page, frame, field);
           if (hasOpen) {
             selectedSuggestion = await selectFirstAddressSuggestion(page, frame, field, options);
             if (selectedSuggestion) break;
           }
 
           // Kiểm tra xem trang có trả về thẻ <select> địa chỉ đi kèm không (ô vừa input vừa select)
-          const selectRes = await handleAddressSelectDropdown(frame, record);
+          if (!isAddressField) continue;
+          const selectRes = await handleAddressSelectDropdown(frame, record, field);
           if (selectRes && selectRes.success) {
             selectedSuggestion = true;
             options.onLog?.({
@@ -232,26 +228,6 @@ export async function fillSelectOrTextField({
           }
         }
 
-        // 3. Fallback: Nếu chưa chọn được, thử lại qua handleAddressSelectDropdown hoặc ArrowDown + Enter
-        if (!selectedSuggestion) {
-          const selectRes = await handleAddressSelectDropdown(frame, record);
-          if (selectRes && selectRes.success) {
-            selectedSuggestion = true;
-            options.onLog?.({
-              type: 'address_suggestion_selected',
-              detail: `[Address Select] Đã chọn địa chỉ từ <select>: [${(selectRes.text || '').slice(0, 40)}]`
-            }, page);
-          } else {
-            const hasOpen = await hasActiveAddressSuggestions(page, frame);
-            if (hasOpen) {
-              const downSteps = Math.random() < 0.5 ? 1 : 2;
-              for (let d = 0; d < downSteps; d++) {
-                await field.press('ArrowDown').catch(() => {});
-              }
-              await field.press('Enter').catch(() => {});
-            }
-          }
-        }
       } catch {}
 
       // Đảm bảo sau khi xử lý autocomplete, ô địa chỉ không bị widget xóa trắng
@@ -281,7 +257,7 @@ export async function fillSelectOrTextField({
       // Với ô city/state/job/school thông thường (không phải ô autocomplete chuyên biệt):
       // Kiểm tra nhanh trong < 1ms xem có dropdown đang mở hay không, nếu không mở thì đi tiếp ngay
       try {
-        const hasOpen = await hasActiveAddressSuggestions(page, frame);
+        const hasOpen = await hasActiveAddressSuggestions(page, frame, field);
         if (hasOpen) {
           selectedSuggestion = await selectFirstAddressSuggestion(page, frame, field, options);
         }

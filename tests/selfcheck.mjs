@@ -2820,26 +2820,10 @@ assert.ok(Array.isArray(ADDRESS_SUGGESTION_SELECTORS) && ADDRESS_SUGGESTION_SELE
 assert.equal(typeof hasActiveAddressSuggestions, 'function');
 assert.equal(typeof selectFirstAddressSuggestion, 'function');
 
-let addressSuggestionClicked = false;
-const mockPacItem = {
-  count: async () => 1,
-  isVisible: async () => true,
-  evaluate: async (fn) => fn({ scrollIntoView: () => {}, dispatchEvent: () => {}, click: () => { addressSuggestionClicked = true; } }),
-  click: async () => { addressSuggestionClicked = true; },
-};
-const mockAddressPage = {
-  locator: (sel) => ({
-    count: async () => sel.includes('.pac-item') ? 1 : 0,
-    nth: () => mockPacItem,
-  }),
-  evaluate: async (fn) => true,
-};
-const hasSuggestions = await hasActiveAddressSuggestions(mockAddressPage);
-assert.equal(hasSuggestions, true);
 
-const pickedSuggestion = await selectFirstAddressSuggestion(mockAddressPage);
-assert.equal(pickedSuggestion, true);
-assert.equal(addressSuggestionClicked, true, 'selectFirstAddressSuggestion phải click thành công vào mục gợi ý địa chỉ');
+const unscopedAddressPage = { evaluate: () => assert.fail('Không được tìm gợi ý khi chưa xác định form') };
+assert.equal(await hasActiveAddressSuggestions(unscopedAddressPage), false);
+assert.equal(await selectFirstAddressSuggestion(unscopedAddressPage), false);
 
 console.log('Tất cả kiểm tra selfcheck hoàn tất thành công!');
 process.exit(0);

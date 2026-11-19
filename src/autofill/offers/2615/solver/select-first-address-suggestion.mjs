@@ -1,214 +1,119 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/select-first-address-suggestion.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
-import { markFormRelatedPopups } from './form-scope/mark-form-related-popups.mjs';
-import { locateFormElements } from './form-scope/locate-form-elements.mjs';
 import { ADDRESS_SUGGESTION_SELECTORS } from './state/address-suggestion-selectors.mjs';
 
 /**
- * Tự động tìm và chọn phần tử gợi ý địa chỉ đầu tiên từ danh sách API của trang web.
- * Hỗ trợ Google Places, Loqate, Mapbox, Algolia, ARIA listbox, thẻ select động và custom dropdowns.
- *
- * @param {object} page Page Playwright.
- * @param {object} [frame=null] Frame Playwright.
- * @param {object} [field=null] Locator ô input địa chỉ (dùng cho fallback keyboard).
- * @param {object} [options={}] Tùy chọn log.
- * @return {Promise<boolean>} True khi thao tác chọn gợi ý đã thực hiện thành công.
+ * Xác minh form, ô nhập và gợi ý cùng thuộc một tài liệu trước khi tác động.
+ * @param {object} context Page hoặc frame chứa ô nhập.
+ * @param {object|null} field Locator của ô nhập, hoặc null để nhận diện ô địa chỉ trong form.
+ * @param {'inspect'|'select'|'select-native'} action Kiểm tra, chọn gợi ý hoặc chỉ chọn từ select.
+ * @param {string} [expectedAddress] Địa chỉ cần đối chiếu với lựa chọn trong select.
+ * @return {Promise<{success:boolean,text?:string}>} Kết quả kiểm tra hoặc chọn gợi ý.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-19
  */
-async function selectFirstAddressSuggestion(page, frame = null, field = null, options = {}) {
-  const formScope = (frame || page)?._activeAutofillFormScope;
-  if (formScope) await (frame || page).evaluate(markFormRelatedPopups, formScope).catch(() => {});
-  const contexts = (formScope ? [frame || page] : [page, frame]).filter(c => c && (typeof c.evaluate === 'function' || typeof c.locator === 'function'));
-  const seenContexts = new Set();
-  for (const ctx of contexts) {
-    if (seenContexts.has(ctx)) continue;
-    seenContexts.add(ctx);
-    try {
-      let clickRes = null;
-      if (typeof ctx.evaluate === 'function') {
-        clickRes = await ctx.evaluate(payload => {
-          const selectors = Array.isArray(payload) ? payload : payload.selectors;
-          const scopeSelector = Array.isArray(payload) ? null : payload.scopeSelector;
-          if (typeof document === 'undefined') return null;
-          const isVisible = el => {
-            if (!el || el.disabled) return false;
-            const s = window.getComputedStyle ? window.getComputedStyle(el) : null;
-            if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) return false;
-            const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
-            return r ? r.width > 0 && r.height > 0 : true;
-          };
-          for (const sel of selectors) {
-            try {
-              const allItems = Array.from(document.querySelectorAll(sel));
-              const visibleItems = allItems.filter(el => (!scopeSelector || el.matches(scopeSelector)) && (isVisible(el) || el.tagName === 'OPTION'));
-              if (visibleItems.length === 0) continue;
-
-              // Random chọn kết quả số 1 (index 0) hoặc số 2 (index 1) nếu có từ 2 kết quả trở lên để tránh spam đáp án giống nhau liên tục
-              const targetIdx = visibleItems.length >= 2 && Math.random() < 0.5 ? 1 : 0;
-              const item = visibleItems[targetIdx];
-              if (!item) continue;
-
-              // XỬ LÝ ĐẶC BIỆT KHI KẾT QUẢ TRẢ VỀ LÀ THẺ <SELECT> / <OPTION> (ô vừa input vừa select)
-              if (item.tagName === 'OPTION') {
-                const select = item.closest('select');
-                if (select) {
-                  select.value = item.value;
-                  item.selected = true;
-                  select.selectedIndex = Array.from(select.options).indexOf(item);
-                  select.dispatchEvent(new Event('input', {
-                    bubbles: true
-                  }));
-                  select.dispatchEvent(new Event('change', {
-                    bubbles: true
-                  }));
-                  select.dispatchEvent(new Event('blur', {
-                    bubbles: true
-                  }));
-                  return {
-                    success: true,
-                    selector: sel,
-                    text: (item.textContent || item.innerText || item.value || '').trim().slice(0, 50)
-                  };
-                }
-                const datalist = item.closest('datalist');
-                if (datalist && datalist.id) {
-                  const input = document.querySelector(`input[list="${datalist.id}"]`);
-                  if (input) {
-                    input.value = item.value || item.textContent || '';
-                    input.dispatchEvent(new Event('input', {
-                      bubbles: true
-                    }));
-                    input.dispatchEvent(new Event('change', {
-                      bubbles: true
-                    }));
-                    input.dispatchEvent(new Event('blur', {
-                      bubbles: true
-                    }));
-                    return {
-                      success: true,
-                      selector: sel,
-                      text: input.value.slice(0, 50)
-                    };
-                  }
-                }
-              }
-              item.scrollIntoView?.({
-                block: 'nearest'
-              });
-              // Kích hoạt chuỗi sự kiện chuột hoàn chỉnh cho React (onMouseDown), Loqate, Google Places, Vanilla listeners
-              item.dispatchEvent(new MouseEvent('pointerdown', {
-                bubbles: true,
-                cancelable: true
-              }));
-              item.dispatchEvent(new MouseEvent('mousedown', {
-                bubbles: true,
-                cancelable: true
-              }));
-              item.dispatchEvent(new MouseEvent('mouseup', {
-                bubbles: true,
-                cancelable: true
-              }));
-              item.dispatchEvent(new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true
-              }));
-              item.click?.();
-
-              // Đồng bộ thẻ ẩn #input-address nếu có trên AlphaIntent / LaunchPotato
-              try {
-                const hiddenAddr = document.getElementById('input-address') || document.querySelector('input[data-testid="input-address"]');
-                const fullText = (item.textContent || item.innerText || item.getAttribute('data-street_line') || '').trim();
-                if (hiddenAddr && fullText) {
-                  hiddenAddr.value = fullText;
-                  hiddenAddr.dispatchEvent(new Event('input', {
-                    bubbles: true
-                  }));
-                  hiddenAddr.dispatchEvent(new Event('change', {
-                    bubbles: true
-                  }));
-                }
-              } catch {}
-              return {
-                success: true,
-                selector: sel,
-                text: (item.textContent || item.innerText || '').trim().slice(0, 50)
-              };
-            } catch {}
-          }
-          return {
-            success: false
-          };
-        }, formScope ? { selectors: ADDRESS_SUGGESTION_SELECTORS, scopeSelector: formScope.memberSelector } : ADDRESS_SUGGESTION_SELECTORS).catch(() => null);
-      }
-      if (clickRes?.success) {
-        options.onLog?.({
-          type: 'address_suggestion_selected',
-          detail: `[Address Autocomplete] Đã tự động chọn gợi ý địa chỉ đầu tiên từ API: [${(clickRes.text || clickRes.selector).slice(0, 40)}]`
-        }, page);
-        return true;
-      }
-
-      // Mock / Unit test fallback: Khi chạy trên môi trường test không có DOM thật (evaluate trả về boolean/null)
-      if ((!clickRes || clickRes.success === undefined) && typeof ctx.locator === 'function') {
-        for (const sel of ADDRESS_SUGGESTION_SELECTORS) {
-          try {
-            const loc = locateFormElements(ctx, sel);
-            const count = await loc.count().catch(() => 0);
-            if (count > 0) {
-              const targetIdx = count >= 2 && Math.random() < 0.5 ? 1 : 0;
-              const item = loc.nth(targetIdx);
-              const visible = await item.isVisible({
-                timeout: 100
-              }).catch(() => false);
-              if (visible) {
-                let suggestionSelected = await item.evaluate?.(el => {
-                  if (el.tagName === 'OPTION') {
-                    const select = el.closest('select');
-                    if (select) {
-                      select.value = el.value;
-                      el.selected = true;
-                      select.dispatchEvent(new Event('input', {
-                        bubbles: true
-                      }));
-                      select.dispatchEvent(new Event('change', {
-                        bubbles: true
-                      }));
-                      return true;
-                    }
-                  }
-                  el.scrollIntoView?.({
-                    block: 'nearest'
-                  });
-                  el.dispatchEvent(new MouseEvent('pointerdown', {
-                    bubbles: true,
-                    cancelable: true
-                  }));
-                  el.dispatchEvent(new MouseEvent('mousedown', {
-                    bubbles: true,
-                    cancelable: true
-                  }));
-                  el.click?.();
-                  return true;
-                }).catch(() => false);
-                if (!suggestionSelected) {
-                  suggestionSelected = await item.click?.({
-                    force: true,
-                    timeout: 300
-                  }).then(() => true).catch(() => false);
-                }
-                if (!suggestionSelected) continue;
-                options.onLog?.({
-                  type: 'address_suggestion_selected',
-                  detail: `[Address Autocomplete] Đã chọn gợi ý địa chỉ: [${sel.slice(0, 40)}]`
-                }, page);
-                return true;
-              }
-            }
-          } catch {}
+export async function resolveAddressSuggestion(context, field, action, expectedAddress = '') {
+  const scope = context?._activeAutofillFormScope;
+  if (!scope?.rootSelector || !scope.memberSelector || scope.active === false || scope.unavailable) return { success: false };
+  let handle;
+  try {
+    if (field) {
+      handle = await field.elementHandle({ timeout: 500 });
+      if (!handle) return { success: false };
+    }
+    return await context.evaluate(({ scope, input, selectors, action, expectedAddress }) => {
+      const root = document.querySelector(scope.rootSelector);
+      const outside = 'footer, header, nav, aside, [role="navigation"], [role="contentinfo"], [role="banner"], [role="complementary"], [role="search"], .footer, .site-footer, #footer, .ow-attribution, [data-ux-footer-link], [hidden], [inert], [aria-hidden="true"], [aria-disabled="true"]';
+      const visible = element => {
+        if (!element?.isConnected || element.closest(outside) || element.matches(':disabled') || !element.getClientRects().length) return false;
+        for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
         }
+        return true;
+      };
+      if (!visible(root)) return { success: false };
+      const addressFields = [...root.querySelectorAll('input:not([type]), input[type="text"], input[type="search"], textarea')].filter(element =>
+        visible(element) && /address|street|diachi/i.test([element.name, element.id, element.autocomplete, element.placeholder, element.getAttribute('aria-label')].join(' ')));
+      if (!input) input = addressFields.includes(document.activeElement) ? document.activeElement : addressFields.length === 1 ? addressFields[0] : null;
+      if (action === 'select-native' && !addressFields.includes(input)) return { success: false };
+      if (!visible(input) || !root.contains(input) || !input.matches(scope.memberSelector) ||
+          root.matches('form') && input.form !== root) return { success: false };
+      const menuIds = field => ['aria-controls', 'aria-owns', 'list'].flatMap(attribute => (field.getAttribute(attribute) || '').split(/\s+/)).filter(Boolean);
+      const references = menuIds(input);
+      if (references.length && [...document.querySelectorAll('input, select, textarea')].some(other =>
+        other !== input && menuIds(other).some(id => references.includes(id)) && visible(other))) return { success: false };
+      const menus = references.map(id => document.getElementById(id)).filter(Boolean);
+      if (references.length && !menus.length) return { success: false };
+      const areas = menus.length ? menus : [root];
+      const fieldGroup = input.closest('.address-fields, .address-group, .input-group-address, .form-group, .input-group');
+      const owned = element => {
+        const form = element.closest('form');
+        if (form && form !== input.form || element.form && element.form !== input.form || element.closest(outside)) return false;
+        const labelControl = element.closest('label')?.control;
+        if (labelControl && labelControl !== input) return false;
+        if (references.length) return menus.some(menu => menu === element || menu.contains(element));
+        if (!root.contains(element)) return false;
+        if (fieldGroup?.contains(element) && fieldGroup.querySelectorAll('input:not([type="hidden"]), textarea').length === 1) return true;
+        return addressFields.length === 1 && addressFields[0] === input && Boolean(element.closest(
+          '.pac-container, .address-suggestions, .address-results, .address-predictions, .address-list, [data-testid="address-suggestions"], select.address-select, select[name*="address" i], select[id*="address" i], select[name*="street" i], select[id*="street" i]'
+        ));
+      };
+      const normalize = text => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+      const expected = normalize(expectedAddress || input.value);
+      for (const selector of selectors) {
+        const candidates = areas.flatMap(area => [...area.querySelectorAll(selector)]).filter(item => {
+          if (!owned(item) || item.closest('a[href]:not([href="#"]):not([href=""])') || item.closest('button:not([type="button"])')?.form) return false;
+          if (item.tagName === 'OPTION') {
+            const select = item.closest('select');
+            return !item.disabled && !item.closest('optgroup[disabled]') && item.value &&
+              (select ? visible(select) && (!select.form || select.form === input.form) : input.list && item.parentElement === input.list);
+          }
+          return action !== 'select-native' && visible(item);
+        });
+        if (!candidates.length) continue;
+        const matching = expected ? candidates.filter(item =>
+          (' ' + normalize(item.getAttribute('data-street_line') || item.textContent || item.value) + ' ').includes(' ' + expected + ' ')) : candidates;
+        if (matching.length !== 1) return { success: false };
+        const item = matching[0];
+        const text = (item.textContent || item.value || '').trim();
+        if (action === 'inspect') return { success: true };
+        if (item.tagName === 'OPTION') {
+          const select = item.closest('select');
+          if (action === 'select-native' && (!select || !expected)) return { success: false };
+          const target = select || input;
+          target.value = item.value;
+          target.dispatchEvent(new Event('input', { bubbles: true }));
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true, text };
+        }
+        item.scrollIntoView({ block: 'nearest' });
+        const rect = item.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        if (!item.contains(hit) || hit.closest('a[href], button') !== item.closest('a[href], button')) return { success: false };
+        item.click();
+        return { success: true, text };
       }
-    } catch {}
+      return { success: false };
+    }, { scope, input: handle || null, selectors: ADDRESS_SUGGESTION_SELECTORS, action, expectedAddress });
+  } catch {
+    return { success: false };
+  } finally {
+    await handle?.dispose().catch(() => {});
   }
-  return false;
 }
-export { selectFirstAddressSuggestion };
+
+/**
+ * Chỉ chọn gợi ý địa chỉ xác minh được trong tài liệu của trường đang điền.
+ * @param {object} page Page Playwright.
+ * @param {object|null} [frame] Frame sở hữu trường.
+ * @param {object|null} [field] Locator trường đang điền.
+ * @param {object} [options] Callback ghi nhận thao tác.
+ * @return {Promise<boolean>} Đã chọn đúng một mục.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+export async function selectFirstAddressSuggestion(page, frame = null, field = null, options = {}) {
+  const result = await resolveAddressSuggestion(frame || page, field, 'select');
+  if (result.success) options.onLog?.({ type: 'address_suggestion_selected', detail: '[Address Autocomplete] Đã chọn gợi ý trong form đang điền.' }, page);
+  return result.success;
+}
