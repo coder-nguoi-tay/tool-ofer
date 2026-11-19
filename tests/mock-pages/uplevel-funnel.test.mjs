@@ -37,12 +37,13 @@ function recordExternalRequest(request) {
 let observedExternalRequests = [];
 
 /**
- * Kiểm tra toàn bộ funnel Zulily đã được dựng lại trong fixture offline.
+ * Kiểm tra các bước của fixture offline sau khi màn email đã hiển thị trọn vẹn.
  *
  * @return {Promise<void>} Hoàn tất khi các bước câu hỏi, email và chặn mạng đều đạt.
  * @throws {Error} Khi giao diện hoặc tương tác khác với luồng đã lưu.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-10-24 00:00:00 +07:00
+ * @updated 2026-11-19
  */
 async function verifyOfflineUplevelFunnel() {
   observedExternalRequests = [];
@@ -76,7 +77,10 @@ async function verifyOfflineUplevelFunnel() {
       await page.locator(`[data-screen="${stage.next}"]`).waitFor({ state: 'visible', timeout: 5000 });
     }
 
-    await page.locator('[data-screen="email"]').waitFor({ state: 'visible', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const screen = document.querySelector('[data-screen="email"].is-active');
+      return screen && getComputedStyle(screen).opacity === '1';
+    }, undefined, { timeout: 5000 });
     assert.equal(await page.locator('#email').getAttribute('placeholder'), 'Enter Your Email Address');
     assert.match(await page.locator('.terms').innerText(), /email marketing/i);
 

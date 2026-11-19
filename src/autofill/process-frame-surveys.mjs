@@ -9,7 +9,6 @@ import { handleAdsmithSurvey } from './handle-adsmith-survey.mjs';
 import { handleAlphaIntentQuestions } from './handle-alpha-intent-questions.mjs';
 import { handleAlphaIntentSoiCards } from './handle-alpha-intent-soi-cards.mjs';
 import { handleCustomGenderButtons } from './handle-custom-gender-buttons.mjs';
-import { handleGoogleOauthSkip } from './handle-google-oauth-skip.mjs';
 import { handleMuiQuestionButtons } from './handle-mui-question-buttons.mjs';
 import { handleOfferwallTasks } from './handle-offerwall-tasks.mjs';
 import { handleRadioAndSurveyOptions } from './handle-radio-and-survey-options.mjs';
@@ -121,16 +120,6 @@ export async function processFrameSurveys({
     });
   } catch (muiErr) {
     console.log(`[MuiQ] Lỗi xử lý câu hỏi MUI: ${muiErr.message}`);
-  }
-
-  // Xử lý màn Google OAuth grant ("Continue Through Gmail"): bấm Skip bỏ qua
-  try {
-    session.autofillStep = 'xử lý bước Google OAuth';
-    await handleGoogleOauthSkip(page, frame, {
-      onLog: options.onLog
-    });
-  } catch (gErr) {
-    console.log(`[GmailSkip] Lỗi xử lý màn Gmail OAuth: ${gErr.message}`);
   }
 
   // Tự động trích xuất thông tin có sẵn trong globalData/geolocation/jLead để làm giàu record phiên này

@@ -21,7 +21,7 @@ test('SOI xác minh Yes/No và consent, không khóa thẻ khi website chưa nh�
 test('pageHasWork: returns true when page has Yes/No action buttons without text inputs', async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  const { context, page } = await createFormScopeFixture(browser, '<div><button type="button" class="btn-yes">Yes</button><button type="button">No</button></div>');
+  const { context, page } = await createFormScopeFixture(browser, '<main><h2>Have you used this service?</h2><div><button type="button" class="btn-yes">Yes</button><button type="button">No</button></div></main>');
   t.after(() => context.close());
   assert.equal(await pageHasWork(page), true, 'Yes/No survey screens must remain actionable');
 });
@@ -29,14 +29,14 @@ test('pageHasWork: returns true when page has Yes/No action buttons without text
 test('detectSmartFallbackAction: selects survey choice without requiring explicit pickRandom in config', async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  const { context, page } = await createFormScopeFixture(browser, '<button type="button" class="btn-yes question-answer-button" id="answer-yes">Yes</button>');
+  const { context, page } = await createFormScopeFixture(browser, '<main><div class="survey-container"><h2>Ready to continue?</h2><button type="button" class="btn-yes question-answer-button" id="answer-yes">Yes</button></div></main>');
   t.after(() => context.close());
   const fallback = await detectSmartFallbackAction(page, { solveSurveyCards: true });
   assert.ok(fallback, 'Smart fallback must return an action for survey buttons');
   assert.equal(fallback.action, 'click');
 });
 
-test('findSubmitButton: recognizes Yes/No action buttons when no other fields exist', async () => {
+test('findSubmitButton ignores standalone Yes/No buttons without a verified form', async () => {
   const mockYesBtn = {
     isVisible: async () => true,
     isEnabled: async () => true,
@@ -59,5 +59,5 @@ test('findSubmitButton: recognizes Yes/No action buttons when no other fields ex
   };
 
   const submitBtn = await findSubmitButton(mockFrame);
-  assert.equal(submitBtn, mockYesBtn, 'findSubmitButton must recognize Yes button');
+  assert.equal(submitBtn, null);
 });

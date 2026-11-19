@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium } from 'playwright';
+import { resolveActiveFormScope } from '../src/autofill/form-scope/resolve-active-form-scope.mjs';
 import { submitFrameForm } from '../src/autofill/submit-frame-form.mjs';
 import { submitVisibleFormFallback } from '../src/autofill/submit-visible-form-fallback.mjs';
 
@@ -47,7 +48,7 @@ test('submit chỉ tương tác form đang hiển thị và sẵn sàng trên Ch
     await t.test(`bỏ qua form có phần tử cha ${hiddenStyle}`, async () => {
       await page.setContent(`<section style="${hiddenStyle}"><form onsubmit="event.preventDefault(); this.dataset.submitted = 'true'">
         <input value="done"><button>Submit</button></form></section>`);
-      assert.equal((await page.evaluate(submitVisibleFormFallback)).method, 'none');
+      assert.equal((await page.evaluate(submitVisibleFormFallback, await resolveActiveFormScope(page))).method, 'none');
       assert.equal(await page.locator('form').getAttribute('data-submitted'), null);
     });
   }
@@ -68,15 +69,15 @@ test('submit chỉ tương tác form đang hiển thị và sẵn sàng trên Ch
       '<form><fieldset disabled><input value="done"><button>Submit</button></fieldset></form>',
     ]) {
       await page.setContent(content);
-      assert.equal((await page.evaluate(submitVisibleFormFallback)).method, 'none');
+      assert.equal((await page.evaluate(submitVisibleFormFallback, await resolveActiveFormScope(page))).method, 'none');
     }
   });
 
   await t.test('form nhiều bước gửi bước đang mở, bỏ qua bước trước đã ẩn và chống gửi dồn', async () => {
     await page.setContent(`<form hidden id="previous" onsubmit="event.preventDefault(); this.dataset.submitted='true'"><input value="previous"></form>
       <form id="current" onsubmit="event.preventDefault(); this.dataset.submits=String(Number(this.dataset.submits || 0) + 1)"><input required value="ready"></form>`);
-    assert.equal((await page.evaluate(submitVisibleFormFallback)).id, 'current');
-    assert.equal((await page.evaluate(submitVisibleFormFallback)).method, 'none');
+    assert.equal((await page.evaluate(submitVisibleFormFallback, await resolveActiveFormScope(page))).id, 'current');
+    assert.equal((await page.evaluate(submitVisibleFormFallback, await resolveActiveFormScope(page))).method, 'none');
     assert.equal(await page.locator('#previous').getAttribute('data-submitted'), null);
     assert.equal(await page.locator('#current').getAttribute('data-submits'), '1');
   });
@@ -84,21 +85,21 @@ test('submit chỉ tương tác form đang hiển thị và sẵn sàng trên Ch
   await t.test('form chưa hợp lệ hoặc còn lỗi không bị gửi dự phòng', async () => {
     for (const content of ['<textarea required></textarea>', '<input value="ready"><p class="error-message">Invalid address</p>']) {
       await page.setContent(`<form>${content}</form>`);
-      assert.equal((await page.evaluate(submitVisibleFormFallback)).method, 'none');
+      assert.equal((await page.evaluate(submitVisibleFormFallback, await resolveActiveFormScope(page))).method, 'none');
     }
   });
 
-  await t.test('trang không có form chỉ click nút dự phòng đang hiển thị', async () => {
+  await t.test('trang không có form không bấm nút dự phòng', async () => {
     await page.setContent('<button hidden onclick="this.dataset.clicked=1">Hidden</button><div role="button" onclick="this.dataset.clicked=1">Continue</div>');
-    assert.equal((await page.evaluate(submitVisibleFormFallback)).method, 'button_click');
+    assert.equal((await page.evaluate(submitVisibleFormFallback, await resolveActiveFormScope(page))).method, 'none');
     assert.equal(await page.locator('button').getAttribute('data-clicked'), null);
-    assert.equal(await page.locator('[role="button"]').getAttribute('data-clicked'), '1');
+    assert.equal(await page.locator('[role="button"]').getAttribute('data-clicked'), null);
   });
 
-  await t.test('bước mới không có form vẫn tiếp tục khi DOM giữ form cũ đã ẩn', async () => {
+  await t.test('form cũ đã ẩn không cho phép bấm Continue đứng riêng', async () => {
     await page.setContent('<form hidden><input value="old"><button>Submit</button></form><div role="button" onclick="this.dataset.clicked=1">Continue</div>');
-    assert.equal((await page.evaluate(submitVisibleFormFallback)).method, 'button_click');
-    assert.equal(await page.locator('[role="button"]').getAttribute('data-clicked'), '1');
+    assert.equal((await page.evaluate(submitVisibleFormFallback, await resolveActiveFormScope(page))).method, 'none');
+    assert.equal(await page.locator('[role="button"]').getAttribute('data-clicked'), null);
   });
 
   for (const change of ['button.closest("form").hidden = true', 'button.disabled = true', 'button.setAttribute("aria-busy", "true")']) {

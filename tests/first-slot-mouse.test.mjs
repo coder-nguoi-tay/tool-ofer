@@ -86,13 +86,14 @@ test('renderer treo không chặn click và không tích lũy lệnh vẽ con tr
   const pendingRender = new Promise(resolve => { finishRender = resolve; });
   const page = {
     evaluate: () => { renders++; return pendingRender; },
-    mouse: { move: async () => {}, down: async () => { presses++; }, up: async () => {} },
+    mouse: { move: async () => {}, down: async () => assert.fail('Không bấm theo tọa độ cũ'), up: async () => {} },
   };
   try {
     await humanMouseMove(page, 240, 160);
     assert.equal(await humanClick(page, {
       evaluate: async () => ({ ready: true }),
       boundingBox: async () => ({ x: 200, y: 120, width: 100, height: 40 }),
+      click: async ({ force }) => { assert.equal(force, false); presses++; },
     }), true);
     assert.equal(presses, 1);
     assert.equal(renders, 1, 'Không xếp thêm lệnh DOM khi renderer chưa trả lời');

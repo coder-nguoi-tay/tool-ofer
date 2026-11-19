@@ -295,8 +295,10 @@ test('Full Flow E2E: Giả lập đa phiên bản OS & Trình duyệt trên Obsc
         );
         assert.equal(fp.platform, tc.expectedPlatform, `Platform phải khớp ${tc.expectedPlatform}`);
 
-        // Engine CPU chưa hỗ trợ WebGL: phải báo không hỗ trợ thay vì trả pixel giả.
-        assert.equal(fp.webglRenderer, 'none');
+        // WebGL metadata and readback are profile-backed in the native Rust core.
+        assert.notEqual(fp.webglRenderer, 'none');
+        assert.ok(tc.expectedGPU.some(part => fp.webglRenderer.includes(part)),
+          `WebGL renderer (${fp.webglRenderer}) phải khớp GPU profile`);
 
         // 5. Kiểm tra Canvas Noise có sinh dữ liệu hợp lệ
         assert.ok(fp.canvasLength > 100, 'Canvas toDataURL phải hợp lệ');

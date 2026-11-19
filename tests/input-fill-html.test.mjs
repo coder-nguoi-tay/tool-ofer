@@ -47,6 +47,15 @@ test('mỗi lượt nhập nhanh/chậm/date giữ một HTML ô nhập, xem và
   assert.equal(await page.locator('#dob').inputValue(), '1990-01-02');
   await recordInputFillHtml(page.locator('#notes'), page);
   assert.doesNotMatch(entries().at(-1).html, /private-notes/);
+  await page.locator('#notes').evaluate(element => {
+    for (const name of ['id', 'name', 'title', 'aria-label', 'aria-valuetext', 'placeholder', 'class', 'data-field']) {
+      element.setAttribute(name, 'sample-contact@example.invalid');
+    }
+  });
+  await recordInputFillHtml(page.locator('textarea'), page);
+  assert.doesNotMatch(JSON.stringify(entries().at(-1)), /sample-contact/);
+  assert.equal(entries().at(-1).fieldId, '[redacted]');
+  assert.equal(entries().at(-1).fieldName, '[redacted]');
   await page.locator('#name').evaluate(element => element.className = 'x'.repeat(12000));
   await recordInputFillHtml(page.locator('#name'), page);
   assert.ok(entries().at(-1).html.length <= 8192);

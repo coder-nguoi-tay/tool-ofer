@@ -125,7 +125,7 @@ test('agent chạy end-to-end qua API OpenAI-compatible (server giả localhost)
   t.after(() => server.close());
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  const { context, page, session } = await createFormScopeFixture(browser, '<input name="email" id="email" type="email">');
+  const { context, page, session } = await createFormScopeFixture(browser, '<main><form><label>Email<input name="email" id="email" type="email"></label></form></main>');
   t.after(() => context.close());
   session.triggerAutofillScan = () => {};
   const agent = startContinuousAgent(page, () => ({ email: 'dung@record.test' }), session, {

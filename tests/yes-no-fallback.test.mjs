@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createFormScopeFixture } from './helpers/form-scope-browser-fixture.mjs';
+import { resolveActiveFormScope } from '../src/autofill/form-scope/resolve-active-form-scope.mjs';
 import { handleYesNoStep } from '../src/autofill/handle-yes-no-step.mjs';
 
 const skip = !existsSync(chromium.executablePath());
@@ -28,7 +29,9 @@ test('Yes hết, hai Continue không đổi bước thì No hết, không đụn
 test('Continue chuyển bước thành công thì không đổi sang No ở bước cũ', { skip }, async t => {
   const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
   const {context,page}=await createFormScopeFixture(browser,'<form><fieldset><legend>Would you like updates?</legend><label><input name="answer" value="yes" type="radio">Yes</label><label><input name="answer" value="no" type="radio">No</label></fieldset><button type="button" onclick="this.closest(\'form\').hidden=true">Continue</button></form>');t.after(()=>context.close());
-  const logs=[];const run=()=>handleYesNoStep({frame:page.mainFrame(),page,options:{onLog:e=>logs.push(e)}});
+  const frame = page.mainFrame();
+  assert.ok((await resolveActiveFormScope(frame))?.active);
+  const logs=[];const run=()=>handleYesNoStep({frame,page,options:{onLog:e=>logs.push(e)}});
   await run();await run();assert.equal((await run()).handled,false);
   assert.equal(await page.locator('input[value=yes]').isChecked(),true);
   assert.equal(logs.some(e=>e.type==='survey_yes_no_fallback'),false);
@@ -75,7 +78,9 @@ test('checkbox Yes/No có input ẩn: chọn đủ nhóm rồi mới Continue', 
   t.after(() => browser.close());
   const { context, page } = await createFormScopeFixture(browser, '<form>' + ['one', 'two'].map(name => `<fieldset><legend>Question ${name}</legend><label><input style="display:none" type="checkbox" name="${name}-yes" value="yes">Yes</label><label><input style="display:none" type="checkbox" name="${name}-no" value="no">No</label></fieldset>`).join('') + '<button type="button" onclick="window.continued=Array.from(document.querySelectorAll(\'input[value=yes]\')).every(input=>input.checked)">Continue</button></form>');
   t.after(() => context.close());
-  const run = () => handleYesNoStep({ frame: page.mainFrame(), page });
+  const frame = page.mainFrame();
+  assert.ok((await resolveActiveFormScope(frame))?.active);
+  const run = () => handleYesNoStep({ frame, page });
   await run();
   assert.equal(await page.evaluate(() => window.continued), undefined);
   await run();
@@ -88,9 +93,11 @@ test('checkbox Yes/No có input ẩn: chọn đủ nhóm rồi mới Continue', 
 test('nút link có wrapper riêng và class chosen không bị chọn lặp trước Continue', { skip }, async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  const { context, page } = await createFormScopeFixture(browser, `<form>${['one', 'two'].map(name => `<section><h3>Question ${name}</h3><div><a href="#" onclick="event.preventDefault();this.classList.add('chosen');window.answers=(window.answers||0)+1">Yes</a></div><div><a href="#" onclick="event.preventDefault();this.classList.add('chosen')">No</a></div></section>`).join('')}<button type="button" onclick="window.continued=document.querySelectorAll('a.chosen').length===2">Continue</button></form>`);
+  const { context, page } = await createFormScopeFixture(browser, `<form>${['one', 'two'].map(name => `<section><h3>Question ${name}</h3><div><a href="#" onclick="event.preventDefault();this.classList.add('chosen');window.answers=(window.answers||0)+1">Yes</a></div><div><a href="#" onclick="event.preventDefault();this.classList.add('chosen')">No</a></div></section>`).join('')}<button type="submit" onclick="event.preventDefault();window.continued=document.querySelectorAll('a.chosen').length===2">Continue</button></form>`);
   t.after(() => context.close());
-  const run = () => handleYesNoStep({ frame: page.mainFrame(), page });
+  const frame = page.mainFrame();
+  assert.ok((await resolveActiveFormScope(frame))?.active);
+  const run = () => handleYesNoStep({ frame, page });
   await run(); await run();
   assert.equal(await page.evaluate(() => window.continued), undefined);
   assert.equal(await page.evaluate(() => window.answers), 2);

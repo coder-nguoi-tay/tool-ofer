@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { selectActiveForm } from './select-active-form.mjs';
+import { FORM_UTILITY_REGIONS } from '../../browser/locators/form-utility-regions.mjs';
 const activeScopes = new WeakMap();
 
 /**
@@ -7,14 +8,14 @@ const activeScopes = new WeakMap();
  * @param {object} frame Page hoặc Frame Playwright cần quét.
  * @return {Promise<object|null>} Phạm vi đã xác minh trong DOM hiện tại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-19
  */
 export async function resolveActiveFormScope(frame) {
   if (typeof frame.evaluate !== 'function') return null;
   const previous = activeScopes.get(frame);
   let timer;
   const inspection = await Promise.race([
-    frame.evaluate(selectActiveForm, { previousId: previous?.id, flowId: previous?.flowId, nextId: randomUUID() }).then(result => ({ verified: true, result })).catch(() => ({ verified: false })),
+    frame.evaluate(selectActiveForm, { previousId: previous?.id, flowId: previous?.flowId, nextId: randomUUID(), excludedRegions: FORM_UTILITY_REGIONS }).then(result => ({ verified: true, result })).catch(() => ({ verified: false })),
     new Promise(resolve => { timer = setTimeout(() => resolve({ verified: false }), 3000); timer.unref?.(); }),
   ]).finally(() => clearTimeout(timer));
   const result = inspection.verified ? inspection.result : previous ? { ...previous, active: false, unavailable: true } : null;

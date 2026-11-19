@@ -4,6 +4,7 @@ import { isExcludedOfferPageUrl } from './is-excluded-offer-page-url.mjs';
 import { normalizeOfferUrl } from './normalize-offer-url.mjs';
 import { getOfferUrlState } from './get-offer-url-state.mjs';
 import { hasUnfinishedOfferWork } from '../../leads/actions/has-unfinished-offer-work.mjs';
+import { attachFrameRequestTracking } from '../frames/pending-frame-requests.mjs';
 
 const attached = new WeakSet();
 
@@ -12,12 +13,14 @@ const attached = new WeakSet();
  * @param {object} context BrowserContext riêng của phiên.
  * @param {object} session Phiên sở hữu tab chính và callback log.
  * @return {void} Gắn listener một lần, không đóng browser hoặc tab cuối.
+ * @throws {Error} Khi context không cho đăng ký sự kiện tab.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-19
  */
 export function attachUniqueOfferTabs(context, session) {
   if (attached.has(context)) return;
   attached.add(context);
+  attachFrameRequestTracking(context);
   void installExcludedPopupFilter(context).catch(() => {});
   const state = getOfferUrlState(context);
   const watched = new WeakSet();

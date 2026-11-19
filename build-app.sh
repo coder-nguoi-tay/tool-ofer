@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_VERSION="$(node -p "require('./package.json').version")"
-BUILD_NUMBER="74"
+BUILD_NUMBER="76"
 
 APP_NAME="AutoLeadPC Mac 2 AdsPower.app"
 INSTALLED_APP="/Applications/$APP_NAME"
@@ -56,6 +56,8 @@ reopen_installed_app() {
     open "$INSTALLED_APP"
   fi
 }
+# Kiểm tra và dựng core trước khi dừng bản đang dùng.
+node scripts/build-obscura.mjs
 quit_installed_app
 BUILD_DIRECTORY="$(mktemp -d "/Applications/.AutoLeadPC-build.XXXXXX")"
 
@@ -174,7 +176,7 @@ EOF
   # Các test hợp đồng đóng gói Windows cũng được chạy từ bundle Mac.
   mkdir -p "$LAUNCHER_DIR/packaging" "$LAUNCHER_DIR/scripts"
   cp -R packaging/windows "$LAUNCHER_DIR/packaging/"
-  cp -p scripts/build-windows.mjs "$LAUNCHER_DIR/scripts/"
+  cp -p scripts/build-windows.mjs scripts/build-obscura.mjs "$LAUNCHER_DIR/scripts/"
   # Test đóng gói cần source compiler và script thật, kể cả khi chạy trong bundle.
   cp -p build-app.sh AutoLeadPCMacApp.swift AutoLeadPC2.icns autoleadpc-icon.svg "$LAUNCHER_DIR/"
   cp -p app.mjs autofill.mjs option-scorer.mjs observer.mjs analyze-ops.mjs stealth.mjs survey-solver.mjs ai-assist.mjs lead-check.mjs chrome-versions.mjs adspower-profile.mjs multilogin-profile.mjs gologin-profile.mjs obscura-engine.mjs codex-form-agent.mjs local-profile-engine.mjs playwright-mcp-human.cjs pc-app.png package.json package-lock.json relay.mjs useragents.txt QA_TEST_CASES.md README.md tgbot.mjs tunnel.mjs mcp-server.mjs "$LAUNCHER_DIR/"
@@ -189,11 +191,8 @@ EOF
     cp -p captcha.mjs "$LAUNCHER_DIR/"
   fi
 
-  # Luôn kiểm tra/build source Rust mới nhất; Cargo tái sử dụng cache khi không có thay đổi.
-  local OBSCURA_RELEASE_BIN="demo-obscura-antidetect/target/release/obscura_antidetect_demo"
-  node scripts/build-obscura.mjs
   mkdir -p "$LAUNCHER_DIR/bin"
-  cp -p "$OBSCURA_RELEASE_BIN" "$LAUNCHER_DIR/bin/obscura_antidetect_demo"
+  cp -p bin/obscura_antidetect_demo "$LAUNCHER_DIR/bin/obscura_antidetect_demo"
   chmod +x "$LAUNCHER_DIR/bin/obscura_antidetect_demo"
 
   # Copy node_modules

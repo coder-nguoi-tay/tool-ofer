@@ -57,7 +57,7 @@ test('action xác minh form/frame và trạng thái tương tác trước khi cl
   });
   await t.test('tìm action trong iframe đang làm việc', async () => {
     await page.locator('body').evaluate(body => {
-      const iframe = document.createElement('iframe'); iframe.srcdoc = '<button id="3949" onclick="this.dataset.clicked=1">Continue</button>'; body.append(iframe);
+      const iframe = document.createElement('iframe'); iframe.srcdoc = '<main><form><input name="name"><button type="button" id="3949" onclick="this.dataset.clicked=1">Continue</button></form></main>'; body.append(iframe);
     });
     await page.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.querySelector('button'));
     page._activeAutofillFrame = page.frames()[1];

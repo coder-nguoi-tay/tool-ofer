@@ -3,13 +3,17 @@
  * @param {object} context Định danh phạm vi cũ và định danh cấp mới từ phía ứng dụng.
  * @return {object|null} Phạm vi biểu mẫu cùng selector thành viên, hoặc null nếu không có.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-19
  */
-export function selectActiveForm({ previousId, nextId, flowId }) {
+export function selectActiveForm({ previousId, nextId, flowId, excludedRegions = 'footer, nav, aside, [role="search"], .site-footer' }) {
   const controlSelector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea';
   const isExcluded = el => {
     if (!el) return false;
-    if (el.closest?.('footer, nav, aside, [role="search"], .site-footer, .offerwall-card, form[data-tf-element-role="offer"]')) return true;
+    if (el.closest?.(excludedRegions + ', .offerwall-card, form[data-tf-element-role="offer"]')) return true;
+    if (mainRegions.length && !el.closest?.('[role="dialog"], [aria-modal="true"], dialog[open]')) {
+      const form = el.form || el.closest?.('form, [role="form"]');
+      if (!mainRegions.some(main => main.contains(el) || form && (main.contains(form) || form.contains(main)))) return true;
+    }
     const headerEl = el.closest?.('header, .site-header, [role="banner"]');
     if (headerEl) {
       const headerHasInputs = Boolean(headerEl.querySelector?.('input:not([type="hidden"]), select, textarea'));
@@ -34,6 +38,7 @@ export function selectActiveForm({ previousId, nextId, flowId }) {
     const bounds = element.getBoundingClientRect();
     return bounds.width > 0 && bounds.height > 0;
   };
+  const mainRegions = Array.from(document.querySelectorAll('main, [role="main"], #main, #content, .main-content, .site-main')).filter(visible);
   const activeFlowId = flowId || nextId;
   const candidates = new Map();
   for (const control of document.querySelectorAll(controlSelector)) {
@@ -62,7 +67,7 @@ export function selectActiveForm({ previousId, nextId, flowId }) {
   }
   const previous = previousId ? document.querySelector('[data-ux-autofill-scope="' + previousId + '"]') : null;
   const ranked = [...candidates.values()].filter(candidate => candidate.modal || candidate.focused || candidate.root.matches('[id^="sign_up_step"]') || candidate.root.getAttribute('data-ux-autofill-deferred') !== activeFlowId).sort((first, second) => Number(second.modal) - Number(first.modal) || Number(second.focused) - Number(first.focused) || Number(second.root === previous) - Number(first.root === previous) || (first.root.matches('[id^="sign_up_step"]') && second.root.matches('[id^="sign_up_step"]') && first.root.closest('form') === second.root.closest('form') ? (first.root.compareDocumentPosition(second.root) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1) : second.count - first.count));
-  const root = ranked[0]?.root || previous;
+  const root = ranked[0]?.root || (!isExcluded(previous) && previous);
   if (!root) return null;
   root.removeAttribute('data-ux-autofill-deferred');
   for (const candidate of candidates.values()) {

@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { inspectAutofillChallenge } from '../src/autofill/watchdog/inspect-autofill-challenge.mjs';
 import { getAutofillScanDelay } from '../src/autofill/watchdog/get-autofill-scan-delay.mjs';
 import { attachAutofillPageWatcher } from '../src/autofill/attach-autofill-page-watcher.mjs';
+import { attachAutofillPageWatcher as attachOffer2615PageWatcher } from '../src/autofill/offers/2615/solver/attach-autofill-page-watcher.mjs';
 import { tryFastTextInput } from '../src/autofill/interaction/try-fast-text-input.mjs';
 import { humanType } from '../src/autofill/human-type.mjs';
 import { configurePageMousePolicy } from '../src/autofill/interaction/configure-page-mouse-policy.mjs';
@@ -46,6 +47,33 @@ test('slot sau dùng fill đã xác minh, không gõ từng ký tự; giá trị
 });
 
 const skip = !existsSync(chromium.executablePath()) && 'Chưa cài Chromium của Playwright';
+test('tab phụ hết iframe ở mức 98% nhả quyền phục hồi và không F5 trang cha', { skip }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const realNow = Date.now.bind(Date);
+  let elapsed = 0;
+  t.mock.method(Date, 'now', () => realNow() + elapsed);
+  for (const attachWatcher of [attachAutofillPageWatcher, attachOffer2615PageWatcher]) {
+    const { context, page, session } = await createFormScopeFixture(browser, '<main><h2>98%</h2></main>');
+    try {
+      session.mainPage = await context.newPage();
+      page._lateProgressRecoveryActive = true;
+      let passes = 0;
+      const logs = [];
+      attachWatcher(page, {
+        trackedPages: new WeakSet(), session, record: {}, options: { onLog: entry => logs.push(entry) },
+        fillVisibleForms: async () => { passes++; }, checkLeadAfterEmailOnPage() {}, isSpamAdUrl: () => false, watchPage() {},
+      });
+      await waitForCondition(() => passes === 1);
+      const [scan] = session._pageScans;
+      elapsed += 65_000;
+      await scan(true);
+      assert.equal(page._lateProgressRecoveryActive, false);
+      assert.equal(logs.some(entry => ['late_progress_reload', 'stuck_page_reload', 'late_progress_ai_requested'].includes(entry.type)), false);
+    } finally { await context.close(); }
+  }
+});
+
 test('form có script Cloudflare vẫn làm việc, lead đã có không chặn watchdog và iframe có AI fallback', { skip }, async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());

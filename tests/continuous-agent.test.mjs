@@ -155,7 +155,7 @@ test('luồng AI cũ nhường tab khi continuous agent đang giữ', async () =
 test('lỗi agy: backoff, không đổi provider, giữ tab; Stop trong lúc backoff thoát ngay', async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  const { context, page, session } = await createFormScopeFixture(browser, '<input name="email" id="email">');
+  const { context, page, session } = await createFormScopeFixture(browser, '<main><form><label>Email<input name="email" id="email" type="email"></label></form></main>');
   t.after(() => context.close());
   const startCount = moduleState.agtRunningCount;
   let sends = 0;
@@ -185,7 +185,7 @@ test('Stop: nối vào closeActiveBrowsers, stopAll giết agy đang chờ, sess
   t.after(() => browser.close());
   const startCount = moduleState.agtRunningCount;
   const makeAgent = async () => {
-    const { context, page, session } = await createFormScopeFixture(browser, '<input name="email" id="email">');
+    const { context, page, session } = await createFormScopeFixture(browser, '<main><form><label>Email<input name="email" id="email" type="email"></label></form></main>');
     t.after(() => context.close());
     session.triggerAutofillScan = () => {};
     let sendCalled = false, killed = 0, rejectSend;

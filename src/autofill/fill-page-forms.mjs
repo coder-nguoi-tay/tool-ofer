@@ -7,6 +7,7 @@ import { rescueRequiredField } from './form-scope/rescue-required-field.mjs';
 import { resolveActiveFormScope } from './form-scope/resolve-active-form-scope.mjs';
 import { locateFormElements } from './form-scope/locate-form-elements.mjs';
 import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-lead-session.mjs';
+import { isSecondaryOfferTab } from '../leads/actions/is-secondary-offer-tab.mjs';
 import { trackFrameScreen } from './track-frame-screen.mjs';
 import { completeFrameControls } from './complete-frame-controls.mjs';
 import { fillFrameFields } from './fill-frame-fields.mjs';
@@ -29,7 +30,7 @@ import { naturalMouseDrift } from './natural-mouse-drift.mjs';
 import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
 
 /**
- * Xử lý màn card đặc thù trước rồi quét form/frame theo dữ liệu và chính sách lead của phiên.
+ * Xử lý form theo phiên. Tab gốc dùng các bước riêng của trang, tab phụ chỉ làm việc bên trong iframe đã chọn.
  * @param {object} page Tab cần xử lý.
  * @param {object} context Dữ liệu phiên và callback điều phối được giữ bởi attachAutofill.
  * @return {Promise<void>} Hoàn tất thao tác trên tab.
@@ -47,6 +48,8 @@ export async function fillPageForms(page, {
   protectConfirmedLeadSession(session);
   if (page.isClosed() || page._leadRecoveryInProgress || ['manual','skip'].includes(session.offerMode)) return;
   const frames = await selectPageFormFrames(page);
+  const iframeOnly = isSecondaryOfferTab(page, session);
+  if (iframeOnly && !frames.length) return;
   // Không lấy effectiveRecords[...] (mảng dùng chung giữa các slot): dòng dưới gắn email phiên vào record.
   const record = page._assignedRecord || session.currentRecord || sessionRecord;
   // Record của tab lấy riêng từ hàng đợi nên chưa có email của phiên: gắn vào để mọi nhánh điền (kể cả điền cứu trợ, AI) dùng đúng email.
@@ -68,6 +71,7 @@ export async function fillPageForms(page, {
   }
   if (session.offerMode === 'consent_only') {
     for (const frame of frames) {
+      if (!frame._activeAutofillFormScope?.active) continue;
       const boxes = await locateFormElements(frame, 'input[type="checkbox"]').all().catch(() => []);
       for (const box of boxes) {
         const consent = await box.evaluate(el => {
@@ -85,10 +89,11 @@ export async function fillPageForms(page, {
   }
   if (shouldPauseForLead(session, options)) return;
   // Điều phối các bước tiền quét đặc thù theo từng Offer (ví dụ Offer 2615 paththankyou)
-  if (await dispatchOfferCustomPreScan(page, { session, sessionRecord, options, triggerLeadCheckAfterEmail })) return;
+  if (!iframeOnly && await dispatchOfferCustomPreScan(page, { session, sessionRecord, options, triggerLeadCheckAfterEmail })) return;
   // Đánh dấu link kiểu footer (giới thiệu/policy/contact...) trước mọi nhánh bấm; giới hạn 1.5s để trang đang chuyển không giữ lượt quét.
   await Promise.all(frames.map(frame => Promise.race([frame.evaluate(markFooterLikeLinks).catch(() => 0), new Promise(resolve => setTimeout(resolve, 1500))])));
-  if (await handleSweepstakesCardPage(page, session, options)) return;
+  if (!iframeOnly && await handleSweepstakesCardPage(page, session, options)) return;
+  if (!frames.length) return;
 
   // PHÁT HIỆN EMAIL ĐIỀN NGOÀI (RoboForm/extension/tay) — nếu các cờ thường không bắt được,
   // quét nhanh các ô email hiển thị có giá trị trong page + frame con để bật cờ emailFilled,
@@ -141,7 +146,7 @@ export async function fillPageForms(page, {
     session.screenReached = Math.max(session.screenReached || 1, (session.completedScreens || 0) + 1);
     options.onPageJump?.(session, session.pageJumps, currentUrl);
   }
-  if (isRealBrowser && session.lastObservedUrl !== currentUrl) {
+  if (!iframeOnly && isRealBrowser && session.lastObservedUrl !== currentUrl) {
     session.lastObservedUrl = currentUrl;
     const observationPause = Math.floor(Math.random() * 300) + 350; // 350ms - 650ms
     await new Promise(r => setTimeout(r, observationPause));

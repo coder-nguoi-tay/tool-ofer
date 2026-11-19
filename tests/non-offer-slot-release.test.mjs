@@ -357,26 +357,73 @@ test('detectOfferContentInPage: loại search, sidebar và link điều hướng
   assert.equal(offerwall.hasOfferWork, true);
 });
 
-test('getEmptyOfferPageReason: tab phụ có search/link điều hướng vẫn đóng sau 30s, offer ở main được giữ', { skip: !existsSync(chromium.executablePath()) && 'Chưa cài Chromium' }, async t => {
+test('tab phụ chỉ còn việc khi iframe trong vùng nội dung có form hoặc câu hỏi', { skip: !existsSync(chromium.executablePath()) && 'Chưa cài Chromium' }, async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
-  await page.route('https://news.example.com/article', route => route.fulfill({ contentType: 'text/html', body: '<main>Loading</main>' }));
+  const emailField = '<form><label>Email<input type="email"></label></form>';
+  const emailFooter = '<footer>Please check your email</footer>';
+  const embeddedForm = '<iframe title="Survey" src="https://embedded.test/step"></iframe>';
+  await page.route('**/*', route => route.fulfill({
+    contentType: 'text/html',
+    body: route.request().url().endsWith('/article') ? '<main>Article</main>' : '<main>' + emailField + '</main>'
+  }));
   await page.goto('https://news.example.com/article');
   let now = 0;
   t.mock.method(Date, 'now', () => now);
-  const reasonAt30s = async html => {
-    await page.setContent(html);
-    const tracker = {};
-    now = 0;
-    assert.equal(await getEmptyOfferPageReason(page, tracker, { subTab: true }), null);
-    now = 31_000;
+  /**
+   * Quét cùng tab phụ tại mốc thời gian giả để kiểm tra khoảng chờ đóng.
+   * @param {object} tracker Trạng thái quan sát của tab qua các lần quét.
+   * @param {number} time Mốc tính bằng mili giây.
+   * @return {Promise<string|null>} Lý do đóng hoặc null khi tab được giữ.
+   * @throws {Error} Khi Chromium mất kết nối trong lúc quét.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-19
+   */
+  const inspectAt = (tracker, time) => {
+    now = time;
     return getEmptyOfferPageReason(page, tracker, { subTab: true });
   };
-  assert.match(await reasonAt30s('<main><form role="search"><input type="text" name="keyword"><button>Search</button></form></main>'), /Tab phụ|một dòng|trắng/);
-  assert.equal(await reasonAt30s('<main><article><a href="/article/2">Continue</a></article></main>'), 'Tab phụ không có form/câu hỏi để làm');
-  assert.equal(await reasonAt30s('<main><form><input type="email" name="email"><button>Continue</button></form></main>'), null);
-  assert.equal(await reasonAt30s('<main><div class="offerwall-card"><a href="https://offer.test">Open offer</a></div></main>'), null);
+  for (const html of [
+    '<main><form role="search"><input name="keyword"><button>Search</button></form></main>',
+    '<main><article><a href="/article/2">Continue</a></article></main>',
+    '<main>' + emailField + '</main>',
+    '<main><div class="offerwall-card" data-ux-clicked="1"><a href="/open">Open offer</a></div></main>',
+    '<main><div class="question-title">What is your age?</div></main>',
+    '<main><iframe title="Survey" srcdoc="<p>Instructions</p>"></iframe></main>',
+    '<main><iframe id="AS_IFRAME" title="Survey" srcdoc=""></iframe></main>',
+    '<main><iframe title="Survey" srcdoc="<div class=survey-container><h2>Thank you</h2><form><input disabled value=12><input readonly value=saved></form></div>"></iframe></main>',
+    '<main><iframe srcdoc="<main><fieldset><legend>Pick one?</legend><label><input type=radio disabled checked>Yes</label><label><input type=radio disabled>No</label></fieldset></main>"></iframe></main>',
+    '<main><iframe srcdoc="<article>News</article>"></iframe></main>',
+    '<main><iframe src="https://ad.doubleclick.net/creative"></iframe></main>',
+    '<main><p>Article</p></main><footer>' + embeddedForm + '</footer>',
+    '<main><iframe hidden src="https://embedded.test/step"></iframe></main>'
+  ]) {
+    await page.setContent(html);
+    const tracker = {};
+    assert.equal(await inspectAt(tracker, 0), null, html);
+    assert.equal(await inspectAt(tracker, 29_999), null, html);
+    assert.match(await inspectAt(tracker, 30_000), /tab phụ/i, html);
+  }
+  for (const html of [
+    '<main>' + embeddedForm + '</main>' + emailFooter,
+    '<main><iframe srcdoc="<main><div class=question-title>What is your age?</div></main>"></iframe></main>',
+    '<main><iframe srcdoc="<main><fieldset><legend>Continue?</legend><button>Yes</button><button>No</button></fieldset></main>"></iframe></main>',
+    '<main aria-busy="true">Loading form</main>' + emailFooter
+  ]) {
+    await page.setContent(html);
+    const tracker = {};
+    assert.equal(await inspectAt(tracker, 0), null, html);
+    assert.equal(await inspectAt(tracker, 30_000), null, html);
+  }
+  await page.setContent('<main>' + emailField + embeddedForm + '</main>');
+  const tracker = {};
+  assert.equal(await inspectAt(tracker, 0), null);
+  assert.equal(await inspectAt(tracker, 60_000), null);
+  await page.locator('iframe').evaluate(element => element.remove());
+  assert.equal(await inspectAt(tracker, 120_000), null, 'nhịp quét đến muộn vẫn bắt đầu đủ 30 giây khi vừa thấy iframe biến mất');
+  assert.equal(await inspectAt(tracker, 149_999), null);
+  assert.match(await inspectAt(tracker, 150_000), /tab phụ/i, 'iframe đã kết thúc, form còn lại ở trang cha không giữ tab');
 });
 
 test('isExitIpConsumed: IP đã click offer vẫn bị chặn, lỗi proxy thì không', () => {

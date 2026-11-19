@@ -1,3 +1,6 @@
+import { getAiFormFrames } from '../autofill/form-scope/select-page-form-frames.mjs';
+import { FORM_UTILITY_REGIONS } from '../browser/locators/form-utility-regions.mjs';
+
 /**
  * Đọc trạng thái validation thực của form, bỏ qua nội dung cảnh báo và hướng dẫn chung.
  *
@@ -7,10 +10,12 @@
  * @since 2026-11-19
  */
 async function inspectFormRepairState(page) {
-  const targetFrame = page._activeAutofillFrame || page;
-  const evaluation = targetFrame.evaluate(formScope => {
+  const [targetFrame] = await getAiFormFrames(page);
+  if (!targetFrame) return null;
+  const evaluation = targetFrame.evaluate(({ formScope, excludedRegions }) => {
     const isVisible = element => {
       if (!element || formScope && !element.matches(formScope.memberSelector)) return false;
+      if (element.closest(excludedRegions)) return false;
       for (let parent = element.parentElement; parent; parent = parent.parentElement) {
         const style = getComputedStyle(parent);
         if (parent.hidden || parent.hasAttribute('inert') || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
@@ -96,7 +101,7 @@ async function inspectFormRepairState(page) {
       problemInputs: problemInputs.slice(0, 15),
       hasBlocker: errors.length > 0 || emailMissing || hasRequiredProblem
     };
-  }, targetFrame._activeAutofillFormScope || null).catch(() => null);
+  }, { formScope: targetFrame._activeAutofillFormScope || null, excludedRegions: FORM_UTILITY_REGIONS }).catch(() => null);
   let timer;
   const timeout = new Promise(resolve => {
     timer = setTimeout(() => resolve(null), 4000);

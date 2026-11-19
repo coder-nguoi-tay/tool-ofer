@@ -132,8 +132,9 @@ test('tích hợp: bộ canh phiên thật (watchTrafficBlockedPage) đóng tab 
   t.after(() => browser.close());
   const context = await browser.newContext();
   const html = '<html style="--progressPercentage:99%"><body><main><div class="offerwall-card-wrap"><div class="card"><a target="_blank" href="https://offer.test/one">One</a></div><div class="card"><a target="_blank" href="https://offer.test/two">Two</a></div></div></main></body></html>';
-  // Tab con còn form để làm: chỉ quy tắc 5 phút mới được đóng nó (không phải quy tắc "trang trống").
-  await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: route.request().url().includes('/wall') ? html : '<main style="text-align:center"><form><h3>Your email?</h3><input name="email"><button type="submit">Continue</button></form></main>' }));
+  // Iframe ở tab con vẫn có form trong suốt thời gian kiểm tra bộ hẹn giờ 5 phút của màn card.
+  const embeddedForm = '<main><iframe srcdoc="<main><form><label>Your email?<input name=email></label></form></main>"></iframe></main>';
+  await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: route.request().url().includes('/wall') ? html : embeddedForm }));
   const root = await context.newPage();
   await root.goto('https://sweepstakesalerts.com/wall');
   const logs = [];

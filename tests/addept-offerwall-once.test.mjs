@@ -41,7 +41,7 @@ test('nhận diện đúng iframe offerwall Addept', () => {
   assert.equal(isAddeptOfferwallFrame(null), false);
 });
 
-test('trang cuối offerwall Addept (blissxo): mỗi offer chỉ bấm đúng một lần, không bị bộ trả lời khảo sát/submit bấm lại', { skip }, async t => {
+test('iframe chỉ có nút quảng cáo: quét form nhiều lần vẫn không mở link hay gửi đáp án', { skip }, async t => {
   const browser = await chromium.launch();
   t.after(() => browser.close());
   const context = await browser.newContext();
@@ -67,8 +67,8 @@ test('trang cuối offerwall Addept (blissxo): mỗi offer chỉ bấm đúng m�
     await page.waitForTimeout(150);
   }
   const clicks = await frame().evaluate(() => window.clicks);
-  assert.deepEqual(clicks, { 0: 1, 1: 1, 2: 1 }, 'mỗi offer bấm đúng một lần, đủ cả ba offer');
-  assert.equal(opened.length, 3, 'mở đúng 3 tab offer');
+  assert.deepEqual(clicks, {}, 'nút quảng cáo trong iframe không phải đáp án của form');
+  assert.deepEqual(opened, [], 'không mở tab từ nút quảng cáo khi quét form');
   assert.equal(await frame().locator('[data-ux-choice-id]').count(), 0, 'bộ trả lời khảo sát không đụng vào nút offer');
   assert.equal(await frame().locator('[data-ux-submitted]').count(), 0, 'bộ submit không bấm "Check Eligibility"');
   assert.equal(page.url(), 'https://blissxo.com/125k-ow?game=lose', 'trang cuối giữ nguyên');

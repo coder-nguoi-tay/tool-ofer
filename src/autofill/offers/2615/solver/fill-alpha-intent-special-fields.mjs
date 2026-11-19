@@ -62,7 +62,9 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
     const genderLoc = locateFormElements(frame, `input[type="radio"].ai-input-gender[value="${genderVal}" i], input#ai-${genderVal.toLowerCase()}-input, .ai-gender-button[data-gender="${genderVal}" i], [data-testid="gender-${genderVal.toLowerCase()}"], #ai-funnel [data-gender="${genderVal}"], #ai-funnel button[data-gender="${genderVal}"]`).first();
     if ((await genderLoc.count().catch(() => 0)) > 0 && (await genderLoc.isEnabled({ timeout: 1000 }).catch(() => false))) {
       const isChecked = await genderLoc.isChecked({ timeout: 1000 }).catch(() => false);
-      const selected = isChecked || (!page?.mouse || await humanClick(page, genderLoc)) && await genderLoc.check({ force: true, timeout: 1500 }).then(() => true).catch(() => false);
+      const selected = isChecked || (page?.mouse
+        ? await humanClick(page, genderLoc) && await genderLoc.isChecked().catch(() => false)
+        : await genderLoc.check({ timeout: 1500 }).then(() => true, () => false));
       if (selected) {
         if (!isChecked) filledCount += 1;
         await frame.evaluate(syncAlphaHiddenGender, frame._activeAutofillFormScope ? { __formScopePayload: true, value: genderVal, scopeSelector: frame._activeAutofillFormScope.memberSelector } : genderVal).catch(() => {});
@@ -73,7 +75,9 @@ async function fillAlphaIntentSpecialFields(frame, record = {}) {
     const disclaimerCb = locateFormElements(frame, '#ai-disclaimer-container input[type="checkbox"], label.tcpa-text input[type="checkbox"], .ai-tcpa input[type="checkbox"], [data-testid="tcpa-checkbox"], #ai-funnel input[type="checkbox"][name*="consent"], #ai-funnel input[type="checkbox"][name*="tcpa"]').first();
     if ((await disclaimerCb.count().catch(() => 0)) > 0 && (await disclaimerCb.isEnabled({ timeout: 1000 }).catch(() => false))) {
       const isChecked = await disclaimerCb.isChecked({ timeout: 1000 }).catch(() => false);
-      const selected = isChecked || (!page?.mouse || await humanClick(page, disclaimerCb)) && await disclaimerCb.check({ force: true, timeout: 1500 }).then(() => true).catch(() => false);
+      const selected = isChecked || (page?.mouse
+        ? await humanClick(page, disclaimerCb) && await disclaimerCb.isChecked().catch(() => false)
+        : await disclaimerCb.check({ timeout: 1500 }).then(() => true, () => false));
       if (selected) {
         if (!isChecked) filledCount += 1;
         await frame.evaluate(syncAlphaTcpaConsent, frame._activeAutofillFormScope ? { __formScopePayload: true, scopeSelector: frame._activeAutofillFormScope.memberSelector } : null).catch(() => {});

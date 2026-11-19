@@ -5,6 +5,15 @@ import { Readable } from 'node:stream';
 import { chromium } from 'playwright';
 import { waitForSurveyReady } from '../src/autofill/offers/2615/solver/survey/wait-for-survey-ready.mjs';
 import { selectPageFormFrames } from '../src/autofill/offers/2615/solver/form-scope/select-page-form-frames.mjs';
+import { selectPageFormFrames as selectGenericFormFrames } from '../src/autofill/form-scope/select-page-form-frames.mjs';
+import { humanClick } from '../src/autofill/human-click.mjs';
+import { fillPageForms } from '../src/autofill/fill-page-forms.mjs';
+import { fillPageForms as fillOffer2615Forms } from '../src/autofill/offers/2615/solver/fill-page-forms.mjs';
+import { inspectFormFrameOwner } from '../src/browser/frames/inspect-form-frame-owner.mjs';
+import { executeAction } from '../src/ai-assist/execute-action.mjs';
+import { detectSmartFallbackAction } from '../src/ai-assist/detect-smart-fallback-action.mjs';
+import { readVisiblePageState } from '../src/ai-assist/visible-state/read-visible-page-state.mjs';
+import { inspectFormRepairState } from '../src/ai-assist/inspect-form-repair-state.mjs';
 import { selectActiveForm } from '../src/autofill/form-scope/select-active-form.mjs';
 import { updateBrowserMousePointer } from '../src/autofill/interaction/update-browser-mouse-pointer.mjs';
 import { handlePostScreenInput } from '../src/http/routes/screen/post-input.mjs';
@@ -110,6 +119,125 @@ test('Khảo sát: Đảm bảo khảo sát load ra đầy đủ và click chọ
       const selectedFrames = await selectPageFormFrames(page);
       assert.equal(selectedFrames.length, 1);
       assert.equal(selectedFrames[0], childFrame, 'Frame được chọn phải là iframe khảo sát đang loading');
+    } finally {
+      await page.close();
+    }
+  });
+
+  await t.test('Cả hai bộ quét loại iframe khác origin trong footer lồng nhau, vùng ẩn và tracker', async () => {
+    const page = await browser.newPage();
+    try {
+      await page.route('**/*', route => {
+        const url = new URL(route.request().url());
+        const embedded = '<div class="survey-container"><form><input name="email"><input name="address"></form></div>';
+        const html = url.pathname === '/landing'
+          ? `<main><form><input name="firstname"></form>
+              <div aria-hidden="true"><iframe name="hidden" src="https://child.test/form"></iframe></div>
+              <iframe name="pixel" width="1" height="1" src="https://child.test/form"></iframe>
+              <iframe name="tracker" src="https://stats.doubleclick.net/pixel"></iframe></main>
+            <form><iframe name="outside" src="https://child.test/form"></iframe></form>
+            <footer><iframe name="footer" src="https://child.test/nested"></iframe></footer>`
+          : url.pathname === '/nested' ? '<iframe name="nested" src="https://other.test/form"></iframe>' : embedded;
+        return route.fulfill({ contentType: 'text/html', body: html });
+      });
+      await page.goto('https://parent.test/landing');
+      for (const name of ['hidden', 'pixel', 'tracker', 'outside', 'footer', 'nested']) {
+        assert.equal(await inspectFormFrameOwner(page.frame({ name })), 'excluded', name);
+      }
+      for (const select of [selectGenericFormFrames, selectPageFormFrames]) {
+        assert.deepEqual(await select(page), [page.mainFrame()]);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
+  await t.test('Không chọn CTA của trang cha trong khi chờ form nhúng, đọc lại sau khi iframe tải xong', async () => {
+    const page = await browser.newPage();
+    try {
+      await page.route('https://child.test/**', route => route.fulfill({ contentType: 'text/html', body: '<main><form><input name="email"></form></main>' }));
+      await page.setContent('<main><form><button>Tiếp tục</button></form><iframe name="survey"></iframe></main>');
+      for (const select of [selectGenericFormFrames, selectPageFormFrames]) assert.deepEqual(await select(page), []);
+      assert.equal(page._autofillWaitingForFormFrame, true);
+      assert.equal((await executeAction(page, { action: 'click', selector: 'button' })).reason, 'scope_unavailable');
+      assert.equal(await detectSmartFallbackAction(page), null);
+      assert.equal(await inspectFormRepairState(page), null);
+      assert.equal((await readVisiblePageState(page)).hasWork, false);
+      const formLoaded = page.waitForEvent('framenavigated', frame => frame.url() === 'https://child.test/form');
+      await page.locator('iframe').evaluate(element => { element.src = 'https://child.test/form'; });
+      const child = await formLoaded;
+      await child.locator('input').waitFor();
+      for (const select of [selectGenericFormFrames, selectPageFormFrames]) assert.deepEqual(await select(page), [child]);
+      assert.equal(page._autofillWaitingForFormFrame, false);
+      await page.locator('iframe').evaluate(element => { element.parentElement.setAttribute('role', 'contentinfo'); });
+      assert.equal((await executeAction(page, { action: 'fill', selector: 'input', value: 'outside' })).ok, false);
+      assert.equal(await child.locator('input').inputValue(), '');
+    } finally {
+      await page.close();
+    }
+  });
+
+  await t.test('Câu hỏi trung tâm vẫn được nhận khi iframe chỉ hiển thị văn bản đã tải xong', async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent('<main><fieldset><legend>Did the status change?</legend><button>Yes</button><button>No</button></fieldset><iframe srcdoc="<p>Status information</p>"></iframe></main>');
+      for (const select of [selectGenericFormFrames, selectPageFormFrames]) assert.deepEqual(await select(page), [page.mainFrame()]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  await t.test('Tab phụ chỉ xử lý iframe còn việc và dừng ngay khi iframe hết câu hỏi', async () => {
+    const context = await browser.newContext();
+    try {
+      const root = await context.newPage();
+      const popup = await context.newPage();
+      const session = { mainPage: root };
+      popup._autofillSession = session;
+      await popup.route('https://popup.test/**', route => route.fulfill({ contentType: 'text/html',
+        body: '<main><form><input name="email"><button type="button" onclick="window.parentClicked=true">Continue</button></form></main>' }));
+      await popup.goto('https://popup.test/content');
+      popup._activeAutofillFrame = popup.mainFrame();
+      assert.equal(await humanClick(popup, popup.locator('button')), false);
+      for (const select of [selectGenericFormFrames, selectPageFormFrames]) assert.deepEqual(await select(popup), []);
+      for (const fill of [fillPageForms, fillOffer2615Forms]) {
+        await fill(popup, { session, sessionRecord: { email: 'fixture@example.test' }, options: { autoSubmit: true } });
+      }
+      assert.equal(await popup.locator('input').inputValue(), '');
+      assert.equal(await popup.evaluate(() => Boolean(window.parentClicked)), false);
+      await popup.evaluate(() => {
+        const iframe = document.createElement('iframe');
+        iframe.srcdoc = '<main><form><label>Your name <input name="name"></label></form></main>';
+        document.querySelector('main').appendChild(iframe);
+      });
+      await popup.frameLocator('iframe').locator('input').waitFor();
+      const child = popup.frames()[1];
+      for (const select of [selectGenericFormFrames, selectPageFormFrames]) assert.deepEqual(await select(popup), [child]);
+      assert.equal((await executeAction(popup, { action: 'click', selector: 'button' })).ok, false);
+      await child.setContent('<main><div class="survey-container"><h2>Completed</h2><form><input name="name" readonly value="Fixture"><button disabled>Done</button></form></div></main>');
+      assert.equal((await readVisiblePageState(popup)).hasWork, false);
+      for (const select of [selectGenericFormFrames, selectPageFormFrames]) assert.deepEqual(await select(popup), []);
+      await popup.locator('iframe').evaluate(iframe => iframe.remove());
+      assert.equal((await readVisiblePageState(popup)).hasWork, false);
+      assert.equal((await executeAction(popup, { action: 'fill', selector: 'input', value: 'outside' })).ok, false);
+      assert.equal(await popup.locator('input').inputValue(), '');
+      popup._uxOriginTab = true;
+      assert.deepEqual(await selectGenericFormFrames(popup), [popup.mainFrame()]);
+    } finally {
+      await context.close();
+    }
+  });
+
+  await t.test('CTA rời và câu hỏi trong chân trang ARIA không mở quyền bấm hoặc điền', async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent('<main><button id="next">Continue</button></main><div role="contentinfo"><form><input name="email"><button>Submit</button></form><h2>Which address?</h2><button>Yes</button><button>No</button></div>');
+      for (const select of [selectGenericFormFrames, selectPageFormFrames]) assert.deepEqual(await select(page), []);
+      assert.equal((await executeAction(page, { action: 'click', selector: '#next' })).ok, false);
+      assert.equal((await executeAction(page, { action: 'fill', selector: 'input', value: 'outside' })).ok, false);
+      assert.equal(await page.locator('input').inputValue(), '');
+      assert.equal((await readVisiblePageState(page)).hasWork, false);
+      assert.equal(await detectSmartFallbackAction(page), null);
     } finally {
       await page.close();
     }

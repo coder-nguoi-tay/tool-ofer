@@ -66,13 +66,15 @@ test('submit click lỗi không đặt cờ màn/email và còn retry được',
   const {context,page}=await createFormScopeFixture(browser,'<form id="main" onsubmit="event.preventDefault();this.dataset.sent=1"><input name="email" type="email" value="test@example.invalid"><button>Submit</button></form>');t.after(()=>context.close());
   const frame=page.mainFrame(), scope={active:true,nativeForm:true,rootSelector:'#main',memberSelector:':is(#main,#main *)'};frame._activeAutofillFormScope=scope;
   const logs=[],session={emailFilled:true};
-  const locatorPrototype=Object.getPrototypeOf(page.locator('button')); const originalClick=locatorPrototype.click,down=page.mouse.down,up=page.mouse.up;
   const request={frame,page,session,record:{email:'test@example.invalid'},options:{autoSubmit:true,onLog:entry=>logs.push(entry)},frameProgress:{formScope:scope,frameHasEmail:true},screenInfo:{hasEmailInput:true},scanStartUrl:page.url()};
-  try{
-    locatorPrototype.click=async()=>{throw new Error('blocked');};page.mouse.down=async()=>{throw new Error('CDP failed');};page.mouse.up=async()=>{throw new Error('CDP failed');};
-    await page.locator('button').evaluate(element=>{element.click=()=>{throw new Error('DOM failed');};});
-    await submitFrameForm(request);
-  }finally{locatorPrototype.click=originalClick;page.mouse.down=down;page.mouse.up=up;await page.locator('button').evaluate(element=>{delete element.click;});}
+  await page.evaluate(() => {
+    const overlay = document.createElement('div');
+    overlay.id = 'blocking-layer';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10';
+    document.body.append(overlay);
+  });
+  await submitFrameForm(request);
+  await page.locator('#blocking-layer').evaluate(element => element.remove());
   assert.equal(session.hasSubmittedCurrentScreen,undefined);assert.equal(session.emailScreenSubmitted,undefined);assert.equal(session.firstSubmitHandled,undefined);assert.equal(session.autofillActions,undefined);
   assert.ok(logs.some(entry=>entry.type==='submit_attempt'));assert.ok(logs.some(entry=>entry.type==='submit_click_failed'));assert.ok(!logs.some(entry=>entry.type==='submit_clicked'));
   await page.locator('button').evaluate(element=>{element.dataset.uxLastSubmitTime='0';});
@@ -80,10 +82,10 @@ test('submit click lỗi không đặt cờ màn/email và còn retry được',
   assert.equal(await page.locator('form').getAttribute('data-sent'),'1');assert.equal(session.emailScreenSubmitted,true);
 });
 
-test('fallback bỏ Back/Cancel/Skip/Privacy và không chọn nút mơ hồ',async t=>{
+test('fallback bỏ mọi nút đứng ngoài form, kể cả Continue',async t=>{
   const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
   const {context,page}=await createFormScopeFixture(browser,'<button id="back">Back</button><button>Cancel</button><button>Skip</button><button>Privacy</button><button id="next">Continue</button>');t.after(()=>context.close());
-  assert.equal((await page.evaluate(submitVisibleFormFallback)).id,'next');
+  assert.equal((await page.evaluate(submitVisibleFormFallback)).method,'none');
   await page.setContent('<button>Back</button><div role="button">Something</div>');assert.equal((await page.evaluate(submitVisibleFormFallback)).method,'none');
 });
 

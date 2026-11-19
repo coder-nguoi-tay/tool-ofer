@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createFormScopeFixture } from '../helpers/form-scope-browser-fixture.mjs';
 import { matchFieldValue, handleCustomGenderButtons, findSubmitButton } from "../../autofill.mjs";
 
 test('Uplevel Rewards (#reg-container): matchFieldValue correctly matches all screen 1 fields', () => {
@@ -89,28 +92,15 @@ test('Uplevel Rewards (#reg-container): handleCustomGenderButtons selects gender
   assert.equal(evaluatedArgs.isFemale, false);
 });
 
-test('Uplevel Rewards (#reg-container): findSubmitButton matches #sub-btn / .sbtn', async () => {
-  const mockBtn = {
-    isVisible: async () => true,
-    isEnabled: async () => true,
-    evaluate: async () => ({ valid: true }),
-  };
-
-  const mockFrame = {
-    locator: (selector) => {
-      if (selector.includes('#sub-btn')) {
-        return {
-          all: async () => [mockBtn],
-        };
-      }
-      return {
-        all: async () => [],
-      };
-    },
-  };
-
-  const submitBtn = await findSubmitButton(mockFrame);
-  assert.notEqual(submitBtn, null, 'Nút #sub-btn phải được tìm thấy');
+test('Uplevel Rewards nhận #sub-btn trong #reg-container và bỏ CTA đứng ngoài', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const { context, page } = await createFormScopeFixture(browser, '<main><div id="reg-container"><input name="email"><div class="sbtn" id="sub-btn">Continue</div></div></main><footer><a class="sbtn" href="/next">Continue</a></footer>');
+  t.after(() => context.close());
+  const submit = await findSubmitButton(page);
+  assert.equal(await submit?.getAttribute('id'), 'sub-btn');
+  await page.locator('#reg-container').evaluate(container => container.remove());
+  assert.equal(Boolean(await findSubmitButton(page)), false);
 });
 
 test('Uplevel Rewards (#reg-container): City/Town matches correctly and falls back without phone leak', () => {

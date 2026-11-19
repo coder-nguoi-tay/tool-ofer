@@ -47,17 +47,62 @@ async function fixture(t) {
   return { origin: `http://127.0.0.1:${server.address().port}`, requests, details };
 }
 
+/**
+ * Chờ CDP thông báo đủ hai iframe loopback rồi đọc tọa độ/lỗi ở chính các realm hiện tại.
+ * @param {import('playwright').Page} page Trang thuộc context của phiên fixture.
+ * @param {string} origin Origin chính xác của fixture HTTP.
+ * @return {Promise<Array<Array<number>|number>>} Tọa độ kèm accuracy hoặc mã lỗi cho từng realm.
+ * @throws {Error} Khi thiếu iframe sau 4 giây, sai cây cha–con, CDP lỗi hoặc callback không hoàn tất.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+async function geolocationReadings(page, origin) {
+  let realms = [];
+  const expectedPaths = ['/frame', '/leaf'];
+  const start = Date.now();
+  while (Date.now() - start < 4000) {
+    const frames = expectedPaths.map(path => page.frames().find(frame => frame.url() === origin + path));
+    if (frames.every(Boolean)) {
+      realms = [page, ...frames];
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.ok(realms.length === 3 && realms.every(Boolean), 'Phải kiểm tra cả iframe và iframe lồng nhau');
+  assert.equal(realms[1].parentFrame(), page.mainFrame(), 'Iframe /frame phải thuộc trang chính');
+  assert.equal(realms[2].parentFrame(), realms[1], 'Iframe /leaf phải nằm trong /frame');
+  const readings = [];
+  for (const realm of realms) {
+    readings.push(await realm.evaluate(() => new Promise(resolve => navigator.geolocation.getCurrentPosition(
+      position => resolve([position.coords.latitude, position.coords.longitude, position.coords.accuracy]),
+      error => resolve(error.code), { timeout: 3000 },
+    ))));
+  }
+  return readings;
+}
+
 test('Obscura không còn script của app để vá Web API hoặc che lỗi engine', async () => {
   const source = await readFile(new URL('../src/obscura-engine/open-obscura-browser.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /addInitScript|stealthInitScript|buildStealthConfig/);
   assert.equal(buildObscuraStealthScript({ antiFingerprint: { canvas: true, clientRects: true, fonts: true } }), '');
 });
 
+/**
+ * Kiểm tra cấu hình native và tọa độ chỉ sau khi fixture cấp quyền rõ ràng cho origin riêng.
+ * @param {import('node:test').TestContext} t Bộ quản lý tài nguyên test.
+ * @return {Promise<void>} Hoàn tất kiểm tra document và các iframe.
+ * @throws {Error} Khi khởi tạo, CDP hoặc assertion thất bại.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
 test('API native đọc cấu hình từ Rust ngay lần chạy đầu, trong iframe và sau reload', { skip: !available, timeout: 30000 }, async t => {
   const { origin } = await fixture(t);
   const session = await openObscuraBrowser({ slot: 971, port: 0, os: 'android', seed: 4242, registerSession: false,
     geo: { ll: [40.75, -73.5], country: 'FR', timezone: 'Europe/Paris' } });
   t.after(() => session.close());
+  const permissionCdp = await session._cdpBrowser.newBrowserCDPSession();
+  await permissionCdp.send('Browser.setPermission', { origin, permission: { name: 'geolocation' }, setting: 'granted' });
+  await permissionCdp.detach();
   await session.page.goto(origin + '/native');
   const metrics = obscuraViewport(session.profile);
   const initial = await session.page.evaluate(() => window.initialNative);
@@ -209,6 +254,14 @@ test('Web Audio không quảng cáo backend tạo PCM giả', { skip: !available
     ['undefined', 'undefined', 'undefined']);
 });
 
+/**
+ * Kiểm tra tọa độ cấu hình của fixture sau grant; không dùng proxy hay website thật.
+ * @param {import('node:test').TestContext} t Bộ quản lý tài nguyên test.
+ * @return {Promise<void>} Hoàn tất kiểm tra tọa độ theo cấu hình phiên.
+ * @throws {Error} Khi khởi tạo, CDP hoặc assertion thất bại.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
 test('CDP Geolocation Override áp dụng tọa độ theo Geo IP khi mở phiên Obscura', { skip: !available, timeout: 20000 }, async t => {
   const { origin } = await fixture(t);
   const session = await openObscuraBrowser({
@@ -219,6 +272,7 @@ test('CDP Geolocation Override áp dụng tọa độ theo Geo IP khi mở phiê
     antiFingerprint: { apiFakeIP: true },
   });
   t.after(() => session.close());
+  await session.context.grantPermissions(['geolocation'], { origin });
   await session.page.goto(origin + '/native');
   const coords = await session.page.evaluate(() => new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
@@ -228,4 +282,75 @@ test('CDP Geolocation Override áp dụng tọa độ theo Geo IP khi mở phiê
     );
   }));
   assert.deepEqual(coords, [21.0285, 105.8542]);
+});
+
+/**
+ * Kiểm tra CDP native: accuracy, lỗi nguyên tử, unavailable và clear trên mọi realm trước/sau reload.
+ * @param {import('node:test').TestContext} t Bộ quản lý phiên và fixture loopback.
+ * @return {Promise<void>} Hoàn tất kiểm tra mà không dùng mặc định vị trí từ môi trường người dùng.
+ * @throws {Error} Khi khởi tạo, CDP hoặc assertion thất bại.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+test('Geolocation CDP giữ accuracy, không cập nhật một phần và clear/unavailable không để tọa độ cũ', { skip: !available, timeout: 45000 }, async t => {
+  const { origin } = await fixture(t);
+  const inheritedGeolocation = process.env.OBSCURA_GEOLOCATION;
+  let session;
+  delete process.env.OBSCURA_GEOLOCATION;
+  try {
+    session = await openObscuraBrowser({ slot: 977, port: 0, seed: 4242, registerSession: false,
+      geo: { ll: [3, 4], timezone: 'UTC' } });
+  } finally {
+    if (inheritedGeolocation === undefined) delete process.env.OBSCURA_GEOLOCATION;
+    else process.env.OBSCURA_GEOLOCATION = inheritedGeolocation;
+  }
+  t.after(() => session.close());
+  await session.context.grantPermissions(['geolocation'], { origin });
+  const page = session.page;
+  await page.goto(origin + '/native');
+  const cdp = await session.context.newCDPSession(page);
+  const position = { latitude: 10, longitude: 20, accuracy: 37.5 };
+  const expected = [[10, 20, 37.5], [10, 20, 37.5], [10, 20, 37.5]];
+  const baseline = [[3, 4, 10], [3, 4, 10], [3, 4, 10]];
+  const unavailable = [2, 2, 2];
+  await cdp.send('Emulation.clearGeolocationOverride');
+  assert.deepEqual(await geolocationReadings(page, origin), baseline);
+  await cdp.send('Emulation.setGeolocationOverride', position);
+  assert.deepEqual(await geolocationReadings(page, origin), expected);
+  for (const params of [
+    { ...position, latitude: '30' }, { ...position, latitude: null }, { ...position, longitude: false },
+    { ...position, accuracy: '1' }, { ...position, latitude: 90.1 }, { ...position, latitude: -90.1 },
+    { ...position, longitude: 180.1 }, { ...position, longitude: -180.1 }, { ...position, accuracy: -1 },
+    { latitude: 30, accuracy: 'invalid' },
+    ...['altitude', 'altitudeAccuracy', 'heading', 'speed'].map(name => ({ ...position, [name]: 1 })),
+  ]) {
+    await assert.rejects(cdp.send('Emulation.setGeolocationOverride', params), /finite number|out of range|not supported/);
+    assert.deepEqual(await geolocationReadings(page, origin), expected);
+  }
+  for (const params of [{}, { latitude: 10 }, { longitude: 20 }, { accuracy: 37.5 },
+    { latitude: 10, longitude: 20 }, { latitude: 10, accuracy: 37.5 }, { longitude: 20, accuracy: 37.5 }]) {
+    await cdp.send('Emulation.setGeolocationOverride', position);
+    await cdp.send('Emulation.setGeolocationOverride', params);
+    assert.deepEqual(await geolocationReadings(page, origin), unavailable);
+    await page.reload();
+    assert.deepEqual(await geolocationReadings(page, origin), unavailable, 'Thiếu trường không được fallback về profile');
+    await cdp.send('Emulation.clearGeolocationOverride');
+    assert.deepEqual(await geolocationReadings(page, origin), baseline);
+    await page.reload();
+    assert.deepEqual(await geolocationReadings(page, origin), baseline);
+  }
+  await cdp.send('Emulation.setBrowserIdentity', { profile: { ...session.profile, geolocation: null } });
+  await page.reload();
+  assert.deepEqual(await geolocationReadings(page, origin), unavailable);
+  for (const reloadBeforeClear of [false, true]) {
+    await cdp.send('Emulation.setGeolocationOverride', position);
+    if (reloadBeforeClear) await page.reload();
+    assert.deepEqual(await geolocationReadings(page, origin), expected);
+    await cdp.send('Emulation.clearGeolocationOverride');
+    assert.deepEqual(await geolocationReadings(page, origin), unavailable, 'Clear phải xóa tọa độ ở realm đang sống');
+    await page.reload();
+    assert.deepEqual(await geolocationReadings(page, origin), unavailable);
+  }
+  assert.equal(await page.evaluate(async () => (await navigator.permissions.query({ name: 'geolocation' })).state), 'granted');
+  await cdp.detach();
 });

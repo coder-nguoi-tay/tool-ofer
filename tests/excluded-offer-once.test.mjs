@@ -49,14 +49,23 @@ test('loại trừ đúng host/path, không phụ thuộc tracking và không đ
   for (const url of ['https://accounts.google.com.evil.test/signin', 'https://notgoogle.com/', 'https://google.com@offer.test/', 'https://offer.test/?next=https://accounts.google.com/signin']) assert.equal(isExcludedOfferPageUrl(url), false);
 });
 
-test('mouse.down lỗi sau khi bắt đầu input không chạy thêm click fallback', async () => {
-  let presses = 0, releases = 0, fallbackClicks = 0;
-  const page = { evaluate: async () => {}, mouse: { move: async () => {}, down: async () => { presses++; throw new Error('CDP disconnected'); }, up: async () => { releases++; } } };
-  const target = { evaluate: async () => ({ ready: true }), boundingBox: async () => ({ x: 10, y: 10, width: 50, height: 30 }), click: async () => { fallbackClicks++; } };
+test('lỗi cảm ứng Android sau touchStart được nhả và không bấm dự phòng', async () => {
+  const { attachGoLoginAndroidTouchInput } = await import('../src/browser/gologin/attach-android-touch-input.mjs');
+  const events = [];
+  const page = { evaluate: async () => {}, mouse: { move: async () => {} } };
+  const connection = { send: async (_command, { type }) => {
+    events.push(type);
+    if (type === 'touchStart') throw new Error('CDP disconnected');
+  } };
+  await attachGoLoginAndroidTouchInput({ newCDPSession: async () => connection }, page, { width: 100, height: 100 });
+  const target = {
+    evaluate: async fn => fn.name === 'inspectInteractionReadiness' ? { ready: true } : true,
+    boundingBox: async () => ({ x: 10, y: 10, width: 50, height: 30 }),
+    hover: async () => {},
+    click: async () => assert.fail('Không bấm lần hai khi kết quả input chưa rõ'),
+  };
   assert.equal(await humanClick(page, target), false);
-  assert.equal(presses, 1);
-  assert.equal(releases, 1);
-  assert.equal(fallbackClicks, 0);
+  assert.deepEqual(events, ['touchStart', 'touchEnd']);
 });
 
 const skip = !existsSync(chromium.executablePath());

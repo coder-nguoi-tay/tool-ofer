@@ -22,8 +22,10 @@ import { requestManagedProfileStop } from '../../browser/actions/request-managed
 import { warnIdleOfferSession } from './warn-idle-offer-session.mjs';
 import { recordProxyOutcome, sessionLabel } from './record-proxy-outcome.mjs';
 import { getEmptyOfferPageReason } from './get-empty-offer-page-reason.mjs';
+import { isSecondaryOfferTab } from './is-secondary-offer-tab.mjs';
+import { attachFrameRequestTracking } from '../../browser/frames/pending-frame-requests.mjs';
 import { isSessionWorkingOnOffer } from './is-session-working-on-offer.mjs';
-import { readSubOfferCloseReason, matchSubOfferCloseReason } from './get-sub-offer-close-reason.mjs';
+import { matchSubOfferCloseReason } from './get-sub-offer-close-reason.mjs';
 import { usesOffer2615CloseRules, finishOffer2615Session } from '../../autofill/offers/2615/session-close/finish-offer2615-session.mjs';
 
 /**
@@ -52,12 +54,14 @@ function dueForDomCheck(page, key) {
  *
  * @param {object} session Phiên Chrome đã mở thành công.
  * @return {void} Gắn lịch kiểm tra vào các tab của phiên.
+ * @throws {Error} Khi phiên không cho đăng ký bộ canh.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-19
  */
 export function watchTrafficBlockedPage(session) {
   if (!session || session.trafficWatcherAttached) return;
   session.trafficWatcherAttached = true;
+  attachFrameRequestTracking(session.browser);
   let checking = false;
   let blocked = false;
   const redirectTracker = new WeakMap();
@@ -217,6 +221,13 @@ export function watchTrafficBlockedPage(session) {
     } catch {}
   };
 
+  /**
+   * Theo dõi điều hướng và bắt đầu lại thời gian kiểm tra khi tab phụ nhận tài liệu mới.
+   * @param {object} p Tab đang được theo dõi.
+   * @return {void}
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-19
+   */
   const bindPageInstantCheck = p => {
     // Gắn ngay khi tab xuất hiện: response điều hướng đầu tiên của popup thường tới trước nhịp kiểm tra 1s.
     if (p && !p._uxStatusListenerBound) {
@@ -227,8 +238,9 @@ export function watchTrafficBlockedPage(session) {
     }
     if (!p || p._toffersDupCheckBound) return;
     p._toffersDupCheckBound = true;
-    p.on?.('framenavigated', () => {
+    p.on?.('framenavigated', frame => {
       p._uxHealthRevision = (p._uxHealthRevision ?? 0) + 1;
+      if (frame && frame === p.mainFrame?.() && isSecondaryOfferTab(p, session)) emptyPageTrackers.delete(p);
       void checkInstantToffersDup(p);
       void checkInstantThankYou(p);
     });
@@ -244,30 +256,33 @@ export function watchTrafficBlockedPage(session) {
 
   /**
    * Đóng các tab offer phụ (không phải tab đầu/tab gốc) đang ở trang hết offer / chờ xác minh email / lifepointspanel,
-   * hoặc sau 30s vẫn không có form/câu hỏi nào để làm (ưu tiên giữ tab có form và đáp án).
+   * hoặc khi iframe trong vùng nội dung đã hết form/câu hỏi liên tục 30 giây.
    * Chỉ đóng tab, không đóng trình duyệt; tab đầu không bao giờ bị đóng ở đây.
    * @param {object} session Phiên trình duyệt.
    * @param {object[]} pages Các tab đang mở.
    * @return {Promise<void>}
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-13
+   * @since 2026-11-19
    */
   const closeFinishedSubOfferTabs = async (session, pages) => {
     for (const page of pages) {
-      if (page === session.mainPage || page._uxOriginTab || page.isClosed?.()) continue;
+      if (!isSecondaryOfferTab(page, session) || page.isClosed?.()) continue;
       // Tab phụ là tab cuối: không đóng ở đây (đóng = đóng cả trình duyệt), để nhánh đóng phiên + bù slot bên dưới xử lý.
       if (!pages.some(other => other !== page && !other.isClosed?.())) continue;
       let tracker = emptyPageTrackers.get(page);
       if (!tracker) { tracker = { since: Date.now() }; emptyPageTrackers.set(page, tracker); }
-      let subOfferReason = matchSubOfferCloseReason({ url: typeof page.url === 'function' ? page.url() : '' });
+      const currentUrl = page.url?.() || '';
+      const revision = page._uxHealthRevision;
+      let subOfferReason = matchSubOfferCloseReason({ url: currentUrl });
       if (!subOfferReason) {
         if (!dueForDomCheck(page, '_uxSubOfferDomCheckAt')) continue;
-        subOfferReason = await readSubOfferCloseReason(page) || await getEmptyOfferPageReason(page, tracker, { subTab: true });
+        subOfferReason = await getEmptyOfferPageReason(page, tracker, { subTab: true });
       }
-      if (!subOfferReason || page.isClosed?.()) continue;
-      const currentUrl = typeof page.url === 'function' ? page.url() : '';
-      console.log(`[SubOffer] Đóng tab ${currentUrl}: ${subOfferReason}.`);
-      session.addBrowserLog?.({ type: 'sub_offer_tab_closed', detail: `Đóng tab offer phụ (${subOfferReason}): ${currentUrl}` });
+      if (!subOfferReason || page.isClosed?.() || currentUrl !== page.url?.() || revision !== page._uxHealthRevision) continue;
+      if (!isSecondaryOfferTab(page, session) || !pages.some(other => other !== page && !other.isClosed?.())) continue;
+      const displayUrl = currentUrl.split(/[?#]/)[0];
+      console.log(`[SubOffer] Đóng tab ${displayUrl}: ${subOfferReason}.`);
+      session.addBrowserLog?.({ type: 'sub_offer_tab_closed', detail: `Đóng tab offer phụ (${subOfferReason}): ${displayUrl}` });
       page._uxClosedByApp = `offer phụ: ${subOfferReason}`;
       await page.close().catch(() => {});
     }
@@ -317,8 +332,8 @@ export function watchTrafficBlockedPage(session) {
           bindPageInstantCheck(page);
           let deadReason = await readThrottledPageHealth(page);
           // Tab con (khi còn tab khác) đọc DOM tối đa mỗi 5 giây; tab chính/tab duy nhất giữ mỗi giây để nhả slot đúng mốc.
-          const isSubTab = page !== session.mainPage && !page._uxOriginTab && pages.some(other => other !== page && !other.isClosed?.());
-          if (!deadReason && !isSessionWorkingOnOffer(session) && (!isSubTab || dueForDomCheck(page, '_uxEmptyPageCheckAt'))) {
+          const isSubTab = isSecondaryOfferTab(page, session) && pages.some(other => other !== page && !other.isClosed?.());
+          if (!deadReason && !isSubTab && !isSessionWorkingOnOffer(session)) {
             let tracker = emptyPageTrackers.get(page);
             if (!tracker) {
               tracker = { since: Date.now() };

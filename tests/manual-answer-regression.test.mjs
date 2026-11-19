@@ -34,6 +34,6 @@ test('đối chiếu các bước trả lời trong log thao tác tay bằng fix
  });
  await t.test('chữ tiến độ 95% không phải câu trả lời hoặc bằng chứng hoàn tất',async()=>{
   const {context,page}=await createFormScopeFixture(browser,'<div id="question_1"><span id="value1">95% - One more step left!</span></div><a id="help" role="button" onclick="this.dataset.hit=1">What will I earn?</a>');
-  try{const result=await solveSurveyStep(page.mainFrame());assert.equal(result.answeredCount,0);assert.equal(result.nextClicked,false);assert.equal(result.status,'unsupported');assert.equal((await executeAction(page,{action:'click',selector:'#help'},{},{allowSubmit:false})).reason,'not_answer_control');assert.equal(await page.locator('#help').getAttribute('data-hit'),null);}finally{await context.close();}
+  try{const result=await solveSurveyStep(page.mainFrame());assert.equal(result.answeredCount,0);assert.equal(result.nextClicked,false);assert.equal(result.status,'unsupported');assert.equal((await executeAction(page,{action:'click',selector:'#help'},{},{allowSubmit:false})).reason,'scope_unavailable');assert.equal(await page.locator('#help').getAttribute('data-hit'),null);}finally{await context.close();}
  });
 });

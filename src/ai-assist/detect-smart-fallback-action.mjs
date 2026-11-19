@@ -1,4 +1,6 @@
 import { globalAiConfig } from './state/global-ai-config.mjs';
+import { getAiFormFrames } from '../autofill/form-scope/select-page-form-frames.mjs';
+import { FORM_UTILITY_REGIONS } from '../browser/locators/form-utility-regions.mjs';
 
 /**
  * Phát hiện action cứu hộ tự động trên trang khi AI trả về [] hoặc từ chối thực hiện.
@@ -12,16 +14,18 @@ import { globalAiConfig } from './state/global-ai-config.mjs';
  * @param {object} [config=null] Cấu hình AI tuỳ biến.
  * @return {Promise<{action:string,selector:string,detail?:string}|null>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-19
  */
 async function detectSmartFallbackAction(page, config = null) {
   const cfg = config || globalAiConfig;
   try {
     if (!page || typeof page.isClosed === 'function' && page.isClosed()) return null;
-    const targetFrame = page._activeAutofillFrame || page;
+    const [targetFrame] = await getAiFormFrames(page);
+    if (!targetFrame) return null;
     return await targetFrame.evaluate(opts => {
       const isVisible = el => {
         if (!el || el.disabled || opts.formScope && !el.matches(opts.formScope.memberSelector)) return false;
+        if (el.closest(opts.excludedRegions)) return false;
         if (el.closest('[aria-disabled="true"], [aria-busy="true"], [inert]')) return false;
         for (let ancestor = el; ancestor; ancestor = ancestor.parentElement) {
           const ancestorStyle = getComputedStyle(ancestor);
@@ -131,7 +135,7 @@ async function detectSmartFallbackAction(page, config = null) {
         const anyContainer = Array.from(document.querySelectorAll('form, [role="form"], .form, .form-container, .survey-container, .quiz-container, div:has(input), div.input, div.button, .btn-option')).find(isVisible);
         if (anyContainer) {
           const btn = anyContainer.querySelector('button, input[type="button"], input[type="submit"], div.button, div.btn-option, .btn-option, [role="button"], a.btn');
-          if (btn) {
+          if (btn && isVisible(btn)) {
             const sel = btn.id ? `#${btn.id}` : btn.className ? `.${btn.className.split(' ')[0]}` : 'button';
             return {
               action: 'click',
@@ -139,17 +143,12 @@ async function detectSmartFallbackAction(page, config = null) {
               detail: 'Tự động kích hoạt nút trong container form/div'
             };
           }
-          const sel = anyContainer.id ? `#${anyContainer.id}` : anyContainer.tagName === 'FORM' ? 'form' : 'div';
-          return {
-            action: 'click',
-            selector: `${sel} button, ${sel} input[type="button"], ${sel} .btn-option, ${sel}`,
-            detail: 'Tự động kích hoạt gửi form/div'
-          };
         }
       }
       return null;
     }, {
       formScope: targetFrame._activeAutofillFormScope || null,
+      excludedRegions: FORM_UTILITY_REGIONS,
       solveBotQuiz: cfg.solveBotQuiz !== false,
       solveSurveyCards: cfg.solveSurveyCards !== false,
       clickJumpPage: cfg.clickJumpPage !== false,

@@ -4,10 +4,10 @@ import { readEvidenceWithTimeout } from '../../../../../logging/recorder/read-ev
 /**
  * Phân biệt AS_IFRAME chưa tạo, trắng, lỗi mạng và nội dung hợp lệ trên FinancialHelpFinder.
  * @param {object} page Trang cha chứa placement Adsmith cần quan sát.
- * @return {Promise<object>} state và lý do; unavailable không phải bằng chứng frame chết.
+ * @return {Promise<object>} Trạng thái kiểm tra; khi iframe lỗi kèm frame, nguồn và mã tài liệu cha đã quan sát.
  * @throws {never} DOM đang chuyển hướng hoặc renderer chưa trả lời được giữ là chưa xác định.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 export async function inspectAdsmithFrameLoading(page) {
   let element;
@@ -51,11 +51,11 @@ export async function inspectAdsmithFrameLoading(page) {
     element = await page.locator('#AS_SURVEY iframe#AS_IFRAME').elementHandle({ timeout: 1000 });
     if (!element || !await element.isVisible()) return { state: 'not_applicable' };
     const frame = await element.contentFrame();
-    if (!frame) return { state: 'frame_blank', documentId: parent.documentId, reason: 'Iframe khảo sát chưa có document.' };
-    if (/^(chrome-error:|about:neterror)/i.test(frame.url())) return { state: 'chrome_error', documentId: parent.documentId, reason: 'Iframe khảo sát báo lỗi mạng của trình duyệt.' };
-    // Obscura để iframe nạp lỗi ở about:blank; Chrome để URL rỗng khi request iframe còn treo (evaluate cũng treo theo).
-    // src Adsmith mà document vẫn trống là chưa tải.
-    if ((!frame.url() || frame.url() === 'about:blank') && parent.source && parent.source !== 'about:blank') return { state: 'frame_blank', documentId: parent.documentId, reason: 'Iframe khảo sát vẫn là about:blank.' };
+    const observation = { frame, source: parent.source, documentId: parent.documentId };
+    if (!frame) return { state: 'frame_blank', ...observation, reason: 'Iframe khảo sát chưa có document.' };
+    if (/^(chrome-error:|about:neterror)/i.test(frame.url())) return { state: 'chrome_error', ...observation, reason: 'Iframe khảo sát báo lỗi mạng của trình duyệt.' };
+    // Playwright có thể chưa cung cấp execution context khi tài liệu đầu tiên đang tải.
+    if (!frame.url() && parent.source && parent.source !== 'about:blank') return { state: 'frame_blank', ...observation, reason: 'Iframe khảo sát đang chờ document.' };
     const content = await readEvidenceWithTimeout(frame, 'adsmith-loading-document', () => frame.evaluate(() => {
       /**
        * Chỉ nhận nội dung khảo sát không nằm trong bước ẩn.
@@ -79,9 +79,9 @@ export async function inspectAdsmithFrameLoading(page) {
       const hasContent = Boolean(text && !/^(loading(?:\s+(?:survey|questions|content))?|please wait|đang tải)[\s.!…]*$/i.test(text));
       const hasImage = Array.from(document.images).some(image => image.complete && image.naturalWidth > 32 && image.getBoundingClientRect().height > 32 && visible(image)
         && !/logo|loading|spinner|load-spin/i.test(`${image.id} ${image.className} ${image.alt} ${image.getAttribute('src') || ''}`));
-      return { hasWork, hasContent, hasImage };
+      return { hasWork, hasContent, hasImage, childUrl: location.href, childDocumentId: performance.timeOrigin };
     }));
-    return content.hasWork || content.hasContent || content.hasImage ? { state: 'normal' } : { state: 'frame_blank', documentId: parent.documentId, reason: 'Document khảo sát chưa có nội dung hiển thị.' };
+    return content.hasWork || content.hasContent || content.hasImage ? { state: 'normal' } : { state: 'frame_blank', ...observation, childUrl: content.childUrl, childDocumentId: content.childDocumentId, reason: 'Document khảo sát chưa có nội dung hiển thị.' };
   } catch { return { state: 'unavailable', applicable }; }
   finally { await element?.dispose().catch(() => {}); }
 }

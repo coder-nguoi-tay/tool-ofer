@@ -73,7 +73,7 @@ test('submit và primitive click từ chối header/footer/aside/attribution dù
   const { inspectInteractionReadiness } = await import('../src/browser/locators/inspect-interaction-readiness.mjs');
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  for (const region of ['header', 'footer', 'nav', 'aside', 'div class="ow-attribution"']) {
+  for (const region of ['header', 'footer', 'nav', 'aside', 'div class="Footer"', 'div class="ow-attribution"']) {
     const tag = region.split(' ')[0];
     const { context, page } = await createFormScopeFixture(browser, `<form><input name="email"><${region}><a class="btn" href="https://noise.test" id="noise">Continue</a></${tag}><main><button type="submit" id="central">Next</button></main></form>`);
     try {
@@ -84,4 +84,31 @@ test('submit và primitive click từ chối header/footer/aside/attribution dù
       assert.equal(await findSubmitButton(page), null, 'không fallback sang link ngoài vùng nghiệp vụ');
     } finally { await context.close(); }
   }
+});
+
+test('primitive giữ đúng form và hủy thao tác nếu link chân trang che điểm bấm khi chuột di chuyển', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { humanClick } = await import('../src/autofill/human-click.mjs');
+  const { resolveActiveFormScope } = await import('../src/autofill/form-scope/resolve-active-form-scope.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { context, page } = await createFormScopeFixture(browser, `<main><form id="survey"><input name="field"><button type="button" id="answer">Answer</button><a id="jump" href="/elsewhere"><span>Next</span></a></form></main>
+    <div><button id="outside">Continue</button></div><footer><a id="cover" href="/terms" style="display:none;position:fixed;inset:0;z-index:99">Terms</a></footer>`);
+  t.after(() => context.close());
+  const frame = page.mainFrame();
+  await resolveActiveFormScope(frame);
+  page._activeAutofillFrame = frame;
+  await page.evaluate(() => {
+    window.clicked = [];
+    document.addEventListener('click', event => { event.preventDefault(); window.clicked.push(event.target.id); });
+  });
+  assert.equal(await humanClick(page, page.locator('#outside')), false);
+  assert.equal(await humanClick(page, page.locator('#jump span')), false);
+  await page.evaluate(() => document.addEventListener('mousemove', () => {
+    document.getElementById('cover').style.display = 'block';
+  }, { once: true }));
+  assert.equal(await humanClick(page, page.locator('#answer')), false);
+  assert.deepEqual(await page.evaluate(() => window.clicked), []);
+  await page.locator('#cover').evaluate(link => link.remove());
+  assert.equal(await humanClick(page, page.locator('#answer')), true);
+  assert.deepEqual(await page.evaluate(() => window.clicked), ['answer']);
 });

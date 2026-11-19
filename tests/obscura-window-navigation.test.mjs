@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { openObscuraBrowser, obscuraViewport } from '../src/obscura-engine/open-obscura-browser.mjs';
 import { resolveObscuraBinary } from '../src/obscura-engine/resolve-obscura-binary.mjs';
+import { selectActiveForm } from '../src/autofill/form-scope/select-active-form.mjs';
 let available = true;
 try { resolveObscuraBinary(); } catch { available = false; }
 
@@ -136,3 +137,39 @@ async function assertEventually(predicate, label) {
   }
   assert.fail(label);
 }
+
+/**
+ * Xác minh nhận diện form vẫn hoạt động khi trang freeze wrapper body và đổi cây DOM.
+ * @param {import('node:test').TestContext} t Quản lý phiên thử nghiệm cô lập.
+ * @return {Promise<void>} Hoàn tất kiểm tra DOM và phạm vi form.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+test('Obscura nhận diện form trong DOM bị freeze sau khi thay đổi cây', { skip: !available, timeout: 30000 }, async t => {
+  const session = await openObscuraBrowser({ slot: 987, port: 0, registerSession: false });
+  t.after(() => session.close());
+  const page = session.page;
+  await page.goto('data:text/html,<!doctype html><html><body><form id="signup"><input type="email" name="email"><button>Continue</button></form></body></html>');
+  const result = await page.evaluate(() => {
+    const body = document.body;
+    const input = document.querySelector('input');
+    // Prime cả cache cha/kết nối trước khi freeze và làm mất hiệu lực cache.
+    void body.parentNode;
+    void body.isConnected;
+    Object.freeze(body);
+    Object.seal(input);
+    const marker = document.createElement('div');
+    document.documentElement.appendChild(marker);
+    let visibleAncestors = 0;
+    for (let parent = input; parent; parent = parent.parentElement) {
+      if (getComputedStyle(parent).display !== 'none') visibleAncestors++;
+    }
+    body.appendChild(document.createElement('span'));
+    return { connected: body.isConnected, parent: body.parentNode.tagName, visibleAncestors, frozen: Object.isFrozen(body) };
+  });
+  assert.deepEqual(result, { connected: true, parent: 'HTML', visibleAncestors: 4, frozen: true });
+  const scope = await page.evaluate(selectActiveForm, { nextId: 'frozen-form-regression' });
+  assert.equal(scope?.active, true);
+  assert.equal(scope?.visibleFieldCount, 1);
+  assert.equal(scope?.nativeForm, true);
+});

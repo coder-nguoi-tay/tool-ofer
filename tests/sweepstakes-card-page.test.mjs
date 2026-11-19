@@ -6,6 +6,7 @@ import { handleSweepstakesCardPage } from '../src/autofill/offerwall/handle-swee
 import { isSweepstakesCardPage } from '../src/autofill/offerwall/is-sweepstakes-card-page.mjs';
 import { openCardLinkInNewTab } from '../src/autofill/offerwall/open-card-link-in-new-tab.mjs';
 import { fillPageForms } from '../src/autofill/fill-page-forms.mjs';
+import { selectPageFormFrames } from '../src/autofill/form-scope/select-page-form-frames.mjs';
 import { limitOfferTabs } from '../src/browser/tabs/limit-offer-tabs.mjs';
 import { attachUniqueOfferTabs } from '../src/browser/tabs/attach-unique-offer-tabs.mjs';
 import { getEmptyOfferPageReason } from '../src/leads/actions/get-empty-offer-page-reason.mjs';
@@ -50,6 +51,10 @@ test('màn card giữ root, dọn đúng context một lần, mở mọi card l�
   limitOfferTabs(context, session);
   attachUniqueOfferTabs(context, session);
   root.mainFrame()._activeAutofillFormScope = { active: true, memberSelector: '#wall input' };
+  await fillPageForms(root, { session, sessionRecord: session.currentRecord, options: { autoSubmit: true }, triggerLeadCheckAfterEmail() {} });
+  assert.equal(old.isClosed(), false, 'tab phụ chỉ có card không được thay tab chính');
+  assert.equal(context.pages().length, 2, 'tab phụ không tự mở card ở trang cha');
+  root._uxOriginTab = true;
   await fillPageForms(root, { session, sessionRecord: session.currentRecord, options: { autoSubmit: true }, triggerLeadCheckAfterEmail() {} });
   assert.equal(old.isClosed(), true);
   assert.equal(otherIpTab.isClosed(), false);
@@ -180,6 +185,8 @@ test('Addept cross-origin giữ trang chờ iframe, bỏ attribution và mở ca
   assert.equal(old.isClosed(), false, 'iframe chưa có card không dọn tab cũ');
   assert.equal(context.pages().length, 2, 'không bấm attribution khi đợi iframe');
   await frame.setContent('<div class="card"><a target="_blank" href="https://offer.test/iframe-one">One</a></div><div class="card"><a target="_blank" href="https://offer.test/iframe-two">Two</a></div>');
+  assert.deepEqual(await selectPageFormFrames(root), [], 'form không mượn link của card');
+  assert.equal(root._autofillWaitingForFormFrame, false, 'iframe đã hiển thị, bộ xử lý card riêng có thể đọc card');
   await handleSweepstakesCardPage(root, session, {});
   assert.equal(old.isClosed(), true);
   assert.equal(context.pages().length, 3);

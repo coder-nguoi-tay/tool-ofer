@@ -2,6 +2,8 @@ import { globalAiConfig } from '../../../../ai-assist/state/global-ai-config.mjs
 import { startContinuousAgent } from '../../../../continuous-agent/start-continuous-agent.mjs';
 // Bản giải riêng của offer 2615, chép từ src/autofill/attach-autofill-page-watcher.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
 import { isCompletedPopupUrl } from '../../../../leads/actions/is-completed-popup-url.mjs';
+import { isSecondaryOfferTab } from '../../../../leads/actions/is-secondary-offer-tab.mjs';
+import { attachFrameRequestTracking } from '../../../../browser/frames/pending-frame-requests.mjs';
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { isNoSurveyFrame } from './adsmith/is-no-survey-frame.mjs';
@@ -28,7 +30,7 @@ import { verifyOffer2615Landing } from '../verify-offer-landing.mjs';
  * @return {void} Hoàn tất thao tác trên tab.
  * @throws {Error} Khi không đăng ký được listener của tab.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 export function attachAutofillPageWatcher(page, {
   trackedPages,
@@ -43,6 +45,7 @@ export function attachAutofillPageWatcher(page, {
   configurePageMousePolicy(page, session);
   if (trackedPages.has(page)) return;
   trackedPages.add(page);
+  attachFrameRequestTracking(page);
   let filling = false;
   let nextScanAt = 0;
   let scanDelayMs = 500;
@@ -80,14 +83,17 @@ export function attachAutofillPageWatcher(page, {
     }
   };
   /**
-   * Quét thư viện trước, theo dõi tiến triển và chuyển AI khi có việc thật sự chưa hoàn tất.
+   * Theo dõi việc trong form và giao tab phụ hết iframe cho bộ canh đóng tab.
    * @return {Promise<void>} Hoàn tất lượt quét độc lập của tab.
+   * @throws {Error} Khi tab hoặc phiên mất kết nối giữa lượt quét.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-12
+   * @since 2026-11-19
    */
   const scanOnce = async () => {
     protectConfirmedLeadSession(session);
-    if (await verifyOffer2615Landing(page, session, options)) {
+    const iframeOnly = isSecondaryOfferTab(page, session);
+    if (iframeOnly) page._lateProgressRecoveryActive = false;
+    if (!iframeOnly && await verifyOffer2615Landing(page, session, options)) {
       return;
     }
     const u = typeof page.url === 'function' ? page.url() : '';
@@ -119,13 +125,13 @@ export function attachAutofillPageWatcher(page, {
     } catch {
       // Trang có thể vừa điều hướng — cho phép lượt quét sau chạy tiếp.
     }
-    if (await recoverAdsmithFrameLoading(page, session, options)) {
+    if (!iframeOnly && await recoverAdsmithFrameLoading(page, session, options)) {
       noProgressRounds = 0;
       scanDelayMs = 1500;
       return;
     }
     // Ưu tiên hiện iframe offer: iframe offer trống thì nạp lại riêng iframe trước khi autofill/F5 trang cha.
-    if (await recoverBlankOfferFrames(page, session, options)) {
+    if (!iframeOnly && await recoverBlankOfferFrames(page, session, options)) {
       noProgressRounds = 0;
       scanDelayMs = 1500;
       return;
@@ -165,12 +171,18 @@ export function attachAutofillPageWatcher(page, {
         void scan(true);
       }, 80);
     } else {
-      if (page._uxSweepstakesCardPageUrl === page.url()) {
+      const selectedFrame = page._activeAutofillFrame;
+      if (iframeOnly && (!selectedFrame?.parentFrame?.() || selectedFrame.isDetached?.())) {
+        noProgressRounds = 0;
+        scanDelayMs = getAutofillScanDelay(0, false);
+        return;
+      }
+      if (!iframeOnly && page._uxSweepstakesCardPageUrl === page.url()) {
         noProgressRounds = 0;
         scanDelayMs = 1500;
         return;
       }
-      if (await isNoSurveyFrame(page._activeAutofillFrame)) {
+      if (await isNoSurveyFrame(selectedFrame)) {
         // Khảo sát Adsmith: AI không can thiệp, nhưng màn mờ .Processing treo thì F5 trang cha sau 40 giây.
         // Trước đây return ở đây nên trang treo vĩnh viễn, không tới bộ F5 bên dưới.
         if (await reloadStuckPage(page, session, 'adsmith-survey', options, Date.now(), { thresholdMs: ADSMITH_STUCK_RELOAD_MS })) {
@@ -183,7 +195,7 @@ export function attachAutofillPageWatcher(page, {
         return;
       }
       // Dùng chung nhận diện visible/iframe với AI, không coi iframe trắng là form bị kẹt.
-      if (await recoverEmptyProgress(page, session, options)) { scanDelayMs = 5000; return; }
+      if (!iframeOnly && await recoverEmptyProgress(page, session, options)) { scanDelayMs = 5000; return; }
       const visibleState = await readVisiblePageState(page);
       const hasInteractable = visibleState.available ? visibleState.hasWork : true;
       if (shouldPauseForLead(session, options)) {

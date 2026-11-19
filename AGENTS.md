@@ -200,6 +200,7 @@ Chuột mô phỏng của autofill chạy riêng trên mọi tab/IP. Policy nằ
 - Desktop chọn một trong hai checkbox chờ lead 2×30s hoặc 2×20s qua `getLeadCheckSettings`/`selectLeadCheckInterval`; hai nhánh Start thường/tuần tự truyền cùng lựa chọn. Không tick thì không chờ. “Chỉ hiện khi có Lead” giữ thời gian đang chọn hoặc bật 30s nếu chưa có; tắt cả hai ô chờ phải tắt chế độ ẩn chờ lead.
 - `stopAutofillOnLead` là opt-in cho phiên mới: chọn checkbox tự bật chờ 30s nếu chưa chọn 20s/30s. `shouldStopAfterLead` giữ mọi tab của IP confirmed không autofill/AI/chuột tự động, kể cả qua reload; primitives đọc session từ `page._autofillSession`. Giữ browser, không hoàn tất/tự đóng FinancialHelpFinder khi chế độ này đang dừng. Không bật thì tiếp tục sau lead như cũ; thao tác thủ công không bị chặn.
 - Khi cần chọn phiên để AI hỗ trợ/xử lý, ưu tiên các trình duyệt có IP đã về lead. Không vì ưu tiên này mà bỏ qua guard bảo vệ IP đã xác nhận lead hoặc quy tắc chống dùng xung đột proxy/IP.
+- Obscura giữ policy quyền native theo origin/BrowserContext. Geolocation chỉ trả tọa độ khi `granted`; đặt override không tự grant. Chưa có prompt UI thì `prompt` phải fail closed. Fixture cần tọa độ phải cấp quyền rõ ràng qua CDP; không tự thêm grant vào launcher để bỏ qua consent. Clear tọa độ phải đồng bộ realm đang sống, iframe và reload.
 - Chỉ xóa profile qua các guard như `isManagedChromeProfilePath`; không nới kiểm tra đường dẫn để tiện cleanup. Profile Chrome tạm và cache được xóa khi phiên đóng, còn profile mẫu được giữ riêng.
 - Nếu sửa quy tắc câu hỏi age/preference/vehicle, đối chiếu §17 trong `PLAYWRIGHT_CORE_INTEGRATION_RESEARCH.md` và cập nhật tài liệu cùng code/test.
 
@@ -277,7 +278,7 @@ CI chỉ kiểm tra cú pháp và chạy test; không build `.app`, không chạ
 
 Theo yêu cầu người dùng, **chỉ giữ và cập nhật một app duy nhất tại `/Applications/AutoLeadPC Mac 2 AdsPower.app`**. Không tạo app có tên phiên bản, bản sao trong repo/workspaces, ZIP hoặc backup timestamp trừ khi người dùng yêu cầu riêng.
 
-Yêu cầu công cụ macOS gồm `swiftc`, `iconutil`, `codesign`. Thoát app trước khi build; không tắt phiên trình duyệt đang làm việc để phục vụ kiểm tra đóng gói.
+Yêu cầu công cụ macOS gồm `swiftc`, `iconutil`, `codesign`, Node và Rust/Cargo. Mỗi lần chạy `build-app.sh` luôn gọi `scripts/build-obscura.mjs` (Cargo release/locked), kể cả binary đã tồn tại; lỗi build/mất binary phải dừng trước khi thay app cũ. Thoát app trước khi build; không tắt phiên trình duyệt đang làm việc để phục vụ kiểm tra đóng gói.
 
 Script thực hiện:
 

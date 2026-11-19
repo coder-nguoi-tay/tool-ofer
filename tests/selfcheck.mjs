@@ -733,7 +733,7 @@ assert.ok(pageTypedChars.every((t) => typeof t.delay === 'number' && t.delay >= 
   assert.deepEqual(typedInto, { email: 'adoanr1sh4d3@gmail.com', name: 'Jane Doe' }, 'humanType trên cùng trang phải gõ tuần tự từng ô');
 }
 
-// Test findSubmitButton nhận diện nút data-vector-submit="true" và data-tf-element-role="submit"
+// Marker submit đứng riêng chưa xác minh được form sở hữu.
 const mockVectorSubmitBtn = {
   isVisible: async () => true,
   isEnabled: async () => true,
@@ -745,7 +745,7 @@ const mockVectorFrame = {
   }),
 };
 const foundVectorSubmit = await findSubmitButton(mockVectorFrame);
-assert.equal(foundVectorSubmit, mockVectorSubmitBtn);
+assert.equal(foundVectorSubmit, null, 'Marker submit đứng riêng không tạo phạm vi form');
 
 assert.equal(typeof handleRadioAndSurveyOptions, 'function');
 
@@ -951,7 +951,7 @@ const mockOfferwallSubmitFrame = {
   }),
 };
 const foundSubmit = await findSubmitButton(mockOfferwallSubmitFrame);
-assert.equal(foundSubmit, mockRegularSubmitBtn, 'findSubmitButton phải bỏ qua nút offerwall và chọn nút submit hợp lệ tiếp theo');
+assert.equal(foundSubmit, null, 'Nút đứng cạnh offerwall chưa có phạm vi form đã xác minh');
 
 // Tên binary: stable và bản lưu theo version phải thử cả bản Chrome for Testing.
 assert.deepEqual(chromeExecutableNames('stable'), ['Google Chrome', 'Google Chrome for Testing']);
@@ -1343,7 +1343,7 @@ watchTrafficBlockedPage(mockAdtrapperSession);
 assert.equal(mockAdtrapperBrowserClosed, false);
 mockAdtrapperBrowserClosed = true;
 
-// 6. Test findSubmitButton: Từ chối thẻ IFRAME và container DIV lớn, nhận diện đúng nút Submit/Continue thực tế
+// 6. Không mượn nút đứng cạnh iframe khi trang cha chưa có form.
 const mockIframeBtn = {
   isVisible: async () => true,
   isEnabled: async () => true,
@@ -1369,7 +1369,7 @@ const mockFrameWithIframeAndButton = {
   }),
 };
 const foundValidBtn = await findSubmitButton(mockFrameWithIframeAndButton);
-assert.equal(foundValidBtn, mockValidButton, 'findSubmitButton phải loại trừ thẻ IFRAME và chọn nút BUTTON hợp lệ');
+assert.equal(foundValidBtn, null, 'Trang cha chưa có form không được mượn nút cạnh iframe');
 
 // Test findSubmitButton: Không ép nút disabled hoặc đang "Submitting..." chạy lại
 let disabledRemoved = false;
@@ -1761,7 +1761,7 @@ const mockFrameWithContinue = {
   }),
 };
 const foundBtn = await findSubmitButton(mockFrameWithContinue);
-assert.ok(foundBtn !== null, 'findSubmitButton phải tìm thấy nút button#btnSubmit');
+assert.equal(foundBtn, null, 'ID btnSubmit không xác định quyền sở hữu của form');
 
 // 11.5 Kiểm tra tự động phát hiện và chọn ngẫu nhiên đáp án id="btn-option"
 const clickedOptions = [];
@@ -1892,7 +1892,7 @@ const leadWaitClickDeadline = Date.now() + 3000;
 while (!submitClickedDuringLeadWait && Date.now() < leadWaitClickDeadline) await new Promise(resolve => setTimeout(resolve, 25));
 assert.ok(submitClickedDuringLeadWait, 'Submit phải được kiểm tra và bấm liên tục ngay cả khi leadCheckStatus đang là waiting');
 
-// 11.7 Kiểm tra findSubmitButton nhận diện nút Jump Page CTA (màn hình thứ 5 sau DOB/Gender)
+// 11.7 Link Jump Page đứng riêng không phải nút gửi biểu mẫu.
 const mockJumpPageCta = {
   tagName: 'A',
   href: 'https://16.dlysurge.com/next?s=123',
@@ -1923,8 +1923,7 @@ const mockJumpPageFrame = {
 };
 
 const foundJumpCta = await findSubmitButton(mockJumpPageFrame);
-assert.ok(foundJumpCta !== null, 'findSubmitButton phải tìm thấy nút Jump Page CTA (a.cta-button / Get My Reward)');
-assert.equal(foundJumpCta, mockJumpPageCta, 'Nút tìm thấy phải là mockJumpPageCta');
+assert.equal(foundJumpCta, null, 'Liên kết Jump Page độc lập không phải nút gửi');
 
 // 11.8 Kiểm tra handleRadioAndSurveyOptions cập nhật session.lastActionTime và session.autofillFields
 const mockSessionForSurvey = {
@@ -2163,7 +2162,7 @@ const mockEligibilityFrame = {
   }),
 };
 const foundEligibility = await findSubmitButton(mockEligibilityFrame);
-assert.equal(foundEligibility, mockCheckBtn, 'findSubmitButton phải nhận diện nút Check Eligibility');
+assert.equal(foundEligibility, null, 'Nút Check Eligibility đứng ngoài form chưa có chủ sở hữu');
 
 // 16. Kiểm tra form submit chủ động bấm ngay cả khi có trường unfilled
 let activeSubmitClicked = false;
@@ -2419,20 +2418,14 @@ const totalScrolled = wheelDeltas.reduce((acc, v) => acc + v, 0);
 assert.ok(Math.abs(totalScrolled - 240) < 50, 'Tổng quãng đường cuộn phải xấp xỉ 240px');
 
 // 18.4 Click tự nhiên (humanClick) với Playwright CDP events
-let mouseDownCalled = false;
-let mouseUpCalled = false;
-mockMousePage.mouse.down = async () => { mouseDownCalled = true; };
-mockMousePage.mouse.up = async () => { mouseUpCalled = true; };
-
+let checkedClicks = 0;
 const mockElementWithBox = {
   boundingBox: async () => ({ x: 100, y: 100, width: 200, height: 40 }),
   scrollIntoViewIfNeeded: async () => {},
-  focus: async () => {},
+  click: async ({ force }) => { assert.equal(force, false); checkedClicks++; },
 };
-const clickRes = await humanClick(mockMousePage, mockElementWithBox);
-assert.equal(clickRes, true, 'humanClick phải trả về true khi click thành công');
-assert.equal(mouseDownCalled, true, 'mouse.down phải được gọi');
-assert.equal(mouseUpCalled, true, 'mouse.up phải được gọi');
+assert.equal(await humanClick(mockMousePage, mockElementWithBox), true);
+assert.equal(checkedClicks, 1);
 
 // 18.5 humanClick fallback an toàn khi boundingBox trả về null
 let fallbackClicked = false;
@@ -2520,7 +2513,7 @@ assert.equal(r1.state, 'NewYork');
 assert.equal(r1.city, 'Fort Edward');
 assert.ok(r1.phone.startsWith('814') || r1.phone.startsWith('817'), 'Số điện thoại phải có mã vùng chuẩn hóa 814/817');
 
-// 20. KIỂM TRA NÚT SIGN UP / REGISTER KHÔNG BỊ COI LÀ NAV NOISE
+// 20. Không coi lời mời Sign Up / Register ngoài form là nút gửi.
 const mockSignUpBtn = {
   tagName: 'BUTTON',
   innerText: 'Sign Up Now',
@@ -2546,7 +2539,7 @@ const mockSignUpFrame = {
   }),
 };
 const foundSignUp = await findSubmitButton(mockSignUpFrame);
-assert.equal(foundSignUp, mockSignUpBtn, 'findSubmitButton phải nhận diện nút Sign Up và không được lọc bỏ bởi navNoise');
+assert.equal(foundSignUp, null, 'Nút Sign Up ngoài form không phải hành động gửi');
 
 const mockRegisterBtn = {
   tagName: 'BUTTON',
@@ -2573,7 +2566,7 @@ const mockRegisterFrame = {
   }),
 };
 const foundRegister = await findSubmitButton(mockRegisterFrame);
-assert.equal(foundRegister, mockRegisterBtn, 'findSubmitButton phải nhận diện nút Register');
+assert.equal(foundRegister, null, 'Nút Register ngoài form không phải hành động gửi');
 
 // 21. KIỂM TRA KHÔNG ĐƯỢC CHECK LEAD VÀ KHÔNG ĐƯỢC TỰ Ý OUT Ở MÀN 1 (MỤC TIÊU MÀN 4)
 const mock4ScreenSession = {
@@ -2830,7 +2823,7 @@ assert.strictEqual(mockSurveySession.hasSubmittedCurrentScreen, false, 'click đ
 assert.strictEqual(mockSurveySession.answerClickPending, true, 'click đáp án phải ghi answerClickPending — bộ đếm màn chỉ tăng khi trang thật sự chuyển màn');
 assert.ok(surveyLinkClickCount > 0, 'Thẻ <a> câu trả lời phải được click');
 
-// 25. KIỂM TRA NHẬN DIỆN VÀ TƯƠNG TÁC LOCOTOMATO WIDGET VÀ IFRAME
+// 25. Widget chưa xác minh được form phải giữ nguyên nút Get Free Guide.
 const mockLocoSubmitBtn = {
   isVisible: async () => true,
   isEnabled: async () => true,
@@ -2847,7 +2840,7 @@ const mockLocoFrame = {
   }),
 };
 const locoSubmitFound = await findSubmitButton(mockLocoFrame);
-assert.ok(locoSubmitFound, 'findSubmitButton phải tìm được nút submit Get Free Guide của LocoTomato');
+assert.equal(locoSubmitFound, null, 'Nút Get Free Guide chưa thuộc form đã xác minh');
 
 // ── Test Address Autocomplete Dropdown Selection (Google Places / Loqate / ARIA) ──
 assert.ok(Array.isArray(ADDRESS_SUGGESTION_SELECTORS) && ADDRESS_SUGGESTION_SELECTORS.length > 10);

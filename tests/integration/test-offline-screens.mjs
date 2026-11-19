@@ -47,8 +47,8 @@ function serveSamples(port) {
  * Chạy bộ test offline trên toàn bộ file mẫu, mỗi file dùng 1 page riêng.
  *
  * @return {Promise<void>} In kết quả pass/fail từng màn.
- * @author coder-nguoi-tay
- * @since 2026-10-25
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
  */
 async function main() {
   const PORT = 3287;
@@ -95,6 +95,13 @@ async function main() {
         const sel = document.querySelector('button.question-answer-button.selected, button.question-answer-button.active, button.question-answer-button[data-ux-clicked="1"], button.question-answer-button[data-ux-submitted="1"]');
         return sel ? (sel.innerText || '').trim().slice(0, 40) : null;
       }).catch(() => null);
+      const skipLinksOnly = file.includes('GMAIL-OAUTH') || file.includes('CHOICE-skip');
+      const initialUrl = page.url();
+      const initialTabCount = context.pages().length;
+      if (skipLinksOnly) await frame.evaluate(() => {
+        window.observedSkipClicks = 0;
+        document.addEventListener('click', () => { window.observedSkipClicks++; }, true);
+      });
       let clicks = 0;
       for (let i = 0; i < SCANS_PER_SCREEN; i++) {
         clicks += await handleAlphaIntentQuestions(page, frame, { onLog }).catch(() => 0);
@@ -124,7 +131,10 @@ async function main() {
       const hasOwSuccess = logs.some((l) => l.startsWith('ow_task_selected') || l.startsWith('ow_task_button'));
       let verdict = 'SKIP';
       if (file.includes('SCRPTK')) verdict = hasOwSuccess ? 'PASS' : 'FAIL';
-      if (file.includes('GMAIL-OAUTH')) verdict = logs.some((l) => l.startsWith('gmail_oauth_skipped')) ? 'PASS' : 'FAIL';
+      if (skipLinksOnly) {
+        const observed = await frame.evaluate(() => window.observedSkipClicks);
+        verdict = clicks === 0 && observed === 0 && page.url() === initialUrl && context.pages().length === initialTabCount ? 'PASS' : 'FAIL';
+      }
       if (file.includes('SEMANTIC')) {
         const okRow = await frame.evaluate(() => {
           const c = document.querySelector('[data-ux-semantic-clicked="1"]');
@@ -134,7 +144,6 @@ async function main() {
         const ann = file.includes('age') ? okRow === '25-34' : (file.includes('vehicle') ? okRow === 'Car' : (okRow === 'SUV' || okRow === null));
         verdict = okRow && ann ? 'PASS' : 'FAIL';
       }
-      if (file.includes('CHOICE-skip')) verdict = logs.some((l) => l.startsWith('gmail_oauth_skipped')) ? 'PASS' : 'FAIL';
       if (file.includes('MUI')) {
         const picked = await frame.evaluate(() => (document.querySelector('[data-ux-mui-clicked="1"]')?.getAttribute('name') || null)).catch(() => null);
         verdict = picked ? 'PASS' : 'FAIL';

@@ -67,6 +67,7 @@ async function submitWithValidation(frame, formScope, session, options, page, ad
  * Gửi form của frame, theo dõi chuyển màn và kích hoạt kiểm tra lead sau email.
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần dừng lượt quét trang.
+ * @throws {never} Bỏ qua lượt gửi khi không xác minh được phạm vi hoặc thao tác.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -82,6 +83,8 @@ export async function submitFrameForm({
 }) {
   if (shouldStopAfterLead(session)) return true;
   if (options.autoSubmit !== false) {
+    const formScope = frameProgress.formScope ?? await resolveActiveFormScope(frame);
+    if (!formScope?.active || formScope.unavailable) return false;
     const yesNo = await handleYesNoStep({ frame, page, options });
     if (yesNo.waitingForInput) return false;
     if (yesNo.handled) {
@@ -89,8 +92,7 @@ export async function submitFrameForm({
       return false;
     }
     try {
-      const formScope = frameProgress.formScope ?? await resolveActiveFormScope(frame);
-      const validationScope = formScope && { ...formScope, verifiedSelections: frameProgress.verifiedSelections };
+      const validationScope = { ...formScope, verifiedSelections: frameProgress.verifiedSelections };
       const submitBtn = await findSubmitButton(frame, formScope);
       if (submitBtn) {
         const btnInfo = await submitBtn.evaluate((btn, currentFields) => {
@@ -108,20 +110,7 @@ export async function submitFrameForm({
             clickCount = 0;
           }
 
-          // 1. Thẻ <a> chuyển link / popup: chỉ bấm 1 lần nếu mở ra tab mới ngoài (_blank)
-          const isExternalNav = tag === 'A' && btn.href && !btn.href.startsWith('javascript:') && !btn.href.startsWith('#') && btn.target === '_blank';
-          if (isExternalNav && btn.dataset.uxSubmitted === '1') {
-            return {
-              shouldClick: false,
-              text,
-              tag,
-              id,
-              className,
-              reason: 'a_already_clicked'
-            };
-          }
-
-          // 2. Chống duplicate submit dồn dập: thời gian cooldown 1200ms
+          // Chống duplicate submit dồn dập: thời gian cooldown 1200ms
           if (now - lastClick < 1200) {
             return {
               shouldClick: false,
@@ -133,7 +122,7 @@ export async function submitFrameForm({
             };
           }
 
-          // 3. Giới hạn click: cho phép tối đa 10 lần cho mỗi nút trên cùng 1 trang (hỗ trợ multi-step forms)
+          // Giới hạn click: cho phép tối đa 10 lần cho mỗi nút trên cùng 1 trang (hỗ trợ multi-step forms)
           if (clickCount >= 10) {
             return {
               shouldClick: false,
@@ -205,7 +194,7 @@ export async function submitFrameForm({
           if (!submitStillReady) return false;
 
           const submitLabel = btnInfo.text || btnInfo.id || 'Submit';
-          if (formScope && !await submitBtn.evaluate(isControlInActiveForm, formScope).catch(() => false)) return false;
+          if (!await submitBtn.evaluate(isControlInActiveForm, formScope).catch(() => false)) return false;
 
           const isFirstSubmitOfSession = !session.firstSubmitHandled && !session.screen1Completed;
           const initialUrl = session.initialFormUrl || page.url();
@@ -373,7 +362,7 @@ export async function submitFrameForm({
 
           // Kích hoạt quét tiếp theo sau 120ms để màn hình thao tác liên tục không nghỉ
         }
-      } else if (frameProgress.filledInThisPass > 0) {
+      } else if (frameProgress.filledInThisPass > 0 && formScope.nativeForm) {
         // FALLBACK NẾU THIẾU NÚT BẤM HOẶC NÚT BẤM KHÔNG ĐƯỢC NHẬN DIỆN:
         // Chỉ chạy khi TRONG LƯỢT QUÉT NÀY vừa điền thêm được ô mới.
         // Trả về định danh phần tử đã gửi (id/class của div/button/form) để log nâng cấp matcher.

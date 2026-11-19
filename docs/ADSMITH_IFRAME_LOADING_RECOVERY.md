@@ -1,6 +1,6 @@
 # Cứu kẹt tải iframe Adsmith trên FinancialHelpFinder
 
-Ngày cập nhật: 2026-11-15. Phạm vi: luồng browser local đang được AutoLeadPC điều khiển.
+Cập nhật ngày 2026-11-19 cho trình duyệt chạy trên máy.
 
 ## Kết quả tối ưu
 
@@ -15,7 +15,11 @@ Phân biệt ba lỗi tải và ưu tiên phục hồi này trước autofill, A
 | `unavailable` | DOM đang điều hướng/không đọc được; chưa có bằng chứng trắng | Chờ quan sát lại | Không suy đoán frame chết |
 | Hết lượt | Cùng URL đã phục hồi 5 lần và vẫn lỗi sau thời gian chờ lượt cuối | Không F5 thêm | Ghi `iframe_load_exhausted`, giữ browser |
 
-Năm lần là trần tự động cho từng URL trên cùng tab, không tự reset chỉ vì reload, đổi hash hoặc quay lại URL cũ. Đóng phiên mới giải phóng trạng thái. Không tự đổi IP, thay proxy, xóa profile hoặc đóng browser.
+Các mốc trong bảng tính từ khi quan sát thấy lỗi liên tục trong cùng một tài liệu. Khi trang còn chờ dữ liệu, app giữ tab. Request định kỳ đến cùng một endpoint không đặt lại cả khoảng chờ sau mỗi phản hồi. Request đã hủy của trang trước không giữ trang mới ở trạng thái đang tải.
+
+Trước khi tải lại riêng iframe, app kiểm tra tài liệu cha, URL và nội dung hiện tại của tài liệu con. Nếu iframe đã tự chuyển bước hoặc vừa hiển thị ô nhập, app giữ nguyên nội dung đó. Với popup `about:blank`, app đọc cả iframe con trước khi quyết định đóng tab.
+
+Trần năm lần tải lại trang cha áp dụng cho từng URL trên cùng tab, kể cả khi phiên đã xác nhận lead. Bộ đếm được giữ qua reload, đổi hash và quay lại URL cũ. Khi đạt trần, app ghi lý do dừng và giữ phiên để kiểm tra.
 
 ## Các điểm sửa so với bản đề xuất
 

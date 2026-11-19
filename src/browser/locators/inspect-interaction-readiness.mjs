@@ -5,10 +5,30 @@
  * @return {object} Trạng thái ready và lý do từ chối thao tác.
  * @throws {never} Phần tử ngoài vùng nghiệp vụ trả về trạng thái từ chối.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 export function inspectInteractionReadiness(element, formScope) {
-  if (element.closest?.('footer, nav, aside, [role="complementary"], .sidebar, [role="navigation"], [role="contentinfo"], .site-footer, .ow-attribution')) return { ready: false, reason: 'outside_business_content' };
+  if (formScope?.active === false || formScope?.unavailable) return { ready: false, reason: 'outside_active_form' };
+  if (element.closest?.('footer, nav, aside, [aria-hidden="true"], [role="search"], [role="complementary"], .sidebar, [role="navigation"], [role="contentinfo"], .site-footer, #footer, [data-ux-footer-link], .ow-attribution')) return { ready: false, reason: 'outside_business_content' };
+  const footerRegion = element.closest?.('.footer');
+  if (footerRegion) {
+    const surveyButton = element.matches?.('button[data-ux-adsmith-target]') && footerRegion.closest('.Survey');
+    if (!surveyButton || element.closest('a[href]')) return { ready: false, reason: 'outside_business_content' };
+  }
+  const link = element.closest?.('a[href], area[href]');
+  if (link) {
+    const href = (link.getAttribute('href') || '').trim();
+    const doc = element.ownerDocument;
+    const inTaskFrame = doc.location.origin === 'https://sdk.scrptk.com' && doc.location.pathname === '/content/render';
+    const verifiedCard = (link.closest('[data-ux-card-id]') && link.matches('[data-ux-offer-cta-id], .offerwall-btn, [data-tf-element-role="offer-btn"]'))
+      || (inTaskFrame && link.matches('#infoPanel #infoPanelButton, .unit-stack .unit-card [data-ux-ow-task-button]'));
+    const question = link.closest('.Survey .Qst, [role="radiogroup"], .survey-container, .quiz-container, [data-question-id]');
+    const surveyContinue = link.matches('.Btm .Next a') && doc.querySelector('.Survey .Qst');
+    const localAction = href === '#' || href === '' || /^javascript:void\(0\);?$/i.test(href);
+    const formAction = (localAction && (formScope || question || surveyContinue || link.closest('form, [role="form"]')))
+      || (href.startsWith('#') && link.hasAttribute('data-ux-choice-id') && (question || link.closest('.question, .q, fieldset, main, [role="main"]')));
+    if (!verifiedCard && (!formAction || link.hasAttribute('download') || (link.target && link.target.toLowerCase() !== '_self'))) return { ready: false, reason: 'navigation_link' };
+  }
   const header = element.closest?.('header, [role="banner"], .site-header');
   if (header) {
     const candidateScope = element.closest?.('form, [role="form"], .hero, .form, .form-container, .survey-container, .lead-form, [id*="form" i], [class*="form" i], [id*="lead" i]');

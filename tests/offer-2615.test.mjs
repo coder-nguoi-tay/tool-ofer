@@ -108,6 +108,7 @@ test('fillPageForms tích hợp đúng luồng: generic không chặn, 2615 xử
       })
     }),
     evaluate: async (fn) => {
+      if (fn?.name === 'detectOfferContentInPage') return { hasForm: true };
       if (fn && fn.name === 'markFooterLikeLinks') footerMarked = true;
       return null;
     },

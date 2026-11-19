@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
+import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { attachFrameRequestTracking, hasPendingFrameRequests } from '../src/browser/frames/pending-frame-requests.mjs';
+import { getEmptyOfferPageReason } from '../src/leads/actions/get-empty-offer-page-reason.mjs';
 import { matchSubOfferCloseReason, readSubOfferCloseReason } from '../src/leads/actions/get-sub-offer-close-reason.mjs';
 import { watchTrafficBlockedPage } from '../src/leads/actions/watch-traffic-blocked-page.mjs';
 import { createLeadTestSession, captureLeadWatcherTicks } from './helpers/lead-session-fixture.mjs';
@@ -7,6 +12,63 @@ import { activeBrowsers } from '../src/browser/sessions.mjs';
 import { autoRefill } from '../src/runtime/constants/auto-refill.mjs';
 
 afterEach(() => { activeBrowsers.clear(); autoRefill.enabled = false; });
+
+/**
+ * Kiểm tra khoảng chờ đóng tab bằng request đang mở trên Chromium, chỉ trả dữ liệu tại fixture.
+ * @param {import('node:test').TestContext} t Ngữ cảnh dọn browser và điều khiển đồng hồ kiểm thử.
+ * @return {Promise<void>} Hoàn tất sau khi iframe biến mất và hết thời gian chờ.
+ * @throws {Error} Khi trạng thái request hoặc thời điểm đóng tab sai.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+async function verifyDeferredIframe(t) {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  attachFrameRequestTracking(context);
+  const page = await context.newPage();
+  const other = await context.newPage();
+  const url = 'https://document.test/';
+  let releaseResponse;
+  const delayedResponse = new Promise(resolve => { releaseResponse = resolve; });
+  t.after(releaseResponse);
+  await context.route('**/*', async route => {
+    if (route.request().url() === url + 'content') {
+      await delayedResponse;
+      return route.fulfill({ body: 'ready' });
+    }
+    return route.fulfill({ contentType: 'text/html', body: '<main><h1>Fixture</h1></main>' });
+  });
+  await page.goto(url);
+  const started = page.waitForRequest(url + 'content');
+  await page.evaluate(() => {
+    void fetch('/content').then(response => response.text()).then(() => {
+      const frame = document.createElement('iframe');
+      frame.srcdoc = '<main><input aria-label="Feedback"></main>';
+      document.querySelector('main').append(frame);
+    });
+  });
+  await started;
+  assert.equal(await page.evaluate(() => document.readyState), 'complete');
+  assert.equal(hasPendingFrameRequests(page, page.mainFrame()), true);
+  assert.equal(hasPendingFrameRequests(other), false);
+  const tracker = { key: url, since: Date.now() - 31_000 };
+  assert.equal(await getEmptyOfferPageReason(page, tracker, { subTab: true }), null);
+  assert.equal(tracker.since, undefined);
+  releaseResponse();
+  await page.frameLocator('iframe').locator('input').waitFor();
+  assert.equal(hasPendingFrameRequests(page), false);
+  assert.equal(await getEmptyOfferPageReason(page, tracker, { subTab: true }), null);
+  await page.locator('iframe').evaluate(frame => frame.remove());
+  const settledTime = Date.now();
+  const clock = t.mock.method(Date, 'now', () => settledTime);
+  assert.equal(await getEmptyOfferPageReason(page, tracker, { subTab: true }), null);
+  clock.mock.mockImplementation(() => settledTime + 31_000);
+  assert.match(await getEmptyOfferPageReason(page, tracker, { subTab: true }), /hết form/);
+}
+
+test('tab phụ chờ fetch tạo iframe sau khi trang cha complete, rồi tính lại thời gian khi hết nội dung',
+  { skip: !existsSync(chromium.executablePath()) }, verifyDeferredIframe);
 
 test('chrome-error của offer phụ nhận diện từ URL, không đợi đọc DOM bị lỗi', async () => {
   assert.match(await readSubOfferCloseReason({ url: () => 'chrome-error://chromewebdata/', evaluate: () => assert.fail('Không đọc DOM của trang lỗi') }), /chrome-error/);
@@ -47,7 +109,7 @@ test('quy tắc đóng tab offer phụ: hết offer, chờ xác minh email, life
 });
 
 /**
- * Popup giả: URL + chữ trong trang (chỉ trả chữ cho hàm đọc chữ offer phụ, các evaluate khác trả null).
+ * Popup đã tải xong, không có form/câu hỏi, hiển thị thông báo của fixture.
  * @param {object} browser Browser giả của fixture.
  * @param {string} url URL popup.
  * @param {string} text Chữ hiển thị.
@@ -58,7 +120,8 @@ test('quy tắc đóng tab offer phụ: hết offer, chờ xác minh email, life
 async function openPopup(browser, url, text) {
   const popup = await browser.newPage();
   popup.currentUrl = url;
-  popup.evaluate = async fn => (fn?.name === 'readSubOfferText' ? text : null);
+  popup.evaluate = async fn => fn?.name === 'readSubOfferText' ? text :
+    fn?.name === 'detectOfferContentInPage' ? { loading: false, hasForm: false, hasChoices: false, hasQuestion: false } : null;
   popup.frames = () => [popup];
   return popup;
 }
@@ -120,8 +183,7 @@ test('watcher: phiên ĐÃ CÓ LEAD vẫn đóng tab offer phụ (lifepointspane
   assert.equal(counters.browserCloses, 0);
 });
 
-// Quy tắc người dùng chốt 2026-11-13: tab thứ 2 trở đi mà không phải offer có form / câu hỏi thì đóng; tab có form/đáp án giữ.
-test('watcher: tab phụ không có form/câu hỏi sau 30s bị đóng (kể cả phiên có lead); tab có form/đáp án/đang tải giữ', async t => {
+test('watcher: tab phụ chỉ có form hoặc câu hỏi ở trang cha được đóng sau 30s, tab đang tải còn được giữ', async t => {
   const ticks = captureLeadWatcherTicks(t);
   let now = 0;
   t.mock.method(Date, 'now', () => now);
@@ -133,13 +195,16 @@ test('watcher: tab phụ không có form/câu hỏi sau 30s bị đóng (kể c�
   const popupWith = async (url, result) => {
     const popup = await browser.newPage();
     popup.currentUrl = url;
-    popup.evaluate = async fn => (fn?.name === 'readSubOfferText' ? 'Some article text\nmore lines' : null);
-    popup.frames = () => [{ evaluate: async () => result }];
+    popup.evaluate = async fn => fn?.name === 'readSubOfferText' ? 'Some article text\nmore lines' :
+      fn?.name === 'detectOfferContentInPage' ? result : null;
+    popup.frames = () => [popup];
     return popup;
   };
-  const article = await popupWith('https://news.example.com/article', EMPTY);
+  const article = await popupWith('https://news.example.com/article', { ...EMPTY, worked: true, hasOfferEntry: true });
+  article._uxSweepstakesCardPageUrl = article.currentUrl;
   const form = await popupWith('https://offer.example.com/form', { ...EMPTY, hasForm: true });
   const quiz = await popupWith('https://survey.example.com/q1', { ...EMPTY, hasChoices: true });
+  const question = await popupWith('https://survey.example.com/prompt', { ...EMPTY, hasQuestion: true });
   const loading = await popupWith('https://slow.example.com/', { ...EMPTY, loading: true });
   watchTrafficBlockedPage(session);
   const tickAt = async at => { now = at; ticks[0](); for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
@@ -150,11 +215,66 @@ test('watcher: tab phụ không có form/câu hỏi sau 30s bị đóng (kể c�
   await tickAt(31_000);
   await tickAt(35_000);
   assert.equal(article.closed, true, 'tab không form/câu hỏi bị đóng');
-  assert.equal(form.closed, false);
-  assert.equal(quiz.closed, false);
+  assert.equal(form.closed, true);
+  assert.equal(quiz.closed, true);
+  assert.equal(question.closed, true);
   assert.equal(loading.closed, false);
   assert.equal(page.closed, false, 'tab đầu giữ nguyên');
   assert.equal(counters.browserCloses, 0);
+});
+
+test('watcher: một lần reload cùng URL hoặc đọc lỗi sẽ bắt đầu lại thời gian chờ trước khi đóng tab phụ', async t => {
+  const ticks = captureLeadWatcherTicks(t);
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  const { session, browser } = createLeadTestSession('198.51.100.81');
+  session.leadCheckStatus = 'confirmed';
+  const popup = await openPopup(browser, 'https://article.test/story', '');
+  let unreadable = false;
+  popup.evaluate = async fn => {
+    if (fn.name !== 'detectOfferContentInPage') return null;
+    if (unreadable) throw new Error('Frame detached');
+    return { hasForm: false, hasChoices: false, hasQuestion: false };
+  };
+  watchTrafficBlockedPage(session);
+  const checkAt = async time => {
+    now = time;
+    ticks[0]();
+    for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
+  };
+  await checkAt(0);
+  now = 29_000;
+  await popup.reload();
+  await checkAt(31_000);
+  assert.equal(popup.closed, false);
+  unreadable = true;
+  await checkAt(60_000);
+  unreadable = false;
+  await checkAt(66_000);
+  assert.equal(popup.closed, false);
+  await checkAt(91_000);
+  assert.equal(popup.closed, false);
+  await checkAt(96_000);
+  assert.equal(popup.closed, true);
+});
+
+test('watcher: không đóng tab vừa được chuyển thành tab chính khi đang đọc DOM', async t => {
+  const ticks = captureLeadWatcherTicks(t);
+  const { session, browser, counters } = createLeadTestSession('198.51.100.82');
+  session.leadCheckStatus = 'confirmed';
+  const popup = await openPopup(browser, 'https://article.test/story', '');
+  popup.evaluate = async fn => {
+    if (fn.name === 'detectOfferContentInPage') return { hasForm: false };
+    if (fn.name !== 'readSubOfferText') return null;
+    session.mainPage = popup;
+    return 'This offer is no longer available.';
+  };
+  watchTrafficBlockedPage(session);
+  ticks[0]();
+  for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(session.mainPage, popup);
+  assert.equal(popup.closed, false);
+  assert.equal(counters.pageCloses, 0);
 });
 
 test('giảm tải: bộ canh chỉ đọc DOM mỗi tab con tối đa mỗi 5 giây; luật theo URL (chrome-error) vẫn đóng ngay', async t => {
@@ -197,5 +317,131 @@ test('giảm tải: bộ canh chỉ đọc DOM mỗi tab con tối đa mỗi 5 g
   assert.equal(SUB_OFFER_DOM_CHECK_MS, 5000);
   assert.ok(domReads <= 5 * 2, `20 giây chỉ đọc DOM nặng của tab con khoảng 4–5 nhịp (mỗi nhịp tối đa 2 lệnh), thực tế ${domReads}`);
   assert.ok(domReads > 0, 'vẫn kiểm tra định kỳ');
-  assert.equal(working.isClosed(), false, 'tab con đang có form không bị đóng');
+  assert.equal(working.isClosed(), false, 'tab con chưa đủ 30 giây chờ iframe');
 });
+
+/**
+ * Popup trắng có thể tạo bảng nhập trực tiếp trong iframe srcdoc mà không đổi URL trang cha.
+ * @param {import('node:test').TestContext} t Context dọn Chromium.
+ * @return {Promise<void>} Bản nháp giữ nguyên sau cả thời hạn tab trắng và không có công việc.
+ * @throws {Error} Khi app đánh dấu đóng trước khi đọc iframe thật.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+async function verifyDraftInBlankPopup(t) {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  const opener = await context.newPage();
+  const opened = context.waitForEvent('page');
+  await opener.evaluate(() => { window.open('about:blank'); });
+  const popup = await opened;
+  await popup.setContent('<main><iframe srcdoc="<main><input value=draft></main>"></iframe></main>');
+  assert.equal(popup.url(), 'about:blank');
+  const tracker = { key: 'about:blank', since: Date.now() - 60000 };
+  assert.equal(await getEmptyOfferPageReason(popup, tracker, { subTab: true }), null);
+  assert.equal(await popup.frameLocator('iframe').locator('input').inputValue(), 'draft');
+  await popup.setContent('');
+  tracker.since = Date.now() - 21000;
+  assert.match(await getEmptyOfferPageReason(popup, tracker, { subTab: true }), /about:blank/);
+}
+test('popup about:blank giữ tài liệu iframe có bản nháp', { skip: !existsSync(chromium.executablePath()) }, verifyDraftInBlankPopup);
+
+/**
+ * Quan sát nhiều response HTTP thành công của cùng endpoint sau khi trang đã hết nội dung.
+ * @param {import('node:test').TestContext} t Context điều khiển đồng hồ và đóng Chromium.
+ * @return {Promise<void>} Heartbeat không liên tục cấp lại 30 giây cho cùng tài liệu.
+ * @throws {Error} Khi tab không thể kết thúc sau thời gian chờ dù đã đọc đầy đủ DOM.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+async function verifyPeriodicRequestsDoNotExtendGrace(t) {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  attachFrameRequestTracking(page);
+  await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<main>Finished</main>' }));
+  await page.goto('https://polling.test/content');
+  const start = Date.now();
+  let now = start;
+  t.mock.method(Date, 'now', () => now);
+  const tracker = {};
+  for (let tick = 0; tick <= 4; tick++) {
+    now = start + tick * 10000;
+    const finished = page.waitForEvent('requestfinished', request => request.url().includes('/status?'));
+    await page.evaluate(tick => fetch('/status?t=' + tick).then(response => response.text()), tick);
+    await finished;
+    now += 5;
+    const reason = await getEmptyOfferPageReason(page, tracker, { subTab: true });
+    if (tick < 3) assert.equal(reason, null);
+    else assert.match(reason, /hết form/);
+  }
+}
+test('các request polling ngắn không giữ tab đã trống mãi', { skip: !existsSync(chromium.executablePath()) }, verifyPeriodicRequestsDoNotExtendGrace);
+
+/**
+ * Giữ request điều hướng chưa được công bố trong popup, sau đó mô phỏng runtime cũ mất terminal event.
+ * @return {void} Các tab và tài liệu mới độc lập với request cũ.
+ * @throws {Error} Khi một tab/tài liệu vô can bị đánh dấu đang tải.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+function verifyRequestOwnership() {
+  const context = new EventEmitter();
+  const popup = new EventEmitter();
+  const other = new EventEmitter();
+  context.pages = () => [popup, other];
+  popup.context = other.context = () => context;
+  let currentUrl = 'https://document.test/previous';
+  const frame = { page: () => popup, url: () => currentUrl };
+  attachFrameRequestTracking(context);
+  let published = false;
+  const initial = {
+    frame: () => { if (!published) throw new Error('awaiting page'); return frame; },
+    url: () => currentUrl, resourceType: () => 'document', isNavigationRequest: () => true,
+  };
+  context.emit('request', initial);
+  assert.equal(hasPendingFrameRequests(other), false);
+  popup.emit('request', initial);
+  assert.equal(hasPendingFrameRequests(popup), true);
+  published = true;
+  assert.equal(hasPendingFrameRequests(popup, frame), true);
+  context.emit('requestfinished', initial);
+  const oldFetch = { frame: () => frame, url: () => 'https://document.test/slow', resourceType: () => 'fetch' };
+  context.emit('request', oldFetch);
+  const nextUrl = 'https://document.test/next';
+  const navigation = { frame: () => frame, url: () => nextUrl, resourceType: () => 'document', isNavigationRequest: () => true };
+  context.emit('request', navigation);
+  const newFetch = { ...oldFetch };
+  context.emit('request', newFetch);
+  currentUrl = nextUrl;
+  popup.emit('framenavigated', frame);
+  context.emit('requestfinished', navigation);
+  assert.equal(hasPendingFrameRequests(popup, frame), true, 'request tài liệu mới vẫn được giữ');
+  context.emit('requestfinished', newFetch);
+  assert.equal(hasPendingFrameRequests(popup, frame), false, 'request bị hủy ở tài liệu cũ đã nhả');
+}
+test('popup chưa rõ frame và tài liệu đã thay không khóa các tab khác', verifyRequestOwnership);
+
+/**
+ * Kiểm tra tab được thông báo sớm trong khi adapter vẫn chưa trả về danh sách tab ban đầu.
+ * @return {Promise<void>} Mọi tab được theo dõi đúng một lần.
+ * @throws {Error} Khi listener bị trễ hoặc bị gắn trùng.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+async function verifyAsyncPageListing() {
+  const context = new EventEmitter();
+  const existingPage = new EventEmitter();
+  const popup = new EventEmitter();
+  let finishListing;
+  context.pages = () => new Promise(resolve => { finishListing = resolve; });
+  attachFrameRequestTracking(context);
+  context.emit('page', popup);
+  assert.equal(popup.listenerCount('request'), 1);
+  finishListing([existingPage, popup]);
+  await Promise.resolve();
+  assert.equal(popup.listenerCount('request'), 1);
+  assert.equal(existingPage.listenerCount('request'), 1);
+}
+test('gắn listener sớm cả khi danh sách tab trả về bất đồng bộ', verifyAsyncPageListing);

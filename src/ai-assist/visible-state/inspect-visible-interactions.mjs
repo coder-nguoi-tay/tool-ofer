@@ -3,9 +3,9 @@
  * @param {object} context Phạm vi form và tiền tố marker cho control không có id duy nhất.
  * @return {object} Trạng thái tương tác đang hiển thị của document, không chứa HTML thô.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-19
  */
-export function inspectVisibleInteractions({ formScope, markerPrefix }) {
+export function inspectVisibleInteractions({ formScope, markerPrefix, excludedRegions }) {
   /**
    * Kiểm tra toàn bộ chuỗi cha để không nhận nút bị ẩn hoặc đang bị khóa bởi widget.
    * @param {Element} element Control hoặc vùng câu hỏi cần kiểm tra.
@@ -15,6 +15,7 @@ export function inspectVisibleInteractions({ formScope, markerPrefix }) {
    */
   const visible = element => {
     if (!element || formScope && !element.matches(formScope.memberSelector)) return false;
+    if (excludedRegions && element.closest(excludedRegions)) return false;
     for (let parent = element; parent; parent = parent.parentElement) {
       const style = getComputedStyle(parent);
       if (parent.hidden || parent.hasAttribute('inert') || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;

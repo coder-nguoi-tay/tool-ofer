@@ -1,6 +1,17 @@
 const attached = new WeakSet();
 
 /**
+ * Nhận biết tab đã nối bộ phát cảm ứng native để kiểm tra đích trước khi chạm.
+ * @param {object} page Tab đang nhận thao tác.
+ * @return {boolean} Tab đang dùng bộ phát cảm ứng của Orbita Android.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-19
+ */
+export function usesGoLoginAndroidTouchInput(page) {
+  return attached.has(page);
+}
+
+/**
  * Orbita Android bị treo khi dispatch mousePressed; dùng touch cho nhấn/thả, giữ hover và con trỏ.
  * @param {object} context Context GoLogin của tab.
  * @param {object} page Tab Android cần sửa primitive nhập liệu.

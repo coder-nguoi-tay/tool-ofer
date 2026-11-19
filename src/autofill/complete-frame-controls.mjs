@@ -1,7 +1,7 @@
+import { inspectInteractionReadiness } from '../browser/locators/inspect-interaction-readiness.mjs';
 import { addActionCount } from './add-action-count.mjs';
 import { addVerifiedFieldCount } from './add-verified-field-count.mjs';
 import { handleCustomGenderButtons } from './handle-custom-gender-buttons.mjs';
-import { handleNegativeSkipButtons } from './handle-negative-skip-buttons.mjs';
 import { handleOfferwallCards } from './handle-offerwall-cards.mjs';
 import { handleRadioAndSurveyOptions } from './handle-radio-and-survey-options.mjs';
 import { solveSurveyStep } from '../../survey-solver.mjs';
@@ -12,7 +12,7 @@ import { syncUplevelRewardsFields } from './sync-uplevel-rewards-fields.mjs';
  * @param {object} context Frame, dữ liệu lead và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần bỏ qua frame hiện tại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-19
  */
 export async function completeFrameControls({
   frameProgress,
@@ -97,30 +97,17 @@ export async function completeFrameControls({
     }
   } catch {}
 
-  // Tự động phát hiện và bấm các nút bỏ qua / skip / negative trên màn ưu đãi trung gian
-  if (!frameProgress.formScope) try {
-    const skippedOffers = await handleNegativeSkipButtons(frame);
-    if (skippedOffers > 0) {
-      frameProgress.filledInThisPass += skippedOffers;
-      addActionCount(session, skippedOffers);
-      session.autofillError = null;
-      options.onLog?.({
-        type: 'negative_skip_clicked',
-        detail: `Đã tự động bấm nút bỏ qua ưu đãi trung gian (${skippedOffers} nút).`
-      });
-    }
-  } catch {}
-
   // Lượt quét cuối chỉ xử lý checkbox đơn/consent. Nhóm nhiều đáp án đã được
   // solveSurveyCheckboxes chọn ngẫu nhiên đúng 2 ô và không được đổi lựa chọn ở đây.
   try {
     const cbClassification = await frame.evaluate(scopeSelector => {
+      if (!scopeSelector) return [];
       const isVisible = el => {
         if (!el || el.disabled) return false;
         const rect = el.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0;
       };
-      const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]:not(:checked)')).filter(el => isVisible(el) && (!scopeSelector || el.matches(scopeSelector)));
+      const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]:not(:checked)')).filter(el => isVisible(el) && el.matches(scopeSelector));
       return checkboxes.map((cb, idx) => {
         const uid = `cb_sweep_${idx}_${Date.now()}`;
         cb.setAttribute('data-ux-sweep-cb', uid);
@@ -141,38 +128,10 @@ export async function completeFrameControls({
       if (!allowed) continue;
       const cb = frame.locator(`[data-ux-sweep-cb="${info.uid}"]`).first();
       if ((await cb.count().catch(() => 0)) === 0) continue;
-      const isEnabled = await cb.isEnabled().catch(() => true);
-      if (!isEnabled) continue;
-      await cb.check({
-        force: true,
-        timeout: 1000
-      }).catch(() => {});
-      let nowChecked = await cb.isChecked().catch(() => false);
-      if (!nowChecked) {
-        await cb.evaluate(el => {
-          const label = el.closest('label') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
-          if (label) {
-            const target = label.querySelector('.checkmark, .checkbox-custom, .indicator, [class*="check"], svg') || label;
-            try {
-              target.click();
-            } catch {}
-          }
-          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked')?.set;
-          if (nativeSetter) {
-            nativeSetter.call(el, true);
-          } else {
-            el.checked = true;
-          }
-          el.setAttribute('aria-checked', 'true');
-          el.dispatchEvent(new Event('input', {
-            bubbles: true
-          }));
-          el.dispatchEvent(new Event('change', {
-            bubbles: true
-          }));
-        }).catch(() => {});
-        nowChecked = await cb.isChecked().catch(() => false);
-      }
+      const readiness = await cb.evaluate(inspectInteractionReadiness, frameProgress.formScope).catch(() => null);
+      if (!readiness?.ready) continue;
+      await cb.check({ force: false, timeout: 600 }).catch(() => {});
+      const nowChecked = await cb.isChecked().catch(() => false);
       if (nowChecked) {
         await cb.evaluate(el => {
           el.dataset.uxFilled = '1';

@@ -1,5 +1,7 @@
 import { readEvidenceWithTimeout } from '../../logging/recorder/read-evidence-with-timeout.mjs';
 import { isHeavyAdOrTrackerUrl } from '../../browser/data-saver/is-heavy-ad-or-tracker-url.mjs';
+import { hasPendingFrameRequests } from '../../browser/frames/pending-frame-requests.mjs';
+import { inspectBlankFrameDocument, lastIframeContentRequestSettledAt, reloadObservedIframe } from './reload-observed-iframe.mjs';
 
 // Iframe quảng cáo/đo lường không phải offer: không nạp lại dù trống.
 const AD_FRAME_HOSTS = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'google.com', 'facebook.com',
@@ -11,17 +13,17 @@ const observations = new WeakMap();
 /**
  * Ưu tiên hiện iframe offer (người dùng chốt 2026-11-18: iframe là phần quan trọng của offer).
  *
- * Iframe offer cỡ lớn (khảo sát, offerwall, form đối tác) trống quá 6 giây thì nạp lại riêng iframe đó, tối đa 2 lần
- * mỗi document, không F5 trang cha. Trống nghĩa là: chưa có document/URL rỗng (request treo), about:blank dù có src
- * (Obscura khi nạp lỗi), chrome-error, hoặc document không có control/chữ/ảnh nào (thanh IP của AutoLeadPC không tính).
+ * Trong một đợt iframe trống liên tục sau khi các request đã kết thúc, cho phép tối đa 2 lần nạp lại riêng iframe.
+ * Khi chưa đọc được frame hoặc request vẫn đang chạy, chờ lượt quan sát mới.
  * Iframe Adsmith #AS_IFRAME do recoverAdsmithFrameLoading lo riêng; iframe quảng cáo/tracker và iframe nhỏ bị bỏ qua.
  * @param {object} page Tab Playwright.
  * @param {object} session Phiên trình duyệt (bỏ qua khi đã đóng).
  * @param {object} [options] onLog để ghi log phiên.
  * @param {number} [now] Đồng hồ cho test.
  * @return {Promise<boolean>} True nếu lượt này đã nạp lại ít nhất một iframe.
+ * @throws {never} Bỏ qua frame vừa chuyển trang hoặc không xác định được.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-19
  */
 export async function recoverBlankOfferFrames(page, session, options = {}, now = Date.now()) {
   if (session?.isClosed || page.isClosed?.() || ['manual', 'skip'].includes(session?.offerMode)) return false;
@@ -48,55 +50,30 @@ export async function recoverBlankOfferFrames(page, session, options = {}, now =
       let host = '';
       try { host = new URL(candidate.source, page.url()).hostname.toLowerCase(); } catch { continue; }
       if (isHeavyAdOrTrackerUrl(candidate.source) || AD_FRAME_HOSTS.some(ad => host === ad || host.endsWith(`.${ad}`))) continue;
-      // Khóa theo document trang cha: trang cha tải lại thì đếm lại; iframe tạm about:blank khi đang nạp lại vẫn giữ lượt.
+      // Giữ số lượt cũ trong lúc chờ request, nhưng chỉ tính thời gian quan sát lại khi frame đã ổn định.
       const key = `${candidate.documentId}|${candidate.index}|${candidate.source}`;
-      const blank = await isFrameBlank(page, candidate.index);
       let state = tab.frames.get(key);
-      if (!blank) { tab.frames.delete(key); continue; }
-      if (!state) { state = { since: now, reloads: 0 }; tab.frames.set(key, state); }
-      if (state.reloads >= MAX_FRAME_RELOADS || now - state.since < BLANK_WAIT_MS * (state.reloads + 1)) continue;
-      const done = await page.evaluate(({ index, source }) => {
-        const frame = document.querySelectorAll('iframe')[index];
-        if (!frame || frame.getAttribute('src') !== source) return false;
-        // Gán lại đúng src khi request cũ còn treo thì trình duyệt bỏ qua: hủy bằng about:blank rồi nạp lại.
-        frame.setAttribute('src', 'about:blank');
-        setTimeout(() => frame.setAttribute('src', source), 50);
-        return true;
-      }, candidate).catch(() => false);
+      const element = await page.locator('iframe').nth(candidate.index).elementHandle({ timeout: 1000 }).catch(() => null);
+      const frame = await element?.contentFrame().catch(() => null);
+      await element?.dispose().catch(() => {});
+      if (!frame || hasPendingFrameRequests(page, frame) || hasPendingFrameRequests(page, page.mainFrame?.())) continue;
+      const child = await readEvidenceWithTimeout(frame, 'offer-frame-content', () => frame.evaluate(inspectBlankFrameDocument)).catch(() => null);
+      if (!child?.blank) { if (child) tab.frames.delete(key); continue; }
+      const settledAt = lastIframeContentRequestSettledAt(page, frame);
+      if (!state) { state = { reloads: 0 }; tab.frames.set(key, state); }
+      if (state.since == null || state.settledAt !== settledAt || state.childUrl !== child.childUrl || state.childDocumentId !== child.childDocumentId) state.since = now;
+      Object.assign(state, { settledAt, childUrl: child.childUrl, childDocumentId: child.childDocumentId });
+      if (state.reloads >= MAX_FRAME_RELOADS || now - state.since < BLANK_WAIT_MS) continue;
+      const done = await reloadObservedIframe(page, frame, { ...candidate, ...child }, settledAt);
       if (!done) continue;
       state.reloads++;
       reloaded = true;
       options.onLog?.({ type: 'offer_frame_reload', detail: `Iframe offer ${host} vẫn trống sau ${Math.round((now - state.since) / 1000)} giây; nạp lại riêng iframe, lần ${state.reloads}/${MAX_FRAME_RELOADS} (giữ trang cha).`, frameReloads: state.reloads }, page);
+      state.since = now;
     }
     return reloaded;
   } catch {
     // Trang vừa điều hướng/đóng: watcher không được sập vì bước phụ này.
     return false;
   } finally { tab.pending = false; }
-}
-
-/**
- * Iframe thứ index của trang cha đã có nội dung offer hiển thị chưa.
- * @param {object} page Tab Playwright.
- * @param {number} index Vị trí iframe trong document.querySelectorAll('iframe').
- * @return {Promise<boolean>} True khi iframe trống hoặc chưa tải.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
- */
-async function isFrameBlank(page, index) {
-  let element;
-  try {
-    element = await page.locator('iframe').nth(index).elementHandle({ timeout: 1000 });
-    const frame = await element?.contentFrame();
-    if (!frame || !frame.url() || frame.url() === 'about:blank' || /^(chrome-error:|about:neterror)/i.test(frame.url())) return true;
-    const content = await readEvidenceWithTimeout(frame, 'offer-frame-content', () => frame.evaluate(() => {
-      const ipBar = document.getElementById('__autolead_ip_bar');
-      const text = (document.body?.innerText || '').replace(ipBar?.innerText || '\u0000', '').replace(/\s+/g, ' ').trim();
-      const controls = document.querySelectorAll('input:not([type="hidden"]),select,textarea,button,a[href],[role="button"]').length;
-      const images = Array.from(document.images).some(image => image.naturalWidth > 32 && image.getBoundingClientRect().height > 32);
-      return Boolean(text) || controls > 0 || images || document.querySelectorAll('canvas,video,iframe').length > 0;
-    }));
-    return !content;
-  } catch { return false; }
-  finally { await element?.dispose().catch(() => {}); }
 }

@@ -515,3 +515,30 @@ Sau khi tách module Yes/No/Save, chạy lại `tests/yes-no-fallback.test.mjs`,
 - Trong lúc Stop đang đóng browser: Start phải bị khóa trên giao diện và API từ chối Start/Sequential; khi Stop hoàn tất mới cho phép chạy lại.
 
 - Độ nhạy form/CSS: request resourceType=stylesheet có URL /pixel.png hoặc query kết thúc tracking.png vẫn được tải, style áp dụng ở iframe/cross-origin. Data Saver không thêm __autolead_perf_style và không đổi animation/transition của form. Kiểm tra click/nhập giữ đúng thứ tự trên các slot, nhịp 160ms và bảo vệ lead vẫn hoạt động. Benchmark Chromium offline 3 lượt: click trước 408–424ms/sau 238–273ms, fast input trước 712–754ms/sau 575–592ms; đây không phải SLA hoặc số đo proxy thật.
+
+- Build macOS: chạy `./build-app.sh` hai lần sau khi sửa source Obscura; cả hai lần phải gọi Cargo và đóng gói binary mới. Build Obscura lỗi hoặc không tạo binary thì dừng, giữ nguyên app cũ và dọn staging. Các test dùng Cargo giả trong fixture, không thay app hoặc đóng phiên thật.
+
+### Obscura core: DOM wrapper bị freeze (2026-11-19)
+
+- Trang có form email và `Object.freeze(document.body)`/`Object.seal(input)`: sau khi thêm/xóa node, đọc `isConnected`, `parentNode`, `getComputedStyle()` không ném lỗi cache `_treeConnected`/`_treeParent`.
+- Bộ chọn form phải trả về scope active và đúng ô email; vẫn giữ trạng thái freeze/seal của website. Cache cây nằm trong WeakMap nội bộ của core, không được vá `Object.freeze` hoặc bỏ guard phạm vi form ở app.
+- Engine đã mở trước khi build tiếp tục dùng binary cũ; xác minh trên phiên mới sau khi đóng gói/mở lại, không tự tắt phiên có lead chỉ để kiểm tra bản build.
+
+### Core Rust: tải tài nguyên và lifecycle (2026-11-19)
+
+- Dùng fixture offline đối chiếu Chromium: async chậm không giữ inline/DCL; classic/defer giữ thứ tự; DCL bubble document → window đúng một lần; currentScript null sau khi thực thi.
+- Script HTTP 404 phát error và không chạy body; classic ném lỗi vẫn phát load, script sau tiếp tục; module có callback load/error.
+- Một script/CSS quá hạn: phần tải thành công vẫn khởi tạo form/style; CSS HTTP 500 không áp dụng; failure xuất hiện qua CDP, không tạo log dữ liệu form hàng loạt.
+- Dừng/hủy document: worker prefetch được hủy, không tăng số request vượt 16; kiểm tra đa tab, iframe, reload và đóng context bằng suite Rust/CDP.
+- Benchmark offline xen kẽ binary cũ/mới bằng `node tests/manual/benchmark-obscura-parser.mjs <baseline-bin> <new-bin>`; đọc riêng thời điểm form tạo và thời gian navigation, không gộp hai chỉ số.
+
+### Core Rust: policy quyền CDP (2026-11-19)
+
+- Grant/deny/reset theo origin và BrowserContext: query và status đã tạo phản ánh thay đổi; có cả `change` và `onchange`, không cần client liên tục evaluate trang.
+- Frame khác origin không dùng grant của main frame; page cùng context dùng chung policy; context mới độc lập; reload giữ override context.
+- Danh sách quyền có phần tử sai, context ID sai hoặc setting sai phải trả lỗi và giữ nguyên policy cũ. Descriptor mở rộng chưa hỗ trợ phải trả lỗi rõ ràng.
+- Geolocation chỉ trả tọa độ khi quyền là `granted`; `prompt`, `denied` và reset trả lỗi code 1 dù đã cấu hình tọa độ. Đặt tọa độ qua CDP không tự cấp quyền. Chưa có giao diện hỏi consent thì không được trả vị trí ở trạng thái `prompt`.
+- `accuracy` được giữ đúng; tọa độ/độ chính xác sai kiểu hoặc ngoài miền hợp lệ phải bị từ chối trước khi đổi state. Clear phải bỏ tọa độ cũ ngay trong document/iframe đang sống và sau reload; nếu không có cấu hình nền thì trả position-unavailable sau khi đã grant.
+- Status có listener `change`/`onchange` còn nhận thông báo sau GC; gỡ listener cuối, `once` hoặc abort signal phải nhả tham chiếu giữ sống. Watch vị trí bị từ chối phải giải phóng handle, kể cả callback lỗi hoặc gọi lại `clearWatch`.
+- Wildcard có hiệu lực cho origin chưa override; override chỉ thắng cho quyền tương ứng. Context khác không nhận wildcard/reset của context mặc định. Quá 1.024 phạm vi bị từ chối nguyên tử; vẫn cập nhật được origin cũ và reset giải phóng quota.
+- Fixture no-poll phải đợi sự kiện console/CDP, không dùng `waitForFunction` hoặc evaluate lặp để kích thích runtime. Kiểm thử tự động tại `tests/obscura-permission-validation.test.mjs` được đăng ký trong runner chính thức.

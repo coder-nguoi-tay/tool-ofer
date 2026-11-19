@@ -4,10 +4,6 @@ import { inspectNoSurvey } from './inspect-no-survey.mjs';
 import { humanClick } from '../human-click.mjs';
 
 const progress = new WeakMap();
-/** Màn mờ .Processing chờ AJAX quá lâu thì gỡ màn mờ và bấm lại Continue một lần (gửi lại request của Adsmith). */
-const ADSMITH_RECLICK_AFTER_MS = 15_000;
-/** Không bận liên tục chừng này mới coi là hết đợt chờ (tránh reset ngay lúc vừa gỡ màn mờ để bấm lại). */
-const ADSMITH_IDLE_RESET_MS = 3_000;
 /**
  * Trang khảo sát Adsmith đứng yên chừng này thì watcher F5 trang cha (người dùng chốt 2026-11-15: 40 giây; chấp nhận
  * F5 làm lại khảo sát). F5 đi qua reloadStuckPage để dùng chung giới hạn 3 lần/URL, tải lại bằng GET và log.
@@ -20,8 +16,9 @@ export const ADSMITH_STUCK_RELOAD_MS = 40_000;
  * @param {object} page Tab dùng để dispatch chuột mô phỏng.
  * @param {object} options Quyền tự submit và callback log.
  * @return {Promise<object|null>} Kết quả giữ bước/thao tác, null nếu quy tắc không áp dụng.
+ * @throws {Error} Khi phiên tương tác không còn khả dụng.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-19
  */
 export async function handleNoSurvey(frame, page, options = {}) {
   const session = options.session || page?._autofillSession;
@@ -30,29 +27,11 @@ export async function handleNoSurvey(frame, page, options = {}) {
   page._activeAutofillFrame = frame;
   const waiting = { handled: true, actions: 0 };
   const current = await frame.evaluate(inspectNoSurvey).catch(() => null);
-  if (!current) return waiting;
+  if (!current || current.busy) return waiting;
   let state = progress.get(frame);
   if (!state || state.identity !== current.identity) {
-    state = { identity: current.identity, attempts: 0, nextAt: 0, logged: false, busySince: null, idleSince: null, reclicked: false };
+    state = { identity: current.identity, attempts: 0, nextAt: 0, logged: false };
     progress.set(frame, state);
-  }
-  if (current.busy) {
-    // Màn mờ đang chặn chuột: bấm vào chỉ trúng màn mờ. Chờ mạng/AJAX; quá 15 giây thì gỡ màn mờ, bấm lại Continue
-    // một lần (Adsmith chỉ có .done(), request lỗi là treo mãi). Không tính là thao tác để mốc F5 40 giây không bị đẩy lùi.
-    state.busySince ??= Date.now();
-    state.idleSince = null;
-    const busyMs = Date.now() - state.busySince;
-    if (busyMs >= ADSMITH_RECLICK_AFTER_MS && !state.reclicked && current.next) {
-      state.reclicked = true;
-      options.onLog?.({ type: 'adsmith_reclick_continue', detail: `Adsmith AS_IFRAME: màn mờ .Processing chờ ${Math.round(busyMs / 1000)}s; gỡ màn mờ và bấm lại Continue một lần.` }, page);
-      await frame.evaluate(() => { document.querySelectorAll('.Processing').forEach(element => { element.style.display = 'none'; }); }).catch(() => {});
-      await humanClick(page, frame.locator(current.next)).catch(() => false);
-    }
-    return waiting;
-  }
-  if (state.busySince) {
-    state.idleSince ??= Date.now();
-    if (Date.now() - state.idleSince >= ADSMITH_IDLE_RESET_MS) Object.assign(state, { busySince: null, idleSince: null, reclicked: false });
   }
   if (Date.now() < state.nextAt) return waiting;
   const unanswered = current.questions.filter(question => !question.selected);

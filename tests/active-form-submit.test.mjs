@@ -11,6 +11,10 @@ import { submitFrameForm } from '../src/autofill/submit-frame-form.mjs';
 import { resolveActiveFormScope } from '../src/autofill/form-scope/resolve-active-form-scope.mjs';
 import { inspectFrameValidation } from '../src/autofill/inspect-frame-validation.mjs';
 import { submitVisibleFormFallback } from '../src/autofill/submit-visible-form-fallback.mjs';
+import { findSubmitButton as findOfferSubmitButton } from '../src/autofill/offers/2615/solver/find-submit-button.mjs';
+import { submitFrameForm as submitOfferFrameForm } from '../src/autofill/offers/2615/solver/submit-frame-form.mjs';
+import { handleNegativeSkipButtons } from '../src/autofill/handle-negative-skip-buttons.mjs';
+import { handleGoogleOauthSkip } from '../src/autofill/handle-google-oauth-skip.mjs';
 import { createFormScopeFixture } from './helpers/form-scope-browser-fixture.mjs';
 
 test('frame tạm mất execution context giữ khóa form, không mở rộng tìm kiếm ra trang', async () => {
@@ -26,6 +30,48 @@ test('frame tạm mất execution context giữ khóa form, không mở rộng t
 test('tìm và gửi đúng form đang xử lý trên Chromium', { skip: !existsSync(chromium.executablePath()) && 'Chưa cài Chromium' }, async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
+
+  await t.test('Không bấm Skip ở footer, không mở khóa nút ẩn để bấm', async () => {
+    const { context, page } = await createFormScopeFixture(browser, '<form><input><button id="skip_offer" type="button" hidden>Skip</button><footer><a class="skip-btn" href="#">No Thanks</a></footer></form><footer><button class="skip-button">Skip</button></footer>');
+    try {
+      await page.evaluate(() => document.addEventListener('click', () => document.body.dataset.clicked = '1'));
+      await resolveActiveFormScope(page);
+      assert.equal(await handleNegativeSkipButtons(page), 0);
+      assert.equal(await handleGoogleOauthSkip(page, page), 0);
+      assert.equal(await page.locator('#skip_offer').isVisible(), false);
+      assert.equal(await page.locator('body').getAttribute('data-clicked'), null);
+    } finally { await context.close(); }
+  });
+
+  for (const [solver, findButton, submit] of [
+    ['chung', findSubmitButton, submitFrameForm],
+    ['2615', findOfferSubmitButton, submitOfferFrameForm],
+  ]) {
+    await t.test(`${solver} chỉ chọn nút thuộc form và bỏ link điều hướng lồng trong câu hỏi`, async () => {
+      const { context, page } = await createFormScopeFixture(browser, '<main><a class="cta-button" href="/next">Continue</a><button id="btnSubmit">Submit</button><iframe srcdoc="<form><input><button>Next</button></form>"></iframe></main>');
+      try {
+        assert.equal(await findButton(page), null);
+        const childButton = await findButton(page.frames()[1]);
+        assert.equal(await childButton.textContent(), 'Next');
+        await page.setContent('<div class="form-container"><input><a href="/guide"><span role="button">Continue</span></a><a href="#" target="_blank">Next</a><a href="#bottom">Submit</a><a href="#">More</a></div>');
+        const scope = await resolveActiveFormScope(page);
+        assert.equal(await findButton(page, scope), null);
+        await page.locator('.form-container').evaluate(root => root.insertAdjacentHTML('beforeend', '<button type="button" data-vector-submit="true">Continue</button>'));
+        assert.equal(await findButton(page, { ...scope, active: false }), null);
+        assert.equal(await findButton(page, { ...scope, unavailable: true }), null);
+        assert.equal(await (await findButton(page, scope)).textContent(), 'Continue');
+      } finally { await context.close(); }
+    });
+
+    await t.test(`${solver} không thử click trực tiếp sau khi primitive đã từ chối`, async () => {
+      const { context, page, session } = await createFormScopeFixture(browser, '<form onsubmit="event.preventDefault()"><input value="ready"><button data-ux-offer-action-label="Continue" onclick="this.dataset.clicked=1">Continue</button></form>');
+      try {
+        await submit({ options: {}, frame: page, page, session, frameProgress: { filledInThisPass: 1 }, record: {}, screenInfo: {}, scanStartUrl: page.url() });
+        assert.equal(await page.locator('button').getAttribute('data-clicked'), null);
+        assert.equal(session.hasSubmittedCurrentScreen, undefined);
+      } finally { await context.close(); }
+    });
+  }
 
   await t.test('nút nhãn tùy biến của form chính thắng Continue ở form phụ', async () => {
     const { context, page } = await createFormScopeFixture(browser, '<form id="main"><input name="email"><input name="firstname"><button type="button" id="claim">Get Free Samples</button><a href="#privacy">Privacy policy</a></form><form id="secondary"><input><button type="button" id="continue">Continue</button></form>');
@@ -173,11 +219,11 @@ test('tìm và gửi đúng form đang xử lý trên Chromium', { skip: !exists
   });
 
   await t.test('form chính kết thúc không tự chuyển sang form phụ đã hiện từ đầu', async () => {
-    const { context, page } = await createFormScopeFixture(browser, '<form id="main"><input><input><button id="primary">Submit</button></form><form id="sidebar"><input id="side-input"><button id="side-button">Continue</button></form>');
+    const { context, page } = await createFormScopeFixture(browser, '<main><form id="primary-form"><input><input><button id="primary">Submit</button></form><form id="secondary"><input id="side-input"><button id="side-button">Continue</button></form></main>');
     try {
       assert.equal(await (await findSubmitButton(page)).getAttribute('id'), 'primary');
-      await page.locator('#main').evaluate(form => { form.hidden = true; });
-      assert.equal(await findSubmitButton(page), null);
+      await page.locator('#primary-form').evaluate(form => { form.hidden = true; });
+      assert.equal(Boolean(await findSubmitButton(page)), false);
       await page.locator('#side-input').focus();
       assert.equal(await (await findSubmitButton(page)).getAttribute('id'), 'side-button');
     } finally { await context.close(); }

@@ -13,8 +13,9 @@ const applicationName = 'AutoLeadPC Mac 2 AdsPower.app';
  * Cô lập quy trình đóng gói vào thư mục tạm, dùng compiler/signing giả để không thay app thật.
  * @param {object} context Test context sở hữu thư mục tạm.
  * @return {object} Source fixture, nơi cài app và môi trường công cụ giả.
+ * @throws {Error} Khi không tạo được fixture hoặc công cụ build giả.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-19
  */
 function createBuildFixture(context) {
   const directory = mkdtempSync(join(tmpdir(), 'AutoLeadPC-build-test-'));
@@ -23,6 +24,9 @@ function createBuildFixture(context) {
   const commands = join(directory, 'commands');
   mkdirSync(applications);
   mkdirSync(commands);
+  const coreCrate = join(directory, 'demo-obscura-antidetect/obscura-upstream/crates/obscura');
+  mkdirSync(coreCrate, { recursive: true });
+  writeFileSync(join(coreCrate, 'Cargo.toml'), '[package]\nname = "fixture"\n');
   mkdirSync(join(directory, 'demo-obscura-antidetect/target/release'), { recursive: true });
   writeFileSync(join(directory, 'demo-obscura-antidetect/target/release/obscura_antidetect_demo'), 'fixture native binary', { mode: 0o755 });
   const rootFiles = ['AutoLeadPCMacApp.swift', 'AutoLeadPC2.icns', 'autoleadpc-icon.svg', 'app.mjs', 'autofill.mjs', 'option-scorer.mjs', 'observer.mjs', 'analyze-ops.mjs', 'stealth.mjs', 'survey-solver.mjs', 'ai-assist.mjs', 'lead-check.mjs', 'chrome-versions.mjs', 'adspower-profile.mjs', 'multilogin-profile.mjs', 'gologin-profile.mjs', 'obscura-engine.mjs', 'codex-form-agent.mjs', 'local-profile-engine.mjs', 'playwright-mcp-human.cjs', 'pc-app.png', 'package.json', 'package-lock.json', 'relay.mjs', 'useragents.txt', 'QA_TEST_CASES.md', 'README.md', 'tgbot.mjs', 'tunnel.mjs', 'mcp-server.mjs', 'script.mjs', 'captcha.mjs'];
@@ -31,6 +35,9 @@ function createBuildFixture(context) {
   cpSync(join(sourceDirectory, 'packaging/windows'), join(directory, 'packaging/windows'), { recursive: true });
   mkdirSync(join(directory, 'scripts'));
   cpSync(join(sourceDirectory, 'scripts/build-windows.mjs'), join(directory, 'scripts/build-windows.mjs'));
+  cpSync(join(sourceDirectory, 'scripts/build-obscura.mjs'), join(directory, 'scripts/build-obscura.mjs'));
+  writeFileSync(join(directory, 'obscura-source-version'), 'fixture native binary');
+  writeFileSync(join(commands, 'cargo'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CARGO_LOG"\n[ "${FAIL_OBSCURA:-0}" != "1" ] || exit 1\n[ "${MISSING_OBSCURA_BINARY:-0}" != "1" ] || { rm -f demo-obscura-antidetect/target/release/obscura_antidetect_demo; exit 0; }\ncp obscura-source-version demo-obscura-antidetect/target/release/obscura_antidetect_demo\n', { mode: 0o755 });
   for (const feature of ['desktop', 'mac', 'mini', 'replay']) {
     mkdirSync(join(directory, 'ui', feature));
     writeFileSync(join(directory, 'ui', feature, 'index.html'), `<html>${feature}</html>`);
@@ -53,7 +60,7 @@ function createBuildFixture(context) {
   writeFileSync(join(commands, 'mv'), '#!/bin/sh\nif [ "${FAIL_INSTALL:-0}" = "1" ] && [ "$2" = "$TEST_INSTALLED_APP" ] && [ "${1##*/}" != "previous.app" ]; then exit 1; fi\nexec /bin/mv "$@"\n', { mode: 0o755 });
   const installed = join(applications, applicationName);
   return { directory, applications, installed, env: { ...process.env, PATH: commands + ':' + process.env.PATH, TEST_INSTALLED_APP: installed, OPEN_LOG: join(directory, 'open.log'),
-    LAUNCHCTL_LOG: join(directory, 'launchctl.log'), AUTOLEADPC_LAUNCH_AGENTS: join(directory, 'LaunchAgents') } };
+    CARGO_LOG: join(directory, 'cargo.log'), LAUNCHCTL_LOG: join(directory, 'launchctl.log'), AUTOLEADPC_LAUNCH_AGENTS: join(directory, 'LaunchAgents') } };
 }
 
 test('build lặp chỉ thay một app cố định, không giữ ZIP hoặc backup và không chép settings', context => {
@@ -73,6 +80,7 @@ test('build lặp chỉ thay một app cố định, không giữ ZIP hoặc bac
     assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/build-app.sh')));
     assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/packaging/windows/electron-builder.cjs')));
     assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/scripts/build-windows.mjs')));
+    assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/scripts/build-obscura.mjs')));
     assert.ok(existsSync(join(fixture.installed, 'Contents/Resources/launcher/AutoLeadPCMacApp.swift')));
   }
 });
@@ -125,4 +133,41 @@ test('máy có LaunchAgent: gỡ watchdog/hub trước khi build, nạp lại sa
     `bootstrap ${domain} ${agents}/com.autoleadpc.hub.plist`, `bootstrap ${domain} ${agents}/com.autoleadpc.watchdog.plist`
   ]);
   assert.equal(existsSync(join(fixture.directory, 'open.log')), false, 'Hub tự mở app, không mở thêm bản thứ hai');
+});
+
+test('mỗi lần build app phải build lại Obscura và đóng gói binary mới dù binary cũ đã tồn tại', context => {
+  const fixture = createBuildFixture(context);
+  for (const version of ['obscura-first', 'obscura-updated']) {
+    writeFileSync(join(fixture.directory, 'obscura-source-version'), version);
+    const result = spawnSync('bash', ['build-app.sh'], { cwd: fixture.directory, env: fixture.env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.equal(readFileSync(join(fixture.installed, 'Contents/Resources/launcher/bin/obscura_antidetect_demo'), 'utf8'), version);
+    assert.equal(readFileSync(join(fixture.directory, 'bin/obscura_antidetect_demo'), 'utf8'), version);
+  }
+  const calls = readFileSync(fixture.env.CARGO_LOG, 'utf8').trim().split('\n');
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(call => call.includes('build --release --locked --manifest-path')));
+});
+
+test('thiếu core trong checkout thì báo ngay trước khi chạm vào app hoặc LaunchAgent', context => {
+  const fixture = createBuildFixture(context);
+  rmSync(join(fixture.directory, 'demo-obscura-antidetect/obscura-upstream/crates/obscura/Cargo.toml'));
+  const result = spawnSync('bash', ['build-app.sh'], { cwd: fixture.directory, env: fixture.env, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Thiếu mã nguồn core Obscura/);
+  assert.equal(existsSync(join(fixture.directory, 'launchctl.log')), false);
+  assert.equal(existsSync(fixture.env.CARGO_LOG), false);
+});
+
+test('Obscura build lỗi hoặc không có binary mới thì dừng đóng gói và giữ app cũ', context => {
+  for (const failure of ['FAIL_OBSCURA', 'MISSING_OBSCURA_BINARY']) {
+    const fixture = createBuildFixture(context);
+    mkdirSync(fixture.installed);
+    writeFileSync(join(fixture.installed, 'current-version'), 'keep');
+    const result = spawnSync('bash', ['build-app.sh'], { cwd: fixture.directory, env: { ...fixture.env, [failure]: '1' }, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.ok(existsSync(fixture.env.CARGO_LOG));
+    assert.equal(readFileSync(join(fixture.installed, 'current-version'), 'utf8'), 'keep');
+    assert.deepEqual(readdirSync(fixture.applications), [applicationName]);
+  }
 });

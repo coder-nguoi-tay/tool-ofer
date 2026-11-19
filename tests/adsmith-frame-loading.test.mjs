@@ -6,7 +6,10 @@ import { chromium } from 'playwright';
 import { inspectAdsmithFrameLoading } from '../src/autofill/adsmith/inspect-frame-loading.mjs';
 import { recoverAdsmithFrameLoading } from '../src/autofill/adsmith/recover-frame-loading.mjs';
 import { inspectAdsmithFrameLoading as inspectOffer2615AdsmithFrameLoading } from '../src/autofill/offers/2615/solver/adsmith/inspect-frame-loading.mjs';
+import { recoverAdsmithFrameLoading as recoverOffer2615AdsmithFrameLoading } from '../src/autofill/offers/2615/solver/adsmith/recover-frame-loading.mjs';
 import { attachAutofillPageWatcher } from '../src/autofill/attach-autofill-page-watcher.mjs';
+import { inspectBlankFrameDocument } from '../src/autofill/frames/reload-observed-iframe.mjs';
+import { attachFrameRequestTracking } from '../src/browser/frames/pending-frame-requests.mjs';
 
 /**
  * Dựng mô hình tải Adsmith với đồng hồ ngoài, không dùng proxy hoặc website thật.
@@ -14,7 +17,7 @@ import { attachAutofillPageWatcher } from '../src/autofill/attach-autofill-page-
  * @return {object} Tab giả và danh sách lần điều hướng GET.
  * @throws {never} Lỗi mạng giả chỉ xuất hiện khi test bật failNavigation.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 function createLoadingPage(condition) {
   const page = {
@@ -22,8 +25,13 @@ function createLoadingPage(condition) {
     url: () => page.currentUrl, isClosed: () => false,
     evaluate: async () => ({ applicable: true, iframe: page.condition !== 'spinner', source: 'https://www.adsmith.io/forge/v4/?plc=9235', spinner: true, documentId: page.documentId }),
     locator: () => ({ elementHandle: async () => ({ isVisible: async () => true, dispose: async () => {}, contentFrame: async () => ({
+      frameElement: async () => ({ evaluate: async () => true, dispose: async () => {} }),
       url: () => page.condition === 'error' ? 'chrome-error://chromewebdata/' : page.condition === 'blank' ? 'about:blank' : 'https://www.adsmith.io/forge/v4/',
-      evaluate: async () => { if (page.condition === 'unavailable') throw new Error('document unavailable'); return { hasWork: page.condition === 'normal', hasContent: false, hasImage: false }; }
+      evaluate: async (read, expected) => {
+        if (page.condition === 'unavailable') throw new Error('document unavailable');
+        if (read === inspectBlankFrameDocument && expected) return page.condition === 'blank';
+        return { hasWork: page.condition === 'normal', hasContent: false, hasImage: false, childUrl: page.condition === 'blank' ? 'about:blank' : 'https://www.adsmith.io/forge/v4/', childDocumentId: 2 };
+      }
     }) }) }),
     goto: async url => { page.navigations.push(url); if (page.failNavigation) throw new Error('proxy timeout'); }
   };
@@ -37,6 +45,48 @@ test('spinner 25s, blank 20s và chrome-error 4s: không F5 sớm và dùng GET 
     assert.equal(page.navigations.length, 0, condition);
     await recoverAdsmithFrameLoading(page, {}, {}, threshold);
     assert.deepEqual(page.navigations, [page.url()], condition);
+  }
+});
+
+test('phiên 2615 đã xác nhận cũng dừng ở lần tải lại trang cha thứ năm', async () => {
+  for (const recover of [recoverAdsmithFrameLoading, recoverOffer2615AdsmithFrameLoading]) {
+    const page = createLoadingPage('spinner');
+    const session = { offerSolver: '2615', exitIp: '192.0.2.1', confirmedLeadIp: '192.0.2.1' };
+    const logs = [];
+    for (let now = 0; now <= 210000; now += 1000) await recover(page, session, { onLog: entry => logs.push(entry) }, now);
+    assert.equal(page.navigations.length, 5);
+    assert.equal(logs.filter(entry => entry.type === 'iframe_load_exhausted').length, 1);
+  }
+});
+
+test('bảo toàn iframe Adsmith khi request còn chờ qua toàn bộ ngưỡng tải lại', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  for (const recover of [recoverAdsmithFrameLoading, recoverOffer2615AdsmithFrameLoading]) {
+    const page = await browser.newPage();
+    attachFrameRequestTracking(page);
+    let release;
+    const pendingResponse = new Promise(resolve => { release = resolve; });
+    t.after(() => release());
+    const addresses = [];
+    await page.route('**/*', async route => {
+      addresses.push(new URL(route.request().url()).pathname);
+      if (addresses.at(-1) === '/forge/test') {
+        await pendingResponse;
+        return route.fulfill({ contentType: 'text/html', body: '<p>Content ready</p>' });
+      }
+      return route.fulfill({ contentType: 'text/html', body: '<div id="AS_SURVEY"><iframe id="AS_IFRAME" src="https://www.adsmith.io/forge/test"></iframe></div>' });
+    });
+    const requestedFrame = page.waitForRequest('https://www.adsmith.io/forge/test');
+    await page.goto('https://blog.financialhelpfinder.com/test', { waitUntil: 'domcontentloaded' });
+    await requestedFrame;
+    const logs = [];
+    for (const now of [0, 6000, 12000, 20000, 35000]) assert.equal(await recover(page, {}, { onLog: item => logs.push(item) }, now), true);
+    release();
+    await page.frameLocator('iframe').getByText('Content ready').waitFor();
+    assert.deepEqual(addresses, ['/test', '/forge/test']);
+    assert.deepEqual(logs, []);
+    await page.close();
   }
 });
 
@@ -76,6 +126,36 @@ test('mạng tự hồi phục, đổi giai đoạn, tạm mất DOM hoặc dừ
   await recoverAdsmithFrameLoading(page, {}, {}, 47000);
   await recoverAdsmithFrameLoading(page, {}, {}, 80000);
   assert.equal(page.navigations.length, 0, 'không quan sát quá 15s phải chờ lại');
+});
+
+test('Adsmith cho phép dữ liệu vừa nhận render trong iframe trước khi tải lại iframe hoặc trang cha', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  for (const recover of [recoverAdsmithFrameLoading, recoverOffer2615AdsmithFrameLoading]) {
+    const page = await browser.newPage();
+    attachFrameRequestTracking(page);
+    const paths = [];
+    await page.route('**/*', route => {
+      const path = new URL(route.request().url()).pathname;
+      paths.push(path);
+      return route.fulfill({ contentType: 'text/html', body: path === '/parent'
+        ? '<div id="AS_SURVEY"><iframe id="AS_IFRAME" src="https://www.adsmith.io/forge/blank"></iframe></div>' : '<body></body>' });
+    });
+    await page.goto('https://blog.financialhelpfinder.com/parent');
+    const child = page.frames().find(frame => frame.parentFrame() === page.mainFrame());
+    await recover(page, {}, {}, 0);
+    await recover(page, {}, {}, 5000);
+    const finished = page.waitForEvent('requestfinished', request => request.url().endsWith('/data'));
+    await child.evaluate(async () => { await (await fetch('/data')).text(); });
+    await finished;
+    const logs = [];
+    await recover(page, {}, { onLog: item => logs.push(item) }, 7000);
+    assert.deepEqual(logs, []);
+    await child.evaluate(() => { document.body.textContent = 'Rendered'; });
+    assert.equal(await recover(page, {}, {}, 20000), false);
+    assert.deepEqual(paths, ['/parent', '/forge/blank', '/data']);
+    await page.close();
+  }
 });
 
 test('người dùng reload cùng URL thì chờ đủ thời gian của document mới, không F5 dồn ngay', async () => {
