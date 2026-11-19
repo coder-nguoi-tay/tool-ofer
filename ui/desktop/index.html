@@ -581,6 +581,8 @@
           <div class="screen-preview-actions" style="display:flex;gap:6px;align-items:center;">
             <button type="button" class="screen-tool-btn" onclick="_openScreenDevtools()"
               title="DevTools của tab đang xem: F12 hoặc Fn+F12 trên Mac, Cmd+Option+I">F12 DevTools</button>
+            <button type="button" class="screen-tool-btn" aria-controls="screenMcpPanel"
+              onclick="const panel=document.getElementById('screenMcpPanel'); panel.hidden=!panel.hidden; if(!panel.hidden) panel.elements.code.focus()">MCP biểu mẫu</button>
             <button type="button" class="screen-tool-btn" onclick="_openScreenHtml()"
               title="Xem, sao chép hoặc tải HTML hiện tại, kể cả iframe">HTML</button>
             <button type="button" class="screen-tool-btn" onclick="_goBackScreen()"
@@ -603,6 +605,12 @@
               title="Đóng cửa sổ xem trực tiếp (Phím Esc)">✕ Đóng (Esc)</button>
           </div>
         </div>
+        <form hidden id="screenMcpPanel" onsubmit="event.preventDefault(); updateScreenFormMcp('share')" style="padding:8px;background:#1e293b;color:#fff">
+          <label>Mã từ agent <input name="code" autocomplete="off" spellcheck="false" required></label>
+          <button type="submit">Ghép tab này</button>
+          <button type="button" onclick="updateScreenFormMcp('revoke')">Ngắt ghép tab này</button>
+          <output name="status" aria-live="polite"></output>
+        </form>
         <section id="screenHtmlPanel"
           style="display:none;flex-direction:column;gap:6px;padding:8px 14px;background:#111827;color:#e5e7eb;flex-shrink:0;">
           <div class="screen-html-toolbar" style="display:flex;gap:6px;align-items:center;">

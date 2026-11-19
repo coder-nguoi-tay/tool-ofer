@@ -66,6 +66,17 @@ npm install
 npm start
 ```
 
+## MCP biểu mẫu cho agent bên ngoài
+
+Chạy client trong thư mục gốc của checkout này. Codex đọc cấu hình project ở `.codex/config.toml`. Claude Code đọc `.mcp.json`. Với client MCP stdio khác, đặt command là `node`, args là đường dẫn tuyệt đối đến `mcp-server.mjs` và `--forms`. Dùng cùng `AUTOLEADPC_PORT`, `AUTOLEADPC_INSTANCE` và, nếu có tùy chỉnh, `AUTOLEADPC_DATA_DIR` với backend. Cấu hình project đi kèm dùng instance 2, cổng 3211. Backend phải chạy phiên bản có mục **MCP biểu mẫu** trong Screen View. Cờ `--forms` chỉ công bố bốn công cụ dành cho biểu mẫu.
+
+1. Trên website mình quản lý, đánh dấu một form ở document chính và khai báo khóa dữ liệu trên từng trường. Ví dụ ô ZIP có thể dùng `<form data-autoleadpc-mcp="record"><label>Postal code<input type="tel" data-autoleadpc-field="zipcode"></label></form>`.
+2. Yêu cầu agent gọi `form_pair` với origin chính xác, ví dụ `https://forms.example.org`. Trong **Screen View → MCP biểu mẫu** của tab đã có record, nhập mã và bấm **Ghép tab này**. Mã có hiệu lực một lần. Quyền hết hạn mười phút kể từ lúc cấp mã.
+3. Agent gọi `form_inspect` để xem nhãn, khóa, loại trường và trạng thái có dữ liệu. Gọi `form_fill` với duy nhất khóa, ví dụ `{"field":"zipcode"}`. Backend lấy giá trị từ record của tab. Với câu hỏi riêng, nhập một cột CSV/JSON tên `mcp_answer_<khóa>` trong dữ liệu app. Ví dụ `mcp_answer_contact` chứa `sms` cho nhóm radio có khóa `contact`. Các khóa hồ sơ hỗ trợ gồm `firstname`, `lastname`, `fullname`, `email`, `phone`, `address`, `city`, `state`, `zipcode`, `country`. Dropdown và radio cần khớp duy nhất một lựa chọn. App đọc lại sau 550 ms để phát hiện trang trả trường về giá trị cũ. Với radio, dùng cùng khóa và name cho cả nhóm, và đặt đáp án bằng value của lựa chọn.
+4. Người vận hành xem lại kết quả trong tab. Bấm **Ngắt ghép tab này** hoặc gọi `form_disconnect` để kết thúc. Đổi document, đóng tab hoặc thay record làm mất quyền dùng grant cũ.
+
+MCP trả trạng thái xác minh ngay sau sự kiện input/change. Trang có thể tiếp tục xử lý bất đồng bộ hoặc tự chuyển bước theo logic riêng. Công cụ không nhận selector, JavaScript, lệnh điều hướng, submit hay giá trị do agent nhập. Giao diện ghép và client stdio kết nối trực tiếp qua loopback. Agent cloud cần một MCP client chạy trên máy giữ app hoặc một triển khai remote có xác thực riêng.
+
 ## Chạy test
 
 Chạy `npm test` để chạy self-check và test bộ cài các phiên bản Chrome. Các test DOM mở Chromium headless trên trang cục bộ; test tự động không gửi form tới website thật.

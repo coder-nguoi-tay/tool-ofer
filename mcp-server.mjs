@@ -19,6 +19,9 @@ import { join } from 'node:path';
 const APP_PORT = Number(process.env.AUTOLEADPC_PORT) || 3211;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 
+const formsOnly = process.argv.includes('--forms');
+const forms = formsOnly ? await import('./src/form-mcp/client-tools.mjs') : null;
+
 const instanceId = process.env.AUTOLEADPC_INSTANCE || '1';
 const dataDirName = process.env.AUTOLEADPC_DATA_DIR || `AutoLeadPC${instanceId !== '1' ? `-${instanceId}` : ''}`;
 
@@ -227,6 +230,7 @@ function replyError(id, code, message) {
 
 let pending = 0;
 let inputClosed = false;
+let formCalls = Promise.resolve();
 
 function checkExit() {
   if (inputClosed && pending === 0) process.exit(0);
@@ -236,7 +240,12 @@ const rl = createInterface({ input: process.stdin, terminal: false });
 
 rl.on('line', (line) => {
   let msg;
-  try { msg = JSON.parse(line); } catch { return; }
+  try { msg = JSON.parse(line); } catch { replyError(null, -32700, 'JSON không hợp lệ.'); return; }
+  if (!msg || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
+    replyError(null, -32600, 'Request JSON-RPC không hợp lệ.');
+    return;
+  }
+  if (msg.id === undefined) return;
 
   const { id, method, params } = msg;
   pending++;
@@ -244,21 +253,29 @@ rl.on('line', (line) => {
   (async () => {
     if (method === 'initialize') {
       reply(id, {
-        protocolVersion: '2024-11-05',
+        protocolVersion: formsOnly ? (['2024-11-05', '2025-03-26', '2025-06-18'].includes(params?.protocolVersion) ? params.protocolVersion : '2025-11-25') : '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'autoleadpc', version: '1.0.0' },
+        serverInfo: { name: formsOnly ? 'autoleadpc-forms' : 'autoleadpc', version: '1.0.0' },
       });
+    } else if (method === 'ping' && id !== undefined) {
+      reply(id, {});
     } else if (method === 'notifications/initialized') {
       // no-op
     } else if (method === 'tools/list') {
-      reply(id, { tools: TOOLS });
+      reply(id, { tools: formsOnly ? forms.formTools : TOOLS });
     } else if (method === 'tools/call') {
+      if (formsOnly) {
+        if (!forms.formTools.some(tool => tool.name === params?.name)) return replyError(id, -32602, 'Công cụ biểu mẫu không tồn tại.');
+        const operation = formCalls.then(() => forms.callFormTool(params.name, params.arguments ?? {}, APP));
+        formCalls = operation.catch(() => {});
+        return reply(id, await operation);
+      }
       const text = await callTool(params?.name, params?.arguments ?? {});
       reply(id, { content: [{ type: 'text', text }] });
     } else if (id !== undefined) {
       replyError(id, -32601, `Method not found: ${method}`);
     }
-  })().finally(() => { pending--; checkExit(); });
+  })().catch(() => replyError(id, -32603, 'Không thể hoàn tất request.')).finally(() => { pending--; checkExit(); });
 });
 
 rl.on('close', () => { inputClosed = true; checkExit(); });

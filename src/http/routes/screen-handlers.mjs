@@ -1,3 +1,4 @@
+import { handleFormMcpRequest } from '../../form-mcp/handle-form-request.mjs';
 import { handlePostScreenDevtools } from './screen/post-devtools.mjs';
 import { handleGetScreenHtml } from './screen/get-html.mjs';
 import { handleCommandsExecute } from '../routes/commands/execute.mjs';
@@ -24,4 +25,4 @@ import { handlePostScreenReload } from '../routes/screen/post-reload.mjs';
 import { handlePostScreenTabs } from '../routes/screen/post-tabs.mjs';
 import { handlePostScreenTabsClose } from '../routes/screen/post-tabs-close.mjs';
 import { handlePostScreenTabsNew } from '../routes/screen/post-tabs-new.mjs';
-export const screenRouteHandlers = [handlePostScreenDevtools, handleGetScreenHtml, handleCommandsExecute, handleGetDeviceProfiles, handlePostDeviceProfiles, handleGetAgentsIndex, handlePostAgentRegister, handlePostAgentHeartbeat, handleGetAgentTask, handlePostAgentResult, handlePostAgentsConfig, handleGetScreenSnapshot, handleGetScreenStream, handleGetScreenTabs, handlePostScreenTabsClose, handlePostScreenBack, handlePostScreenReload, handlePostScreenNavigate, handlePostScreenTabsNew, handlePostScreenTabs, handlePostScreenInput, handlePostBrowserShow, handlePostBrowserClose, handlePostBrowserHide, handlePostBrowserShowAll, handlePostBrowserHideAll];
+export const screenRouteHandlers = [handleFormMcpRequest, handlePostScreenDevtools, handleGetScreenHtml, handleCommandsExecute, handleGetDeviceProfiles, handlePostDeviceProfiles, handleGetAgentsIndex, handlePostAgentRegister, handlePostAgentHeartbeat, handleGetAgentTask, handlePostAgentResult, handlePostAgentsConfig, handleGetScreenSnapshot, handleGetScreenStream, handleGetScreenTabs, handlePostScreenTabsClose, handlePostScreenBack, handlePostScreenReload, handlePostScreenNavigate, handlePostScreenTabsNew, handlePostScreenTabs, handlePostScreenInput, handlePostBrowserShow, handlePostBrowserClose, handlePostBrowserHide, handlePostBrowserShowAll, handlePostBrowserHideAll];

@@ -1,0 +1,4 @@
+[mcp_servers.autoleadpc-forms]
+command = "node"
+args = ["mcp-server.mjs", "--forms"]
+env = { AUTOLEADPC_INSTANCE = "2", AUTOLEADPC_PORT = "3211" }

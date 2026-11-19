@@ -71,8 +71,8 @@
   min-width: 0;
 }
 
-/* Trên màn hình Desktop (> 900px), khóa cứng chiều cao header và không cho nút rớt dòng để màn hình tuyệt đối không giật khi FPS nhảy */
-@media (min-width: 901px) {
+/* Trên màn hình Desktop (> 1100px), khóa cứng chiều cao header và không cho nút rớt dòng để màn hình tuyệt đối không giật khi FPS nhảy */
+@media (min-width: 1101px) {
   .screen-preview-header {
     height: 48px;
     min-height: 48px;
@@ -110,7 +110,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .screen-preview-header {
     height: auto !important;
     min-height: auto !important;

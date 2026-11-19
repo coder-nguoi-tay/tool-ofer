@@ -13,6 +13,7 @@
   "desktop/functions/_open-new-tab.js",
   "desktop/functions/_open-screen-devtools.js",
   "desktop/functions/_open-screen-html.js",
+  "desktop/functions/update-screen-form-mcp.js",
   "desktop/functions/_open-select-picker.js",
   "desktop/functions/_poll-thumbnails.js",
   "desktop/functions/_quick-scroll.js",

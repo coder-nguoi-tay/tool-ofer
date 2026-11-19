@@ -3,10 +3,12 @@
  * @param {number} slot slot.
  * @return {void} Kết quả xử lý open screen modal.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-19
  */
 function openScreenModal(slot) {
       _screenActiveSlot = slot;
+      const mcpPanel = document.getElementById('screenMcpPanel');
+      if (mcpPanel) { mcpPanel.hidden = true; mcpPanel.reset(); }
       const htmlPanel = document.getElementById('screenHtmlPanel');
       if (htmlPanel) { htmlPanel.style.display = 'none'; htmlPanel.dataset.request = String(Number(htmlPanel.dataset.request || 0) + 1); }
       document.getElementById('screenModal').style.display = 'flex';

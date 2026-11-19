@@ -146,6 +146,7 @@ const TEST_FILES = [
   'chrome-versions.test.mjs',
   'form-reject.test.mjs',
   'codex-form-agent.test.mjs',
+  'form-mcp.test.mjs',
   'entry-point.test.mjs',
   'local-profile-engine.test.mjs',
   'multi-tab-ai.test.mjs',

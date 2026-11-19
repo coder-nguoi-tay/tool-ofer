@@ -93,7 +93,7 @@ test('toolbar preview giữ đủ nút trong viewport nhỏ', { skip: !existsSyn
   const { readUiAsset } = await import('../src/http/read-ui-asset.mjs');
   const html = (await readFile(new URL('../ui/desktop/index.html', import.meta.url), 'utf8')).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   const styles = await readUiAsset('desktop/styles.css');
-  for (const width of [900, 640, 480, 360, 320]) {
+  for (const width of [1101, 1024, 901, 900, 640, 480, 360, 320]) {
     const page = await browser.newPage({ viewport: { width, height: 700 } });
     await page.setContent(html);
     await page.addStyleTag({ content: styles });
@@ -116,7 +116,7 @@ test('toolbar preview giữ đủ nút trong viewport nhỏ', { skip: !existsSyn
     assert.equal(layout.documentWidth, width, `Trang không được tràn ngang ở ${width}px`);
     assert.equal(layout.headerScrollWidth, layout.headerWidth, `Toolbar không được cắt nút ở ${width}px`);
     assert.equal(layout.visibleButtons, layout.buttonCount, `Mọi nút phải nằm trong viewport ở ${width}px`);
-    assert.equal(layout.buttonCount, 9);
+    assert.equal(layout.buttonCount, 10);
     await page.close();
   }
 });

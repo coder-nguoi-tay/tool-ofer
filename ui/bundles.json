@@ -150,6 +150,7 @@
     "desktop/functions/_open-new-tab.js",
     "desktop/functions/_open-screen-devtools.js",
     "desktop/functions/_open-screen-html.js",
+    "desktop/functions/update-screen-form-mcp.js",
     "desktop/functions/_download-screen-html.js",
     "desktop/functions/_go-back-screen.js",
     "desktop/functions/_reload-screen.js",
