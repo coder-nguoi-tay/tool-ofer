@@ -1,4 +1,5 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/interaction/try-fast-text-input.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
+import { withPinnedInput, retainsInputFocus } from '../../../../interaction/focused-input.mjs';
 import { waitForInputPacing } from './wait-for-input-pacing.mjs';
 import { humanClick } from '../human-click.mjs';
 import { recordInputFillHtml } from '../../../../../logging/record-input-fill-html.mjs';
@@ -11,19 +12,22 @@ import { recordInputFillHtml } from '../../../../../logging/record-input-fill-ht
  * @return {Promise<boolean>} True khi nhập và blur giữ đúng giá trị, false để caller thử đường tương thích.
  * @throws {never} Lỗi nhập trả về false; lỗi ghi HTML không ảnh hưởng thao tác.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 export async function tryFastTextInput(field, value, page = null) {
-  if (typeof field.fill !== 'function' || typeof field.inputValue !== 'function') return false;
-  try {
-    if (page?.mouse && !await humanClick(page, field)) return false;
-    await waitForInputPacing(page);
-    await recordInputFillHtml(field, page);
-    await field.fill(value, { timeout: 1500 });
-    if (typeof field.press === 'function') await field.press('Tab', { timeout: 500 }).catch(() => {});
-    await waitForInputPacing(page);
-    const actual = await field.inputValue({ timeout: 500 });
-    if (actual.trim().toLowerCase() === value.trim().toLowerCase()) return true;
-    return /^[+\d\s().-]+$/.test(value) && actual.replace(/\D/g, '') === value.replace(/\D/g, '');
-  } catch { return false; }
+  return withPinnedInput(field, async input => {
+    if (typeof input.fill !== 'function' || typeof input.inputValue !== 'function') return false;
+    try {
+      if (page?.mouse && !await humanClick(page, input)) return false;
+      await waitForInputPacing(page);
+      await recordInputFillHtml(input, page);
+      if (page?.mouse && !await retainsInputFocus(input)) return false;
+      await input.fill(value, { timeout: 1500 });
+      if (typeof input.press === 'function' && await retainsInputFocus(input)) await input.press('Tab', { timeout: 500 }).catch(() => {});
+      await waitForInputPacing(page);
+      const actual = await input.inputValue({ timeout: 500 });
+      if (actual.trim().toLowerCase() === value.trim().toLowerCase()) return true;
+      return /^[+\d\s().-]+$/.test(value) && actual.replace(/\D/g, '') === value.replace(/\D/g, '');
+    } catch { return false; }
+  });
 }

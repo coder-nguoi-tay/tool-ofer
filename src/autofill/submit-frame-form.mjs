@@ -235,8 +235,7 @@ export async function submitFrameForm({
                 text: submitLabel,
                 detail: `Đang thử bấm nút submit/tiếp tục: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id || '?'}" class="${btnInfo.className || '?'}"`
               }, page);
-              if (await humanClick(page, submitBtn)) return true;
-              return submitBtn.click({ timeout: 2000 }).then(() => true).catch(() => false);
+              return humanClick(page, submitBtn);
             });
           } finally {
             if (!submitDispatched) page.off?.('popup', popupHandler);

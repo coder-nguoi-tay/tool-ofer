@@ -185,10 +185,7 @@ export async function submitFrameForm({
           // Thao tác click tự nhiên bằng humanClick (Bézier curves + CDP mouse events)
           const beforeSubmitState = await readQuestionState(frame);
           const clickStartedAt = Date.now();
-          let submitDispatched = await humanClick(page, submitBtn);
-          if (!submitDispatched) {
-            submitDispatched = await submitBtn.click({ timeout: 2000 }).then(() => true).catch(() => false);
-          }
+          const submitDispatched = await humanClick(page, submitBtn);
           // Website chặn ngay bằng alert lỗi nhập liệu ("Please enter a birthday…"): không tính là đã submit/tiến triển.
           // Trước đây mỗi lần vẫn cộng action nên watcher bấm Continue lặp mãi (log 2026-11-12: 54 lần).
           const rejectedDialog = submitDispatched && page._uxLastDialog?.validation && page._uxLastDialog.at >= clickStartedAt ? page._uxLastDialog : null;

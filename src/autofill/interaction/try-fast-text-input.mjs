@@ -1,3 +1,4 @@
+import { withPinnedInput, retainsInputFocus } from './focused-input.mjs';
 import { readAddressSelection } from '../read-address-selection.mjs';
 import { waitForInputPacing } from './wait-for-input-pacing.mjs';
 import { humanClick } from '../human-click.mjs';
@@ -12,24 +13,31 @@ import { recordInputFillHtml } from '../../logging/record-input-fill-html.mjs';
  * @return {Promise<boolean>} True khi nhập và blur giữ đúng giá trị, false để caller thử đường tương thích.
  * @throws {never} Lỗi nhập trả về false; lỗi ghi HTML không ảnh hưởng thao tác.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function tryFastTextInput(field, value, page = null, address = false) {
-  if (typeof field.fill !== 'function' || typeof field.inputValue !== 'function') return false;
-  try {
-    if (page?.mouse && !await humanClick(page, field)) return false;
-    await waitForInputPacing(page);
-    await recordInputFillHtml(field, page);
-    await field.fill(value, { timeout: 1500 });
-    if (address && (await field.evaluate(readAddressSelection, value))?.retained) return true;
-    if (typeof field.press === 'function') await field.press('Tab', { timeout: 500 }).catch(() => {});
-    await waitForInputPacing(page);
-    const actual = await field.inputValue({ timeout: 500 });
-    if (actual.trim().toLowerCase() === value.trim().toLowerCase()) return true;
-    if (address) {
-      const choice = await field.evaluate(readAddressSelection, value);
-      if (choice.retained || choice.pending) return true;
-    }
-    return /^[+\d\s().-]+$/.test(value) && actual.replace(/\D/g, '') === value.replace(/\D/g, '');
-  } catch { return false; }
+  return withPinnedInput(field, async input => {
+    if (typeof input.fill !== 'function' || typeof input.inputValue !== 'function') return false;
+    try {
+      if (page?.mouse && !await humanClick(page, input)) return false;
+      await waitForInputPacing(page);
+      await recordInputFillHtml(input, page);
+      if (page?.mouse && !await retainsInputFocus(input)) return false;
+      if (address) {
+        const selection = await input.evaluate(readAddressSelection, value);
+        if (selection.retained || selection.pending) return true;
+      }
+      await input.fill(value, { timeout: 1500 });
+      if (address && (await input.evaluate(readAddressSelection, value))?.retained) return true;
+      if (typeof input.press === 'function' && await retainsInputFocus(input)) await input.press('Tab', { timeout: 500 }).catch(() => {});
+      await waitForInputPacing(page);
+      const actual = await input.inputValue({ timeout: 500 });
+      if (actual.trim().toLowerCase() === value.trim().toLowerCase()) return true;
+      if (address) {
+        const choice = await input.evaluate(readAddressSelection, value);
+        if (choice.retained || choice.pending) return true;
+      }
+      return /^[+\d\s().-]+$/.test(value) && actual.replace(/\D/g, '') === value.replace(/\D/g, '');
+    } catch { return false; }
+  });
 }

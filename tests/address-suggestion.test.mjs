@@ -141,6 +141,23 @@ test('chọn địa chỉ một lần, giữ mã của widget khi auto quét l�
   assert.deepEqual(await page.locator('form').evaluate(form => [form.dataset.choices, form.dataset.overwritten, form.dataset.submitted]), ['1',undefined,'addr-10']);
 });
 
+test('địa chỉ được widget xác nhận khi lấy focus vẫn giữ mã ở cả hai đường nhập', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { humanType } = await import('../src/autofill/human-type.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  for (const slot of [1, 2]) {
+    await page.setContent(`<form><label>Street address<input name="address" role="combobox"
+      onfocus="this.value='10 Oak Street, Unit A'; this.form.elements.place_id.value='fixture-id'"
+      oninput="this.form.elements.place_id.value=''"></label><input type="hidden" name="place_id"></form>`);
+    page._autofillMouseSlot = slot;
+    const street = page.locator('[name=address]');
+    await humanType(street, '10 Oak St', page, { address: true, simulateTypo: false });
+    assert.equal(await street.inputValue(), '10 Oak Street, Unit A');
+    assert.equal(await page.locator('[name=place_id]').inputValue(), 'fixture-id');
+  }
+});
+
 test('widget xác nhận ngay khi nhập nhanh thì auto không phát lại input hoặc khôi phục chữ gốc', { skip: !existsSync(chromium.executablePath()) }, async t => {
   const { fillSelectOrTextField } = await import('../src/autofill/fill-select-or-text-field.mjs');
   const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');

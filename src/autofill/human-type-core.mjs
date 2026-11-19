@@ -1,3 +1,4 @@
+import { retainsInputFocus } from './interaction/focused-input.mjs';
 import { ADJACENT_KEYS } from './state/adjacent-keys.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { readAddressSelection } from './read-address-selection.mjs';
@@ -14,7 +15,7 @@ import { recordInputFillHtml } from '../logging/record-input-fill-html.mjs';
  * @return {Promise<void>} Hoàn tất điền hoặc trả về khi giá trị rỗng.
  * @throws {never} Lỗi nhập được xử lý trong từng nhánh; lỗi ghi HTML không chặn autofill.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function humanTypeCore(field, text, page = null, options = {}) {
   const str = String(text ?? '');
@@ -23,6 +24,8 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   if (shouldStopAfterLead(activePage?._autofillSession)) return;
   if (options.address && (await field.evaluate(readAddressSelection, str).catch(() => null))?.retained) return;
   if (activePage?._autofillMouseSlot > 1 && await tryFastTextInput(field, str, activePage, options.address)) return;
+  if (!await retainsInputFocus(field, true)) return;
+  const keyTarget = field.ownerFrame && typeof field.type === 'function' ? field : activePage?.keyboard;
   const isRealBrowser = Boolean(activePage?.mouse && typeof activePage.mouse.move === 'function');
   const enableTypo = options.simulateTypo !== undefined ? Boolean(options.simulateTypo) : isRealBrowser;
   try {
@@ -40,16 +43,14 @@ async function humanTypeCore(field, text, page = null, options = {}) {
         }).catch(() => {});
       }
       if (typeof field.click === 'function') {
-        await field.click({
-          force: true,
-          timeout: 1500
-        }).catch(() => {});
+        if (!await field.click({ timeout: 1500 }).then(() => true, () => false)) return;
       }
     }
-    if (typeof field.focus === 'function') {
+    if (!await retainsInputFocus(field, true)) return;
+    if (typeof field.focus === 'function' && !(activePage?.mouse && field.ownerFrame)) {
       await field.focus().catch(() => {});
     }
-  } catch {}
+  } catch { return; }
   const prePause = Math.floor(Math.random() * 40) + 25;
   if (activePage && typeof activePage.waitForTimeout === 'function') {
     await activePage.waitForTimeout(prePause).catch(() => {});
@@ -59,19 +60,31 @@ async function humanTypeCore(field, text, page = null, options = {}) {
 
   // Xóa nội dung cũ tự nhiên qua tổ hợp phím (Select All + Backspace) nếu trường đã có chữ
   if (shouldStopAfterLead(activePage?._autofillSession)) return;
+  if (!await retainsInputFocus(field)) return;
   await recordInputFillHtml(field, activePage);
-  try {
-    const isMac = process.platform === 'darwin';
-    const selectAllKey = isMac ? 'Meta+A' : 'Control+A';
-    if (typeof field.press === 'function') {
-      await field.press(selectAllKey).catch(() => {});
-      await field.press('Backspace').catch(() => {});
-    } else if (activePage?.keyboard) {
-      await activePage.keyboard.press(selectAllKey).catch(() => {});
-      await activePage.keyboard.press('Backspace').catch(() => {});
-    }
-  } catch {}
+  if (!await retainsInputFocus(field)) return;
+  if (options.address) {
+    const selection = await field.evaluate(readAddressSelection, str).catch(() => null);
+    if (!selection || selection.retained || selection.pending) return;
+  }
+  const initialValue = typeof field.inputValue === 'function' ? await field.inputValue({ timeout: 500 }).catch(() => null) : null;
+  if (initialValue !== '') {
+    try {
+      const isMac = process.platform === 'darwin';
+      const selectAllKey = isMac ? 'Meta+A' : 'Control+A';
+      if (typeof field.press === 'function') {
+        await field.press(selectAllKey).catch(() => {});
+        if (!await retainsInputFocus(field)) return;
+        await field.press('Backspace').catch(() => {});
+      } else if (activePage?.keyboard) {
+        await activePage.keyboard.press(selectAllKey).catch(() => {});
+        if (!await retainsInputFocus(field)) return;
+        await activePage.keyboard.press('Backspace').catch(() => {});
+      }
+    } catch {}
+  }
 
+  if (!await retainsInputFocus(field)) return;
   // Đảm bảo không còn ký tự cũ sót lại để tránh ghép nối chuỗi không mong muốn
   if (typeof field.evaluate === 'function') {
     await field.evaluate(el => {
@@ -92,11 +105,11 @@ async function humanTypeCore(field, text, page = null, options = {}) {
 
   // Gõ tuần tự từng ký tự mô phỏng nhịp gõ phím của người thật kèm giả lập gõ nhầm (Typo Simulation)
   let typedOk = false;
-  if (activePage?.keyboard && typeof activePage.keyboard.type === 'function') {
+  if (typeof keyTarget?.type === 'function') {
     try {
       let typoDone = false;
       for (let i = 0; i < str.length; i++) {
-        if (shouldStopAfterLead(activePage?._autofillSession)) return;
+        if (shouldStopAfterLead(activePage?._autofillSession) || !await retainsInputFocus(field)) return;
         const char = str[i];
         // Nhịp gõ người thật nhanh và mượt mà: 45-85ms/ký tự, có biến động tự nhiên
         let charDelay = isNameOrEmail ? Math.floor(Math.random() * 35) + 45 : isDigitsOnly ? Math.floor(Math.random() * 30) + 50 : Math.floor(Math.random() * 35) + 45;
@@ -120,16 +133,18 @@ async function humanTypeCore(field, text, page = null, options = {}) {
           typoDone = true;
           const wrongChar = adjacent[Math.floor(Math.random() * adjacent.length)];
           const typedWrong = char === char.toUpperCase() ? wrongChar.toUpperCase() : wrongChar;
-          await activePage.keyboard.type(typedWrong, {
+          await keyTarget.type(typedWrong, {
             delay: charDelay
           }).catch(() => {});
           const hesitate = Math.floor(Math.random() * 100) + 110;
           await new Promise(r => setTimeout(r, hesitate));
-          await activePage.keyboard.press('Backspace').catch(() => {});
+          if (!await retainsInputFocus(field)) return;
+          await keyTarget.press('Backspace').catch(() => {});
           const fixPause = Math.floor(Math.random() * 35) + 40;
           await new Promise(r => setTimeout(r, fixPause));
+          if (!await retainsInputFocus(field)) return;
         }
-        await activePage.keyboard.type(char, {
+        await keyTarget.type(char, {
           delay: charDelay
         });
       }
@@ -141,7 +156,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
     try {
       let typoDone = false;
       for (let i = 0; i < str.length; i++) {
-        if (shouldStopAfterLead(activePage?._autofillSession)) return;
+        if (shouldStopAfterLead(activePage?._autofillSession) || !await retainsInputFocus(field)) return;
         const char = str[i];
         // Nhịp gõ người thật (bản pressSequentially): đồng bộ với nhánh keyboard.type
         let charDelay = isNameOrEmail ? Math.floor(Math.random() * 80) + 110 : isDigitsOnly ? Math.floor(Math.random() * 70) + 130 : Math.floor(Math.random() * 80) + 115;
@@ -165,11 +180,13 @@ async function humanTypeCore(field, text, page = null, options = {}) {
           }).catch(() => {});
           const hesitate = Math.floor(Math.random() * 100) + 110;
           await new Promise(r => setTimeout(r, hesitate));
+          if (!await retainsInputFocus(field)) return;
           if (typeof field.press === 'function') {
             await field.press('Backspace').catch(() => {});
           }
           const fixPause = Math.floor(Math.random() * 35) + 40;
           await new Promise(r => setTimeout(r, fixPause));
+          if (!await retainsInputFocus(field)) return;
         }
         await field.pressSequentially(char, {
           delay: charDelay
@@ -183,6 +200,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
 
   // Fallback an toàn nếu chưa gõ được qua keyboard/pressSequentially
   if (shouldStopAfterLead(activePage?._autofillSession)) return;
+  if (!await retainsInputFocus(field) || (!typedOk && field.ownerFrame)) return;
   if (!typedOk && typeof field.pressSequentially === 'function') {
     try {
       await field.pressSequentially(str, {
@@ -253,6 +271,8 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   }
   if (typeof field.blur === 'function') {
     await field.blur().catch(() => {});
+  } else if (field.ownerFrame && await retainsInputFocus(field)) {
+    await field.evaluate(element => element.blur()).catch(() => {});
   }
 
   // Dừng siêu ngắn tự nhiên sau khi gõ xong trường (25ms - 50ms)

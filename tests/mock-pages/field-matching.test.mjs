@@ -193,6 +193,30 @@ test('quét lại hai ô đã đánh dấu điền nhưng bị đảo giá trị
   assert.equal(await page.locator('#update-phone-modal-submit').getAttribute('data-sent'), null);
 });
 
+test('modal điện thoại giữ số đã đúng và chỉ bấm khi cho phép gửi, ô đã hợp lệ', async t => {
+  const { chromium } = await import('playwright');
+  const { existsSync } = await import('node:fs');
+  if (!existsSync(chromium.executablePath())) return t.skip('Chưa cài Chromium');
+  const { createFormScopeFixture } = await import('../helpers/form-scope-browser-fixture.mjs');
+  const { fillPageForms } = await import('../../src/autofill/fill-page-forms.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<form>
+    <label>Phone<input id="update-phone-modal-input" type="tel" value="(817) 555-0147" oninput="this.dataset.edited=1"></label>
+    <button type="button" id="update-phone-modal-submit" onclick="this.dataset.sent=Number(this.dataset.sent || 0)+1">Save</button></form>`);
+  const phone = page.locator('input');
+  const button = page.locator('button');
+  for (const autoSubmit of [false, true]) {
+    if (autoSubmit) await phone.evaluate(input => input.setAttribute('aria-invalid', 'true'));
+    await fillPageForms(page, { session, sessionRecord: { phone: '8175550147' }, options: { autoSubmit }, triggerLeadCheckAfterEmail() {} });
+    assert.equal(await button.getAttribute('data-sent'), null);
+    if (!autoSubmit) assert.equal(await phone.getAttribute('data-edited'), null);
+  }
+  await phone.evaluate(input => input.removeAttribute('aria-invalid'));
+  await fillPageForms(page, { session, sessionRecord: { phone: '8175550147' }, options: { autoSubmit: true }, triggerLeadCheckAfterEmail() {} });
+  assert.equal(await button.getAttribute('data-sent'), '1');
+});
+
 test('đường nhập nhanh nhường ô có nhãn trái với selector, giữ số điện thoại và địa chỉ trống khi record thiếu', async t => {
   const { chromium } = await import('playwright');
   const { existsSync } = await import('node:fs');

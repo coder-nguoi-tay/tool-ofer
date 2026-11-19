@@ -1796,6 +1796,23 @@ assert.ok(
 // 11.6 Kiểm tra autofill tiếp tục chạy và kiểm tra submit liên tục khi leadCheckStatus = 'waiting' (không bị đứng màn hình)
 let submitClickedDuringLeadWait = false;
 const mockLeadWaitPageEvents = {};
+const selfcheckSubmitScope = { id: 'selfcheck', active: true, rootSelector: '#form', memberSelector: ':is(#form, #form *)', nativeForm: true, visibleFieldCount: 1 };
+const selfcheckSubmitSelector = '[data-ux-scoped-submit="selfcheck"]';
+/**
+ * Mô phỏng bộ theo dõi validation khi các form fixture được gửi hợp lệ.
+ * @param {Function} observer Hàm quan sát chạy trong frame.
+ * @param {object} scope Phạm vi form được chọn.
+ * @return {Promise<object>} Handle đọc trạng thái validation và giải phóng sau khi gửi.
+ * @throws {AssertionError} Khi caller quan sát sai form.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+async function observeValidFixtureForm(observer, scope) {
+  assert.equal(observer.name, 'observeFormValidation');
+  assert.equal(scope.id, selfcheckSubmitScope.id);
+  const state = { initialErrors: [], watching: true, readFeedback: () => [], close() {} };
+  return { evaluate: async read => read(state), dispose: async () => {} };
+}
 const mockReadySubmitDomState = {
   getAttribute: () => null,
   hasAttribute: () => false,
@@ -1829,22 +1846,26 @@ const mockLeadWaitPage = {
     return true;
   },
   frames: () => [{
+    evaluateHandle: observeValidFixtureForm,
     locator: (sel) => ({
-      all: async () => {
-        if (sel.includes('button') || sel.includes('continue')) {
-          return [{
-            isVisible: async () => true,
-            isEnabled: async () => true,
-            scrollIntoViewIfNeeded: async () => {},
-            hover: async () => {},
-            click: async () => { submitClickedDuringLeadWait = true; },
-            evaluate: async (fn) => fn(mockSubmitButton),
-          }];
-        }
-        return [];
-      },
+      all: async () => [],
+      filter: () => ({ all: async () => [], elementHandles: async () => [] }),
+      first: () => sel === selfcheckSubmitSelector ? {
+        isVisible: async () => true,
+        isEnabled: async () => true,
+        click: async () => { submitClickedDuringLeadWait = true; },
+        evaluate: async (fn, arg) => {
+          if (fn.name === 'isControlInActiveForm') return true;
+          return fn(mockSubmitButton, arg);
+        },
+      } : { count: async () => 0, isVisible: async () => false },
     }),
-    evaluate: async (fn) => {
+    evaluate: async (fn, arg) => {
+      if (fn?.name === 'collectQuestionBlocks') return [];
+      if (fn?.name === 'inspectVisibleTwyCards') return null;
+      if (fn?.name === 'fillVisibleTwySubform') return 0;
+      if (fn?.name === 'selectActiveForm') return selfcheckSubmitScope;
+      if (arg?.scope?.id === selfcheckSubmitScope.id && arg.legalNoiseSource) return selfcheckSubmitSelector;
       if (fn?.toString() === '() => true') return true;
       if (fn?.name === 'inspectYesNoStep') return { questions: [] };
       return { unfilled: false };
@@ -1867,7 +1888,8 @@ attachAutofill(mockContextLeadWait, [{ firstname: 'John' }], 'https://example.co
 });
 
 mockSessionLeadWait.triggerAutofillScan?.();
-await new Promise((r) => setTimeout(r, 250));
+const leadWaitClickDeadline = Date.now() + 3000;
+while (!submitClickedDuringLeadWait && Date.now() < leadWaitClickDeadline) await new Promise(resolve => setTimeout(resolve, 25));
 assert.ok(submitClickedDuringLeadWait, 'Submit phải được kiểm tra và bấm liên tục ngay cả khi leadCheckStatus đang là waiting');
 
 // 11.7 Kiểm tra findSubmitButton nhận diện nút Jump Page CTA (màn hình thứ 5 sau DOB/Gender)
@@ -2203,9 +2225,10 @@ const mockEmailSubmitBtn = {
   scrollIntoViewIfNeeded: async () => {},
   hover: async () => {},
   click: async () => { emailSubmitBtnClicked = true; },
-  evaluate: async (fn, arg) => fn({
+  evaluate: async (fn, arg) => fn.name === 'isControlInActiveForm' ? true : fn({
     tagName: 'BUTTON',
     id: 'btnNextEmail',
+    getBoundingClientRect: () => ({ width: 120, height: 40 }),
     ...mockReadySubmitDomState,
     innerText: 'Continue to Next Step',
     dataset: {},
@@ -2222,6 +2245,7 @@ const mockEmailInput = {
   press: async () => {},
   inputValue: async () => 'test@gmail.com',
   evaluate: async (fn, arg) => {
+    if (fn.name === 'isControlInActiveForm') return true;
     emailFieldFilled = true;
     return fn({
       id: 'user_email',
@@ -2251,9 +2275,11 @@ const mockEmailPage = {
   on: () => {},
   off: () => {},
   frames: () => [{
+    evaluateHandle: observeValidFixtureForm,
     locator: (sel) => ({
+      filter: () => ({ all: async () => [], elementHandles: async () => [] }),
       all: async () => {
-        if (sel === 'input, textarea, select') {
+        if (sel.includes('input, textarea, select')) {
           return [mockEmailInput];
         }
         if (sel.includes('button') || sel.includes('Continue') || sel.includes('submit')) {
@@ -2262,9 +2288,14 @@ const mockEmailPage = {
         return [];
       },
       count: async () => 0,
-      first: () => ({ count: async () => 0, isVisible: async () => false }),
+      first: () => sel === selfcheckSubmitSelector ? mockEmailSubmitBtn : { count: async () => 0, isVisible: async () => false },
     }),
-    evaluate: async (fn) => {
+    evaluate: async (fn, arg) => {
+      if (fn?.name === 'collectQuestionBlocks') return [];
+      if (fn?.name === 'inspectVisibleTwyCards') return null;
+      if (fn?.name === 'fillVisibleTwySubform') return 0;
+      if (fn?.name === 'selectActiveForm') return selfcheckSubmitScope;
+      if (arg?.scope?.id === selfcheckSubmitScope.id && arg.legalNoiseSource) return selfcheckSubmitSelector;
       if (fn?.toString() === '() => true') return true;
       if (fn?.name === 'inspectYesNoStep') return { questions: [] };
       return { isScreen5: false, isJumpPage: false, hasEmailInput: true };
@@ -2294,7 +2325,8 @@ attachAutofill(mockEmailContext, [{ email: 'test@gmail.com' }], 'https://example
 });
 
 mockEmailSession.triggerAutofillScan?.();
-await new Promise((r) => setTimeout(r, 600));
+const emailSubmitDeadline = Date.now() + 3000;
+while (!mockEmailSession.emailScreenSubmitted && Date.now() < emailSubmitDeadline) await new Promise(resolve => setTimeout(resolve, 25));
 
 assert.ok(mockEmailSession.emailFilled, 'Session phải đánh dấu emailFilled khi điền ô email');
 assert.ok(emailSubmitBtnClicked, 'Autofill phải click submit màn chứa email');
@@ -2342,7 +2374,8 @@ attachAutofill(mockEmailContext, [{ email: 'test@gmail.com' }], 'https://example
 });
 
 mockEmailSession5.triggerAutofillScan?.();
-await new Promise((r) => setTimeout(r, 400));
+const firstEmailStepDeadline = Date.now() + 3000;
+while (!mockEmailSession5.emailScreenSubmitted && Date.now() < firstEmailStepDeadline) await new Promise(resolve => setTimeout(resolve, 25));
 // Lượt quét sau khi trang đã sang màn mới mới check lead (check sau khi đã NHẢY QUA màn email).
 mockEmailSession5.triggerAutofillScan?.();
 await new Promise((r) => setTimeout(r, 400));

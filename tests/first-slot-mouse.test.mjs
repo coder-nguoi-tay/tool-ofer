@@ -2,6 +2,7 @@ import { syncUplevelRewardsFields } from '../src/autofill/sync-uplevel-rewards-f
 import { attachAutofill } from '../src/autofill/attach-autofill.mjs';
 import { handleCheckboxField } from '../src/autofill/handle-checkbox-field.mjs';
 import { humanType } from '../src/autofill/human-type.mjs';
+import { humanType as typeInOfferForm } from '../src/autofill/offers/2615/solver/human-type.mjs';
 import { tryFastTextInput } from '../src/autofill/interaction/try-fast-text-input.mjs';
 import { renderBrowserMousePointer } from '../src/autofill/interaction/render-browser-mouse-pointer.mjs';
 import { clickReadyControl } from '../src/browser/locators/click-ready-control.mjs';
@@ -140,6 +141,25 @@ test('nhãn checkbox, AI và field đặc thù trong iframe đều nhận chuộ
   });
 });
 
+
+test('dừng nhập khi trang chuyển focus trong keydown hoặc sau ký tự đầu, kể cả trong iframe', { skip }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  for (const typeText of [humanType, typeInOfferForm]) {
+    for (const event of ['keydown', 'input']) {
+      await page.setContent('<main><iframe title="Form" srcdoc="<main><input id=first><input id=other value=keep></main>"></iframe></main>');
+      const form = page.frameLocator('iframe');
+      const first = form.locator('#first');
+      await first.evaluate((element, name) => element.addEventListener(name, e => {
+        if (name === 'input' || e.key === 'a') element.ownerDocument.querySelector('#other').focus();
+      }), event);
+      await typeText(first, 'abcd', page, { simulateTypo: false });
+      assert.equal(await form.locator('#other').inputValue(), 'keep', 'Ô mới giữ nguyên giá trị');
+      assert.equal(await first.inputValue(), event === 'input' ? 'a' : '');
+    }
+  }
+});
 
 test('input không nhận click thì không được điền nhanh hoặc gõ phím', async () => {
   let writes = 0;

@@ -210,18 +210,16 @@ export async function fillPageForms(page, {
       if ((await phoneModalInput.count().catch(() => 0)) > 0 && (await phoneModalInput.isVisible().catch(() => false))) {
         const metadata = await phoneModalInput.evaluate(collectFieldMetadata);
         const rawPhone = resolveContactField(metadata) === 'phone' && String(resolveProvidedFieldValue(metadata, record, session) || '').replace(/\D/g, '');
-        if (rawPhone && rawPhone.length === 10) {
+        if (rawPhone && rawPhone.length === 10 && !metadata.readOnly && !metadata.disabled) {
           const area = rawPhone.slice(0, 3);
           const mid = rawPhone.slice(3, 6);
           const last = rawPhone.slice(6, 10);
           const formattedPhone = `(${area}) ${mid}-${last}`;
-          await humanType(phoneModalInput, formattedPhone, page);
-          const submitModalBtn = locateFormElements(frame, '#update-phone-modal-submit, button.update-phone-modal-submit').first();
-          if ((await submitModalBtn.count().catch(() => 0)) > 0 && (await submitModalBtn.isVisible().catch(() => false))) {
-            await submitModalBtn.click({
-              force: true,
-              timeout: 1500
-            });
+          if (metadata.value.replace(/\D/g, '') !== rawPhone) {
+            await humanType(phoneModalInput, formattedPhone, page);
+            const accepted = await phoneModalInput.evaluate((input, digits) => input.value.replace(/\D/g, '') === digits &&
+              input.validity.valid && input.getAttribute('aria-invalid') !== 'true', rawPhone).catch(() => false);
+            if (!accepted) continue;
             frameProgress.filledInThisPass += 1;
             addVerifiedFieldCount(session, 1);
           }
