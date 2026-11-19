@@ -7,6 +7,7 @@ import { buildSelectCandidates } from '../autofill/select/build-select-candidate
 import { readRequestBody } from '../http/actions/read-request-body.mjs';
 import { respondWithJson } from '../http/actions/respond-with-json.mjs';
 import { consumePairing } from './pairing.mjs';
+import { applyRecordFormField } from './apply-record-form-field.mjs';
 import { operateOnForm } from './operate-on-form.mjs';
 
 const grants = new Map();
@@ -120,12 +121,12 @@ export async function handleFormMcpRequest(request, response) {
       choiceValue: fill ? explicitChoiceValue(record, args.field) : null,
       candidates: fill ? buildSelectCandidates(value, { name: args.field }) : []
     };
-    let result = await grant.form.evaluate(operateOnForm, operation);
+    let result = await applyRecordFormField(grant.form, operation);
     if (fill && result.verified) {
       await wait(550);
       if (grants.get(token) !== grant || (page._assignedRecord || (page === session.mainPage && session.currentRecord)) !== record ||
           suppliedValue(record, args.field, session) !== value || explicitChoiceValue(record, args.field) !== operation.choiceValue) return send(409, { error: 'Quyền hoặc dữ liệu đã đổi khi xác minh.' });
-      result = await grant.form.evaluate(operateOnForm, { ...operation, verifyOnly: true });
+      result = await applyRecordFormField(grant.form, { ...operation, verifyOnly: true });
     }
     if (result.fields) {
       for (const item of result.fields) {

@@ -4,7 +4,7 @@
  * @param {object|string|null} scopePayload Giá trị đồng bộ và phạm vi form từ phía ứng dụng.
  * @return {void} Cập nhật control cùng các sự kiện input/change cần thiết.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-19
  */
 export function syncAlphaHiddenContactData(scopePayload) {
   const scopeSelector = scopePayload?.__formScopePayload ? scopePayload.scopeSelector : null;
@@ -25,7 +25,8 @@ export function syncAlphaHiddenContactData(scopePayload) {
   
   const addr = findControl('#address');
   const hiddenAddr = findControl('#input-address');
-  if (addr && addr.value && hiddenAddr && hiddenAddr.readOnly) {
+  const addressWidget = addr?.matches?.('[role=combobox], [aria-autocomplete], [aria-controls], [list]') || addr?._autoleadAddressChoice;
+  if (addr?.value && hiddenAddr?.readOnly && !hiddenAddr.value && !addressWidget) {
     hiddenAddr.value = addr.value;
     hiddenAddr.dispatchEvent(new Event('input', {
       bubbles: true

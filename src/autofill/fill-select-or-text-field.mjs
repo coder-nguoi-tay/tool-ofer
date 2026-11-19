@@ -6,6 +6,7 @@ import { scrollToFormControl } from './form-scope/scroll-to-form-control.mjs';
 import { addVerifiedFieldCount } from './add-verified-field-count.mjs';
 import { handleAddressSelectDropdown } from './handle-address-select-dropdown.mjs';
 import { hasActiveAddressSuggestions } from './has-active-address-suggestions.mjs';
+import { readAddressSelection } from './read-address-selection.mjs';
 import { humanClick } from './human-click.mjs';
 import { humanType } from './human-type.mjs';
 import { parseDobComponents } from './parse-dob-components.mjs';
@@ -127,8 +128,19 @@ export async function fillSelectOrTextField({
     unmatchedFieldNames.add(`${metadata.names?.[0] ?? 'date'} (date fill failed)`);
     return true;
   } else {
+    const isAddressField = metadata.names.some(n => /address|street|diachi/i.test(n) && !/email/i.test(n));
+    const requestedAddress = String(valueToFill);
+    if (isAddressField) {
+      const choice = await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
+      if (choice?.retained || choice?.pending) return true;
+      await field.evaluate((input, query) => {
+        if (input._autoleadAddressChoice?.query !== query) delete input._autoleadAddressChoice;
+        input._autoleadAddressQuery = query;
+      }, requestedAddress).catch(() => {});
+    }
     // Nhập từ từ mô phỏng nhịp gõ phím của người thật (chống bị phát hiện bot autofill)
-    await humanType(field, valueToFill, page);
+    await humanType(field, valueToFill, page, { address: isAddressField });
+    if (isAddressField && (await field.evaluate(readAddressSelection, requestedAddress).catch(() => null))?.retained) return false;
 
     // XÁC MINH SAU GÕ (fix): framework có thể clear ô (type=tel + maxlength,
     // React/Angular reset) — trước đây chỉ set data-ux-filled="1" nên ô rỗng vẫn bị coi
@@ -155,6 +167,11 @@ export async function fillSelectOrTextField({
           okTyped = true;
           break;
         }
+        if (isAddressField) {
+          const choice = await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
+          if (choice?.retained) return false;
+          if (choice?.pending) return true;
+        }
         if (retry === 3) break;
         if (retry === 2 && typeof field.fill === 'function') {
           await recordInputFillHtml(field, page);
@@ -164,7 +181,7 @@ export async function fillSelectOrTextField({
           }).catch(() => {});
         } else {
           await humanType(field, expectVal, page, {
-            simulateTypo: false
+            address: isAddressField, simulateTypo: false
           });
         }
       }
@@ -187,7 +204,6 @@ export async function fillSelectOrTextField({
     }
 
     // Chỉ chấp nhận gợi ý xác định được cho ô vừa nhập.
-    const isAddressField = metadata.names.some(n => /address|street|diachi/i.test(n));
     const isCityOrStateField = metadata.names.some(n => /city|thanhpho|state|tinh|province|make|model|school|college|job/i.test(n));
     const isComboboxOrAutocomplete = Boolean(metadata.ariaAutoComplete || metadata.classes?.includes('autocomplete') || metadata.classes?.includes('typeahead') || metadata.names?.some(n => /autocomplete|suggest/i.test(n)));
     let selectedSuggestion = false;
@@ -232,7 +248,10 @@ export async function fillSelectOrTextField({
 
       // Đảm bảo sau khi xử lý autocomplete, ô địa chỉ không bị widget xóa trắng
       const postAddressVal = await field.inputValue().catch(() => '');
-      if (!postAddressVal || postAddressVal.trim() === '') {
+      const retainedAfterPick = !selectedSuggestion && isAddressField && await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
+      if (retainedAfterPick?.retained) return false;
+      if (retainedAfterPick?.pending) return true;
+      if (!selectedSuggestion && (!postAddressVal || postAddressVal.trim() === '')) {
         await field.evaluate((el, val) => {
           const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
           const desc = Object.getOwnPropertyDescriptor(proto, 'value');

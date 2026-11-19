@@ -9,6 +9,7 @@ import { resolveProvidedFieldValue } from '../autofill/record-values/resolve-pro
 import { buildSelectCandidates } from '../autofill/select/build-select-candidates.mjs';
 import { selectOptionWithHumanInteraction } from '../autofill/select/select-option-with-human-interaction.mjs';
 import { inspectActionField } from './inspect-action-field.mjs';
+import { readAddressSelection } from '../autofill/read-address-selection.mjs';
 import { selectFirstAddressSuggestion } from '../autofill/select-first-address-suggestion.mjs';
 import { clickReadyControl } from '../browser/locators/click-ready-control.mjs';
 import { resolveActionTarget } from './resolve-action-target.mjs';
@@ -93,8 +94,17 @@ async function executeAction(page, act, session = null, policy = {}) {
       if (!policy.providedValuesOnly && !policy.repairOnly && session?.assignedEmail && (fieldIdentity.email || /email|mail/i.test(selector) || /@/.test(fillValue))) {
         fillValue = session.assignedEmail;
       }
-      await humanType(locator, fillValue, page);
-      if (fieldIdentity.address || /address|street/i.test(selector)) {
+      const isAddress = !fieldIdentity.email && (fieldIdentity.address || /address|street/i.test(selector));
+      if (isAddress) {
+        const choice = await locator.evaluate(readAddressSelection, fillValue);
+        if (choice?.retained) return { ok: true, verified: true, reason: 'address_selection_retained' };
+        if (choice?.pending) return { ok: false, verified: false, reason: 'address_selection_pending' };
+      }
+      await humanType(locator, fillValue, page, { address: isAddress });
+      if (isAddress && (await locator.evaluate(readAddressSelection, fillValue))?.retained) {
+        return { ok: true, verified: true, reason: 'address_selection_retained' };
+      }
+      if (isAddress) {
         await locator.evaluate(el => {
           const field = el.matches?.('input, textarea') ? el : el.querySelector?.('input, textarea');
           if (!field) return;
@@ -137,7 +147,7 @@ async function executeAction(page, act, session = null, policy = {}) {
       const normalizedActual = String(actualValue ?? '').trim().normalize('NFKC');
       const isEmail = fieldIdentity.email || /email|mail/i.test(selector) || /@/.test(fillValue);
       const matchesValue = isEmail ? normalizedActual.toLowerCase() === normalizedExpected.toLowerCase() : normalizedActual === normalizedExpected;
-      if (!matchesValue) return {
+      if (!matchesValue && !(isAddress && (await locator.evaluate(readAddressSelection, fillValue))?.retained)) return {
         ok: false,
         verified: false,
         reason: 'value_not_present'

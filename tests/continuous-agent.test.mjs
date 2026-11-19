@@ -401,3 +401,39 @@ test('Vận hành chỉ nhận tên cột khả dụng và hỏi riêng nhãn m�
   assert.equal(await page.locator('[type=checkbox]').isChecked(), false);
   assert.equal(agent.turnCount, 2);
 });
+
+test('form agent giữ địa chỉ đã chọn khi widget chuẩn hóa chữ, cho phép đổi record và nhập lại khi widget xóa', { timeout: 15000 }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<form data-autoleadpc-mcp="record">
+    <label>Street address<input id="address" role="combobox" aria-controls="streets" data-autoleadpc-field="address"></label>
+    <div id="streets" role="listbox"><button type="button" role="option">10 Oak St</button></div>
+    <input name="place_id" type="hidden"><button id="submit" disabled>Submit</button></form>`);
+  await page.evaluate(() => {
+    const f = document.querySelector('form'), address = f.querySelector('#address'), code = f.elements.place_id;
+    address.oninput = () => { code.value = ''; f.querySelector('#submit').disabled = true; f.dataset.writes = String(Number(f.dataset.writes || 0) + 1); };
+    f.querySelector('[role=option]').onclick = () => { address.value = '10 Oak Street, Unit A'; code.value = 'test-10'; f.querySelector('#submit').disabled = false; };
+  });
+  page._assignedRecord = { address: '10 Oak St' };
+  const agent = startContinuousAgent(page, () => page._assignedRecord, session, {
+    allowedOrigin: new URL(page.url()).origin, aiConfig: { enabled: true, mode: 'form_agent', cliBinary: 'agy' },
+    createTransport: () => ({ kill() {}, close() {}, send() { throw new Error('Trường đã biết'); } })
+  });
+  t.after(() => stopContinuousAgent(page));
+  await page.waitForFunction(() => document.querySelector('#address').value === '10 Oak St');
+  await page.locator('[role=option]').click();
+  await page.waitForTimeout(1600);
+  assert.equal(await page.inputValue('#address'), '10 Oak Street, Unit A');
+  assert.equal(await page.inputValue('[name=place_id]'), 'test-10');
+  assert.equal(await page.locator('#submit').isEnabled(), true);
+  assert.equal(await page.locator('form').getAttribute('data-writes'), '1');
+  await page.evaluate(() => { document.querySelector('#address').value = ''; });
+  await page.waitForTimeout(750);
+  assert.equal(await page.inputValue('#address'), '', 'Widget giữ mã đã chọn và dùng ô trống để tìm kiếm mới');
+  assert.equal(await page.locator('form').getAttribute('data-writes'), '1');
+  await page.evaluate(() => { document.querySelector('[name=place_id]').value = ''; });
+  await page.waitForFunction(() => document.querySelector('#address').value === '10 Oak St');
+  page._assignedRecord = { address: '99 Pine Rd' };
+  await page.waitForFunction(() => document.querySelector('#address').value === '99 Pine Rd');
+  assert.equal(agent.turnCount, 0);
+});

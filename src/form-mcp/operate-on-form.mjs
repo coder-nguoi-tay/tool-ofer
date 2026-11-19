@@ -2,11 +2,11 @@
  * Đọc trường đã khai báo hoặc áp dụng đúng đáp án record trong realm của form đã cấp quyền.
  * @param {HTMLFormElement} form Form công bố các trường cho app.
  * @param {object} operation Origin, trường, metadata dự kiến và đáp án lấy từ record.
- * @return {object} Metadata khi đọc, trạng thái xác minh khi điền hoặc lý do không thể điền.
+ * @return {object} Metadata hoặc trạng thái khi thao tác, hoặc control để kiểm tra địa chỉ cùng form.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-19
  */
-export function operateOnForm(form, { origin, field, value, choiceValue, candidates = [], verifyOnly = false, requireSingle = false, expected }) {
+export function operateOnForm(form, { origin, field, value, choiceValue, candidates = [], verifyOnly = false, requireSingle = false, expected, locateAddress = false, addressInput, choice }) {
   if (!form.isConnected || form.ownerDocument.location.origin !== origin ||
       (requireSingle && form.ownerDocument.querySelectorAll('form[data-autoleadpc-mcp="record"]').length !== 1) ||
       !form.matches('form[data-autoleadpc-mcp="record"]')) {
@@ -45,6 +45,13 @@ export function operateOnForm(form, { origin, field, value, choiceValue, candida
   }
   const control = members[0];
   const ambiguous = { error: 'Record không khớp một lựa chọn duy nhất.' };
+  if (locateAddress && members.length === 1 && control.matches('input:not([type]), input[type=text], textarea')) return control;
+  if (addressInput) {
+    if (control !== addressInput || control.value !== choice.display) return { verified: false };
+    if (choice.retained || choice.pending) {
+      return requireSingle ? { verified: choice.retained, changed: false } : { verified: choice.retained };
+    }
+  }
   const changes = [];
   let matchesAnswer;
   const multiSelect = control.localName === 'select' && control.hasAttribute('multiple');
@@ -97,7 +104,14 @@ export function operateOnForm(form, { origin, field, value, choiceValue, candida
       targetValue = matches[0].index;
     }
     matchesAnswer = () => control[property] === targetValue;
-    if (!verifyOnly && !matchesAnswer()) { control[property] = targetValue; changes.push(control); }
+    if (!verifyOnly && !matchesAnswer()) {
+      if (addressInput) {
+        if (control._autoleadAddressChoice?.query !== value) delete control._autoleadAddressChoice;
+        control._autoleadAddressQuery = value;
+      }
+      control[property] = targetValue;
+      changes.push(control);
+    }
   }
   for (const changed of changes) {
     if (!changed.isConnected || changed.form !== form) continue;

@@ -100,3 +100,85 @@ test('địa chỉ: kiểm tra gợi ý trong Chromium cục bộ', { skip: !exi
     assert.equal(await page.locator('[data-clicks]').count(), 0);
   });
 });
+
+test('chọn địa chỉ một lần, giữ mã của widget khi auto quét lại và khi gửi form', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { fillSelectOrTextField } = await import('../src/autofill/fill-select-or-text-field.mjs');
+  const { submitFrameForm } = await import('../src/autofill/submit-frame-form.mjs');
+  const { syncAlphaHiddenContactData } = await import('../src/autofill/alpha-intent/sync-alpha-hidden-contact-data.mjs');
+  const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<form>
+    <label>Street address<input id="address" name="address" aria-controls="addresses" value="10 Oak St"></label>
+    <select name="verified_address" id="addresses"><option value="">Choose</option><option value="addr-10">10 Oak St, Unit A</option></select>
+    <input type="hidden" id="input-address" readonly><button id="submit" disabled>Continue</button></form>`);
+  await page.evaluate(() => {
+    const form = document.querySelector('form'), street = form.elements.address, choices = form.elements.verified_address;
+    const id = document.querySelector('#input-address'), submit = document.querySelector('#submit');
+    choices.onchange = () => {
+      form.dataset.choices = String(Number(form.dataset.choices || 0) + 1);
+      street.value = '10 Oak Street, Unit A';
+      id.value = choices.value;
+      submit.disabled = false;
+    };
+    street.oninput = id.oninput = () => { id.value = ''; submit.disabled = true; form.dataset.overwritten = 'yes'; };
+    form.onsubmit = event => { event.preventDefault(); form.dataset.submitted = id.value; };
+  });
+  const scope = await resolveActiveFormScope(page);
+  const field = page.locator('#address'), record = { address: '10 Oak St' };
+  assert.equal((await handleAddressSelectDropdown(page, record, field)).success, true);
+  const frameProgress = { formScope: scope, filledInThisPass: 1 };
+  for (let scan = 0; scan < 2; scan++) {
+    await fillSelectOrTextField({ metadata: { names: ['address'], type: 'text', kind: 'input' }, field, page, frame: page,
+      valueToFill: record.address, record, options: {}, session, frameProgress, unmatchedFieldNames: new Set() });
+    await page.evaluate(syncAlphaHiddenContactData);
+    await handleAddressSelectDropdown(page, record, field);
+  }
+  assert.equal(await field.inputValue(), '10 Oak Street, Unit A');
+  assert.equal(await page.locator('#input-address').inputValue(), 'addr-10');
+  assert.equal(await page.locator('#submit').isEnabled(), true);
+  await submitFrameForm({ options: { autoSubmit: true }, frame: page, page, session, frameProgress, record, screenInfo: {}, scanStartUrl: page.url() });
+  assert.deepEqual(await page.locator('form').evaluate(form => [form.dataset.choices, form.dataset.overwritten, form.dataset.submitted]), ['1',undefined,'addr-10']);
+});
+
+test('widget xác nhận ngay khi nhập nhanh thì auto không phát lại input hoặc khôi phục chữ gốc', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { fillSelectOrTextField } = await import('../src/autofill/fill-select-or-text-field.mjs');
+  const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<form>
+    <label>Street address<input name="address" role="combobox"></label><input type="hidden" name="place_id">
+    <button disabled>Continue</button></form>`);
+  await page.evaluate(() => {
+    const f = document.querySelector('form'), street = f.elements.address, place = f.elements.place_id;
+    street.oninput = () => {
+      if (f.dataset.accepted) { place.value = ''; f.querySelector('button').disabled = true; return; }
+      if (street.value !== '10 Oak St') return;
+      street.value = '10 Oak Street, Unit A';
+      place.value = 'local-10'; f.dataset.accepted = 'yes'; f.querySelector('button').disabled = false;
+    };
+  });
+  page._autofillMouseSlot = 2;
+  const field = page.locator('[name=address]');
+  await fillSelectOrTextField({ metadata: { names: ['address'], type: 'text', kind: 'input' }, field, page, frame: page,
+    valueToFill: '10 Oak St', record: { address: '10 Oak St' }, options: {}, session, frameProgress: {}, unmatchedFieldNames: new Set() });
+  assert.equal(await field.inputValue(), '10 Oak Street, Unit A');
+  assert.equal(await page.locator('[name=place_id]').inputValue(), 'local-10');
+  assert.equal(await page.locator('button').isEnabled(), true);
+});
+
+test('agent giữ lựa chọn ARIA đã có trước lần quét đầu kể cả khi widget không có place_id', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { applyRecordFormField } = await import('../src/form-mcp/apply-record-form-field.mjs');
+  const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page } = await createFormScopeFixture(browser, `<form data-autoleadpc-mcp="record">
+    <input data-autoleadpc-field="address" role="combobox" aria-expanded="false" aria-controls="locations" value="10 Oak Street, Unit A">
+    <div role="listbox" id="locations" hidden><div role="option" aria-selected="true">10 Oak St, Unit A</div></div></form>`);
+  const form = await page.locator('form').elementHandle();
+  try {
+    const operation = { origin: new URL(page.url()).origin, field: 'address', value: '10 Oak St', requireSingle: true };
+    assert.deepEqual(await applyRecordFormField(form, operation), { verified: true, changed: false });
+    assert.equal(await page.locator('input').inputValue(), '10 Oak Street, Unit A');
+  } finally { await form.dispose(); }
+});

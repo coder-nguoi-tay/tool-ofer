@@ -4,6 +4,7 @@ import { shouldPauseForLead } from '../autofill/should-pause-for-lead.mjs';
 import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
 import { normalizeFieldName } from '../autofill/normalize-field-name.mjs';
 import { buildSelectCandidates } from '../autofill/select/build-select-candidates.mjs';
+import { applyRecordFormField } from '../form-mcp/apply-record-form-field.mjs';
 import { operateOnForm } from '../form-mcp/operate-on-form.mjs';
 import { explicitChoiceValue, profileFields, suppliedValue } from '../form-mcp/supplied-value.mjs';
 import { setOwner, setStatus } from './run-continuous-agent.mjs';
@@ -109,7 +110,7 @@ export async function runDashboardFormAgent(agent) {
             } else state.attempts.delete(field);
             continue;
           }
-          const operation = { origin, field, value, choiceValue, candidates: buildSelectCandidates(value, { name: source }),
+          const operation = { origin, field, source, value, choiceValue, candidates: buildSelectCandidates(value, { name: source }),
             expected: metadata, requireSingle: true };
           const signature = JSON.stringify([metadata, source, value]);
           let attempt = state.attempts.get(field);
@@ -117,7 +118,7 @@ export async function runDashboardFormAgent(agent) {
             attempt = { signature, writes: 0, reported: '' };
             state.attempts.set(field, attempt);
           }
-          const result = await form.evaluate(operateOnForm, { ...operation, verifyOnly: attempt.writes >= 2 });
+          const result = await applyRecordFormField(form, { ...operation, verifyOnly: attempt.writes >= 2 });
           if (result.stale) throw new Error('Trường đã đổi');
           if (result.changed) {
             attempt.writes++;
@@ -143,7 +144,7 @@ export async function runDashboardFormAgent(agent) {
             if (!allowed() || currentRecord() !== record) break;
             const latest = explicitOnly ? explicitChoiceValue(record, operation.field) : suppliedValue(record, source, session);
             if (latest !== operation.value) continue;
-            const retained = await form.evaluate(operateOnForm, { ...operation, verifyOnly: true });
+            const retained = await applyRecordFormField(form, { ...operation, verifyOnly: true });
             if (retained.stale) {
               delay = 0;
               throw new Error('Form đã dựng lại khi xác minh');

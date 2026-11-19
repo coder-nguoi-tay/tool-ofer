@@ -1,5 +1,6 @@
 import { ADJACENT_KEYS } from './state/adjacent-keys.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
+import { readAddressSelection } from './read-address-selection.mjs';
 import { humanClick } from './human-click.mjs';
 import { tryFastTextInput } from './interaction/try-fast-text-input.mjs';
 import { recordInputFillHtml } from '../logging/record-input-fill-html.mjs';
@@ -9,18 +10,19 @@ import { recordInputFillHtml } from '../logging/record-input-fill-html.mjs';
  * @param {object} field Locator của trường đang được điền.
  * @param {string} text Giá trị đã chọn từ record.
  * @param {object|null} page Tab Playwright sở hữu trường.
- * @param {object} options Tuỳ chọn nhịp gõ và mô phỏng lỗi gõ.
+ * @param {object} options Tuỳ chọn nhịp gõ và giữ địa chỉ được widget xác nhận.
  * @return {Promise<void>} Hoàn tất điền hoặc trả về khi giá trị rỗng.
  * @throws {never} Lỗi nhập được xử lý trong từng nhánh; lỗi ghi HTML không chặn autofill.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 async function humanTypeCore(field, text, page = null, options = {}) {
   const str = String(text ?? '');
   if (!str) return;
   const activePage = page || (typeof field?.page === 'function' ? field.page() : null);
   if (shouldStopAfterLead(activePage?._autofillSession)) return;
-  if (activePage?._autofillMouseSlot > 1 && await tryFastTextInput(field, str, activePage)) return;
+  if (options.address && (await field.evaluate(readAddressSelection, str).catch(() => null))?.retained) return;
+  if (activePage?._autofillMouseSlot > 1 && await tryFastTextInput(field, str, activePage, options.address)) return;
   const isRealBrowser = Boolean(activePage?.mouse && typeof activePage.mouse.move === 'function');
   const enableTypo = options.simulateTypo !== undefined ? Boolean(options.simulateTypo) : isRealBrowser;
   try {
@@ -199,6 +201,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
     } catch {}
   }
 
+  if (options.address && (await field.evaluate(readAddressSelection, str).catch(() => null))?.retained) return;
   // Kiểm tra lại giá trị sau khi gõ: nếu rỗng (do mask hoặc validator trang), đặt qua property descriptor
   let postVal = '';
   if (typeof field.inputValue === 'function') {

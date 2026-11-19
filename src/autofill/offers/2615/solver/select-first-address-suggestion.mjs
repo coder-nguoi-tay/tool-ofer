@@ -76,7 +76,15 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
         if (matching.length !== 1) return { success: false };
         const item = matching[0];
         const text = (item.textContent || item.value || '').trim();
+        const prior = input._autoleadAddressChoice;
+        const sameOption = item.tagName === 'OPTION' && item.closest('select') && item.selected;
+        const sameChoice = prior?.item === item && prior.form === input.form && prior.display === input.value &&
+          input.getAttribute('aria-invalid') !== 'true' && input.validity?.valid !== false &&
+          (item.getAttribute('aria-selected') === 'true' || prior.display !== prior.query || input.getAttribute('aria-expanded') === 'false');
+        if (sameOption || sameChoice) return { success: action !== 'inspect', text, retained: true };
         if (action === 'inspect') return { success: true };
+        const query = expectedAddress || input.value;
+        const choice = { query, label: text, item, form: input.form, display: input.value };
         if (item.tagName === 'OPTION') {
           const select = item.closest('select');
           if (action === 'select-native' && (!select || !expected)) return { success: false };
@@ -84,6 +92,8 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
           target.value = item.value;
           target.dispatchEvent(new Event('input', { bubbles: true }));
           target.dispatchEvent(new Event('change', { bubbles: true }));
+          choice.display = input.value;
+          input._autoleadAddressChoice = choice;
           return { success: true, text };
         }
         item.scrollIntoView({ block: 'nearest' });
@@ -91,6 +101,8 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
         const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
         if (!item.contains(hit) || hit.closest('a[href], button') !== item.closest('a[href], button')) return { success: false };
         item.click();
+        choice.display = input.value;
+        input._autoleadAddressChoice = choice;
         return { success: true, text };
       }
       return { success: false };
@@ -114,6 +126,6 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
  */
 export async function selectFirstAddressSuggestion(page, frame = null, field = null, options = {}) {
   const result = await resolveAddressSuggestion(frame || page, field, 'select');
-  if (result.success) options.onLog?.({ type: 'address_suggestion_selected', detail: '[Address Autocomplete] Đã chọn gợi ý trong form đang điền.' }, page);
+  if (result.success && !result.retained) options.onLog?.({ type: 'address_suggestion_selected', detail: '[Address Autocomplete] Đã chọn gợi ý trong form đang điền.' }, page);
   return result.success;
 }
