@@ -139,7 +139,7 @@ test('agent chạy end-to-end qua API OpenAI-compatible (server giả localhost)
   assert.equal(requests[0].url, '/v1/chat/completions');
   assert.equal(requests[0].auth, 'Bearer sk-test-key-0001');
   assert.equal(requests[0].body.model, 'fake-model');
-  assert.ok(requests[0].body.messages[0].content.includes('dung@record.test'));
+  assert.ok(!requests[0].body.messages[0].content.includes('dung@record.test'));
   stopContinuousAgent(page);
   await agent.done;
 });

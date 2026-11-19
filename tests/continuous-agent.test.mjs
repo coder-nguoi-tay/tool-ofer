@@ -70,9 +70,9 @@ test('agy stream: timeout giết process và từ chối lượt, không cho hai
   assert.equal(children[0].killed, true);
 });
 
-test('prompt: lượt đầu có record và luật, lượt sau chỉ giao diện + lỗi trước', () => {
+test('prompt: lượt đầu có luật và giữ record trong app, lượt sau chỉ giao diện + lỗi trước', () => {
   const first = buildFirstPrompt({ url: 'https://a.test', record: { email: 'u@x.test' }, html: '<input>' });
-  assert.ok(first.includes('u@x.test') && first.includes('KHÔNG submit'));
+  assert.ok(!first.includes('u@x.test') && first.includes('KHÔNG submit'));
   const next = buildNextPrompt({ url: 'https://a.test', html: '<input id=b>', feedback: ['fill #a: missing_record'] });
   assert.ok(!next.includes('u@x.test') && next.includes('missing_record') && next.includes('<input id=b>'));
 });
@@ -118,7 +118,7 @@ test('agent liên tục: một hội thoại qua nhiều màn, giá trị lấy 
   await until(() => prompts.length >= 1);
   await until(async () => (await page.inputValue('#email')) === 'dung@record.test');
   assert.notEqual(await page.inputValue('#email'), 'bia-ra@ai.test', 'giá trị do app lấy từ record, không dùng giá trị AI bịa');
-  assert.ok(prompts[0].includes('dung@record.test'));
+  assert.ok(!prompts[0].includes('dung@record.test'));
   await until(() => scans >= 1);
   assert.equal(page._aiAssistRunning, false, 'nhả tab cho autofill sau khi thực thi');
   assert.equal(moduleState.agtRunningCount, startCount, 'nhả capacity đúng một lần');

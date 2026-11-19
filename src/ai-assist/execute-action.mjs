@@ -24,7 +24,7 @@ import { addVerifiedFieldCount } from '../autofill/add-verified-field-count.mjs'
  * @param {object} policy Quyền repair và record có nguồn dữ liệu; không cho AI tự submit.
  * @return {Promise<{ok:boolean,verified:boolean,reason:string}>} Kết quả thao tác và xác minh.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-19
  */
 async function executeAction(page, act, session = null, policy = {}) {
   if (shouldStopAfterLead(session || page?._autofillSession)) return { ok: false, verified: false, reason: 'lead_confirmed_paused' };
@@ -58,7 +58,10 @@ async function executeAction(page, act, session = null, policy = {}) {
   try {
     if (await isNoSurveyFrame(target.frame)) return { ok: false, verified: false, reason: 'survey_owned_by_autofill' };
     if (isAddeptOfferwallFrame(target.frame)) return { ok: false, verified: false, reason: 'offerwall_owned_by_autofill' };
-    if (policy.allowSubmit === false || policy.repairOnly) {
+    if (policy.providedValuesOnly && !policy.choiceFromAutofill && !['fill', 'type', 'select'].includes(action)) {
+      return { ok: false, verified: false, reason: 'choice_owned_by_autofill' };
+    }
+    if (policy.allowSubmit === false || policy.repairOnly || policy.providedValuesOnly) {
       const purpose = await locator.evaluate(inspectActionPurpose);
       if (action === 'click' && purpose.noise) return { ok: false, verified: false, reason: 'not_answer_control' };
       if (action === 'click' && purpose.submit) return { ok: false, verified: false, reason: 'submit_owned_by_autofill' };
@@ -66,7 +69,12 @@ async function executeAction(page, act, session = null, policy = {}) {
       if (policy.repairOnly || policy.providedValuesOnly) {
         if (['fill','type','select'].includes(action)) {
           const metadata = await locator.evaluate(collectFieldMetadata);
-          const supplied = resolveProvidedFieldValue(metadata, policy.record || {}, session || {});
+          if (metadata.kind === 'select' && action !== 'select' || metadata.kind !== 'select' && action === 'select' ||
+              !['input', 'textarea', 'select'].includes(metadata.kind) ||
+              metadata.kind === 'input' && /^(checkbox|radio|button|submit|reset|file|hidden|image|password)$/i.test(metadata.type || '')) {
+            return { ok: false, verified: false, reason: 'field_action_mismatch' };
+          }
+          const supplied = resolveProvidedFieldValue(metadata, page._assignedRecord || policy.record || {}, session || {});
           if (supplied == null || supplied === '') return { ok: false, verified: false, reason: 'missing_record' };
           value = String(supplied);
           if (action === 'select') {
@@ -82,7 +90,7 @@ async function executeAction(page, act, session = null, policy = {}) {
       const fieldIdentity = await locator.evaluate(inspectActionField);
       if (fieldIdentity.readOnly) return { ok: false, verified: false, reason: 'element_readonly' };
       let fillValue = String(value ?? '');
-      if (session?.assignedEmail && (fieldIdentity.email || /email|mail/i.test(selector) || /@/.test(fillValue))) {
+      if (!policy.providedValuesOnly && !policy.repairOnly && session?.assignedEmail && (fieldIdentity.email || /email|mail/i.test(selector) || /@/.test(fillValue))) {
         fillValue = session.assignedEmail;
       }
       await humanType(locator, fillValue, page);

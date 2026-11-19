@@ -2,6 +2,8 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { activeBrowsers } from '../browser/sessions.mjs';
 import { resolveDebugPage } from '../browser/screen/resolve-debug-page.mjs';
 import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
+import { resolveProvidedFieldValue } from '../autofill/record-values/resolve-provided-field-value.mjs';
+import { buildSelectCandidates } from '../autofill/select/build-select-candidates.mjs';
 import { normalizeFieldName } from '../autofill/normalize-field-name.mjs';
 import { readRequestBody } from '../http/actions/read-request-body.mjs';
 import { respondWithJson } from '../http/actions/respond-with-json.mjs';
@@ -9,7 +11,7 @@ import { consumePairing } from './pairing.mjs';
 import { operateOnForm } from './operate-on-form.mjs';
 
 const grants = new Map();
-const profileFields = new Set(['firstname', 'lastname', 'fullname', 'email', 'phone', 'address', 'city', 'state', 'zipcode', 'country']);
+const profileFields = new Set(['firstname', 'lastname', 'fullname', 'email', 'phone', 'address', 'city', 'state', 'zipcode', 'country', 'contact', 'contactmethod', 'preferredcontact', 'language']);
 
 /**
  * Bỏ quyền ngay khi tab đóng, đổi document, hết hạn hoặc người dùng ngắt ghép.
@@ -67,12 +69,17 @@ async function shareForm(slot, pair) {
  * Đọc trường hồ sơ hoặc cột đáp án MCP đã được parser CSV/JSON của app chuẩn hóa.
  * @param {object} record Record gắn với grant.
  * @param {string} field Khóa do chủ form công bố.
+ * @param {object} session Phiên cung cấp email đã gán và dữ liệu autofill.
  * @return {string|null} Giá trị đủ nguồn hoặc null khi thiếu.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-19
  */
-function suppliedValue(record, field) {
-  const key = profileFields.has(field) ? field : normalizeFieldName('mcp_answer_' + field);
+function suppliedValue(record, field, session) {
+  if (profileFields.has(field)) {
+    const value = resolveProvidedFieldValue({ name: field }, record, session);
+    if (value != null && value !== '') return String(value);
+  }
+  const key = normalizeFieldName('mcp_answer_' + field);
   if (!Object.hasOwn(record, key)) return null;
   const value = record[key];
   return ['string', 'number', 'boolean'].includes(typeof value) && String(value).trim() ? String(value) : null;
@@ -128,18 +135,18 @@ export async function handleFormMcpRequest(request, response) {
         (page._assignedRecord || (page === session.mainPage && session.currentRecord)) !== record) {
       revoke(grant); return send(409, { error: 'Tab hoặc record đã đổi. Hãy ghép lại.' });
     }
-    const value = fill ? suppliedValue(record, args.field) : null;
+    const value = fill ? suppliedValue(record, args.field, session) : null;
     if (fill && value === null) return send(422, { error: 'Record của app thiếu dữ liệu cho trường này.' });
-    const operation = { origin: grant.origin, field: args.field, value };
+    const operation = { origin: grant.origin, field: args.field, value, candidates: fill ? buildSelectCandidates(value, { name: args.field }) : [] };
     let result = await grant.form.evaluate(operateOnForm, operation);
     if (fill && result.verified) {
       await wait(550);
       if (grants.get(token) !== grant || (page._assignedRecord || (page === session.mainPage && session.currentRecord)) !== record ||
-          suppliedValue(record, args.field) !== value) return send(409, { error: 'Quyền hoặc dữ liệu đã đổi khi xác minh.' });
+          suppliedValue(record, args.field, session) !== value) return send(409, { error: 'Quyền hoặc dữ liệu đã đổi khi xác minh.' });
       result = await grant.form.evaluate(operateOnForm, { ...operation, verifyOnly: true });
     }
     if (result.fields) {
-      for (const item of result.fields) item.available = suppliedValue(record, item.field) !== null;
+      for (const item of result.fields) item.available = suppliedValue(record, item.field, session) !== null;
     }
     return send(result.error || result.verified === false ? 409 : 200, result);
   } catch {

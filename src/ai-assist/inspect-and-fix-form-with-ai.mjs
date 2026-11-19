@@ -1,9 +1,8 @@
 import { waitForAiCapacity } from './wait-for-ai-capacity.mjs';
 import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
 import { buildRepairActions } from './repair/build-repair-actions.mjs';
-import { resolveRecordCity } from '../autofill/record-values/resolve-record-city.mjs';
 import { readVisiblePageState } from './visible-state/read-visible-page-state.mjs';
-import { AI_FORM_REPAIR_TIMEOUT_MS } from './state/ai-form-repair-timeout-ms.mjs';
+import { buildFirstPrompt } from '../continuous-agent/build-turn-prompt.mjs';
 import { AI_REQUEST_TIMEOUT_SECONDS } from './state/ai-request-timeout-seconds.mjs';
 import { MAX_FORM_REPAIR_ATTEMPTS } from './state/max-form-repair-attempts.mjs';
 import { callAgt } from './call-agt.mjs';
@@ -26,7 +25,7 @@ import { resolveAiTimeoutSeconds } from './resolve-ai-timeout-seconds.mjs';
  * @param {object} [options={}] Tùy chọn mở rộng.
  * @return {Promise<{status: string, fixed: boolean, errors: string[], actionsCount: number}>} Trạng thái sửa form đã được xác minh hoặc lý do chưa sửa được.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-19
  */
 async function inspectAndFixFormWithAi(page, record, session = {}, options = {}) {
   if (shouldStopAfterLead(session)) return { status: 'lead_confirmed_paused', fixed: false, errors: [], actionsCount: 0 };
@@ -94,6 +93,9 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
   let capacityAcquired = false;
   try {
     // AutoFill đã chạy trước khi tới đây; chỉ kiểm tra lại trạng thái sau lượt điền thư viện.
+    const assignedRecordAtInspection = page._assignedRecord;
+    record = assignedRecordAtInspection || record;
+    const visibleState = await readVisiblePageState(page);
     const diag = await inspectFormRepairState(page);
     if (!diag) {
       updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#f59e0b;font-weight:600;">🤖 Không đọc được form</span>`);
@@ -118,7 +120,6 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
         actionsCount: 0
       };
     }
-    const visibleState = await readVisiblePageState(page);
     const retrySignature = createHash('sha256').update(JSON.stringify({
       url: currentUrl,
       visibleSignature: visibleState.available ? visibleState.signature : null,
@@ -136,7 +137,7 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
       })),
       emailMissing: diag.emailMissing
     })).digest('hex');
-    const previousRetry = page._aiFormRepairRetry;
+    const previousRetry = page._aiFormRepairRetry?.assignedRecord === assignedRecordAtInspection ? page._aiFormRepairRetry : null;
     if (previousRetry?.signature === retrySignature && previousRetry.attempts >= MAX_FORM_REPAIR_ATTEMPTS) {
       if (!previousRetry.limitLogged) {
         addLog({
@@ -164,22 +165,15 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
       type: 'ai_form_diagnosing',
       detail: `[AI Form Fix] Form chưa qua được (${errorSummary}). Đang gửi chẩn đoán cho AI...`
     });
-    let actions = [];
+    const safeRepair = buildRepairActions(diag, record || {}, session, addLog);
+    let actions = safeRepair.actions;
+    const candidateEmail = session.assignedEmail || record?.assignedEmail || record?.email || record?.emailaddress || record?.mail || null;
 
-    // Chẩn đoán DOM đã xác minh được vẫn dùng được nếu không chụp thêm được ngữ cảnh hiển thị.
-    const cleanedHtml = visibleState.available ? visibleState.html : JSON.stringify(diag);
-
-    // Chuẩn bị email dự phòng tối ưu
-    const candidateEmail = session.assignedEmail || record?.email || record?.assignedEmail || record?.emailaddress || record?.mail || null;
-    const effectiveCity = resolveRecordCity(record || {});
-    const enrichedRecord = {
-      ...record,
-      email: candidateEmail,
-      city: effectiveCity,
-      town: effectiveCity
-    };
-
-    if (cfg.mode !== 'heuristic_only') {
+    const fields = actions.filter(item => item.action === 'fill' || item.action === 'select').map(({ action, selector }) => {
+      const field = diag.problemInputs.find(item => item.selector === selector) || diag.emailInput;
+      return { action, selector, label: field?.label || field?.placeholder || field?.name || field?.id };
+    });
+    if (fields.length && cfg.mode !== 'heuristic_only') {
       const capacity = await waitForAiCapacity(page, session, visibleState.signature, 15000, state => {
         updateBadge(`🤖 Chờ lượt sửa form: ${state.position}${state.priority ? ' · Ưu tiên IP có lead' : ''}`);
         addLog({ type: 'ai_queued', detail: `Chờ chỗ AI sửa form ${state.running}/${state.limit}; vị trí ${state.position}${state.priority ? ', ưu tiên IP đã có lead' : ''}.` });
@@ -191,113 +185,24 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
       }
       capacityAcquired = true;
     }
-    page._aiFormRepairRetry = { signature: retrySignature, attempts: retryAttempts };
+    page._aiFormRepairRetry = { signature: retrySignature, attempts: retryAttempts, assignedRecord: assignedRecordAtInspection };
 
-    // Ưu tiên sử dụng Codex SDK + Playwright MCP nếu phiên chạy qua AdsPower và có CDP endpoint
-    const activeTargetUrl = (typeof page.url === 'function' ? page.url() : '') || session.targetUrl || session.offerUrl || '';
-    if (capacityAcquired && session.isAdsPower && session.browserWebSocketUrl && cfg.useCodexMcp !== false && !page.isClosed() && activeTargetUrl.startsWith('http')) {
-      console.log(`[AI-FormDiagnose] Slot ${slotNum}: Khởi động Codex + Playwright MCP Agent qua CDP endpoint...`);
-      try {
-        const {
-          runCodexFormAgent
-        } = await import('../../codex-form-agent.mjs');
-        const agentResult = await runCodexFormAgent({
-          endpoint: session.browserWebSocketUrl,
-          targetUrl: activeTargetUrl,
-          formData: enrichedRecord,
-          allowSubmit: false,
-          repairOnly: true,
-          timeoutMs: AI_FORM_REPAIR_TIMEOUT_MS,
-          session,
-          logger: m => console.log(`[Slot ${slotNum}] ${m}`)
-        });
-        if (shouldStopAfterLead(session)) return { status: 'lead_confirmed_paused', fixed: false, errors: [], actionsCount: 0 };
-        if (agentResult?.status === 'timeout') {
-          updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#f59e0b;font-weight:600;">🤖 AI hết giờ; autofill tiếp tục</span>`);
-          addLog({
-            time: new Date().toISOString(),
-            type: 'ai_form_timeout',
-            detail: `[AI Form Fix] Dừng lượt AI sau ${AI_FORM_REPAIR_TIMEOUT_MS / 1000}s để form không chờ vô hạn.`
-          });
-          return {
-            status: 'timeout',
-            fixed: false,
-            errors: diag.errors,
-            actionsCount: agentResult.toolCallsCount || 0
-          };
-        }
-        if (agentResult?.success) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const afterAgentDiag = await inspectFormRepairState(page);
-          const pageAdvanced = (typeof page.url === 'function' ? page.url() : page.url) !== currentUrl;
-          if (afterAgentDiag && !afterAgentDiag.hasBlocker) {
-            page._aiFormRepairRetry = null;
-            return {
-              status: agentResult.status,
-              fixed: true,
-              errors: diag.errors,
-              actionsCount: agentResult.toolCallsCount
-            };
-          }
-          if (pageAdvanced) {
-            page._aiFormRepairRetry = null;
-            return {
-              status: 'progressed',
-              fixed: true,
-              errors: diag.errors,
-              actionsCount: agentResult.toolCallsCount
-            };
-          }
-          addLog({
-            time: new Date().toISOString(),
-            type: 'ai_form_repair_unverified',
-            detail: '[AI Form Fix] AI đã thao tác nhưng kiểm tra lại vẫn thấy lỗi; chưa ghi nhận form đã sửa.'
-          });
-        }
-      } catch (agentErr) {
-        console.warn(`[AI-FormDiagnose] Slot ${slotNum}: Lỗi Codex Agent (${agentErr.message}), tiếp tục phương thức dự phòng.`);
-      }
-    }
     if (capacityAcquired && !page.isClosed()) {
-      const prompt = `BỎ QUA SUY NGHĨ (NO REASONING/THINKING). KHÔNG PHÂN TÍCH NGUYÊN NHÂN. KHÔNG GIẢI THÍCH. ƯU TIÊN TỐC ĐỘ TỐI ĐA.
-Chỉ sửa field lỗi bằng dữ liệu được cung cấp. Không submit, không click Continue/Next, không bịa dữ liệu:
-URL: ${page.url ? page.url() : ''}
-
-LỖI GHI NHẬN TỪ DOM:
-${diag.errors.length > 0 ? diag.errors.map(e => `- ${e}`).join('\n') : '(Chưa submit thành công)'}
-
-CÁC TRƯỜNG CÓ VẤN ĐỀ HOẶC CHƯA ĐIỀN:
-${JSON.stringify(diag.problemInputs, null, 2)}
-
-DỮ LIỆU NGƯỜI DÙNG CUNG CẤP:
-${JSON.stringify(enrichedRecord, null, 2)}
-
-QUY TẮC SIÊU TỐC:
-- Chỉ dùng dữ liệu người dùng được cung cấp; thiếu dữ liệu thì bỏ qua field đó.
-- Chỉ trả fill/select/check consent; không click Submit/Next/Continue hoặc điều hướng.
-- Không cần giải thích nguyên nhân, không đắn đo.
-
-YÊU CẦU ĐẦU RA BẮT BUỘC:
-- Trả về DUY NHẤT một mảng JSON, bắt đầu bằng [ và kết thúc bằng ]. Tuyệt đối KHÔNG viết thêm bất kỳ chữ nào khác ngoài JSON.
-Format:
-[
-  {"action":"fill","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"},
-  {"action":"select","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"},
-  {"action":"check","selector":"CSS_SELECTOR"},
-  {"action":"click","selector":"CSS_SELECTOR"}
-]
-
-HTML GIAO DIỆN FORM:
-${cleanedHtml}`;
       try {
-        const raw = await callAgt(prompt, {
-          cliBinary: cfg.cliBinary,
+        const preferCodex = session.isAdsPower && session.browserWebSocketUrl && cfg.useCodexMcp === true;
+        const raw = await callAgt(buildFirstPrompt({ html: JSON.stringify(fields) }), {
+          cliBinary: preferCodex ? 'codex' : cfg.cliBinary,
           timeoutSeconds: resolveAiTimeoutSeconds(cfg.timeoutSeconds || AI_REQUEST_TIMEOUT_SECONDS)
         });
-        actions = parseActions(raw);
-        console.log(`[AI-FormDiagnose] Slot ${slotNum}: AI trả về ${actions.length} action(s) sửa lỗi form.`);
+        const prioritized = new Set();
+        for (const suggestion of parseActions(raw)) {
+          const planned = actions.find(item => item.action !== 'check' && item.action === suggestion.action && item.selector === suggestion.selector);
+          if (planned) prioritized.add(planned);
+        }
+        actions = [...new Set([...prioritized, ...actions])];
+        addLog({ type: 'ai_form_plan_received', detail: `AI xác định ${prioritized.size}/${fields.length} trường trong danh sách sửa của app.` });
       } catch (err) {
-        console.warn(`[AI-FormDiagnose] Slot ${slotNum}: AI CLI không phản hồi (${err.message}). Chuyển sang Heuristic Auto-Healer.`);
+        console.warn(`[AI-FormDiagnose] Slot ${slotNum}: AI không phản hồi (${err.message}). Dùng các trường app đã xác định.`);
       }
     }
     if (capacityAcquired) {
@@ -305,12 +210,13 @@ ${cleanedHtml}`;
       capacityAcquired = false;
     }
 
-    const safeRepair = buildRepairActions(diag, record || {}, session, addLog);
-    if (actions.length === 0) actions = safeRepair.actions;
     const beforeRepairState = await getFormProgressSignature(page);
     let actionsCount = 0;
     let actionsDispatchedCount = 0;
     for (const act of actions) {
+      if (page._assignedRecord !== assignedRecordAtInspection) {
+        return { status: 'record_changed', fixed: false, errors: diag.errors, actionsCount };
+      }
       if (shouldStopAfterLead(session)) break;
       if (page.isClosed() || session.isClosed) break;
       try {
@@ -345,6 +251,9 @@ ${cleanedHtml}`;
     const formProgressed = Boolean(afterRepairState && afterRepairState !== beforeRepairState);
     const blockersCleared = Boolean(afterRepairDiag && !afterRepairDiag.hasBlocker);
 
+    if (page._assignedRecord !== assignedRecordAtInspection) {
+      return { status: 'record_changed', fixed: false, errors: diag.errors, actionsCount };
+    }
     // Cập nhật email chỉ khi DOM xác nhận giá trị hợp lệ sau lượt sửa.
     if (candidateEmail && afterRepairDiag?.emailInput && !afterRepairDiag.emailMissing) {
       session.emailFilled = true;

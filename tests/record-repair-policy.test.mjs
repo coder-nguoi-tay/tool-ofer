@@ -78,3 +78,39 @@ test('AI tự động không vượt mode manual/skip/consent_only',async()=>{
   await runAiAssist(page,{},session,{aiConfig:{enabled:true,mode:'heuristic_only'}});assert.equal(session.aiAssistRunning,undefined);
  }
 });
+
+test('agent điền select bằng record, nhường radio và nút cho autofill', async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const { page, context, session } = await createFormScopeFixture(browser, `<form>
+    <label>State<select id="state"><option value="">Choose</option><option value="a">CA</option><option value="b">TX</option></select></label>
+    <label><input type="radio" id="yes" name="choice">Yes</label>
+    <button type="button" id="advance" onclick="this.dataset.clicked='1'">Continue</button></form>`);
+  t.after(() => context.close());
+  page._assignedRecord = { state: 'Texas' };
+  const policy = { providedValuesOnly: true, allowSubmit: false, record: { state: 'CA' } };
+  const selection = await executeAction(page, { action: 'select', selector: '#state', value: 'a' }, session, policy);
+  assert.equal(selection.verified, true);
+  assert.equal(await page.locator('#state').inputValue(), 'b');
+  for (const action of ['check', 'click', 'fill', 'type']) {
+    const result = await executeAction(page, { action, selector: '#yes', value: 'Texas' }, session, policy);
+    assert.equal(result.ok, false);
+  }
+  assert.equal(await page.locator('#yes').isChecked(), false);
+  assert.equal((await executeAction(page, { action: 'click', selector: '#advance' }, session, policy)).ok, false);
+  assert.equal(await page.locator('#advance').getAttribute('data-clicked'), null);
+});
+
+test('repair nhả tab nếu app thay record giữa chẩn đoán và thao tác', async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const { page, context, session } = await createFormScopeFixture(browser, '<form><label>Postal code<input required></label></form>');
+  t.after(() => context.close());
+  page._assignedRecord = { zipcode: '01234' };
+  const result = await inspectAndFixFormWithAi(page, page._assignedRecord, session, {
+    aiConfig: { enabled: true, mode: 'heuristic_only' },
+    onLog(event) { if (event.type === 'ai_form_diagnosing') page._assignedRecord = { zipcode: '99999' }; }
+  });
+  assert.equal(result.status, 'record_changed');
+  assert.equal(await page.locator('input').inputValue(), '');
+});

@@ -4,7 +4,7 @@
  * @param {object} page Trang Playwright cần kiểm tra.
  * @return {Promise<{errors:string[],emailInput:object|null,emailMissing:boolean,problemInputs:object[],hasBlocker:boolean}|null>} Trạng thái lỗi form đang hiển thị.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-19
  */
 async function inspectFormRepairState(page) {
   const targetFrame = page._activeAutofillFrame || page;
@@ -48,11 +48,21 @@ async function inspectFormRepairState(page) {
       const isCheckbox = type === 'checkbox' || type === 'radio' || element.getAttribute('role') === 'checkbox';
       const isChecked = isCheckbox ? Boolean(element.checked || element.getAttribute('aria-checked') === 'true' || element.classList.contains('checked')) : true;
       const isRequired = Boolean(element.required || element.getAttribute('aria-required') === 'true');
-      const selector = id ? `[id=${JSON.stringify(id)}]` : name ? `${tag}[name=${JSON.stringify(name)}]` : tag;
+      const referencedLabel = (element.getAttribute('aria-labelledby') || '').split(/\s+/)
+        .map(labelId => document.getElementById(labelId)?.textContent.trim()).filter(Boolean).join(' ');
+      const label = referencedLabel || element.getAttribute('aria-label') || Array.from(element.labels || [], item => {
+        const caption = item.cloneNode(true);
+        for (const nested of caption.querySelectorAll('input, select, textarea')) nested.remove();
+        return caption.textContent.trim();
+      }).join(' ');
+      const marker = element.getAttribute('data-ux-ai-target');
+      const candidate = marker ? `[data-ux-ai-target=${JSON.stringify(marker)}]` : id ? `[id=${JSON.stringify(id)}]` : name ? `${tag}[name=${JSON.stringify(name)}]` : tag;
+      const selector = document.querySelectorAll(candidate).length === 1 ? candidate : null;
       if (isEmail && !emailInput) {
         emailInput = {
           id,
           name,
+          label,
           type,
           val: value,
           isEmpty,
@@ -67,6 +77,7 @@ async function inspectFormRepairState(page) {
           type,
           id,
           name,
+          label,
           placeholder,
           currentValue: value,
           isEmpty,

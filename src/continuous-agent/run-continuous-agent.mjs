@@ -76,7 +76,7 @@ async function acquireCapacity(agent, signature) {
  * @param {object} agent Agent đã đăng ký (page, session, getRecord, cfg, signal, transport, log).
  * @return {Promise<void>} Kết thúc khi agent dừng.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 export async function runContinuousAgent(agent) {
   const { page, session, signal, transport, cfg } = agent;
@@ -102,7 +102,7 @@ export async function runContinuousAgent(agent) {
     try {
       if (transport.turns >= MAX_TURNS_PER_CONVERSATION) transport.close();
       const html = state.html, url = page.url();
-      const prompt = transport.turns === 0 ? buildFirstPrompt({ url, record: agent.getRecord(), customInstructions: cfg.customInstructions, html }) : buildNextPrompt({ url, html, feedback });
+      const prompt = transport.turns === 0 ? buildFirstPrompt({ customInstructions: cfg.customInstructions, html }) : buildNextPrompt({ url, html, feedback });
       setStatus(agent, 'thinking', `Lượt ${transport.turns + 1} của hội thoại`);
       const startedAt = Date.now();
       try {

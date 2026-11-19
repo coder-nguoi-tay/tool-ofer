@@ -6,7 +6,7 @@
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-19
  */
-export function operateOnForm(form, { origin, field, value, verifyOnly = false }) {
+export function operateOnForm(form, { origin, field, value, candidates = [], verifyOnly = false }) {
   if (!form.isConnected || form.ownerDocument.location.origin !== origin ||
       !form.matches('form[data-autoleadpc-mcp="record"]')) return { error: 'Form đã đổi. Hãy ghép lại.' };
   const controls = Array.from(form.elements).filter(control =>
@@ -55,7 +55,7 @@ export function operateOnForm(form, { origin, field, value, verifyOnly = false }
         Array.from(form.elements).some(item => item.type === 'radio' && item.name === control.name && !members.includes(item))) {
       return { error: 'Nhóm lựa chọn không rõ ràng.' };
     }
-    const matches = members.filter(item => item.value === value);
+    const matches = members.filter(item => candidates.includes(item.value));
     if (matches.length !== 1) return { error: 'Record không khớp một lựa chọn duy nhất.' };
     control = matches[0];
     if (verifyOnly || control.checked) return verifyAnswer();
@@ -64,7 +64,7 @@ export function operateOnForm(form, { origin, field, value, verifyOnly = false }
     if (members.length !== 1) return { error: 'Có nhiều trường trùng khóa.' };
     if (control.localName === 'select') {
       const matches = Array.from(control.options).filter(option => !option.disabled && !option.closest('optgroup[disabled]') &&
-        (option.value === value || option.label.trim() === value));
+        (candidates.includes(option.value) || candidates.includes(option.label.trim())));
       if (matches.length !== 1) return { error: 'Record không khớp một lựa chọn duy nhất.' };
       expectedOption = matches[0];
       if (verifyOnly || control.selectedIndex === expectedOption.index) return verifyAnswer();

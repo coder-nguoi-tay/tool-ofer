@@ -1,14 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { getAgtSpawnConfig } from '../ai-assist/get-agt-spawn-config.mjs';
-
-/**
- * Thư mục làm việc riêng, rỗng cho agy: agent không có file dự án nào trong tầm tay.
- * Thư mục chỉ được tạo, không bao giờ bị xóa bởi app.
- */
-const AGY_CWD = join(tmpdir(), 'autolead-agy-cwd');
 
 /**
  * Process `agy` sống lâu cho một tab: mỗi lượt gửi một dòng NDJSON `{"event":"user","message":{"content":...}}`
@@ -18,7 +9,7 @@ const AGY_CWD = join(tmpdir(), 'autolead-agy-cwd');
  * @param {object} [options={}] bin, timeoutMs, spawnFn (tiêm cho test), args bổ sung.
  * @return {{send:Function,close:Function,kill:Function,readonly turns:number,readonly conversationId:string|null}} Phiên transport.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 export function createAgySession({ bin = 'agy', timeoutMs = 100_000, spawnFn = spawn, args = [] } = {}) {
   let child = null, buffer = '', pending = null, turns = 0, conversationId = null, stderrTail = '';
@@ -56,12 +47,13 @@ export function createAgySession({ bin = 'agy', timeoutMs = 100_000, spawnFn = s
   /**
    * Spawn process agy nếu chưa có hoặc đã chết.
    * @return {object} Child process đang chạy.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-19
    */
   const ensureChild = () => {
     if (child) return child;
-    mkdirSync(AGY_CWD, { recursive: true });
-    const { bin: resolvedBin, env } = getAgtSpawnConfig(bin);
-    const proc = spawnFn(resolvedBin, ['--input-format', 'stream-json', '--output-format', 'stream-json', '--effort', 'low', '--mode', 'plan', '--sandbox', '--disable-slash-commands', ...args], { cwd: AGY_CWD, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const { bin: resolvedBin, env, cwd } = getAgtSpawnConfig(bin);
+    const proc = spawnFn(resolvedBin, ['--input-format', 'stream-json', '--output-format', 'stream-json', '--effort', 'low', '--mode', 'plan', '--sandbox', '--disable-slash-commands', ...args], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     child = proc; buffer = ''; turns = 0; conversationId = null;
     proc.stdout.on('data', chunk => {
       buffer += chunk.toString();

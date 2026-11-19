@@ -13,20 +13,22 @@ import { spawn } from 'node:child_process';
  * @return {Promise<string>} Output từ AI CLI.
  * @throws {Error} Khi CLI timeout, ném lỗi hoặc kết thúc với mã lỗi.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-19
  */
 function executeAgtProcess(prompt, options = {}) {
   return new Promise((resolve, reject) => {
     const timeoutMs = resolveAiTimeoutSeconds(options.timeoutSeconds || globalAiConfig.timeoutSeconds) * 1000;
     const {
       bin,
+      cwd,
       env
     } = getAgtSpawnConfig(options.cliBinary);
     const isCodex = bin.includes('codex');
-    const isAgy = bin.includes('agy') || !isCodex;
-    // agy: Tắt chế độ suy nghĩ (--effort low), bỏ hỏi quyền (--dangerously-skip-permissions), tắt slash commands để ưu tiên tốc độ tối đa
-    const args = isAgy ? ['--effort', 'low', '--dangerously-skip-permissions', '--disable-slash-commands'] : isCodex ? ['exec', '--model', CODEX_MODEL, '--config', `model_reasoning_effort="${CODEX_REASONING_EFFORT}"`, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--ephemeral', '--json', '-'] : [];
+    const args = isCodex
+      ? ['exec', '--model', CODEX_MODEL, '--config', `model_reasoning_effort="${CODEX_REASONING_EFFORT}"`, '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '--json', '-']
+      : ['--effort', 'low', '--mode', 'plan', '--sandbox', '--disable-slash-commands'];
     const child = spawn(bin, args, {
+      cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe']
     });

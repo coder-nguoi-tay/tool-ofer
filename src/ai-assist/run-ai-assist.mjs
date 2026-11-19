@@ -1,3 +1,4 @@
+import { buildFirstPrompt } from '../continuous-agent/build-turn-prompt.mjs';
 import { readVisiblePageState } from './visible-state/read-visible-page-state.mjs';
 import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
 import { isNoSurveyFrame } from '../autofill/adsmith/is-no-survey-frame.mjs';
@@ -25,7 +26,7 @@ import { waitForAiCapacity } from './wait-for-ai-capacity.mjs';
  * @return {Promise<void>}
  * @throws {Error} Nếu thao tác Playwright ngoài các nhánh fallback phát sinh lỗi.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-19
  */
 async function runAiAssist(page, record, session = {}, options = {}) {
   if (shouldStopAfterLead(session)) return;
@@ -103,33 +104,7 @@ async function runAiAssist(page, record, session = {}, options = {}) {
       const cleanedHtml = visibleState.html;
       const formStateBeforeAi = visibleState.signature;
       lastAttemptSignature = visibleState.signature;
-      const recordJson = JSON.stringify(record ?? {}, null, 2);
-      let prompt = `BỎ QUA SUY NGHĨ (NO REASONING/THINKING). KHÔNG GIẢI THÍCH. ƯU TIÊN TỐC ĐỘ TỐI ĐA.
-Chỉ dùng selector được cung cấp cho các control hiển thị và chưa bị khóa. Không đề xuất click/gõ trên bước ẩn. Nếu chưa có thao tác hợp lệ, trả [].
-Sinh mảng JSON thao tác UI để hoàn thành hoặc tiếp tục trang web dưới đây:
-URL: ${page.url()}
-Dữ liệu người dùng cung cấp:
-${recordJson}
-
-QUY TẮC SIÊU TỐC:
-- KHÔNG CẦN CHỌN ĐÚNG, CHỌN NHANH: Câu hỏi khảo sát / ý kiến / trắc nghiệm -> Chọn ngay đáp án "Yes" hoặc lựa chọn đầu tiên hợp lệ.
-- Trường nhập liệu (tên, họ, email, phone, ngày sinh, địa chỉ, zip): Điền nhanh theo dữ liệu người dùng ở trên.
-- Không submit/Continue/Next/CTA điều hướng. Chỉ sửa field bằng record và chọn đáp án; pipeline autofill phụ trách kiểm tra và submit.
-- Chú ý cấu trúc Offer/Landing Page: Các ô nhập và nút bấm thường nằm trong thẻ <div> class "input", "button", "btn-option" (không bắt buộc nằm trong thẻ <form>).
-
-YÊU CẦU ĐẦU RA BẮT BUỘC:
-- Trả về DUY NHẤT 1 mảng JSON, bắt đầu bằng [ và kết thúc bằng ]. Tuyệt đối KHÔNG viết bất kỳ chữ nào khác ngoài JSON.
-Format các action:
-[
-  {"action":"fill","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"},
-  {"action":"select","selector":"CSS_SELECTOR","value":"GIÁ_TRỊ"},
-  {"action":"check","selector":"CSS_SELECTOR"},
-  {"action":"click","selector":"CSS_SELECTOR"}
-]`;
-      if (cfg.customInstructions && typeof cfg.customInstructions === 'string' && cfg.customInstructions.trim()) {
-        prompt += `\n\nHƯỚNG DẪN BỔ SUNG CỦA NGƯỜI DÙNG:\n${cfg.customInstructions.trim()}`;
-      }
-      prompt += `\n\nHTML GIAO DIỆN:\n${cleanedHtml}`;
+      const prompt = buildFirstPrompt({ customInstructions: cfg.customInstructions, html: cleanedHtml });
       let actions = [];
       let t0 = Date.now();
       if (cfg.mode === 'heuristic_only') {
@@ -187,6 +162,15 @@ Format các action:
           moduleState.agtRunningCount = Math.max(0, moduleState.agtRunningCount - 1);
         }
       }
+      if (cfg.mode !== 'heuristic_only') {
+        actions = actions.filter(item => ['fill', 'type', 'select'].includes(item.action));
+        if (!actions.length) {
+          waitingForPage = true;
+          waitingReason = 'Autofill tiếp tục theo quy tắc của app';
+          blockAiForState(page, formStateBeforeAi);
+          break;
+        }
+      }
       if (actions.length === 0) {
         // Fallback tự động thông minh: nếu AI trả về [] nhưng trang thực tế có câu hỏi trắc nghiệm, survey, nút Jump Page, hoặc Submit
         const smartFallback = await detectSmartFallbackAction(page, cfg);
@@ -226,7 +210,7 @@ Format các action:
         if (page.isClosed() || session.isClosed) break;
         try {
           updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#818cf8;font-weight:600;">🤖 AI: ${act.action} ${act.selector || ''}</span>`);
-          const actionResult = await executeAction(page, act, session, { allowSubmit: false, providedValuesOnly: true, record, onLog: addLog });
+          const actionResult = await executeAction(page, act, session, { allowSubmit: false, providedValuesOnly: true, choiceFromAutofill: cfg.mode === 'heuristic_only', record, onLog: addLog });
           if (!actionResult.ok) {
             addLog({
               time: new Date().toISOString(),

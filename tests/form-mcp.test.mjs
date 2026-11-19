@@ -34,7 +34,8 @@ test('stdio ghép đúng tab, chỉ điền đáp án của record và thu hồi
     if (req.url === '/operator') { res.end(operatorHtml); return; }
     res.end(`<form data-autoleadpc-mcp="record" onsubmit="event.preventDefault();this.dataset.sent=1">
       <label>ZIP<input type="tel" data-autoleadpc-field="zipcode"></label>
-      <label>State<select data-autoleadpc-field="state"><option value="">Choose</option><option value="TX">Texas</option></select></label>
+      <label>Email<input type="email" data-autoleadpc-field="email"></label>
+      <label>State<select data-autoleadpc-field="state"><option value="">Choose</option><option value="area-48">TX</option></select></label>
       <fieldset><legend>Contact</legend><label><input type="radio" name="contact" data-autoleadpc-field="contact" value="mail">Mail</label>
       <label><input type="radio" name="contact" data-autoleadpc-field="contact" value="sms">SMS</label></fieldset>
       <input data-autoleadpc-field="nickname"><input type="password" data-autoleadpc-field="secret"><button>Gửi</button></form>`);
@@ -46,8 +47,8 @@ test('stdio ghép đúng tab, chỉ điền đáp án của record và thu hồi
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.goto(origin);
-  [page._assignedRecord] = parseAutofillRecords('zipcode,state,mcp_answer_contact,secret\n01234,Texas,sms,fixture-secret');
-  const session = { slot: 17, mainPage: page, browser: page.context() };
+  [page._assignedRecord] = parseAutofillRecords('zipcode,state,contact,mcp_answer_contact,secret\n01234,Texas,sms,mail,fixture-secret');
+  const session = { slot: 17, assignedEmail: 'tab@example.invalid', mainPage: page, browser: page.context() };
   activeBrowsers.add(session);
   t.after(() => activeBrowsers.delete(session));
   const child = spawn(process.execPath, ['mcp-server.mjs', '--forms'], {
@@ -95,13 +96,14 @@ test('stdio ghép đúng tab, chỉ điền đáp án của record và thu hồi
   const inspected = (await call('form_inspect')).result.content[0].text;
   assert.doesNotMatch(inspected, /01234|fixture-secret|Texas/);
   assert.deepEqual(JSON.parse(inspected).fields.map(f => [f.field, f.available]),
-    [['zipcode',true],['state',true],['contact',true],['nickname',false]]);
+    [['zipcode',true],['email',true],['state',true],['contact',true],['nickname',false]]);
   assert.equal((await call('form_fill', { field: 'zipcode', value: '99999' })).result.isError, true);
   assert.equal((await call('form_fill', { field: 'nickname' })).result.isError, true);
   assert.equal((await call('form_fill', { field: 'secret' })).result.isError, true);
-  for (const field of ['zipcode','state','contact']) assert.equal((await call('form_fill', { field })).result.isError, false);
+  for (const field of ['zipcode','email','state','contact']) assert.equal((await call('form_fill', { field })).result.isError, false);
   assert.equal(await page.locator('input[type=tel]').inputValue(), '01234');
-  assert.equal(await page.locator('select').inputValue(), 'TX');
+  assert.equal(await page.locator('input[type=email]').inputValue(), session.assignedEmail);
+  assert.equal(await page.locator('select').inputValue(), 'area-48');
   assert.equal(await page.locator('input[value=sms]').isChecked(), true);
   assert.equal(await page.locator('form').getAttribute('data-sent'), null);
   await page.locator('select').evaluate(select => {
