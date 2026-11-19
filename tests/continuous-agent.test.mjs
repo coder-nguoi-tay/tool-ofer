@@ -458,6 +458,7 @@ test('AI ghép ô ngoài danh sách theo từng phần tử, giữ dữ liệu n
     <input id="wrongsource" aria-label="Số điện thoại" type="tel">
     <input id="filled" aria-label="Prefilled" value="user-entry"><input type="password" aria-label="Password">
     <input type="text" autocomplete="one-time-code" aria-label="Verify">
+    <label>Information<input placeholder="Verification code"></label>
     <input hidden aria-label="Hidden"><input disabled aria-label="Disabled"><input readonly aria-label="Locked">
     <button type="submit">Submit</button></form>
     <input aria-label="Outside"><form><input aria-label="Other form"></form>`);
@@ -503,4 +504,35 @@ test('AI ghép ô ngoài danh sách theo từng phần tử, giữ dữ liệu n
   const privateKey = batches[0].fields[0].field;
   assert.ok((await page.locator('#allowed').evaluate(operateOnForm, { origin, field: privateKey, value: 'wrong' })).error);
   assert.equal(agent.turnCount, 2);
+});
+
+test('gợi ý đổi trong lúc chờ AI làm mất hiệu lực ánh xạ cũ của chính ô', { timeout: 12000 }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<meta charset="utf-8"><form data-autoleadpc-mcp="record">
+    <label>Thông tin<input id="entry" aria-placeholder="Nơi nhận thư"></label></form>`);
+  page._assignedRecord = { state: 'Texas', city: 'Austin' };
+  const hints = [];
+  const agent = startContinuousAgent(page, () => page._assignedRecord, session, {
+    allowedOrigin: new URL(page.url()).origin, aiConfig: { enabled: true, mode: 'form_agent' },
+    createTransport: () => ({ kill() {}, close() {}, async send(prompt) {
+      const [field] = JSON.parse(prompt.split('\n').at(-1)).fields;
+      hints.push(field.placeholder);
+      if (hints.length === 1) {
+        await page.locator('#entry').evaluate(input => {
+          input.oninput = () => { input.dataset.writes = (input.dataset.writes || '') + input.value + ','; };
+          input.setAttribute('aria-placeholder', 'Đô thị đang sống');
+        });
+      }
+      return { text: JSON.stringify([{ field: field.field, source: hints.length === 1 ? 'state' : 'city' }]) };
+    } })
+  });
+  try {
+    await page.waitForFunction(() => document.querySelector('#entry').value === 'Austin');
+    assert.deepEqual(hints, ['Nơi nhận thư', 'Đô thị đang sống']);
+    assert.equal(await page.locator('#entry').getAttribute('data-writes'), 'Austin,');
+  } finally {
+    stopContinuousAgent(page);
+    await agent.done;
+  }
 });

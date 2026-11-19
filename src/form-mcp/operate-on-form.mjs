@@ -1,5 +1,5 @@
 /**
- * Đọc và điền đúng form đã cấp quyền. Agent Vận hành có thể ghép thêm ô nhập thiếu khóa với record.
+ * Đọc nhãn và gợi ý của cùng ô trên form được cấp quyền, đối chiếu lại cả hai khi điền từ record.
  * @param {HTMLFormElement} form Form công bố các trường cho app.
  * @param {object} operation Origin, trường, bộ định danh ô của agent, metadata dự kiến và đáp án lấy từ record.
  * @return {object} Metadata hoặc trạng thái khi thao tác, hoặc control để kiểm tra địa chỉ cùng form.
@@ -66,24 +66,27 @@ export function operateOnForm(form, { origin, field, value, choiceValue, candida
     const unlisted = key.startsWith('@');
     const inputHint = control.title || control.name || control.id || control.autocomplete ||
       (['email', 'tel'].includes(control.type) ? control.type : '');
+    const placeholder = (control.getAttribute('placeholder')?.trim() || control.getAttribute('aria-placeholder')?.trim() || '').slice(0, 160);
     const label = (referenced || control.getAttribute('aria-label')?.trim() || labelText(labelElement) ||
-      control.placeholder || (unlisted ? inputHint : key)).trim().slice(0, 160);
+      placeholder || (unlisted ? inputHint : key)).trim().slice(0, 160);
     if (unlisted && /password|passcode|verification.?code|security.?code|one.?time|captcha|\botp\b|\bssn\b|credit.?card|card.?number|cvv|cvc|mật khẩu|mã xác (?:minh|thực)/i
-      .test([label, control.name, control.id].join(' '))) {
+      .test([label, placeholder, control.name, control.id].join(' '))) {
       groups.delete(key);
       continue;
     }
     if (!field && requireSingle && members.some(item => item.validity?.valid === false || item.getAttribute('aria-invalid') === 'true')) invalidFields.push(key);
     const kind = control.tagName === 'INPUT' ? control.type : control.localName === 'select' && control.hasAttribute('multiple') ? 'select-multiple' : control.localName;
-    fields.push({ field: key, label, kind });
+    const metadata = { field: key, label, kind };
+    if (placeholder && (requireSingle || field)) metadata.placeholder = placeholder;
+    fields.push(metadata);
   }
   if (!field) return requireSingle ? { fields, invalidFields, populatedFields } : { fields };
   const members = groups.get(field);
-  if (!members || (expected && (expected.label !== fields[0].label || expected.kind !== fields[0].kind))) {
+  if (!members || (expected && (expected.label !== fields[0].label || expected.kind !== fields[0].kind || expected.placeholder !== fields[0].placeholder))) {
     return requireSingle ? { stale: true } : { error: 'Trường hoặc nhãn đã đổi.' };
   }
   const control = members[0];
-  const metadata = { ...fields[0], name: control.name, id: control.id, autocomplete: control.autocomplete, placeholder: control.placeholder };
+  const metadata = { ...fields[0], placeholder: fields[0].placeholder || '', name: control.name, id: control.id, autocomplete: control.autocomplete };
   if (describeField) return metadata;
   if (expectedControl && Object.keys(metadata).some(key => metadata[key] !== expectedControl[key])) return { stale: true, verified: false };
   if (field.startsWith('@') && !verifyOnly && control.value.trim() && control.validity?.valid !== false &&

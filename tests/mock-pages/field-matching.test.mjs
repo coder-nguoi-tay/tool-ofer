@@ -1,6 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { matchFieldValue } from "../../autofill.mjs";
+import { resolveProvidedFieldValue } from '../../src/autofill/record-values/resolve-provided-field-value.mjs';
+
+test('autofill và repair dùng cụm từ hoặc mẫu trong đúng ô để lấy giá trị record', () => {
+  const record = { phone: '8175550147', email: 'fixture@example.invalid', address: '10 Oak St', address2: 'Apt 7',
+    firstname: 'Ada', lastname: 'Lovelace', fullname: 'Ada Lovelace', city: 'Austin', zipcode: '01234' };
+  for (const [label, placeholder, source] of [
+    ['Liên hệ', '(###) ###-####', 'phone'], ['Liên hệ', '09xx xxx xxx', 'phone'],
+    ['Thông tin', 'VD: name@example.com', 'email'], ['Thông tin', 'VD: 123 Main St', 'address'],
+    ['Thông tin', 'Số nhà và tên đường', 'address'], ['Mã', 'Bưu chính', 'zipcode'],
+    ['Please enter your first name', '', 'firstname'], ['First', 'Name', 'firstname'], ['Họ và', 'Tên của bạn', 'fullname'],
+    ['Điền họ và tên của bạn', '', 'fullname'], ['First and last name', '', 'fullname'], ['State your first name', '', 'firstname'],
+    ['Name', 'Your family name', 'lastname'],
+    ['Address', 'Line 2', 'address2'], ['Location', 'Enter your city', 'city'],
+    ['Street address', '(555) 123-4567', null], ['Số điện thoại', 'Ví dụ: 123 đường Mẫu', null],
+    ['Mã', '123456', null],
+  ]) {
+    const metadata = { label, placeholder, type: 'text', names: [label, placeholder] };
+    const expected = record[source] ?? null;
+    assert.equal(matchFieldValue(metadata.names, record, metadata), expected, label + ' / ' + placeholder);
+    assert.equal(resolveProvidedFieldValue(metadata, record), expected, label + ' / ' + placeholder);
+  }
+});
 
 test('matchFieldValue: Street Address, Zip Code, City never match phone even if disclaimer has phone text', () => {
   const record = {
@@ -67,10 +89,11 @@ test('metadata đọc nhãn liên kết/nhãn nổi/placeholder từng ô, khôn
   await page.setContent(`<form><span id="address-label">Street Address</span><input id="phone" name="phone" type="tel" aria-labelledby="address-label">
     <div class="field-item"><span class="label-entry">Địa chỉ</span><input id="floating" type="tel"></div>
     <input id="hint" name="phone" type="tel" placeholder="Your street address">
+    <label>Thông tin<input id="aria-hint" name="phone" aria-placeholder="123 Main St"></label>
     <div class="reg-fields"><label for="real-phone">Phone Number</label><input id="real-phone" type="tel"><label for="real-address">Street Address</label><input id="real-address" type="tel"></div>
     <p>By providing your phone number you agree to receive calls.</p></form>`);
   const record = { address: '123 Example Street', phone: '8175550147' };
-  for (const id of ['phone', 'floating', 'hint', 'real-address']) {
+  for (const id of ['phone', 'floating', 'hint', 'aria-hint', 'real-address']) {
     const metadata = await page.locator('#' + id).evaluate(collectFieldMetadata);
     assert.equal(matchFieldValue(metadata.names, record, metadata), record.address, id);
   }
@@ -126,8 +149,7 @@ test('aria-labelledby ghép nhiều ID đúng thứ tự, ưu tiên hơn aria-la
   }
 });
 
-test('nhãn riêng quyết định dữ liệu trong autofill và repair, mâu thuẫn hoặc thiếu dữ liệu thì giữ trống', async () => {
-  const { resolveProvidedFieldValue } = await import('../../src/autofill/record-values/resolve-provided-field-value.mjs');
+test('nhãn riêng quyết định dữ liệu trong autofill và repair, mâu thuẫn hoặc thiếu dữ liệu thì giữ trống', () => {
   const record = { phone: '8175550147', address: '10 Oak St', email: 'fixture@example.invalid', zipcode: '01234' };
   for (const [metadata, expected] of [
     [{ name: 'address', label: 'Số điện thoại', type: 'tel' }, record.phone],

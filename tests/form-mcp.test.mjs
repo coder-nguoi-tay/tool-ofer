@@ -196,7 +196,7 @@ test('Obscura gọi API ghép nhãn cho ô thiếu khóa, lấy giá trị từ 
       return;
     }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end('<form data-autoleadpc-mcp="record"><label>Where is your mail delivered?<input id="delivery"></label></form>');
+    res.end('<form data-autoleadpc-mcp="record"><label>Mã<input id="delivery" placeholder="Bưu chính"></label></form>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
@@ -213,6 +213,9 @@ test('Obscura gọi API ghép nhãn cho ô thiếu khóa, lấy giá trị từ 
   try {
     await page.waitForFunction(() => document.querySelector('#delivery').value === '01234', undefined, { timeout: 8000, polling: 100 });
     assert.equal(requests.length, 1);
+    const [sent] = JSON.parse(requests[0].split('\n').at(-1)).fields;
+    assert.equal(sent.label, 'Mã');
+    assert.equal(sent.placeholder, 'Bưu chính');
     assert.doesNotMatch(requests[0], /01234/);
     assert.equal(await page.locator('#delivery').getAttribute('data-autoleadpc-field'), null);
   } finally {

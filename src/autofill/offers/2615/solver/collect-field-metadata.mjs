@@ -1,6 +1,6 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/collect-field-metadata.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
 /**
- * Đọc nhãn riêng của từng ô và gợi ý nhập để đối chiếu định danh kỹ thuật với ý nghĩa hiển thị.
+ * Đọc nhãn riêng của từng ô và gợi ý nhập HTML/ARIA để đối chiếu định danh kỹ thuật với ý nghĩa hiển thị.
  * @param {Element} element Ô nhập được Playwright truyền vào trong frame hiện tại.
  * @return {object} Nhãn, placeholder, tên ứng viên, kiểu và trạng thái ô nhập.
  * @throws {never} Liên kết nhãn không còn tồn tại được bỏ qua.
@@ -68,6 +68,7 @@ export function collectFieldMetadata(element) {
   const vectorField = element.getAttribute('data-vector-field') || '';
   const ariaLabelledByText = referencedLabels.join(' ');
   const ariaLabel = (element.getAttribute('aria-label') || '').trim();
+  const placeholder = element.getAttribute('placeholder')?.trim() || element.getAttribute('aria-placeholder')?.trim() || '';
   const accessibleName = ariaLabelledByText || ariaLabel || labels.join(' ');
   const isReq = Boolean(element.required) || element.getAttribute('aria-required') === 'true' || element.classList.contains('required') || element.classList.contains('error') || [...labels, ...referencedLabels].some(l => /(^|\s)\*|\*(\s|$)/.test(l));
   return {
@@ -76,7 +77,7 @@ export function collectFieldMetadata(element) {
     label: labels.join(' '),
     accessibleName,
     ariaLabelledByText,
-    placeholder: element.getAttribute('placeholder') || '',
+    placeholder,
     ariaLabel,
     autocomplete: element.getAttribute('autocomplete') || '',
     classes: `${element.className || ''} ${container ? container.className || '' : ''}`,
@@ -87,7 +88,7 @@ export function collectFieldMetadata(element) {
     disabled: Boolean(element.matches?.(':disabled')) || Boolean(element.closest('[inert], [aria-hidden=true], [aria-disabled=true]')),
     invalid: element.validity?.valid === false || element.getAttribute('aria-invalid') === 'true',
     checked: Boolean(element.checked),
-    names: [accessibleName, vectorField, element.getAttribute('placeholder'), element.getAttribute('name'), element.id, element.getAttribute('autocomplete'), element.getAttribute('data-name'), element.getAttribute('data-field'), element.getAttribute('data-testid'), element.getAttribute('data-qa'), element.getAttribute('data-tf-element-role'), element.getAttribute('data-leadid-type'), ...Object.values(dataAttributes), ...fieldHints, element.getAttribute('title'), ...labels.filter(l => l && l.length <= 60)].filter(Boolean),
+    names: [accessibleName, vectorField, placeholder, element.getAttribute('name'), element.id, element.getAttribute('autocomplete'), element.getAttribute('data-name'), element.getAttribute('data-field'), element.getAttribute('data-testid'), element.getAttribute('data-qa'), element.getAttribute('data-tf-element-role'), element.getAttribute('data-leadid-type'), ...Object.values(dataAttributes), ...fieldHints, element.getAttribute('title'), ...labels.filter(l => l && l.length <= 60)].filter(Boolean),
     containerText: containerText.slice(0, 400),
     kind: element.tagName.toLowerCase(),
     type: element.getAttribute('type')?.toLowerCase(),
