@@ -4,9 +4,10 @@
  * @return {Promise<void>} Hoàn tất khi API khởi chạy trả kết quả.
  * @throws {Error} Khi giao diện không thể gửi yêu cầu mở trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-19
  */
 async function handleStart(options = {}) {
+      if (typeof dashboardAiSave !== 'undefined' && dashboardAiSave && !(await dashboardAiSave)?.success) return;
       const btnStart = document.getElementById('btnStart');
       if (btnStart && btnStart.disabled) return;
       if (window.cachedSessions && window.cachedSessions.length > 0) {

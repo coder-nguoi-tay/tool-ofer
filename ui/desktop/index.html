@@ -380,10 +380,10 @@
                 <div class="options-group-label">✨ Tự động thông minh:</div>
                 <div class="options-group-pills smart-pills-grid">
                   <label class="option-pill option-pill-ai"
-                    title="AI tự động nhận diện câu hỏi / khảo sát khi bị kẹt và hỗ trợ hoàn tất form.">
-                    <input type="checkbox" id="cbxAiAssist" checked
+                    title="Bật để AI theo dõi tab từ khi mở và điền form đã khai báo trên website đích. Bỏ tích để dùng autofill của app.">
+                    <input type="checkbox" id="cbxAiAssist"
                       onchange="toggleAiAssistDashboard(this.checked); syncOptionPills();">
-                    <span class="option-pill-text"><span class="option-pill-icon">✨</span> AI Assist</span>
+                    <span class="option-pill-text"><span class="option-pill-icon">✨</span> AI điều khiển</span>
                   </label>
 
 
@@ -1423,6 +1423,7 @@
                 <span class="form-label">Chế độ AI:</span>
                 <select id="cbbAiMode" class="win-select" style="flex:1;">
                   <option value="auto_on_stuck">Auto on Stuck (Tự động gỡ kẹt khi form kẹt - Khuyên dùng)</option>
+                  <option value="form_agent">AI điều khiển biểu mẫu từ khi mở tab</option>
                   <option value="continuous">Continuous (Hỗ trợ liên tục từ màn 1)</option>
                   <option value="heuristic_only">Heuristic Fallback Only (Chỉ dùng Smart Fallback, không tốn token)
                   </option>
@@ -1507,7 +1508,7 @@
 
           <!-- Group 3b: Agent API (Continuous) -->
           <fieldset class="win-group" style="margin-bottom:8px;">
-            <legend class="win-legend">Agent liên tục — nguồn AI (dùng khi AI Mode = Continuous)</legend>
+            <legend class="win-legend">Nguồn AI cho chế độ liên tục và AI điều khiển</legend>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
               <label style="display:flex;align-items:center;gap:8px;font-size:12px;">Nguồn:
                 <select id="cbbAgentTransport" class="win-select" style="flex:1;" onchange="syncAgentApiFormat()">
@@ -1548,7 +1549,7 @@
             <div style="font-size:11px;color:#94a3b8;margin-top:5px;">
               URL dán base (vd <code>https://api.openai.com/v1</code>) hoặc endpoint đầy đủ của gateway. Chỉ https (http
               cho localhost).
-              Key lưu cục bộ, không hiển thị lại; để trống ô key nghĩa là giữ key cũ. Cần chọn AI Mode = Continuous ở
+              Key lưu cục bộ, không hiển thị lại; để trống ô key nghĩa là giữ key cũ. Chọn AI điều khiển hoặc Continuous ở
               trên và Save AI Config.
             </div>
           </fieldset>

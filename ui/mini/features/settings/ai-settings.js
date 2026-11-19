@@ -144,18 +144,18 @@ function miniSetIsAiAssistEnabled() {
 }
 
 /**
- * Bật/tắt AI Assist như desktop toggleAiAssistDashboard: đổi mode auto_on_stuck/disabled rồi lưu toàn bộ form.
+ * Bật/tắt AI Assist như desktop toggleAiAssistDashboard: đổi chế độ điều khiển biểu mẫu hoặc autofill rồi lưu toàn bộ form.
  * Nạp cấu hình trước nếu chưa có để không ghi đè chỉ dẫn tùy chỉnh bằng giá trị mặc định.
- * @param {boolean} enabled true = bật (auto_on_stuck), false = tắt (disabled).
+ * @param {boolean} enabled true = bật (form_agent), false = tắt (disabled).
  * @return {Promise<boolean>} true khi lưu thành công.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-19
  */
 async function miniSetSetAiAssistEnabled(enabled) {
   if (!miniSetAiConfig) await miniSetLoadAi();
   if (!miniSetAiConfig) { showToast('Chưa đọc được cấu hình AI, thử lại sau.'); return false; }
   const modeEl = document.getElementById('setAiMode');
-  if (modeEl) modeEl.value = enabled ? 'auto_on_stuck' : 'disabled';
-  const cfg = { ...miniSetReadAiForm(), enabled: Boolean(enabled), mode: enabled ? 'auto_on_stuck' : 'disabled' };
+  if (modeEl) modeEl.value = enabled ? 'form_agent' : 'disabled';
+  const cfg = { ...miniSetReadAiForm(), enabled: Boolean(enabled), mode: enabled ? 'form_agent' : 'disabled' };
   return miniSetPostAi(cfg, enabled ? 'Đã bật AI Assist.' : 'Đã tắt AI Assist.');
 }

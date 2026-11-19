@@ -7,6 +7,9 @@ import { serveUiAsset } from '../src/http/ui-assets.mjs';
 
 test('form Agent API trên giao diện desktop: nạp, lưu (key không hiển thị lại) và thử kết nối', async t => {
   const saved = [];
+  const operationWrites = [];
+  let aiConfig = { enabled: true, mode: 'auto_on_stuck', timeoutSeconds: 150 };
+  let failAiSave = false;
   let stored = { transport: 'agy', apiFormat: 'openai', apiBaseUrl: '', apiModel: '', apiKeySet: false, apiKeyHint: '' };
   const page_html = (await readFile(new URL('../ui/desktop/index.html', import.meta.url), 'utf8')).replace(/<script[^>]*src="[^"]*"[^>]*><\/script>/g, '').replace(/<link[^>]*>/g, '');
   const server = createServer(async (request, response) => {
@@ -16,6 +19,14 @@ test('form Agent API trên giao diện desktop: nạp, lưu (key không hiển t
     request.on('data', chunk => { body += chunk; });
     request.on('end', () => {
       response.setHeader('content-type', 'application/json');
+      if (request.url === '/ai/config') {
+        if (request.method === 'GET') return response.end(JSON.stringify(aiConfig));
+        const patch = JSON.parse(body);
+        operationWrites.push(patch);
+        if (failAiSave) return response.end(JSON.stringify({ error: 'Lỗi ghi cấu hình' }));
+        aiConfig = { ...aiConfig, ...patch };
+        return response.end(JSON.stringify({ success: true }));
+      }
       if (request.url === '/agent/api/config' && request.method === 'GET') return response.end(JSON.stringify(stored));
       if (request.url === '/agent/api/config') {
         const patch = JSON.parse(body); saved.push(patch);
@@ -56,5 +67,25 @@ test('form Agent API trên giao diện desktop: nạp, lưu (key không hiển t
   await page.evaluate(() => testAgentApiConfigUi());
   assert.equal(saved.at(-1).apiKey, '', 'lần lưu sau gửi key rỗng → server giữ key cũ');
   assert.match(await page.textContent('#agentApiStatus'), /Kết nối OK \(12ms\)/);
+  await page.evaluate(() => loadAiConfigUi());
+  const checkbox = page.locator('#cbxAiAssist');
+  assert.equal(await checkbox.evaluate(box => box.indeterminate), true);
+  await checkbox.evaluate(box => box.click());
+  await page.waitForFunction(() => !document.querySelector('#cbxAiAssist').disabled);
+  assert.deepEqual(operationWrites.at(-1), { enabled: true, mode: 'form_agent' });
+  assert.equal(await page.inputValue('#cbbAiMode'), 'form_agent');
+  await page.evaluate(() => loadAiConfigUi());
+  assert.equal(await checkbox.isChecked(), true);
+  failAiSave = true;
+  await checkbox.evaluate(box => box.click());
+  await page.waitForFunction(() => !document.querySelector('#cbxAiAssist').disabled);
+  assert.equal(await checkbox.isChecked(), true);
+  failAiSave = false;
+  await checkbox.evaluate(box => box.click());
+  await page.waitForFunction(() => !document.querySelector('#cbxAiAssist').disabled);
+  assert.deepEqual(operationWrites.at(-1), { enabled: false, mode: 'disabled' });
+  assert.equal(await checkbox.isChecked(), false);
+  assert.equal(await page.inputValue('#cbbAiMode'), 'disabled');
+  assert.equal(aiConfig.timeoutSeconds, 150);
   assert.deepEqual(errors, []);
 });

@@ -63,11 +63,13 @@ export function createAgySession({ bin = 'agy', timeoutMs = 100_000, spawnFn = s
     proc.stderr.on('data', chunk => { stderrTail = (stderrTail + chunk).slice(-300); });
     proc.stdin.on('error', () => {});
     proc.on('error', error => {
-      if (child === proc) child = null;
+      if (child !== proc) return;
+      child = null;
       settle(new Error(error.code === 'ENOENT' ? `${resolvedBin} không có trong PATH` : error.message));
     });
     proc.on('close', code => {
-      if (child === proc) { child = null; turns = 0; }
+      if (child !== proc) return;
+      child = null; turns = 0;
       settle(new Error(`agy thoát (${code}) giữa lượt: ${stderrTail.trim() || 'không có stderr'}`));
     });
     return proc;

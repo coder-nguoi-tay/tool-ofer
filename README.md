@@ -68,6 +68,8 @@ npm start
 
 ## AI dùng dữ liệu của luồng autofill
 
+Trong **Vận hành**, tích **AI điều khiển** để theo dõi các tab tự động ngay khi mở và cả tab tự động đang chạy. Agent điền các trường còn thiếu hoặc lỗi trên form `data-autoleadpc-mcp="record"` của đúng origin đã nhập lúc mở trình duyệt. Khóa trường và nguồn record dùng cùng quy ước bên dưới. Khi chưa có form phù hợp, agent chờ. Bỏ tích sẽ hủy lượt AI và trả tab cho autofill. Đóng tab hoặc trình duyệt sẽ dừng agent tương ứng. Checkbox ở trạng thái gạch ngang khi đang dùng một chế độ AI khác từ Cài đặt.
+
 Khi bật AI trong app, agent liên tục và agent xử lý form bị kẹt dùng record hiện tại của tab. AI chỉ chỉ định ô nhập hoặc dropdown. App đọc lại nhãn từ DOM, áp dụng cùng bộ quy tắc lấy email đã gán, dữ liệu record và các cách viết tương đương của option. Các nhóm radio, checkbox và hành động gửi form do autofill xử lý. Khi có lỗi validation, app lập danh sách trường sửa được và dùng AI CLI đã cấu hình để ưu tiên các trường đó. Log `ai_form_plan_received` ghi số trường AI nhận diện trong danh sách. Luồng trong app tự chạy theo chế độ AI đã chọn, không cần ghép mã MCP hoặc nhập dữ liệu lần nữa.
 
 ## MCP biểu mẫu cho agent bên ngoài

@@ -1,3 +1,6 @@
+import { attachAutofillPageWatcher } from '../src/autofill/attach-autofill-page-watcher.mjs';
+import { setGlobalAiConfig } from '../src/ai-assist/set-global-ai-config.mjs';
+import { globalAiConfig } from '../src/ai-assist/state/global-ai-config.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -217,3 +220,73 @@ test('Stop: nối vào closeActiveBrowsers, stopAll giết agy đang chờ, sess
  * @return {boolean} True nếu agent đang giữ tab.
  */
 function page_flag(page) { return page._aiAssistRunning === true; }
+
+test('AI Vận hành giữ tab, chỉ điền form đã khai báo, hủy phản hồi muộn và nhả về autofill khi bỏ tích', { timeout: 25000 }, async t => {
+  const oldConfig = globalAiConfig;
+  t.after(() => setGlobalAiConfig(oldConfig));
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, '<form><input id="ordinary"></form>');
+  session.mainPage = page;
+  page._assignedRecord = { zipcode: '01234', state: 'Texas' };
+  const origin = new URL(page.url()).origin;
+  const form = '<form data-autoleadpc-mcp="record"><input id="zip" data-autoleadpc-field="zipcode"><select id="state" data-autoleadpc-field="state"><option value="">Choose</option><option value="TX">Texas</option></select></form>';
+  const delayed = new EventEmitter();
+  const prompts = [];
+  let holding = false, kills = 0, autoPasses = 0;
+  const transport = {
+    turns: 0, close() {}, kill() { kills++; },
+    async send(prompt) {
+      prompts.push(prompt);
+      if (holding) {
+        delayed.emit('waiting');
+        await new Promise(resolve => delayed.once('release', resolve));
+      }
+      return { text: '["zipcode","state","unknown"]' };
+    }
+  };
+  setGlobalAiConfig({ enabled: true, mode: 'form_agent' });
+  attachAutofillPageWatcher(page, {
+    trackedPages: new WeakSet(), options: { allowedOrigin: origin, createTransport: () => transport }, session,
+    fillVisibleForms: async () => { autoPasses++; delayed.emit('auto'); }, record: {}, checkLeadAfterEmailOnPage() {},
+    isSpamAdUrl: () => false, watchPage() {}
+  });
+  assert.ok(page._continuousAgent);
+  await page.waitForTimeout(720);
+  assert.equal(prompts.length, 0);
+  await page.goto('https://unrelated.test/form');
+  await page.setContent(form);
+  await page.waitForTimeout(720);
+  assert.equal(prompts.length, 0);
+  await page.goto(origin);
+  await page.setContent(form);
+  await page.waitForFunction(() => document.querySelector('#state')?.value === 'TX');
+  assert.equal(await page.inputValue('#zip'), '01234');
+  assert.equal(autoPasses, 0);
+  assert.ok(prompts.every(prompt => !prompt.includes('01234') && !prompt.includes('Texas')));
+
+  holding = true;
+  const waiting = new Promise(resolve => delayed.once('waiting', resolve));
+  // Chuyển document nhưng giữ cùng tab để kiểm tra vòng đời của agent.
+  await page.reload();
+  await page.setContent(form);
+  await waiting;
+  const stopped = page._continuousAgent;
+  setGlobalAiConfig({ enabled: false, mode: 'disabled' });
+  assert.equal(page._continuousAgent, null);
+  assert.equal(kills, 1);
+  delayed.emit('release');
+  await stopped.done;
+  assert.equal(await page.inputValue('#zip'), '');
+  if (!autoPasses) await new Promise(resolve => delayed.once('auto', resolve));
+  assert.ok(autoPasses > 0);
+  holding = false;
+  setGlobalAiConfig({ enabled: true, mode: 'form_agent' });
+  session.triggerAutofillScan();
+  await page.waitForFunction(() => document.querySelector('#zip')?.value === '01234');
+  const restarted = page._continuousAgent;
+  await browser.close();
+  await restarted.done;
+  assert.equal(getContinuousAgentState(page), null);
+  assert.equal(kills, 2);
+});

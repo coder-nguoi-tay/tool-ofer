@@ -1,7 +1,7 @@
 let globalAiConfig = {
   enabled: true,
   mode: 'auto_on_stuck',
-  // 'auto_on_stuck' | 'continuous' | 'heuristic_only' | 'disabled'
+  // 'auto_on_stuck' | 'form_agent' | 'continuous' | 'heuristic_only' | 'disabled'
   cliBinary: 'agy',
   useCodexMcp: false,
   // Bỏ Codex MCP, chuyển hẳn sang agy CLI tốc độ cao

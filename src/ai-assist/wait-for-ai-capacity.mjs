@@ -9,14 +9,15 @@ import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-
  * Caller chỉ nhả agtRunningCount trong finally nếu đã nhận acquired; không hủy AI đang chạy.
  * @param {object} page Tab cần AI hỗ trợ.
  * @param {object} session Phiên sở hữu IP exit đã xác minh.
- * @param {string} signature Trạng thái DOM dự định xử lý.
+ * @param {string|null} signature Chữ ký DOM hoặc null khi caller giữ handle form và tự kiểm tra sau khi chờ.
  * @param {number} maxWaitMs Hạn chờ để trả quyền về autofill.
  * @param {Function|null} onQueued Thông báo khi vị trí/ưu tiên đổi, tránh ghi log mỗi nhịp poll.
+ * @param {AbortSignal} [signal] Hủy vé khi tab trả quyền điều khiển.
  * @return {Promise<string>} acquired, page_changed, queue_timeout hoặc closed.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-19
  */
-export async function waitForAiCapacity(page, session, signature, maxWaitMs = 15000, onQueued = null) {
+export async function waitForAiCapacity(page, session, signature, maxWaitMs = 15000, onQueued = null, signal) {
   const ticket = { page, session, deadline: Date.now() + maxWaitMs };
   moduleState.agtWaiters.push(ticket);
   let nextInspectionAt = 0, lastPosition = '', waited = false;
@@ -30,12 +31,13 @@ export async function waitForAiCapacity(page, session, signature, maxWaitMs = 15
     .sort((first, second) => Number(protectConfirmedLeadSession(second.session)) - Number(protectConfirmedLeadSession(first.session)));
   try {
     while (!page.isClosed() && !session.isClosed) {
+      if (signal?.aborted) return 'aborted';
       if (shouldStopAfterLead(session)) return 'page_changed';
       if (page._leadRecoveryInProgress) return 'page_changed';
       if (Date.now() >= ticket.deadline) return 'queue_timeout';
       const queue = ordered();
       if (moduleState.agtRunningCount < MAX_CONCURRENT_AGT && queue[0] === ticket) {
-        if (waited) {
+        if (waited && signature !== null) {
           const current = await readVisiblePageState(page);
           if (current.available && current.signature !== signature) return 'page_changed';
           if (page.isClosed() || session.isClosed) return 'closed';
@@ -50,7 +52,7 @@ export async function waitForAiCapacity(page, session, signature, maxWaitMs = 15
       const key = `${position}:${priority}:${moduleState.agtRunningCount}`;
       if (key !== lastPosition) onQueued?.({ position, priority, running: moduleState.agtRunningCount, limit: MAX_CONCURRENT_AGT });
       lastPosition = key;
-      if (Date.now() >= nextInspectionAt) {
+      if (signature !== null && Date.now() >= nextInspectionAt) {
         const current = await readVisiblePageState(page);
         if (current.available && current.signature !== signature) return 'page_changed';
         nextInspectionAt = Date.now() + 1000;

@@ -13,11 +13,11 @@ import { resolveAiTimeoutSeconds } from './resolve-ai-timeout-seconds.mjs';
  * @param {object} options Cấu hình AI và callback log.
  * @return {Promise<void>} Hoàn tất một lượt chẩn đoán, luôn trả lại chỗ AI đã acquired.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-19
  */
 export async function diagnoseEmptyProgress(page, session, snapshot, options) {
   const config = { ...globalAiConfig, ...options.aiConfig };
-  if (!config.enabled || ['disabled', 'heuristic_only'].includes(config.mode)) {
+  if (!config.enabled || ['disabled', 'heuristic_only', 'form_agent'].includes(config.mode)) {
     options.onLog?.({ type: 'late_progress_ai_disabled', detail: 'Đã thử hai lần F5; AI chưa bật, giữ trang và chờ kiểm tra.' }, page); return;
   }
   let acquired = false;

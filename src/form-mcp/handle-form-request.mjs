@@ -1,17 +1,15 @@
+import { suppliedValue } from './supplied-value.mjs';
 import { setTimeout as wait } from 'node:timers/promises';
 import { activeBrowsers } from '../browser/sessions.mjs';
 import { resolveDebugPage } from '../browser/screen/resolve-debug-page.mjs';
 import { shouldStopAfterLead } from '../autofill/should-stop-after-lead.mjs';
-import { resolveProvidedFieldValue } from '../autofill/record-values/resolve-provided-field-value.mjs';
 import { buildSelectCandidates } from '../autofill/select/build-select-candidates.mjs';
-import { normalizeFieldName } from '../autofill/normalize-field-name.mjs';
 import { readRequestBody } from '../http/actions/read-request-body.mjs';
 import { respondWithJson } from '../http/actions/respond-with-json.mjs';
 import { consumePairing } from './pairing.mjs';
 import { operateOnForm } from './operate-on-form.mjs';
 
 const grants = new Map();
-const profileFields = new Set(['firstname', 'lastname', 'fullname', 'email', 'phone', 'address', 'city', 'state', 'zipcode', 'country', 'contact', 'contactmethod', 'preferredcontact', 'language']);
 
 /**
  * Bỏ quyền ngay khi tab đóng, đổi document, hết hạn hoặc người dùng ngắt ghép.
@@ -63,26 +61,6 @@ async function shareForm(slot, pair) {
   page.once('close', grant.onClose);
   page.on('framenavigated', grant.onNavigation);
   return { origin: pair.origin, expiresAt: pair.expiresAt };
-}
-
-/**
- * Đọc trường hồ sơ hoặc cột đáp án MCP đã được parser CSV/JSON của app chuẩn hóa.
- * @param {object} record Record gắn với grant.
- * @param {string} field Khóa do chủ form công bố.
- * @param {object} session Phiên cung cấp email đã gán và dữ liệu autofill.
- * @return {string|null} Giá trị đủ nguồn hoặc null khi thiếu.
- * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
- */
-function suppliedValue(record, field, session) {
-  if (profileFields.has(field)) {
-    const value = resolveProvidedFieldValue({ name: field }, record, session);
-    if (value != null && value !== '') return String(value);
-  }
-  const key = normalizeFieldName('mcp_answer_' + field);
-  if (!Object.hasOwn(record, key)) return null;
-  const value = record[key];
-  return ['string', 'number', 'boolean'].includes(typeof value) && String(value).trim() ? String(value) : null;
 }
 
 /**

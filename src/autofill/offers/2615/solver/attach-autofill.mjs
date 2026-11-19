@@ -203,14 +203,14 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
    * @param {object} page Tab Chrome cần theo dõi.
    * @return {void} Đăng ký bộ hẹn giờ và dọn khi tab đóng.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-10-21
+   * @since 2026-11-19
    */
   function watchPage(page) {
-    // No-op trừ khi AI config ở mode 'continuous' (+ agy); các mode khác giữ nguyên luồng cũ.
-    startContinuousAgent(page, () => page._assignedRecord || session.currentRecord || record, session, options);
+    // Đăng ký agent khi mở tab; watcher đồng bộ các lần đổi chế độ tiếp theo.
+    startContinuousAgent(page, () => page._assignedRecord || session.currentRecord || record, session, { ...options, allowedOrigin });
     return attachAutofillPageWatcher(page, {
       trackedPages,
-      options,
+      options: { ...options, allowedOrigin },
       session,
       fillVisibleForms,
       record,

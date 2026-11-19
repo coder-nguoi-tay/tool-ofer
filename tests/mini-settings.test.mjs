@@ -119,7 +119,7 @@ test('AI: timeout hiển thị đúng giá trị lưu (không cắt 15s) và b�
   assert.equal(context.miniSetIsAiAssistEnabled(), false);
 
   await context.miniSetSetAiAssistEnabled(true);
-  assert.equal(requests.at(-1).body.mode, 'auto_on_stuck');
+  assert.equal(requests.at(-1).body.mode, 'form_agent');
   assert.equal(requests.at(-1).body.enabled, true);
   assert.equal(context.miniSetIsAiAssistEnabled(), true);
 });

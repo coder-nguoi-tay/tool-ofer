@@ -6,8 +6,9 @@
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-19
  */
-export function operateOnForm(form, { origin, field, value, candidates = [], verifyOnly = false }) {
+export function operateOnForm(form, { origin, field, value, candidates = [], verifyOnly = false, pendingOnly = false, requireSingle = false, onlyIfPending = false }) {
   if (!form.isConnected || form.ownerDocument.location.origin !== origin ||
+      (requireSingle && form.ownerDocument.querySelectorAll('form[data-autoleadpc-mcp="record"]').length !== 1) ||
       !form.matches('form[data-autoleadpc-mcp="record"]')) return { error: 'Form đã đổi. Hãy ghép lại.' };
   const controls = Array.from(form.elements).filter(control =>
     control.hasAttribute('data-autoleadpc-field') && control.form === form &&
@@ -22,10 +23,23 @@ export function operateOnForm(form, { origin, field, value, candidates = [], ver
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(control);
   }
+  /**
+   * Xác định trường còn trống hoặc đang báo lỗi từ các control có cùng khóa.
+   * @param {HTMLElement[]} members Các control hiển thị mà form đã khai báo.
+   * @return {boolean} Agent cần xử lý trường này.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-19
+   */
+  const needsInput = members => {
+    const control = members[0];
+    return control.type === 'radio' ? !members.some(item => item.checked) :
+      !control.value.trim() || control.getAttribute('aria-invalid') === 'true' || control.validity?.valid === false;
+  };
   if (!field) {
     const fields = [];
     for (const [key, members] of groups) {
       const control = members[0];
+      if (pendingOnly && !needsInput(members)) continue;
       const labelElement = control.type === 'radio' ? control.closest('fieldset')?.querySelector('legend') : control.labels?.[0];
       const labelCopy = labelElement?.cloneNode(true);
       for (const nested of labelCopy?.querySelectorAll('input,select,textarea') || []) nested.remove();
@@ -36,6 +50,7 @@ export function operateOnForm(form, { origin, field, value, candidates = [], ver
   }
   const members = groups.get(field);
   if (!members?.length) return { error: 'Trường không còn sẵn sàng.' };
+  if (onlyIfPending && !verifyOnly && !needsInput(members)) return { skipped: true };
   let control = members[0];
   let expectedOption;
   /**

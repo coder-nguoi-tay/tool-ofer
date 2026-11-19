@@ -25,7 +25,7 @@ const BADGE_LABELS = { queued: 'chờ lượt AI', thinking: 'đang phân tích'
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-15
  */
-function setStatus(agent, status, detail = '', log = false) {
+export function setStatus(agent, status, detail = '', log = false) {
   if (agent.status === 'stopped') return;
   const changed = agent.status !== status;
   agent.status = status; agent.detail = detail;
@@ -42,10 +42,11 @@ function setStatus(agent, status, detail = '', log = false) {
  * @param {boolean} on Giữ hay nhả quyền.
  * @return {void}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
-function setOwner(agent, on) {
+export function setOwner(agent, on) {
   const { page, session } = agent;
+  if (page._continuousAgent !== agent) return;
   if (!session.aiRunningPages) session.aiRunningPages = new Set();
   on ? session.aiRunningPages.add(page) : session.aiRunningPages.delete(page);
   page._aiAssistRunning = on;

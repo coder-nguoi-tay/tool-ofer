@@ -35,7 +35,7 @@ async function runAiAssist(page, record, session = {}, options = {}) {
     ...globalAiConfig,
     ...(options.aiConfig || {})
   };
-  if (!cfg.enabled || cfg.mode === 'disabled') {
+  if (!cfg.enabled || ['disabled', 'form_agent'].includes(cfg.mode)) {
     const slotNum = (session.tileIndex ?? 0) + 1;
     console.log(`[AI-Assist] Slot ${slotNum}: AI Assist đang tắt theo cấu hình.`);
     return;
@@ -206,7 +206,7 @@ async function runAiAssist(page, record, session = {}, options = {}) {
         }
       }
       for (const act of actions) {
-        if (shouldStopAfterLead(session)) break;
+        if (!globalAiConfig.enabled || ['disabled', 'form_agent'].includes(globalAiConfig.mode) || shouldStopAfterLead(session)) break;
         if (page.isClosed() || session.isClosed) break;
         try {
           updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#818cf8;font-weight:600;">🤖 AI: ${act.action} ${act.selector || ''}</span>`);

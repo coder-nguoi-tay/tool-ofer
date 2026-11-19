@@ -4,24 +4,24 @@ import { createAgySession } from './agy-stream-session.mjs';
 import { createApiChatSession } from './api-chat-session.mjs';
 import { loadAgentConfig } from './agent-config.mjs';
 import { getAgent, registerAgent } from './agent-registry.mjs';
+import { runDashboardFormAgent } from './run-dashboard-form-agent.mjs';
 import { runContinuousAgent } from './run-continuous-agent.mjs';
 import { stopContinuousAgent } from './stop-continuous-agent.mjs';
 
 /**
- * Bật agent liên tục cho một tab nếu cấu hình AI đang ở mode `continuous` với agy. Không làm gì ở các mode khác,
- * nên luồng `auto_on_stuck` / `heuristic_only` / `disabled` giữ nguyên. Idempotent: một tab chỉ có một agent.
+ * Khởi chạy tối đa một agent trên tab theo chế độ Vận hành hoặc chế độ liên tục đã cấu hình.
  *
  * @param {object} page Tab offer.
  * @param {()=>object} getRecord Hàm lấy record hiện hành của tab (đọc lại mỗi lượt, không chụp một lần).
  * @param {object} session Phiên sở hữu tab.
- * @param {object} [options={}] onLog, aiConfig, createTransport (tiêm cho test).
+ * @param {object} [options={}] Origin website đích, cấu hình transport và callback của phiên.
  * @return {object|null} Agent đang chạy hoặc null nếu không bật.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 export function startContinuousAgent(page, getRecord, session, options = {}) {
   const cfg = { ...globalAiConfig, ...(options.aiConfig || {}) };
-  if (!cfg.enabled || cfg.mode !== 'continuous') return null;
+  if (!cfg.enabled || !['continuous', 'form_agent'].includes(cfg.mode)) return null;
   if (['manual', 'skip', 'consent_only'].includes(session.offerMode)) return null;
   const existing = getAgent(page);
   if (existing) return existing;
@@ -40,15 +40,16 @@ export function startContinuousAgent(page, getRecord, session, options = {}) {
     transport = createAgySession({ bin: cfg.cliBinary || 'agy', timeoutMs });
   }
   const abortController = new AbortController();
-  const agent = { page, session, cfg, transport, abortController, signal: abortController.signal, log, getRecord, status: 'initializing', detail: '', startedAt: Date.now(), lastProgressAt: null, actionCount: 0, turnCount: 0, lastLog: '' };
+  const agent = { page, session, cfg, allowedOrigin: options.allowedOrigin, transport, abortController, signal: abortController.signal, log, getRecord, status: 'initializing', detail: '', startedAt: Date.now(), lastProgressAt: null, actionCount: 0, turnCount: 0, lastLog: '' };
   registerAgent(page, agent);
   page._continuousAgent = agent;
-  page.once?.('close', () => stopContinuousAgent(page, 'page_closed'));
+  agent.onClose = () => stopContinuousAgent(page, 'page_closed');
+  page.once?.('close', agent.onClose);
   // Nhiều đường đóng phiên lẻ (refill, lead, tab cuối...) chỉ đặt session.isClosed; watchdog đảm bảo lượt AI đang bay bị hủy.
   agent.watchdog = setInterval(() => { if (session.isClosed || page.isClosed()) stopContinuousAgent(page, session.isClosed ? 'session_closed' : 'page_closed'); }, 1000);
   agent.watchdog.unref?.();
-  agent.done = runContinuousAgent(agent)
+  agent.done = (cfg.mode === 'form_agent' ? runDashboardFormAgent(agent) : runContinuousAgent(agent))
     .catch(error => log({ time: new Date().toISOString(), type: 'continuous_crashed', detail: `[Continuous AI] Agent dừng do lỗi: ${error.message}` }))
-    .finally(() => stopContinuousAgent(page, 'finished'));
+    .finally(() => { if (getAgent(page) === agent) stopContinuousAgent(page, 'finished'); });
   return agent;
 }

@@ -1,3 +1,4 @@
+import { globalAiConfig } from '../../ai-assist/state/global-ai-config.mjs';
 import { dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { getAiConfigFilePath } from './get-ai-config-file-path.mjs';
@@ -10,7 +11,7 @@ import { writeFileSync } from 'node:fs';
  * @param {object} cfg Cấu hình trợ lý AI.
  * @return {object} Kết quả xử lý nghiệp vụ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-19
  */
 function saveAiConfigFile(cfg) {
   try {
@@ -21,8 +22,9 @@ function saveAiConfigFile(cfg) {
         recursive: true
       });
     }
-    setGlobalAiConfig(cfg);
-    writeFileSync(filePath, JSON.stringify(cfg, null, 2), 'utf8');
+    const next = { ...globalAiConfig, ...cfg };
+    writeFileSync(filePath, JSON.stringify(next, null, 2), 'utf8');
+    setGlobalAiConfig(next);
     return {
       success: true
     };

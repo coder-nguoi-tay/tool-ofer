@@ -42,7 +42,7 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
     ...globalAiConfig,
     ...(options.aiConfig || {})
   };
-  if (!cfg.enabled || cfg.mode === 'disabled') {
+  if (!cfg.enabled || ['disabled', 'form_agent'].includes(cfg.mode)) {
     return {
       status: 'disabled',
       fixed: false,
@@ -217,7 +217,7 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
       if (page._assignedRecord !== assignedRecordAtInspection) {
         return { status: 'record_changed', fixed: false, errors: diag.errors, actionsCount };
       }
-      if (shouldStopAfterLead(session)) break;
+      if (!globalAiConfig.enabled || ['disabled', 'form_agent'].includes(globalAiConfig.mode) || shouldStopAfterLead(session)) break;
       if (page.isClosed() || session.isClosed) break;
       try {
         const actionResult = await executeAction(page, act, session, { repairOnly: true, allowSubmit: false, record });

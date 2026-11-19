@@ -8,13 +8,14 @@ import { getAgent, listAgents, unregisterAgent } from './agent-registry.mjs';
  * @param {string} [reason='stopped'] Lý do (ghi vào trạng thái).
  * @return {boolean} True nếu có agent được dừng.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-19
  */
 export function stopContinuousAgent(page, reason = 'stopped') {
   const agent = getAgent(page);
   if (!agent || agent.status === 'stopped') return false;
   agent.status = 'stopped'; agent.detail = reason;
   clearInterval(agent.watchdog);
+  page.off?.('close', agent.onClose);
   agent.abortController.abort();
   agent.transport.kill();
   agent.session.aiRunningPages?.delete(page);

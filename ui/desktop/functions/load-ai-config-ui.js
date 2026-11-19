@@ -3,7 +3,7 @@
      * @return {Promise<void>} Hoàn tất khi cấu hình được nạp vào giao diện.
      * @throws {Error} Khi API đọc cấu hình không phản hồi.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-19
  */
 async function loadAiConfigUi() {
       const cfg = await api('/ai/config');
@@ -21,5 +21,9 @@ async function loadAiConfigUi() {
       if (document.getElementById('chkSyncAutofill')) document.getElementById('chkSyncAutofill').checked = cfg.syncAutofill !== false;
 
       if (document.getElementById('txtAiCustomInstructions')) document.getElementById('txtAiCustomInstructions').value = cfg.customInstructions || '';
-      if (document.getElementById('cbxAiAssist')) document.getElementById('cbxAiAssist').checked = cfg.enabled !== false && cfg.mode !== 'disabled';
+      const checkbox = document.getElementById('cbxAiAssist');
+      if (checkbox) {
+        checkbox.checked = cfg.enabled !== false && cfg.mode === 'form_agent';
+        checkbox.indeterminate = cfg.enabled !== false && cfg.mode !== 'disabled' && cfg.mode !== 'form_agent';
+      }
     }

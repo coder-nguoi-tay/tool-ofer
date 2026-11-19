@@ -3,11 +3,11 @@
      * @return {Promise<void>} Hoàn tất khi cấu hình đã được lưu.
      * @throws {Error} Khi API lưu cấu hình không phản hồi.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-19
  */
 async function saveAiConfig() {
       const cfg = {
-        enabled: document.getElementById('cbxAiAssist') ? document.getElementById('cbxAiAssist').checked : true,
+        enabled: document.getElementById('cbbAiMode').value !== 'disabled',
         mode: document.getElementById('cbbAiMode').value,
         cliBinary: document.getElementById('cbbAiBinary').value,
         maxRounds: parseInt(document.getElementById('nudAiMaxRounds').value) || 20,
@@ -27,6 +27,7 @@ async function saveAiConfig() {
 
       const statusEl = document.getElementById('aiConfigSaveStatus');
       if (res && res.success) {
+        await loadAiConfigUi();
         statusEl.textContent = 'Đã lưu cấu hình AI thành công!';
         setTimeout(() => { statusEl.textContent = ''; }, 3000);
       } else {
