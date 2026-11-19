@@ -1,0 +1,270 @@
+{
+  "google": [
+    [
+      "Google Deutsch",
+      "de-DE"
+    ],
+    [
+      "Google US English",
+      "en-US"
+    ],
+    [
+      "Google UK English Female",
+      "en-GB"
+    ],
+    [
+      "Google UK English Male",
+      "en-GB"
+    ],
+    [
+      "Google español",
+      "es-ES"
+    ],
+    [
+      "Google español de Estados Unidos",
+      "es-US"
+    ],
+    [
+      "Google français",
+      "fr-FR"
+    ],
+    [
+      "Google हिन्दी",
+      "hi-IN"
+    ],
+    [
+      "Google Bahasa Indonesia",
+      "id-ID"
+    ],
+    [
+      "Google italiano",
+      "it-IT"
+    ],
+    [
+      "Google 日本語",
+      "ja-JP"
+    ],
+    [
+      "Google 한국의",
+      "ko-KR"
+    ],
+    [
+      "Google Nederlands",
+      "nl-NL"
+    ],
+    [
+      "Google polski",
+      "pl-PL"
+    ],
+    [
+      "Google português do Brasil",
+      "pt-BR"
+    ],
+    [
+      "Google русский",
+      "ru-RU"
+    ],
+    [
+      "Google 普通话（中国大陆）",
+      "zh-CN"
+    ],
+    [
+      "Google 粤語（香港）",
+      "zh-HK"
+    ],
+    [
+      "Google 國語（臺灣）",
+      "zh-TW"
+    ]
+  ],
+  "apple": [
+    [
+      "Samantha",
+      "en-US"
+    ],
+    [
+      "Alex",
+      "en-US"
+    ],
+    [
+      "Fred",
+      "en-US"
+    ],
+    [
+      "Daniel",
+      "en-GB"
+    ],
+    [
+      "Karen",
+      "en-AU"
+    ],
+    [
+      "Moira",
+      "en-IE"
+    ],
+    [
+      "Rishi",
+      "en-IN"
+    ],
+    [
+      "Tessa",
+      "en-ZA"
+    ],
+    [
+      "Thomas",
+      "fr-FR"
+    ],
+    [
+      "Amélie",
+      "fr-CA"
+    ],
+    [
+      "Anna",
+      "de-DE"
+    ],
+    [
+      "Alice",
+      "it-IT"
+    ],
+    [
+      "Mónica",
+      "es-ES"
+    ],
+    [
+      "Paulina",
+      "es-MX"
+    ],
+    [
+      "Luciana",
+      "pt-BR"
+    ],
+    [
+      "Joana",
+      "pt-PT"
+    ],
+    [
+      "Xander",
+      "nl-NL"
+    ],
+    [
+      "Zosia",
+      "pl-PL"
+    ],
+    [
+      "Milena",
+      "ru-RU"
+    ],
+    [
+      "Kyoko",
+      "ja-JP"
+    ],
+    [
+      "Yuna",
+      "ko-KR"
+    ],
+    [
+      "Tingting",
+      "zh-CN"
+    ],
+    [
+      "Sinji",
+      "zh-HK"
+    ],
+    [
+      "Meijia",
+      "zh-TW"
+    ],
+    [
+      "Lekha",
+      "hi-IN"
+    ],
+    [
+      "Damayanti",
+      "id-ID"
+    ],
+    [
+      "Linh",
+      "vi-VN"
+    ],
+    [
+      "Kanya",
+      "th-TH"
+    ],
+    [
+      "Yelda",
+      "tr-TR"
+    ],
+    [
+      "Alva",
+      "sv-SE"
+    ]
+  ],
+  "android": [
+    [
+      "English United States",
+      "en-US"
+    ],
+    [
+      "English United Kingdom",
+      "en-GB"
+    ],
+    [
+      "English India",
+      "en-IN"
+    ],
+    [
+      "English Australia",
+      "en-AU"
+    ],
+    [
+      "Spanish Spain",
+      "es-ES"
+    ],
+    [
+      "Spanish United States",
+      "es-US"
+    ],
+    [
+      "French France",
+      "fr-FR"
+    ],
+    [
+      "German Germany",
+      "de-DE"
+    ],
+    [
+      "Italian Italy",
+      "it-IT"
+    ],
+    [
+      "Portuguese Brazil",
+      "pt-BR"
+    ],
+    [
+      "Japanese Japan",
+      "ja-JP"
+    ],
+    [
+      "Korean South Korea",
+      "ko-KR"
+    ],
+    [
+      "Vietnamese Vietnam",
+      "vi-VN"
+    ]
+  ],
+  "windows": [
+    [
+      "Microsoft David - English (United States)",
+      "en-US"
+    ],
+    [
+      "Microsoft Mark - English (United States)",
+      "en-US"
+    ],
+    [
+      "Microsoft Zira - English (United States)",
+      "en-US"
+    ]
+  ]
+}
