@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { activeBrowsers } from '../src/browser/sessions.mjs';
+import { handleGetScreenTabs } from '../src/http/routes/screen/get-tabs.mjs';
 import { attachScreencastSession, createViewerHub, releaseScreencast } from "../app.mjs";
 
 /**
@@ -146,6 +148,87 @@ function makeSession(pages) {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
+
+test('thanh tab phản hồi trong khi một tab chậm đọc tiêu đề, kể cả khi đổi URL', { timeout: 2000 }, async t => {
+  const page = makePage();
+  let url = 'about:blank';
+  let reads = 0, finishTitle;
+  page.url = () => url;
+  page.title = () => { reads++; return new Promise(resolve => { finishTitle = resolve; }); };
+  const session = makeSession([page]);
+  session.slot = 938;
+  activeBrowsers.add(session);
+  t.after(() => activeBrowsers.delete(session));
+  /** Đọc tiêu đề đầu tiên từ API của phiên thử.
+   * @return {Promise<string>} Tiêu đề trả về trên thanh tab.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-20
+   */
+  async function listedTitle() {
+    let title;
+    await handleGetScreenTabs({ method: 'GET', url: '/screen/tabs/938' }, {
+      writeHead() {}, end(json) { title = JSON.parse(json).tabs[0].title; }
+    });
+    return title;
+  }
+  assert.equal(await listedTitle(), '');
+  assert.equal(await listedTitle(), '');
+  assert.equal(reads, 1);
+  const finishPrevious = finishTitle;
+  url = 'about:blank#child';
+  const navigated = listedTitle();
+  finishTitle('Trang mới');
+  assert.equal(await navigated, 'Trang mới');
+  finishPrevious('Trang trước');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(await listedTitle(), 'Trang mới');
+  assert.equal(reads, 2);
+});
+
+test('đổi tab loại bỏ cả frame và ảnh chụp bù còn chờ của nguồn cũ', async t => {
+  let pump;
+  t.mock.method(globalThis, 'setInterval', callback => { pump = callback; return 1; });
+  t.mock.method(globalThis, 'clearInterval', () => {});
+  const firstPage = makePage(), nextPage = makePage();
+  const firstSource = fakeCdp();
+  const captures = [];
+  const send = firstSource.send;
+  firstSource.send = (method, params) => method === 'Page.captureScreenshot'
+    ? new Promise(resolve => captures.push(resolve)) : send(method, params);
+  const res = fakeResponse();
+  const stream = { sseResponse: res };
+  await attachScreencastSession(stream, firstSource, firstPage);
+  await new Promise(resolve => setImmediate(resolve));
+  stream.lastFrameTime -= 2000;
+  const pending = pump();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(captures.length, 2);
+  await releaseScreencast(stream);
+  const nextSource = fakeCdp();
+  await attachScreencastSession(stream, nextSource, nextPage);
+  firstSource.emit('Page.screencastFrame', { data: 'OLD', sessionId: 3 });
+  for (const resolve of captures) resolve({ data: 'OLD' });
+  await pending;
+  nextSource.emit('Page.screencastFrame', { data: 'NEW', sessionId: 1 });
+  assert.deepEqual(res.writes, ['data: NEW\n\n']);
+  await releaseScreencast(stream);
+});
+
+test('mất kết nối CDP của tab con đang mở thì Screen View nối lại đúng tab con', async () => {
+  const parent = makePage(), child = makePage();
+  const session = makeSession([parent, child]);
+  const cdp = fakeCdp();
+  const stream = { sseResponse: fakeResponse() };
+  try {
+    await attachScreencastSession(stream, cdp, child, 42, session);
+    cdp.emit('close');
+    await tick();
+    assert.equal(session.created.length, 1);
+    assert.equal(stream.page, child);
+  } finally {
+    await releaseScreencast(stream);
+  }
+});
 
 test('mục 2 - createViewerHub: nhiều người xem chung, người mới nhận ngay frame gần nhất', () => {
   const hub = createViewerHub();

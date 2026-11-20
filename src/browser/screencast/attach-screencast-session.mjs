@@ -12,7 +12,7 @@ import { isWindowMinimized } from './is-window-minimized.mjs';
  * @param {object|null} [session]
  * @return {Promise<void>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-20
  */
 async function attachScreencastSession(scObj, cdpSession, targetPage, slot = null, session = null) {
   // Route đổi/mở/đóng tab gọi lại không kèm slot/session: giữ của lần gắn trước để còn tự khôi phục được.
@@ -31,15 +31,16 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   scObj.session = session;
   scObj.lastFrameTime = Date.now();
 
-  // 1. Kích hoạt Page domain trên CDP để đảm bảo nhận event screencastFrame
-  await cdpSession.send('Page.enable').catch(() => {});
+  let attached = true;
+  let reconnecting = false;
+  let captureInFlight = false;
 
   // Tự động khôi phục session khi tab chuyển trang (navigation) hoặc bị detach
   const onDetachOrClose = async () => {
     // Listener của tab/phiên CDP đã bị thay thế: bỏ qua, không kéo màn xem về tab khác.
-    if (scObj.cdpClient !== cdpSession) return;
-    if (scObj.cleaned || scObj.isReconnecting || scObj.sseResponse.writableEnded) return;
-    scObj.isReconnecting = true;
+    if (!attached || scObj.cdpClient !== cdpSession) return;
+    if (scObj.cleaned || reconnecting || scObj.sseResponse.writableEnded) return;
+    reconnecting = true;
     let recovered = false;
     try {
       if (scObj.keepaliveTimer) {
@@ -49,20 +50,21 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
       const curSession = session || [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
       if (curSession && !curSession.isClosed && curSession.browser) {
         const pages = curSession.browser.pages().filter(p => !p.isClosed());
-        const newPage = curSession.mainPage && !curSession.mainPage.isClosed() ? curSession.mainPage : pages[0];
+        const newPage = pages.includes(targetPage) ? targetPage
+          : pages.includes(curSession.mainPage) ? curSession.mainPage : pages[0];
         if (newPage) {
           const newCdp = await curSession.browser.newCDPSession(newPage).catch(() => null);
-          if (newCdp && !scObj.cleaned) {
+          if (newCdp && attached && !scObj.cleaned) {
             await attachScreencastSession(scObj, newCdp, newPage, slot, curSession);
             recovered = true;
-          }
+          } else if (newCdp) await newCdp.detach().catch(() => {});
         }
       }
     } catch {} finally {
-      scObj.isReconnecting = false;
+      reconnecting = false;
     }
     // Không còn tab nào để nối lại: đóng kết nối để người xem thấy "đang kết nối lại" thay vì đứng hình im lặng.
-    if (!recovered && !scObj.cleaned) {
+    if (!recovered && attached && !scObj.cleaned) {
       try {
         scObj.sseResponse.end();
       } catch {}
@@ -72,13 +74,9 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   // CDPSession của Playwright phát 'close' khi phiên bị detach/target mất (không có sự kiện 'disconnect').
   cdpSession.on?.('close', onDetachOrClose);
   targetPage.on?.('close', onDetachOrClose);
-  scObj.unbindListeners = () => {
-    cdpSession.off?.('close', onDetachOrClose);
-    targetPage.off?.('close', onDetachOrClose);
-  };
-
   // 2. Gắn listener TRƯỚC KHI gọi startScreencast để không bao giờ bị lỡ frame đầu
-  cdpSession.on('Page.screencastFrame', frame => {
+  const onFrame = frame => {
+    if (!attached) return;
     scObj.lastFrameTime = Date.now();
     if (frame.metadata) {
       scObj.deviceWidth = frame.metadata.deviceWidth;
@@ -93,7 +91,16 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
       sessionId: frame.sessionId
     }).catch(() => {});
     if (res.write(`data: ${frame.data}\n\n`)) ack();else res.once('drain', ack);
-  });
+  };
+  cdpSession.on('Page.screencastFrame', onFrame);
+  scObj.unbindListeners = () => {
+    attached = false;
+    cdpSession.off?.('Page.screencastFrame', onFrame);
+    cdpSession.off?.('close', onDetachOrClose);
+    targetPage.off?.('close', onDetachOrClose);
+  };
+  await cdpSession.send('Page.enable').catch(() => {});
+  if (!attached || scObj.cleaned) return;
 
   // 3. Giữ kích thước tọa độ viewport; lấy một trong hai frame để giảm tải mã hóa và truyền ảnh.
   const vp = typeof targetPage?.viewportSize === 'function' ? targetPage.viewportSize() : null;
@@ -108,16 +115,17 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   }).catch(err => {
     console.warn('[ScreenStream] Lỗi startScreencast:', err.message);
   });
+  if (!attached || scObj.cleaned) return;
 
   // 4. Frame ban đầu chụp NỀN, không await, và KHÔNG chụp khi cửa sổ đang thu nhỏ (xem isWindowMinimized):
   // lệnh chụp treo sẽ chặn screencast của slot. Lúc đó screencast tự gửi frame đầu.
   // Bỏ fallback page.screenshot: nó cũng gọi captureScreenshot nên treo y như vậy.
-  void isWindowMinimized(cdpSession).then(minimized => minimized ? null : cdpSession.send('Page.captureScreenshot', {
+  void isWindowMinimized(cdpSession).then(minimized => minimized || !attached ? null : cdpSession.send('Page.captureScreenshot', {
     format: 'jpeg',
     quality: 58
   })).then(initShot => {
     const res = scObj.sseResponse;
-    if (initShot?.data && !scObj.cleaned && !res.writableEnded && !res.destroyed && scObj.cdpClient === cdpSession) {
+    if (initShot?.data && attached && !scObj.cleaned && !res.writableEnded && !res.destroyed) {
       scObj.lastFrameTime = Date.now();
       res.write(`data: ${initShot.data}\n\n`);
     }
@@ -127,6 +135,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   // Ping kết nối tách khỏi tần suất chụp, tránh biến trang tĩnh thành luồng screenshot liên tục.
   let pingCounter = 0;
   scObj.keepaliveTimer = setInterval(async () => {
+    if (!attached) return;
     if (scObj.cleaned || scObj.sseResponse.writableEnded || !scObj.page || scObj.page.isClosed()) {
       if (scObj.keepaliveTimer) {
         clearInterval(scObj.keepaliveTimer);
@@ -150,16 +159,16 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
 
     // Chỉ bù frame khi trang thực sự tĩnh quá 1,5 giây.
     if (idleTime >= 1500) {
-      if (scObj.captureInFlight) return;
-      scObj.captureInFlight = true;
+      if (captureInFlight) return;
+      captureInFlight = true;
       try {
         // Cửa sổ thu nhỏ: không chụp bù (lệnh chụp treo sẽ chặn screencast của slot này).
-        if (await isWindowMinimized(scObj.cdpClient)) return;
-        const shot = await scObj.cdpClient.send('Page.captureScreenshot', {
+        if (await isWindowMinimized(cdpSession) || !attached) return;
+        const shot = await cdpSession.send('Page.captureScreenshot', {
           format: 'jpeg',
           quality: 50
         });
-        if (shot?.data && !scObj.sseResponse.writableEnded) {
+        if (shot?.data && attached && !scObj.cleaned && !scObj.sseResponse.writableEnded) {
           scObj.lastFrameTime = Date.now();
           scObj.sseResponse.write(`data: ${shot.data}\n\n`);
         }
@@ -169,7 +178,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
           void onDetachOrClose();
         }
       } finally {
-        scObj.captureInFlight = false;
+        captureInFlight = false;
       }
     }
   }, 500);
