@@ -20,7 +20,7 @@ use crate::client::{
     redirect_taints_origin, request_fetch_site, request_origin_header, request_referrer, response_too_large,
     same_site_context, serialized_request_origin, validate_cors_response, validate_request_mode,
     validate_url, CallbackRegistry, InFlightGuard, ObscuraNetError, RequestInfo, RequestMode,
-    ResourceRequest, Response, SsrfGuardResolver,
+    ResourceRequest, ResourceType, Response, SsrfGuardResolver,
 };
 #[cfg(feature = "stealth")]
 use crate::cookies::{CookieJar, SameSiteContext};
@@ -497,6 +497,9 @@ impl StealthHttpClient {
                 request_callback_fired = true;
             }
 
+            if request.resource_type == ResourceType::Document {
+                crate::navigation_trace::document_exchange(None);
+            }
             let in_flight = InFlightGuard::new(&self.in_flight);
             let resp = if method == wreq::Method::GET {
                 send_get_with_connection_reset_retry(req, &current_url).await
@@ -507,6 +510,9 @@ impl StealthHttpClient {
                 })?;
 
             let status = resp.status();
+            if request.resource_type == ResourceType::Document {
+                crate::navigation_trace::document_exchange(Some(status.as_u16()));
+            }
             validate_wreq_cors_response(
                 &request,
                 &current_url,

@@ -173,3 +173,94 @@ test('Obscura nhận diện form trong DOM bị freeze sau khi thay đổi cây'
   assert.equal(scope?.visibleFieldCount, 1);
   assert.equal(scope?.nativeForm, true);
 });
+
+test('Obscura phân biệt timeout trước header, giữa body và tài nguyên con quá hạn', { skip: !available, timeout: 45000 }, async t => {
+  const originalTimeout = process.env.OBSCURA_NAV_TIMEOUT_MS;
+  const originalPerf = process.env.AUTOLEADPC_OBSCURA_PERF;
+  process.env.OBSCURA_NAV_TIMEOUT_MS = '2000';
+  process.env.AUTOLEADPC_OBSCURA_PERF = '1';
+  t.after(() => {
+    if (originalTimeout === undefined) delete process.env.OBSCURA_NAV_TIMEOUT_MS;
+    else process.env.OBSCURA_NAV_TIMEOUT_MS = originalTimeout;
+    if (originalPerf === undefined) delete process.env.AUTOLEADPC_OBSCURA_PERF;
+    else process.env.AUTOLEADPC_OBSCURA_PERF = originalPerf;
+  });
+
+  const transfers = [];
+  t.mock.method(console, 'info', line => {
+    if (String(line).includes('[ObscuraPerf] navigation_end ')) transfers.push(line);
+  });
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    const path = req.url.split('?')[0];
+    requests.push([path, req.method]);
+    if (path === '/headers' || path === '/pending.css' || path === '/pending.js') return;
+    if (path === '/ready.css') {
+      res.writeHead(200, { 'Content-Type': 'text/css' });
+      res.end('#probe { width: 77px }');
+      return;
+    }
+    if (path === '/ready.js') {
+      res.writeHead(200, { 'Content-Type': 'text/javascript' });
+      res.end('window.externalScriptRan = true');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    if (path === '/body') { res.write('<!doctype html>'); return; }
+    const asset = path === '/css' ? '<link rel="stylesheet" href="/pending.css"><link rel="stylesheet" href="/ready.css">'
+      : path === '/script' ? '<script src="/pending.js"></script><script src="/ready.js"></script>' : '';
+    res.end('<!doctype html><title>Committed page</title>' + asset + '<div id="probe"></div><script>window.fixtureReady = true</script>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = 'http://127.0.0.1:' + server.address().port;
+  let session;
+  t.after(async () => {
+    await session?.close();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  session = await openObscuraBrowser({ slot: 964, port: 0, registerSession: false });
+  await session.page.goto(origin + '/root');
+  const cdp = await session.browser.newCDPSession(session.page);
+  await cdp.send('Page.enable');
+  const commits = [], failures = [];
+  cdp.on('Page.frameNavigated', event => commits.push(event.frame.url));
+  cdp.on('Network.loadingFailed', event => failures.push(event));
+
+  for (const phase of ['headers', 'body']) {
+    await t.test('POST chờ ' + phase, async () => {
+      commits.length = 0;
+      failures.length = 0;
+      const url = origin + '/' + phase + '?fixture-private-marker';
+      const before = transfers.length;
+      await assert.rejects(cdp.send('Page.navigate', { url, __method: 'POST', __body: '' }), /deadline|timed out/i);
+      await assertEventually(() => transfers.slice(before).some(line => line.includes('failed=1')), 'mốc lỗi điều hướng');
+      const trace = transfers.slice(before).find(line => line.includes('failed=1'));
+      assert.ok(trace.includes('phase=' + phase), trace);
+      assert.ok(trace.includes('http_status=' + (phase === 'headers' ? 0 : 200) + ' '), trace);
+      assert.match(trace, /request_ms=\d+/);
+      assert.match(trace, phase === 'headers' ? /headers_ms=-1 / : /headers_ms=\d+ /);
+      assert.match(trace, /body_ms=-1$/);
+      assert.ok(!trace.includes('fixture-private-marker') && !trace.includes(origin));
+      assert.deepEqual(requests.filter(([path]) => path === '/' + phase), [['/' + phase, 'POST']]);
+      assert.ok(!commits.includes(url));
+      assert.equal((await cdp.send('Page.getFrameTree')).frameTree.frame.url, origin + '/root');
+      assert.equal(await session.page.evaluate(() => window.fixtureReady), true);
+      assert.deepEqual(failures.filter(event => event.type === 'Document').map(event => event.errorText), ['net::ERR_TIMED_OUT']);
+    });
+  }
+  for (const [path, type] of [['css', 'Stylesheet'], ['script', 'Script']]) {
+    await t.test('HTML 200 vẫn hoàn tất khi ' + type + ' hết hạn', async () => {
+      failures.length = 0;
+      await cdp.send('Page.navigate', { url: origin + '/' + path });
+      assert.equal(await session.page.evaluate(() => window.fixtureReady), true);
+      assert.equal((await cdp.send('Page.getFrameTree')).frameTree.frame.url, origin + '/' + path);
+      if (path === 'css') {
+        assert.equal(await session.page.evaluate(() => getComputedStyle(document.getElementById('probe')).width), '77px');
+      } else {
+        assert.equal(await session.page.evaluate(() => window.externalScriptRan), true);
+      }
+      assert.ok(failures.some(event => event.type === type), 'Tài nguyên chậm phải được ghi nhận lỗi');
+    });
+  }
+});

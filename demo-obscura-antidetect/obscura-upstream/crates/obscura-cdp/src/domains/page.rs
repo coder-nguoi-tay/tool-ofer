@@ -1416,9 +1416,14 @@ pub(crate) fn emit_navigation_failure(
     fan_out_network_events(ctx, page_id, session_id, start);
 }
 
-pub(crate) fn emit_aborted_navigation(
+/// End a failed provisional load while keeping the last committed frame and its contexts.
+/// @param ctx Connection. @param session_id Viewer. @param frame_id Main frame. @param loader_id Request id.
+/// @param url Destination. @param method HTTP method. @param page_id Target. @param request_started Whether already announced.
+/// @param error_text Protocol error. @return Publishes one failed request and stops frame loading.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
+pub(crate) fn emit_uncommitted_navigation_failure(
     ctx: &mut CdpContext, session_id: &Option<String>, frame_id: &str,
-    loader_id: &str, url: &str, method: &str, page_id: &str, request_started: bool,
+    loader_id: &str, url: &str, method: &str, page_id: &str, request_started: bool, error_text: &str,
 ) {
     let start = ctx.pending_events.len();
     let ts = timestamp();
@@ -1433,7 +1438,7 @@ pub(crate) fn emit_aborted_navigation(
     ctx.pending_events.push(CdpEvent {
         method: "Network.loadingFailed".into(), session_id: session_id.clone(),
         params: json!({"requestId": loader_id, "timestamp": ts, "type": "Document",
-            "errorText": "net::ERR_ABORTED", "canceled": true}),
+            "errorText": error_text, "canceled": error_text == "net::ERR_ABORTED"}),
     });
     ctx.pending_events.push(CdpEvent {
         method: "Page.frameStoppedLoading".into(), session_id: session_id.clone(),
@@ -1478,6 +1483,10 @@ pub fn parse_wait_until(params: &Value) -> WaitUntil {
         .unwrap_or(WaitUntil::DomContentLoaded)
 }
 
+/// Navigate through the synchronous CDP dispatch path with the requested HTTP method.
+/// @param url Destination. @param params Command arguments. @param ctx Connection. @param session_id Target session.
+/// @return CDP navigation result. @throws String when navigation fails.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 async fn do_navigate(
     url: &str,
     params: &Value,
@@ -1522,7 +1531,7 @@ async fn do_navigate(
             .and_then(|v| v.as_str())
             .unwrap_or("GET");
         let nav_body = params.get("__body").and_then(|v| v.as_str()).unwrap_or("");
-        if nav_method == "POST" && !nav_body.is_empty() {
+        if nav_method == "POST" {
             page.navigate_with_wait_post(url, wait_until, nav_method, nav_body)
                 .await
                 .map_err(|e| e.to_string())?;

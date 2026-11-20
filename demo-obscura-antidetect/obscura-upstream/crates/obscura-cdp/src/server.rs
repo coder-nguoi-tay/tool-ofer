@@ -2216,6 +2216,8 @@ async fn process_with_interception(
     let mut cancel_tx = Some(cancel_tx);
     let (nav_done_tx, mut nav_done_rx) = mpsc::channel::<(obscura_browser::Page, Result<(), String>, bool)>(1);
     let loading_info = crate::domains::target::attached_page_info(&page);
+    let trace = nav_start.map(|_| std::rc::Rc::new(std::cell::Cell::new(obscura_net::navigation_trace::NavigationTrace::default())));
+    let task_trace = trace.clone();
     let nav_v8_lock = ctx.v8_lock.clone();
 
     tokio::task::spawn_local(async move {
@@ -2229,14 +2231,20 @@ async fn process_with_interception(
         // must run BEFORE the page's own scripts (CDP contract). Hand them
         // to the page so navigate_single can inject them at the right point.
         page.set_preload_scripts(preload_scripts);
+        let navigation = async {
+            if !send_command_response {
+                page.navigate_from_document(&url_owned, &nav_method, &nav_body).await
+            } else if nav_method == "POST" {
+                page.navigate_with_wait_post(&url_owned, wait_until, &nav_method, &nav_body).await
+            } else {
+                page.navigate_with_wait(&url_owned, wait_until).await
+            }
+        };
         let (result, cancelled) = tokio::select! {
             result = async {
-                if !send_command_response {
-                    page.navigate_from_document(&url_owned, &nav_method, &nav_body).await
-                } else if nav_method == "POST" && !nav_body.is_empty() {
-                    page.navigate_with_wait_post(&url_owned, wait_until, &nav_method, &nav_body).await
-                } else {
-                    page.navigate_with_wait(&url_owned, wait_until).await
+                match task_trace {
+                    Some(trace) => obscura_net::navigation_trace::ACTIVE.scope(trace, navigation).await,
+                    None => navigation.await,
                 }
             } => (result.map_err(|e| e.to_string()), false),
             _ = cancel_rx => (Err("net::ERR_ABORTED".into()), true),
@@ -2389,15 +2397,19 @@ async fn process_with_interception(
     let mut page = page_back.expect("navigation task should return the page");
     let committed = page.network_events.iter().any(|event| event.resource_type == "Document")
         || page.js.as_ref().is_some_and(|js| previous_url.as_ref().is_some_and(|url| js.document_url() != url.as_str()));
+    let uncommitted_failure = navigate_result.is_err() && !committed;
     if cancelled {
         page.stop_loading();
         if committed {
             page.lifecycle = obscura_browser::LifecycleState::Failed;
             page.push_history(page.url_string());
-        } else {
-            page.url = previous_url;
-            page.lifecycle = previous_lifecycle;
         }
+    }
+    if uncommitted_failure {
+        page.url = previous_url;
+        page.lifecycle = previous_lifecycle;
+    }
+    if navigate_result.is_err() {
         intercepted_paused.retain(|_, paused| !paused.resolver.is_closed());
     }
 
@@ -2410,14 +2422,13 @@ async fn process_with_interception(
         && !network_events.iter().any(|event| event.request_id == loader_id && event.resource_type == "Document") {
         Some(loader_id.clone())
     } else { None };
-    if let Some(start) = nav_start {
-        let status = network_events.iter().rev()
-            .find(|event| event.child_frame_id.is_none() && event.resource_type == "Document")
-            .map_or(0, |event| event.status);
-        crate::screen_perf::log!("[ObscuraPerf] navigation_end id={} conn={} tab={} elapsed_ms={} committed={} cancelled={} failed={} requested_post={} http_status={}",
+    if let (Some(start), Some(trace)) = (nav_start, trace) {
+        let trace = trace.get();
+        let elapsed = |point: Option<std::time::Instant>| point.map_or(-1, |at| at.duration_since(start).as_millis() as i64);
+        crate::screen_perf::log!("[ObscuraPerf] navigation_end id={} conn={} tab={} elapsed_ms={} committed={} cancelled={} failed={} requested_post={} http_status={} phase={} request_ms={} headers_ms={} body_ms={}",
             req.id, ctx.perf_connection, crate::screen_perf::tab(&page_id), start.elapsed().as_millis(), u8::from(committed),
             u8::from(cancelled), u8::from(navigate_result.is_err()),
-            u8::from(navigation_method.eq_ignore_ascii_case("post")), status);
+            u8::from(navigation_method.eq_ignore_ascii_case("post")), trace.status, trace.phase, elapsed(trace.request), elapsed(trace.headers), elapsed(trace.body));
     }
     let navigation_error = navigate_result.as_ref().err().cloned();
     let page_url = page.url_string();
@@ -2456,16 +2467,21 @@ async fn process_with_interception(
     // makes `page.goto()` resolve to a Response, and the #192 per-isolated-
     // world fresh context ids. Pushes to `ctx.pending_events`; we then drain
     // to the WS reply channel.
-    if !(cancelled && !committed) {
+    if !uncommitted_failure {
         if let (Some(request_id), Some(error)) = (&failed_document, &navigation_error) {
             let error = error.strip_prefix("Network error: ").unwrap_or(error);
             let error_text = if error.starts_with("net::ERR_") { error } else { "net::ERR_FAILED" };
             crate::domains::page::emit_navigation_failure(ctx, &session_for_events, request_id, &page_id_for_events, error_text);
         }
     }
-    if cancelled && !committed {
-        crate::domains::page::emit_aborted_navigation(ctx, &session_for_events, &frame_id,
-            &loader_id, &navigation_url, &navigation_method, &page_id_for_events, document_request_started);
+    if uncommitted_failure {
+        let error = navigation_error.as_deref().unwrap_or("").trim_start_matches("Network error: ");
+        let reason = if cancelled { "net::ERR_ABORTED" }
+            else if error.starts_with("net::ERR_") { error }
+            else if error.ends_with("ms deadline") || error.ends_with("timed out") { "net::ERR_TIMED_OUT" }
+            else { "net::ERR_FAILED" };
+        crate::domains::page::emit_uncommitted_navigation_failure(ctx, &session_for_events, &frame_id,
+            &loader_id, &navigation_url, &navigation_method, &page_id_for_events, document_request_started, reason);
     } else {
         crate::domains::page::emit_navigation_events(
             ctx,

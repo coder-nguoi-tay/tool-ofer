@@ -1538,6 +1538,11 @@ impl ObscuraHttpClient {
         self.fetch_request_uncached(method, url, body, callbacks, request, headers).await
     }
 
+    /// Fetch one resource through the ordinary redirect and response limits.
+    /// @param initial_method Request method. @param url Destination. @param initial_body Optional body.
+    /// @param callbacks Page observers. @param request Resource policy. @param request_headers Overrides.
+    /// @return Fully read response. @throws ObscuraNetError for policy or transport failure.
+    /// @author ductv <ductv@getflycrm.com> @since 2026-11-20
     async fn fetch_request_uncached(
         &self, initial_method: Method, url: &Url, initial_body: Option<Vec<u8>>,
         callbacks: Option<&CallbackRegistry>, request: ResourceRequest,
@@ -1746,12 +1751,18 @@ impl ObscuraHttpClient {
                 req_builder = req_builder.body(b.clone());
             }
 
+            if request.resource_type == ResourceType::Document {
+                crate::navigation_trace::document_exchange(None);
+            }
             let in_flight = InFlightGuard::new(&self.in_flight);
             let resp = req_builder.send().await.map_err(|e| {
                 ObscuraNetError::Network(format!("{}: {}", current_url, error_chain(&e)))
             })?;
 
             let status = resp.status();
+            if request.resource_type == ResourceType::Document {
+                crate::navigation_trace::document_exchange(Some(status.as_u16()));
+            }
             validate_reqwest_cors_response(
                 &request,
                 &current_url,

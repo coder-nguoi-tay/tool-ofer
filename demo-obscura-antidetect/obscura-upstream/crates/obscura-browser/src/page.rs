@@ -387,6 +387,14 @@ const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30_000;
 /// `location` on every load.
 const DEFAULT_NAVIGATION_CHAIN_LIMIT: usize = 10;
 
+/// Keep a short end-of-navigation budget for already downloaded content and lifecycle handlers.
+/// @param now Current time. @param deadline End of this navigation. @return Latest subresource fetch deadline.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
+fn subresource_fetch_deadline(now: tokio::time::Instant, deadline: tokio::time::Instant) -> tokio::time::Instant {
+    let remaining = deadline.saturating_duration_since(now);
+    deadline - (remaining / 10).min(std::time::Duration::from_secs(1))
+}
+
 fn default_navigation_timeout() -> std::time::Duration {
     navigation_timeout_from_env_value(std::env::var("OBSCURA_NAV_TIMEOUT_MS").ok().as_deref())
 }
@@ -2173,9 +2181,12 @@ impl Page {
     /// Nap CSS va import trong ngan sach mang chung cua document.
     /// @return CSS da tai thanh cong theo thu tu cascade cua document.
     /// @author ductv <ductv@getflycrm.com>
-    /// @since 2026-11-19
-    async fn fetch_stylesheets(&mut self) -> Vec<(AuthorStylesheetTarget, String, bool, String)> {
-        self.fetch_stylesheets_until(tokio::time::Instant::now() + std::time::Duration::from_secs(30)).await
+    /// @param navigation_deadline Deadline shared by this navigation including earlier redirect hops.
+    /// @since 2026-11-20
+    async fn fetch_stylesheets(&mut self, navigation_deadline: tokio::time::Instant) -> Vec<(AuthorStylesheetTarget, String, bool, String)> {
+        let now = tokio::time::Instant::now();
+        let deadline = subresource_fetch_deadline(now, navigation_deadline).min(now + std::time::Duration::from_secs(30));
+        self.fetch_stylesheets_until(deadline).await
     }
 
     /// Giữ các stylesheet tải thành công và phân biệt request bị giới hạn, bị chặn và hết hạn.
@@ -2393,8 +2404,11 @@ impl Page {
             .collect()
     }
 
+    /// Run standalone script fixtures with the normal script phase budget.
+    /// @return Completes the script lifecycle. @author ductv <ductv@getflycrm.com> @since 2026-11-20
+    #[cfg(test)]
     async fn execute_scripts(&mut self) {
-        self.execute_scripts_with_module_budget(None).await;
+        self.execute_scripts_with_module_budget(None, None).await;
     }
 
     /// Drive a selected script queue until it empties or the shared parser
@@ -2503,8 +2517,9 @@ impl Page {
     /// @param module_budget_override Ngan sach active rieng cho module trong fixture/loi goi noi bo.
     /// @return Hoan tat lifecycle script trong gioi han watchdog cua document.
     /// @author ductv <ductv@getflycrm.com>
-    /// @since 2026-11-19
-    async fn execute_scripts_with_module_budget(&mut self, module_budget_override: Option<u64>) {
+    /// @param navigation_deadline Shared outer deadline when loading a document.
+    /// @since 2026-11-20
+    async fn execute_scripts_with_module_budget(&mut self, module_budget_override: Option<u64>, navigation_deadline: Option<tokio::time::Instant>) {
         let scripts_started = std::time::Instant::now();
         tracing::info!(
             "execute_scripts called, js runtime exists: {}",
@@ -2527,11 +2542,16 @@ impl Page {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(30_000);
-        let fetch_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(script_deadline_ms);
+        let now = tokio::time::Instant::now();
+        let configured_fetch_deadline = now + tokio::time::Duration::from_millis(script_deadline_ms);
+        let fetch_deadline = navigation_deadline.map_or(configured_fetch_deadline, |deadline| {
+            configured_fetch_deadline.min(subresource_fetch_deadline(now, deadline))
+        });
         // Reserve bounded execution time after a network timeout, so scripts
         // already fetched can still initialize the page instead of being lost.
         let recovery_budget_ms = script_deadline_ms.min(5_000);
-        let script_deadline = fetch_deadline + tokio::time::Duration::from_millis(recovery_budget_ms);
+        let configured_deadline = configured_fetch_deadline + tokio::time::Duration::from_millis(recovery_budget_ms);
+        let script_deadline = navigation_deadline.map_or(configured_deadline, |deadline| configured_deadline.min(deadline));
 
         // Hard backstop over the WHOLE script-execution phase. Inline scripts
         // run back-to-back with no await between them, so neither the soft
@@ -2542,7 +2562,7 @@ impl Page {
         let exec_wd = self
             .js
             .as_mut()
-            .map(|js| js.arm_watchdog(std::time::Duration::from_millis(script_deadline_ms.saturating_add(recovery_budget_ms).saturating_add(1000))));
+            .map(|js| js.arm_watchdog(script_deadline.saturating_duration_since(now) + std::time::Duration::from_secs(1)));
 
         #[derive(Debug, Clone, Copy)]
         enum ScriptKind {
@@ -3738,6 +3758,11 @@ impl Page {
         Ok(())
     }
 
+    /// Load one document within the navigation chain's deadline.
+    /// @param url_str Destination. @param wait_until Required lifecycle. @param method HTTP method.
+    /// @param body Request body. @param referrer Document referrer. @param initiator Initiating origin.
+    /// @param deadline End-to-end limit. @return Requested lifecycle reached. @throws PageError on failure.
+    /// @author ductv <ductv@getflycrm.com> @since 2026-11-20
     async fn navigate_single(
         &mut self,
         url_str: &str,
@@ -3748,14 +3773,11 @@ impl Page {
         initiator: Option<&Url>,
         deadline: tokio::time::Instant,
     ) -> Result<(), PageError> {
+        obscura_net::navigation_trace::stage("document");
         let url = Url::parse(url_str).map_err(|e| PageError::InvalidUrl(e.to_string()))?;
         self.navigation_timing = NavigationTiming::default();
 
-        // The previous document's background loads end with the document.
-        self.retire_render_resources();
         self.lifecycle = LifecycleState::Loading;
-        self.referrer = referrer.to_string();
-        self.url = Some(url.clone());
         let page_id = self.id.as_str();
         self.network_events.retain(|event| event.intercepted && event.resource_type == "Document"
             && event.request_id.strip_prefix(page_id).is_some_and(|suffix| suffix.starts_with('.')));
@@ -3796,6 +3818,7 @@ impl Page {
         }
 
         if url.scheme() == "about" {
+            self.referrer = referrer.to_string();
             self.navigate_blank();
             self.init_js();
             // Preloads (Page.addScriptToEvaluateOnNewDocument, the
@@ -3814,6 +3837,7 @@ impl Page {
                         std::time::Duration::from_secs(5));
                 }
             }
+            obscura_net::navigation_trace::stage("ready");
             return Ok(());
         }
 
@@ -3853,6 +3877,12 @@ impl Page {
             self.lifecycle = LifecycleState::Failed;
             PageError::NetworkError(e.to_string())
         })?;
+        // A provisional request can fail before the body arrives. Its URL and
+        // resource cancellation must never be applied to the preceding document.
+        self.url = Some(url.clone());
+        self.referrer = referrer.to_string();
+        self.retire_render_resources();
+        obscura_net::navigation_trace::document_received(response.status);
         self.navigation_timing.record("responseEnd");
 
         // Store binary main resources (images, PDFs, octet-stream) base64 so
@@ -3916,7 +3946,8 @@ impl Page {
 
         self.dom = Some(dom);
         self.init_js();
-        let author_stylesheets = self.fetch_stylesheets().await;
+        obscura_net::navigation_trace::stage("stylesheets");
+        let author_stylesheets = self.fetch_stylesheets(deadline).await;
 
         // Install fetched CSS in native DOM state. Cross-origin bytes must not
         // become observable through a synthetic style element or page global.
@@ -3981,6 +4012,7 @@ impl Page {
         // resources.
         #[cfg(feature = "render")]
         {
+            obscura_net::navigation_trace::stage("resources");
             let warmup_ms = std::env::var("OBSCURA_RENDER_RESOURCE_WARMUP_MS")
                 .ok()
                 .and_then(|value| value.parse::<u64>().ok())
@@ -3994,13 +4026,15 @@ impl Page {
         // listeners never registered, frameworks never bootstrapped,
         // page.click() handlers were no-ops. Now scripts run regardless
         // of waitUntil and DCL means "DOM parsed AND scripts executed".
-        self.execute_scripts().await;
+        obscura_net::navigation_trace::stage("scripts");
+        self.execute_scripts_with_module_budget(None, Some(deadline)).await;
         // The document's own scripts are the common source of storage writes,
         // so the profile is flushed once they have run, not before.
         self.context.save_local_storage();
 
         #[cfg(feature = "render")]
         {
+            obscura_net::navigation_trace::stage("resources");
             // Page scripts and their bounded post-script event-loop pass can
             // create responsive images, inline styles, and @font-face rules
             // that did not exist during the parser warmup above. Discover them
@@ -4021,9 +4055,11 @@ impl Page {
         // send `Page.navigate` with no `waitUntil`, which lands here and returns
         // on the next line, so building frames further down left every real CDP
         // client seeing a page with no frames at all.
+        obscura_net::navigation_trace::stage("frames");
         self.build_document_frames().await;
 
         if wait_until == crate::lifecycle::WaitUntil::DomContentLoaded {
+            obscura_net::navigation_trace::stage("ready");
             return Ok(());
         }
 
@@ -4047,9 +4083,11 @@ impl Page {
                 _ => 0,
             };
 
+            obscura_net::navigation_trace::stage("idle");
             self.wait_for_network_idle_until(threshold, deadline).await?;
         }
 
+        obscura_net::navigation_trace::stage("ready");
         Ok(())
     }
 
@@ -9381,7 +9419,7 @@ mod tests {
                 </script>
             </head><body></body></html>"#,
         );
-        page.execute_scripts_with_module_budget(None).await;
+        page.execute_scripts_with_module_budget(None, None).await;
         let ran = page.js.as_mut().unwrap().evaluate("globalThis.__ran").unwrap();
         assert_eq!(ran, serde_json::json!(["classic", "dynamic", "module"]));
     }
@@ -9393,7 +9431,7 @@ mod tests {
             "http://127.0.0.1:9",
             r#"<html><body><div id=w><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg></div></body></html>"#,
         );
-        page.execute_scripts_with_module_budget(None).await;
+        page.execute_scripts_with_module_budget(None, None).await;
         let result = page.js.as_mut().unwrap().evaluate(r#"(() => {
             const attr = document.querySelector('svg').attributes[0];
             return [attr.name, attr.localName, attr.prefix, attr.namespaceURI,
@@ -9466,7 +9504,7 @@ mod tests {
                 globalThis.__shared_deadline_completed = true;
             </script></head><body></body></html>"#,
         );
-        page.execute_scripts_with_module_budget(Some(350)).await;
+        page.execute_scripts_with_module_budget(Some(350), None).await;
 
         assert_eq!(
             request_rx
@@ -9532,7 +9570,7 @@ mod tests {
                 </script>
             </head><body></body></html>"#,
         );
-        page.execute_scripts_with_module_budget(Some(300)).await;
+        page.execute_scripts_with_module_budget(Some(300), None).await;
 
         assert_eq!(
             page.js
