@@ -1,3 +1,4 @@
+import { resolveRecordName } from './record-values/resolve-record-name.mjs';
 import { getAddressString } from './get-address-string.mjs';
 import { getRecordPhoneMask, resolveRecordPhone } from './record-values/resolve-record-phone.mjs';
 import { normalizeFieldName } from './normalize-field-name.mjs';
@@ -105,17 +106,32 @@ export function resolveContactField(metadata) {
  */
 export function needsRecordFieldCorrection(kind, value, record, metadata, markedFilled) {
   if (!value || !record) return false;
-  if (markedFilled && (kind === 'firstname' || kind === 'lastname')) {
-    const first = String(record.firstname || record.fname || '').trim().toLowerCase();
-    const last = String(record.lastname || record.lname || '').trim().toLowerCase();
-    return Boolean(first && last && first !== last && value.trim().toLowerCase() === (kind === 'firstname' ? last : first));
-  }
   if (kind === 'phone' && getRecordPhoneMask(metadata.pattern)) {
     const formatted = resolveRecordPhone(record, kind, metadata);
     if (formatted && value !== formatted && /^[+\d\s().-]+$/.test(value) &&
         value.replace(/\D/g, '') === formatted.replace(/\D/g, '')) return true;
   }
-  if (!['phone', 'address'].includes(kind)) return false;
+  return isSwappedContactValue(kind, value, record, markedFilled);
+}
+
+/**
+ * Nhận ra dữ liệu điện thoại và địa chỉ đã bị điền đảo từ cùng record.
+ * @param {string} kind Nghĩa của nhãn đang hiển thị.
+ * @param {string} value Giá trị thực đang nằm trong ô.
+ * @param {object} record Record hiện tại của form.
+ * @param {boolean} [wasMarkedFilled=false] Ô đã được app ghi nhận để có thể sửa tên bị đảo.
+ * @return {boolean} Giá trị trùng trường đối diện và khác trường đúng.
+ * @throws {never} Hồ sơ thiếu giá trị được bỏ qua.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+export function isSwappedContactValue(kind, value, record, wasMarkedFilled = false) {
+  if (wasMarkedFilled && value && record && ['firstname', 'lastname'].includes(kind)) {
+    const first = String(resolveRecordName('firstname', record) || '').trim().toLowerCase();
+    const last = String(resolveRecordName('lastname', record) || '').trim().toLowerCase();
+    return Boolean(first && last && first !== last && value.trim().toLowerCase() === (kind === 'firstname' ? last : first));
+  }
+  if (!value || !record || !['phone', 'address'].includes(kind)) return false;
   const address = String(getAddressString(record)).trim().toLowerCase();
   const phone = String(record.phonenumber || record.phone || record.cellphone || record.homephone || record.workphone || '');
   const digits = phone.replace(/\D/g, '');
