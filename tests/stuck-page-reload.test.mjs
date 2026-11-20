@@ -183,3 +183,23 @@ test('tích hợp: autofill thật trên Chromium, đồng hồ tua nhanh — tr
   assert.equal(held.reloaded, false, 'AI đang giữ tab: không F5');
   assert.equal(held.loads, 1);
 });
+
+test('trước F5 chỉ ghi trạng thái địa chỉ, nhóm trường lỗi và nút gửi của form hiện tại', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: `<form id="current">
+    <input name="address" data-type="address" data-populated="true" value="private-street">
+    <input type="tel" name="phone" required><input name="private-name" value="private-name">
+    <button disabled>Continue</button></form><form><input type="email" required></form>` }));
+  const page = await context.newPage();
+  await page.goto('http://local.test/form');
+  page.mainFrame()._activeAutofillFormScope = { rootSelector: '#current' };
+  const logs = [];
+  await observe(page, {}, { to: STUCK_PAGE_RELOAD_MS, options: { onLog: event => logs.push(event) } });
+  const detail = logs.find(event => event.type === 'stuck_page_reload')?.detail || '';
+  assert.match(detail, /Địa chỉ đã được trang xác nhận/);
+  assert.match(detail, /điện thoại/);
+  assert.match(detail, /nút gửi HTML đang khóa/);
+  assert.doesNotMatch(detail, /private|email/);
+});

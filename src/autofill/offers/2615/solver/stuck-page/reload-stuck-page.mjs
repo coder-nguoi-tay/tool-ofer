@@ -1,4 +1,5 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/stuck-page/reload-stuck-page.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
+import { readStalledAddressFormStatus } from '../../../../stuck-page/describe-address-form.mjs';
 import { shouldPauseForLead } from '../should-pause-for-lead.mjs';
 import { isThankYouUrl } from '../../../../../leads/actions/is-thank-you-url.mjs';
 import { isFinancialhelpThankyouUrl } from '../../../../../leads/actions/is-financialhelp-thankyou-url.mjs';
@@ -50,7 +51,7 @@ function isBusyOrHandledElsewhere(page, session, options) {
  * @param {{thresholdMs?:number}} [settings={}] Ngưỡng đứng yên riêng (trang Adsmith: 40 giây).
  * @return {Promise<boolean>} True nếu vừa F5.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-20
  */
 export async function reloadStuckPage(page, session, signature, options = {}, now = Date.now(), { thresholdMs = STUCK_PAGE_RELOAD_MS } = {}) {
   const url = page.url();
@@ -72,9 +73,14 @@ export async function reloadStuckPage(page, session, signature, options = {}, no
       return false;
     }
   }
+  const lastManualInput = page._uxManualInputAt;
+  const lastActionTime = session.lastActionTime;
+  const addressStatus = options.onLog ? await readStalledAddressFormStatus(page) : '';
+  if (page.url() !== url || isBusyOrHandledElsewhere(page, session, options) ||
+      page._uxManualInputAt !== lastManualInput || session.lastActionTime !== lastActionTime) return false;
   state.reloads += 1;
   const reloadText = (hasLead && offer2615Flow) ? `lần ${state.reloads}` : `lần ${state.reloads}/${MAX_RELOADS_PER_URL}`;
-  options.onLog?.({ type: 'stuck_page_reload', detail: `Trang đứng yên ${thresholdMs >= 60_000 ? `${Math.round(thresholdMs / 60_000)} phút` : `${Math.round(thresholdMs / 1000)} giây`} (không thao tác, giao diện không đổi); F5 ${reloadText}: ${url}` }, page);
+  options.onLog?.({ type: 'stuck_page_reload', detail: `Trang đứng yên ${thresholdMs >= 60_000 ? `${Math.round(thresholdMs / 60_000)} phút` : `${Math.round(thresholdMs / 1000)} giây`} (không thao tác, giao diện không đổi); F5 ${reloadText}: ${url}${addressStatus}` }, page);
   const startedAt = Date.now();
   try {
     if (url.includes('#')) await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
