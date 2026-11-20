@@ -1,4 +1,5 @@
 import { getAddressString } from './get-address-string.mjs';
+import { getRecordPhoneMask, resolveRecordPhone } from './record-values/resolve-record-phone.mjs';
 import { normalizeFieldName } from './normalize-field-name.mjs';
 
 /**
@@ -44,6 +45,7 @@ function contactHint(hint) {
  * Đối chiếu nhãn và chữ gợi ý cùng ô với autocomplete và kiểu trước khi dùng định danh kỹ thuật.
  * @param {object} metadata Thuộc tính và nhãn do form cung cấp.
  * @return {string} Khóa dữ liệu đã nhận diện, conflict khi không an toàn, hoặc rỗng để dùng matcher cũ.
+ * @throws {never} Các dấu hiệu chưa đủ để phân giải được xử lý như xung đột.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -54,7 +56,11 @@ export function resolveContactField(metadata) {
   const token = (metadata.autocomplete || '').toLowerCase().trim().split(/\s+/).filter(part => part !== 'webauthn').at(-1);
   if (metadata.type === 'password' || ['one-time-code', 'current-password', 'new-password'].includes(token)) return 'conflict';
   const autocomplete = contactHint(token);
-  if (labelled && hinted && labelled !== hinted) return 'conflict';
+  const fieldName = contactHint(metadata.name);
+  const identifiers = [fieldName, contactHint(metadata.id)].filter(Boolean);
+  const confirmsLabel = Boolean(labelled && labelled !== 'conflict' &&
+    (autocomplete === labelled || fieldName === labelled && identifiers.every(kind => kind === labelled)));
+  if (labelled && hinted && labelled !== hinted && !confirmsLabel) return 'conflict';
   let visible = labelled || hinted;
   if (label && metadata.placeholder && (!labelled || !hinted)) {
     const joined = contactHint(label + ' ' + metadata.placeholder);
@@ -64,7 +70,6 @@ export function resolveContactField(metadata) {
   if (visible === 'conflict' || visible && autocomplete && visible !== autocomplete) return 'conflict';
   let kind = visible || autocomplete;
   // Nhãn rõ nghĩa khác (Age, Date of birth...) vẫn thuộc bộ matcher hiện hành.
-  const identifiers = [metadata.name, metadata.id].map(contactHint).filter(Boolean);
   if (label && !kind) {
     if (new Set(identifiers).size > 1 || metadata.type === 'tel' && identifiers.includes('address')) return 'conflict';
     return metadata.type === 'email' ? 'email' : '';
@@ -73,7 +78,7 @@ export function resolveContactField(metadata) {
   if (!kind && metadata.type === 'tel' && ['address', 'email'].includes(identifiers[0])) return 'conflict';
   kind ||= identifiers[0] || '';
   if (kind && ['date', 'time', 'month', 'week', 'datetime-local', 'url'].includes(metadata.type)) return 'conflict';
-  if (metadata.type === 'tel' && ['address', 'address2'].includes(kind)) return 'conflict';
+  if (metadata.type === 'tel' && ['address', 'address2'].includes(kind) && !confirmsLabel) return 'conflict';
   if (metadata.type === 'number' && ['address', 'address2', 'email'].includes(kind)) return 'conflict';
   if (metadata.type === 'email' && kind && kind !== 'email') return 'conflict';
   if (!kind && metadata.type === 'email') return 'email';
@@ -87,16 +92,30 @@ export function resolveContactField(metadata) {
 }
 
 /**
- * Nhận ra dữ liệu điện thoại và địa chỉ đã bị điền đảo từ cùng record.
+ * Xác định khi nào có thể sửa giá trị cũ theo đúng trường và hồ sơ của form.
  * @param {string} kind Nghĩa của nhãn đang hiển thị.
  * @param {string} value Giá trị thực đang nằm trong ô.
  * @param {object} record Record hiện tại của form.
- * @return {boolean} Giá trị trùng trường đối diện và khác trường đúng.
+ * @param {object} metadata Thuộc tính của ô, gồm mẫu điện thoại nếu có.
+ * @param {boolean} markedFilled App đã đánh dấu ô là đã điền.
+ * @return {boolean} Giá trị bị đảo trường hoặc số của hồ sơ đang sai định dạng.
+ * @throws {never} Giá trị không xác định được nguồn sẽ được giữ nguyên.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
-export function isSwappedContactValue(kind, value, record) {
-  if (!value || !record || !['phone', 'address'].includes(kind)) return false;
+export function needsRecordFieldCorrection(kind, value, record, metadata, markedFilled) {
+  if (!value || !record) return false;
+  if (markedFilled && (kind === 'firstname' || kind === 'lastname')) {
+    const first = String(record.firstname || record.fname || '').trim().toLowerCase();
+    const last = String(record.lastname || record.lname || '').trim().toLowerCase();
+    return Boolean(first && last && first !== last && value.trim().toLowerCase() === (kind === 'firstname' ? last : first));
+  }
+  if (kind === 'phone' && getRecordPhoneMask(metadata.pattern)) {
+    const formatted = resolveRecordPhone(record, kind, metadata);
+    if (formatted && value !== formatted && /^[+\d\s().-]+$/.test(value) &&
+        value.replace(/\D/g, '') === formatted.replace(/\D/g, '')) return true;
+  }
+  if (!['phone', 'address'].includes(kind)) return false;
   const address = String(getAddressString(record)).trim().toLowerCase();
   const phone = String(record.phonenumber || record.phone || record.cellphone || record.homephone || record.workphone || '');
   const digits = phone.replace(/\D/g, '');

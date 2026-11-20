@@ -1,6 +1,6 @@
 import { getAddressString } from './get-address-string.mjs';
 import { readAddressSelection } from './read-address-selection.mjs';
-import { isSwappedContactValue, resolveContactField } from './resolve-contact-field.mjs';
+import { needsRecordFieldCorrection, resolveContactField } from './resolve-contact-field.mjs';
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
 import { isControlInActiveForm } from './form-scope/is-control-in-active-form.mjs';
 import { collectFieldMetadata } from './collect-field-metadata.mjs';
@@ -16,6 +16,7 @@ import { matchFieldValue } from './match-field-value.mjs';
  * Điền lần lượt các trường trong frame và ghi nhận những ô đã được xác minh.
  * @param {object} context Frame, dữ liệu lead và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần dừng quét trang.
+ * @throws {never} Lỗi của từng ô được xử lý trong vòng quét.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -133,8 +134,8 @@ export async function fillFrameFields({
       const metadata = await field.evaluate(collectFieldMetadata, undefined, { timeout: 1500 });
       const contact = resolveContactField(metadata);
       if (contact === 'address' && !metadata.readOnly) frameProgress.hasAddressField = true;
-      const swapped = isSwappedContactValue(contact, metadata.value, record);
       const isMarkedFilled = (await field.getAttribute('data-ux-filled')) === '1';
+      const needsCorrection = needsRecordFieldCorrection(contact, metadata.value, record, metadata, isMarkedFilled);
       if (isMarkedFilled) {
         const isUncheckedBox = isCheckbox && !(await field.isChecked().catch(() => true));
         const currentVal = await field.inputValue().catch(() => null);
@@ -148,7 +149,7 @@ export async function fillFrameFields({
 
         // Nếu đã fill nhưng giá trị hiện tại bị rỗng hoặc đang bị báo lỗi hoặc là checkbox chưa được tích -> xóa mark để điền lại
         const address = contact === 'address' && await field.evaluate(readAddressSelection, getAddressString(record) || undefined);
-        if (address?.requiresSelection && !address.retained || currentVal !== null && currentVal.trim() === '' || hasError || isUncheckedBox || swapped) {
+        if (address?.requiresSelection && !address.retained || currentVal !== null && currentVal.trim() === '' || hasError || isUncheckedBox || needsCorrection) {
           await field.evaluate(el => el.removeAttribute('data-ux-filled')).catch(() => {});
         } else {
           continue;
@@ -200,7 +201,7 @@ export async function fillFrameFields({
       })) continue;
 
       // Bỏ qua nếu ô đã có giá trị thật (ngoại trừ mask rỗng như (___) ___-____, +1, mm/dd/yyyy hoặc email/zip chưa hợp lệ)
-      if (!swapped && await handleExistingFieldValue({
+      if (!needsCorrection && await handleExistingFieldValue({
         metadata,
         valueToFill,
         field

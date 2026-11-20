@@ -6,8 +6,9 @@ import { FORM_UTILITY_REGIONS } from '../browser/locators/form-utility-regions.m
  *
  * @param {object} page Trang Playwright cần kiểm tra.
  * @return {Promise<{errors:string[],emailInput:object|null,emailMissing:boolean,problemInputs:object[],hasBlocker:boolean}|null>} Trạng thái lỗi form đang hiển thị.
+ * @throws {Error} Khi không thể xác định frame đang xử lý.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function inspectFormRepairState(page) {
   const [targetFrame] = await getAiFormFrames(page);
@@ -84,6 +85,9 @@ async function inspectFormRepairState(page) {
           name,
           label,
           placeholder,
+          autocomplete: element.getAttribute('autocomplete') || '',
+          pattern: element.getAttribute('pattern') || '',
+          maxLength: element.maxLength,
           currentValue: value,
           isEmpty,
           isInvalid,

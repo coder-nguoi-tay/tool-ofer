@@ -249,3 +249,82 @@ test('địa chỉ tổng hợp được nhận diện nhất quán khi điền 
     assert.equal(resolveProvidedFieldValue(metadata, record), expected, label);
   }
 });
+
+test('nhãn và định danh cùng xác nhận dữ liệu dù placeholder cũ, giữ đầy đủ số từ hồ sơ', () => {
+  const record = { firstname: 'An', lastname: 'Tran', phone: '2025550147', address: '10 Oak St' };
+  for (const [metadata, expected] of [
+    [{ name: 'first_name', label: 'First Name', placeholder: 'Last Name' }, record.firstname],
+    [{ name: 'field1', autocomplete: 'family-name', label: 'Họ', placeholder: 'Tên' }, record.lastname],
+    [{ name: 'address', label: 'Địa chỉ', type: 'tel' }, record.address],
+    [{ name: 'phone', label: 'Street Address', type: 'tel' }, null],
+    [{ name: 'field2', label: 'First Name', placeholder: 'Last Name' }, null],
+    [{ name: 'phone', label: 'Phone', type: 'tel', pattern: String.raw`^\(\d{3}\) \d{3}-\d{4}$` }, '(202) 555-0147'],
+    [{ name: 'phone', label: 'Phone', type: 'tel' }, record.phone],
+    [{ name: 'phone1', label: 'Phone', maxLength: 3 }, '202'],
+    [{ name: 'phone1', label: 'Phone', maxLength: 2 }, null],
+    [{ name: 'phone', type: 'tel', label: 'Phone', maxLength: 8 }, null],
+  ]) {
+    assert.equal(matchFieldValue([metadata.name], record, metadata), expected, metadata.name);
+    assert.equal(resolveProvidedFieldValue(metadata, record), expected, 'repair ' + metadata.name);
+  }
+  const missingName = { email: 'fixture.person@example.invalid' };
+  assert.equal(matchFieldValue(['first_name'], missingName, { label: 'First Name' }), null);
+  assert.equal(resolveProvidedFieldValue({ label: 'First Name' }, missingName), null);
+});
+
+/**
+ * Kiểm tra giá trị giữ lại sau hai lượt điền trên một form cục bộ.
+ * @param {object} page Tab trống của trình duyệt thử nghiệm.
+ * @param {import('node:test').TestContext} t Ngữ cảnh dọn máy chủ cục bộ.
+ * @return {Promise<void>} Hoàn tất khi các ô khớp với thông tin trong hồ sơ.
+ * @throws {Error} Khi dữ liệu bị đảo trường, sai định dạng hoặc bị gõ đè.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+async function verifyRecordContactForm(page, t) {
+  const { createServer } = await import('node:http');
+  const { fillPageForms } = await import('../../src/autofill/fill-page-forms.mjs');
+  const html = String.raw`<form>
+    <label>First Name<input name="first_name" placeholder="Last Name" value="Tran" data-ux-filled="1"></label>
+    <label>Last Name<input name="last_name" value="An" data-ux-filled="1"></label>
+    <label>Phone<input name="phone" type="tel" required pattern="^\([0-9]{3}\) [0-9]{3}-[0-9]{4}$" value="2025550147" data-ux-filled="1"></label>
+    <label>First Name<input name="given_name" value="Mai"></label></form>`;
+  const server = createServer((request, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end(html);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise(resolve => server.close(resolve));
+  });
+  await page.goto('http://127.0.0.1:' + server.address().port);
+  const session = { lastObservedUrl: page.url(), firstSubmitHandled: true, completedScreens: 1, autofillFields: 0 };
+  const context = { session, sessionRecord: { firstname: 'An', lastname: 'Tran', phone: '2025550147' },
+    options: { autoSubmit: false }, triggerLeadCheckAfterEmail() {} };
+  await fillPageForms(page, context);
+  const fields = page.locator('input');
+  assert.deepEqual(await fields.evaluateAll(inputs => inputs.map(input => input.value)), ['An', 'Tran', '(202) 555-0147', 'Mai']);
+  assert.equal(Boolean(await page.locator('[name=phone]').evaluate(input => input.validity?.patternMismatch)), false);
+  await page.evaluate(() => { window.edits = 0; document.addEventListener('input', () => window.edits++); });
+  await fillPageForms(page, context);
+  assert.equal(await page.evaluate(() => window.edits), 0);
+}
+
+test('Chromium điền đúng tên và số điện thoại qua hai lượt quét', async t => {
+  const { chromium } = await import('playwright');
+  const { existsSync } = await import('node:fs');
+  if (!existsSync(chromium.executablePath())) return t.skip('Chưa cài Chromium');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  await verifyRecordContactForm(await browser.newPage(), t);
+});
+
+test('Obscura điền đúng tên và số điện thoại qua hai lượt quét', async t => {
+  const { resolveObscuraBinary } = await import('../../src/obscura-engine/resolve-obscura-binary.mjs');
+  try { resolveObscuraBinary(); } catch { return t.skip('Chưa có binary Obscura'); }
+  const { openObscuraBrowser } = await import('../../src/obscura-engine/open-obscura-browser.mjs');
+  const session = await openObscuraBrowser({ slot: 994, port: 0, os: 'ipad', registerSession: false });
+  t.after(() => session.close());
+  await verifyRecordContactForm(session.page, t);
+});

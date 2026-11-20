@@ -1,10 +1,10 @@
+import { resolveRecordName } from './record-values/resolve-record-name.mjs';
+import { resolveRecordPhone } from './record-values/resolve-record-phone.mjs';
 import { resolveContactField } from './resolve-contact-field.mjs';
 import { formatMatchedValue } from './format-matched-value.mjs';
 import { getAddressString } from './get-address-string.mjs';
 import { getDobString } from './get-dob-string.mjs';
 import { getFallbackCity } from './get-fallback-city.mjs';
-import { getNormalizedPhone } from './get-normalized-phone.mjs';
-import { getPhoneAreaCode } from './get-phone-area-code.mjs';
 import { isEmailFieldName } from './is-email-field-name.mjs';
 import { normalizeFieldName } from './normalize-field-name.mjs';
 import { parseDobComponents } from './parse-dob-components.mjs';
@@ -26,9 +26,9 @@ function matchFieldValue(candidateNames, record, metadata = {}) {
   if (contact === 'conflict') return null;
   if (contact === 'address') return getAddressString(record) || null;
   if (contact === 'address2') return record.address2 || record.apt || record.suite || null;
+  if (['firstname', 'lastname', 'fullname'].includes(contact)) return formatMatchedValue(resolveRecordName(contact, record), { maxLength: metadata.maxLength });
+  if (/^phone/.test(contact)) return resolveRecordPhone(record, contact, metadata);
   if (contact) {
-    if (/^phone/.test(contact) && ![record.phonenumber, record.phone, record.cellphone, record.homephone, record.workphone]
-      .some(value => String(value || '').replace(/\D/g, '').length >= 7)) return null;
     return matchIdentifiedValue([contact], record, { type: contact === 'email' ? 'email' : 'text',
       names: [contact], maxLength: metadata.maxLength, kind: metadata.kind, assignedEmail: metadata.assignedEmail });
   }
@@ -41,6 +41,7 @@ function matchFieldValue(candidateNames, record, metadata = {}) {
  * @param {object} record Record được gán cho form.
  * @param {object} metadata Thuộc tính định dạng của trường.
  * @return {string|null} Giá trị đã định dạng hoặc null nếu thiếu.
+ * @throws {never} Thiếu dữ liệu cho trường đã nhận diện trả về null.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -165,29 +166,19 @@ function matchIdentifiedValue(candidateNames, record, metadata) {
   } else if (!isExplicitNonPhone) {
     const isPhoneAreaField = normalizedCandidates.some(c => /^(areacode|phone1|tel1|phonearea)$/i.test(c));
     if (isPhoneAreaField) {
-      return formatMatchedValue(getPhoneAreaCode(record), metadata);
+      return resolveRecordPhone(record, 'phone1', metadata);
     }
     const isPhonePrefixField = normalizedCandidates.some(c => /^(prefix|phone2|tel2|phoneprefix)$/i.test(c));
     if (isPhonePrefixField) {
-      const prefixPhone = getNormalizedPhone(record);
-      if (!prefixPhone) return null;
-      const digits = prefixPhone.replace(/\D/g, '');
-      if (digits.length < 6) return null;
-      return formatMatchedValue(digits.slice(3, 6), metadata);
+      return resolveRecordPhone(record, 'phone2', metadata);
     }
     const isPhoneLineField = normalizedCandidates.some(c => /^(line|linenumber|phone3|tel3|phoneline)$/i.test(c));
     if (isPhoneLineField) {
-      const phone = getNormalizedPhone(record);
-      if (!phone) return null;
-      const digits = phone.replace(/\D/g, '');
-      if (digits.length < 10) return null;
-      return formatMatchedValue(digits.slice(6, 10), metadata);
+      return resolveRecordPhone(record, 'phone3', metadata);
     }
     const isFullPhoneField = metadata.type === 'tel' && !isExplicitZip && !isExplicitCity && !isExplicitAddress && !isExplicitState && !isExplicitDob && !blockPhone || normalizedCandidates.some(c => /^(phone|phonenumber|telephone|telephone_two|mobile|mobilenumber|cell|cellphone|contactphone|userphone|primaryphone|dayphone|eveningphone|homephone|workphone|sdt|dienthoai|tl)$/i.test(c) || /phone|mobile|cell|^tel(ephone)?(_two)?$|^sdt$|dienthoai|^tl$/i.test(c) && !/^(areacode|phone1|tel1|prefix|phone2|tel2|line|phone3|tel3)$/i.test(c) && !/microphone|headphone|earphone|address|street|addr|apt|suite|unit|zip|postal|postcode|city|town|email|name/i.test(c));
     if (isFullPhoneField) {
-      const phone = getNormalizedPhone(record);
-      if (!phone) return null;
-      return formatMatchedValue(phone, metadata);
+      return resolveRecordPhone(record, 'phone', metadata);
     }
   }
 
@@ -298,8 +289,7 @@ function matchIdentifiedValue(candidateNames, record, metadata) {
   if (metadata.required || metadata.ariaRequired || metadata.isRequired) {
     if (metadata.type === 'number' || metadata.type === 'range') return null;
     if (metadata.type === 'tel') {
-      const phone = getNormalizedPhone(record);
-      return phone ? formatMatchedValue(phone, metadata) : null;
+      return resolveRecordPhone(record, 'phone', metadata);
     }
     if (metadata.type === 'email') {
       // Không tự sinh email: chỉ dùng email trong danh sách app cung cấp (hết thì để trống).
