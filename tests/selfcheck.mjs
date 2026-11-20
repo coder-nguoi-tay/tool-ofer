@@ -449,8 +449,8 @@ assert.equal(matchFieldValue(['street_address', 'address1'], leadRecord), '2609 
 assert.equal(matchFieldValue(['city'], leadRecord), 'Edmond');
 assert.equal(matchFieldValue(['state'], leadRecord), 'OK');
 assert.equal(matchFieldValue(['zip', 'postal_code'], leadRecord), '73132');
-assert.ok(/^(814|817)9335582$/.test(matchFieldValue(['phone', 'tel'], leadRecord)), 'Phone phải có đầu số mặc định 814 hoặc 817');
-assert.ok(['814', '817'].includes(matchFieldValue(['areacode', 'phone1'], leadRecord)), 'Areacode phải là 814 hoặc 817');
+assert.equal(matchFieldValue(['phone', 'tel'], leadRecord), '4059335582');
+assert.equal(matchFieldValue(['areacode', 'phone1'], leadRecord), '405');
 assert.equal(matchFieldValue(['prefix', 'phone2'], leadRecord), '933');
 assert.equal(matchFieldValue(['linenumber', 'phone3'], leadRecord), '5582');
 assert.equal(matchFieldValue(['ssn', 'social_security'], leadRecord), '653-24-6710');
@@ -508,7 +508,7 @@ assert.equal(jeremy.address, '723 e 6th st');
 assert.equal(jeremy.city, 'Dewey');
 assert.equal(jeremy.state, 'OK');
 assert.equal(jeremy.zipcode, '74029');
-assert.ok(/^(814|817)-397-5329$/.test(jeremy.phonenumber), 'jeremy.phonenumber phải có đầu số mặc định 814 hoặc 817');
+assert.equal(jeremy.phonenumber, '918-397-5329');
 assert.equal(jeremy.dateofbirth, '8/4/1984');
 
 assert.equal(matchFieldValue(['full_name', 'name'], jeremy), 'Jeremy Adam McNeice');
@@ -518,8 +518,8 @@ assert.equal(matchFieldValue(['street_address', 'address'], jeremy), '723 e 6th 
 assert.equal(matchFieldValue(['city'], jeremy), 'Dewey');
 assert.equal(matchFieldValue(['state'], jeremy), 'OK');
 assert.equal(matchFieldValue(['zip', 'zipcode'], jeremy), '74029');
-assert.ok(/^(814|817)-397-5329$/.test(matchFieldValue(['phone', 'tel'], jeremy)), 'Phone jeremy phải có đầu số 814 hoặc 817');
-assert.ok(['814', '817'].includes(matchFieldValue(['areacode'], jeremy)), 'Areacode jeremy phải là 814 hoặc 817');
+assert.equal(matchFieldValue(['phone', 'tel'], jeremy), '918-397-5329');
+assert.equal(matchFieldValue(['areacode'], jeremy), '918');
 assert.equal(matchFieldValue(['prefix'], jeremy), '397');
 assert.equal(matchFieldValue(['linenumber'], jeremy), '5329');
 assert.equal(matchFieldValue(['dob', 'date_of_birth'], jeremy), '08/04/1984');
@@ -594,8 +594,8 @@ const kendra = kendraParsed[0];
 assert.equal(kendra.firstname, 'Kendra');
 assert.equal(kendra.lastname, 'Wardlaw');
 assert.equal(kendra.fullname, 'Kendra Wardlaw');
-assert.ok(/^(814|817)7420430$/.test(kendra.phone), 'kendra.phone phải có đầu số 814 hoặc 817');
-assert.ok(/^(814|817)7420430$/.test(kendra.cellphone), 'kendra.cellphone phải có đầu số 814 hoặc 817');
+assert.equal(kendra.phone, '3077420430');
+assert.equal(kendra.cellphone, '3077420430');
 assert.equal(kendra.email, 'KendraWardlaw5138274@gmail.com');
 assert.equal(kendra.state, 'AK');
 assert.equal(kendra.stateorprovince, 'AK');
@@ -610,7 +610,7 @@ assert.equal(matchFieldValue(['first_name'], kendra), 'Kendra');
 assert.equal(matchFieldValue(['last_name'], kendra), 'Wardlaw');
 assert.equal(matchFieldValue(['full_name', 'name'], kendra), 'Kendra Wardlaw');
 assert.equal(matchFieldValue(['email'], kendra), 'KendraWardlaw5138274@gmail.com');
-assert.ok(/^(814|817)7420430$/.test(matchFieldValue(['phone', 'tel'], kendra)), 'matchFieldValue phone kendra phải có đầu số 814 hoặc 817');
+assert.equal(matchFieldValue(['phone', 'tel'], kendra), '3077420430');
 assert.equal(matchFieldValue(['address', 'address1', 'street_address'], kendra), '4125 N Inspiration Loop');
 assert.equal(matchFieldValue(['city'], kendra), 'Wasilla');
 assert.equal(matchFieldValue(['state'], kendra, { kind: 'select' }), 'AK');
@@ -644,29 +644,29 @@ assert.equal(getNormalizedPhone({ phone: savedFormTestPhone }), savedFormTestPho
 assert.equal(matchFieldValue(['phone', 'tel'], { phone: savedFormTestPhone }), savedFormTestPhone, 'Autofill chính phải điền nguyên số hợp lệ từ form test');
 assert.equal(getPhoneAreaCode({ phone: '+1 (814) 555-0100' }), '814', 'Tiền tố quốc gia +1 không làm mất mã vùng 814');
 assert.equal(getPhoneAreaCode({ phone: '+1 (817) 555-0100' }), '817', 'Tiền tố quốc gia +1 không làm mất mã vùng 817');
-assert.ok(['814', '817'].includes(getPhoneAreaCode({})), 'Khi record rỗng, getPhoneAreaCode phải trả về 814 hoặc 817');
+assert.equal(getPhoneAreaCode({}), '');
 assert.equal(getPhoneAreaCode({ phone: '8141234567' }), '814', 'Số có sẵn đầu 814 phải giữ nguyên');
 assert.equal(getPhoneAreaCode({ phone: '8179998888' }), '817', 'Số có sẵn đầu 817 phải giữ nguyên');
-assert.ok(['814', '817'].includes(getPhoneAreaCode({ phone: '4059335582' })), 'Số có sẵn đầu khác -> chuẩn hóa về 814 hoặc 817');
+assert.equal(getPhoneAreaCode({ phone: '4059335582' }), '405');
 assert.equal(getPhoneAreaCode({ areacode: '814' }), '814', 'Trường areacode = 814 phải được tôn trọng');
 assert.equal(getPhoneAreaCode({ areacode: '817' }), '817', 'Trường areacode = 817 phải được tôn trọng');
 
 const emptyPhone = getNormalizedPhone({});
-assert.ok(/^(814|817)\d{7}$/.test(emptyPhone), 'Record thiếu số điện thoại -> đầu 814/817 + 7 số đuôi bất kỳ');
-assert.equal(getNormalizedPhone({}).length, 10, 'Số sinh ra phải đủ 10 chữ số');
+assert.equal(emptyPhone, '');
+assert.equal(getNormalizedPhone({}), '', 'Thiếu số thì giữ trống');
 const stablePhoneRecord = {};
 assert.equal(getNormalizedPhone(stablePhoneRecord), getNormalizedPhone(stablePhoneRecord), 'Cùng bản ghi phải ra cùng một số');
-assert.ok(['814', '817'].includes(getPhoneAreaCode({})), 'Khi record rỗng, getPhoneAreaCode phải trả về 814 hoặc 817');
+assert.equal(getPhoneAreaCode({}), '');
 assert.equal(getPhoneAreaCode({ phone: '8141234567' }), '814', 'Số có sẵn đầu 814 phải giữ nguyên');
 assert.equal(getPhoneAreaCode({ phone: '8179998888' }), '817', 'Số có sẵn đầu 817 phải giữ nguyên');
-assert.ok(['814', '817'].includes(getPhoneAreaCode({ phone: '4059335582' })), 'Số có sẵn đầu khác -> chuẩn hóa về 814 hoặc 817');
+assert.equal(getPhoneAreaCode({ phone: '4059335582' }), '405');
 assert.equal(getPhoneAreaCode({ areacode: '814' }), '814', 'Trường areacode = 814 phải được tôn trọng');
 assert.equal(getPhoneAreaCode({ areacode: '817' }), '817', 'Trường areacode = 817 phải được tôn trọng');
 const fallbackAutofillRecord = createFallbackAutofillRecord();
 const fallbackPhoneDigits = fallbackAutofillRecord.phone.replace(/\D/g, '');
-assert.match(fallbackPhoneDigits, /^(?:814|817)\d{7}$/, 'Record fallback chính thức phải có đầu 814/817 và đủ 10 chữ số');
-assert.equal(fallbackAutofillRecord.areacode, fallbackPhoneDigits.slice(0, 3), 'Mã vùng fallback phải khớp số điện thoại đầy đủ');
-assert.equal(matchFieldValue(['phone', 'tel'], fallbackAutofillRecord), fallbackAutofillRecord.phone, 'Trường điện thoại đầy đủ dùng đúng số của record fallback');
+assert.equal(fallbackPhoneDigits, '');
+assert.equal(getNormalizedPhone(fallbackAutofillRecord), '');
+assert.equal(matchFieldValue(['phone', 'tel'], fallbackAutofillRecord), null);
 
 // Test matchFieldValue với record rỗng phải trả null (không bịa phone từ bên ngoài)
 const matchedEmptyPhone = matchFieldValue(['phone', 'tel'], {});
@@ -1232,8 +1232,9 @@ const mockStuckPage = {
   isClosed: () => false,
   url: () => 'https://example.com/form',
   on: (evt, handler) => { mockStuckPageEvents[evt] = handler; },
-  evaluate: async () => true, // Giả lập trang có form/input interactable
+  evaluate: async fn => fn.name === 'inspectManualCaptchaSurface' ? false : true, // Có form, chưa có challenge.
   frames: () => [{
+    parentFrame: () => null,
     locator: () => ({ all: async () => [] }),
     evaluateAll: async () => ({}),
     evaluate: async (fn) => fn.name === 'inspectVisibleInteractions' ? { url: 'https://example.test/form', controls: [{ selector: '#next', type: 'button', tag: 'button', label: 'Continue', value: '' }], questions: [], errors: [] } : [],
@@ -1296,6 +1297,7 @@ const mockBlankPage = {
   on: () => {},
   evaluate: async () => false, // Trang cảm ơn / rỗng không có interactable
   frames: () => [{
+    parentFrame: () => null,
     locator: () => ({ all: async () => [] }),
     evaluateAll: async () => ({}),
     evaluate: async () => [],
@@ -1840,12 +1842,14 @@ const mockLeadWaitPage = {
   url: () => 'https://example.com/step2',
   on: (evt, handler) => { mockLeadWaitPageEvents[evt] = handler; },
   evaluate: async (fn, arg) => {
+    if (fn.name === 'inspectManualCaptchaSurface') return false;
     if (typeof fn === 'function') {
       return fn(mockSubmitButton, arg);
     }
     return true;
   },
   frames: () => [{
+    parentFrame: () => null,
     evaluateHandle: observeValidFixtureForm,
     locator: (sel) => ({
       all: async () => [],
@@ -2186,6 +2190,7 @@ const mockActivePage = {
   url: () => 'https://example.com/form',
   on: () => {},
   frames: () => [{
+    parentFrame: () => null,
     locator: (sel) => ({
       all: async () => {
         if (sel.includes('button') || sel.includes('Submit')) {
@@ -2273,7 +2278,9 @@ const mockEmailPage = {
   url: () => mockEmailPageUrl,
   on: () => {},
   off: () => {},
+  evaluate: async () => false,
   frames: () => [{
+    parentFrame: () => null,
     evaluateHandle: observeValidFixtureForm,
     locator: (sel) => ({
       filter: () => ({ all: async () => [], elementHandles: async () => [] }),
@@ -2511,7 +2518,7 @@ assert.equal(r1.dob, '11/05/1977');
 assert.equal(r1.zipcode, '12828');
 assert.equal(r1.state, 'NewYork');
 assert.equal(r1.city, 'Fort Edward');
-assert.ok(r1.phone.startsWith('814') || r1.phone.startsWith('817'), 'Số điện thoại phải có mã vùng chuẩn hóa 814/817');
+assert.equal(r1.phone, '5183234117', 'Bản ghi phân tách bằng dấu | giữ nguyên số điện thoại nguồn');
 
 // 20. Không coi lời mời Sign Up / Register ngoài form là nút gửi.
 const mockSignUpBtn = {
