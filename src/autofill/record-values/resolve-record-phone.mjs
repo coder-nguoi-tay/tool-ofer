@@ -25,7 +25,7 @@ export function getRecordPhoneMask(pattern = '') {
  * Lấy nguyên số điện thoại của hồ sơ và định dạng theo ô đầy đủ hoặc ô chia phần.
  * @param {object} record Hồ sơ đã gán cho form.
  * @param {string} contact Loại ô phone, phone1, phone2 hoặc phone3.
- * @param {object} metadata Độ dài và mẫu nhập khai báo trên ô.
+ * @param {object} metadata Nhãn, autocomplete, độ dài và mẫu nhập dùng để chọn đúng số liên hệ.
  * @return {string|null} Số có nguồn từ hồ sơ và vừa với ô nhập.
  * @throws {never} Bỏ qua số thiếu hoặc không thể biểu diễn bằng mẫu đã xác định.
  * @author ductv <ductv@getflycrm.com>
@@ -33,7 +33,7 @@ export function getRecordPhoneMask(pattern = '') {
  */
 export function resolveRecordPhone(record, contact, metadata) {
   const label = metadata.accessibleName || metadata.ariaLabelledByText || metadata.ariaLabel || metadata.label;
-  const phoneLabel = normalizeFieldName(label || metadata.name || metadata.id || metadata.names?.[0]);
+  const phoneLabel = normalizeFieldName(label || metadata.name || metadata.id || metadata.names?.[0]).replace(/(?:optional|required)$/, '');
   const purpose = /^(home|work)(?:(?:telephone|phone|tel)(?:number)?|number)$/.exec(phoneLabel)?.[1];
   const autocompletePurpose = (metadata.autocomplete || '').toLowerCase().split(/\s+/).find(token => token === 'home' || token === 'work');
   if (purpose && autocompletePurpose && purpose !== autocompletePurpose) return null;

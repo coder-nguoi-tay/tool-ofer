@@ -11,20 +11,22 @@ import { normalizeFieldName } from './normalize-field-name.mjs';
  * Tự động phục hồi nếu JSON bị cắt cụt đuôi hoặc chứa trailing comma.
  *
  * @param {string} source Nội dung người dùng dán vào ô dữ liệu.
- * @return {object[]} Các bản ghi có tên cột và giá trị dạng chuỗi.
- * @throws {Error} Khi cấu trúc hoặc số lượng dữ liệu không hợp lệ.
+ * @return {object[]} Các bản ghi có tên cột chuẩn hóa, giữ giá trị đã cung cấp và bổ sung bí danh còn thiếu.
+ * @throws {Error} Khi cấu trúc không hợp lệ hoặc một bản ghi có nhiều cột trùng tên sau chuẩn hóa.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
 function parseAutofillRecords(source) {
   const content = String(source ?? '').trim();
   if (!content) return [];
-  if (content.includes('\t')) throw new Error('Hãy dùng CSV hoặc JSON; bảng phân tách bằng tab chưa được hỗ trợ.');
   let records;
+  let delimitedHeaders;
   const trimmedJson = content.replace(/,\s*$/, '').trim();
+  const firstDataLine = content.match(/^(?![ \t]*#)[^\r\n]+/m)?.[0] || '';
+  const delimiter = firstDataLine.replace(/"(?:[^"]|"")*"/g, '').match(/[,|\t]/)?.[0];
   if (trimmedJson.startsWith('[') || trimmedJson.startsWith('{')) {
     const tryCleanJson = str => {
-      const cleaned = str.replace(/,\s*([}\]])/g, '$1').replace(/,\s*$/, '');
+      const cleaned = str.replace(/"(?:\\.|[^"\\])*"|,\s*([}\]])/g, (token, closing) => closing || token).replace(/,\s*$/, '');
       return JSON.parse(cleaned);
     };
     try {
@@ -54,33 +56,31 @@ function parseAutofillRecords(source) {
         }
       }
     }
-  } else if (content.includes('|')) {
+  } else if (delimiter === '\t') {
+    throw new Error('Hãy dùng CSV hoặc JSON; bảng phân tách bằng tab chưa được hỗ trợ.');
+  } else if (delimiter === '|') {
     // 3. Hỗ trợ định dạng phân tách bằng dấu gạch đứng (|) tương tự file Config/Info/info.txt của tool PC
     const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
     if (!lines.length) throw new Error('Dữ liệu dạng pipe (|) không có dòng dữ liệu hợp lệ.');
     const firstCells = lines[0].split('|').map(c => c.trim().replace(/^\uFEFF/, ''));
     const isFirstLineData = firstCells.some(c => c.includes('@')) || /^(male|female|mr|ms|mrs)$/i.test(firstCells[2] || firstCells[3] || '') || /^\d{4}$/.test(firstCells[6] || '');
     const standardPipeHeaders = ['firstname', 'lastname', 'gender', 'title', 'birthday', 'birthmonth', 'birthyear', 'phone', 'address', 'city', 'state', 'zipcode', 'phone2', 'username', 'password', 'email'];
-    let headers;
     let dataLines;
     if (isFirstLineData) {
-      headers = standardPipeHeaders.slice(0, firstCells.length);
-      while (headers.length < firstCells.length) {
-        headers.push(`field${headers.length + 1}`);
+      delimitedHeaders = standardPipeHeaders.slice(0, firstCells.length);
+      while (delimitedHeaders.length < firstCells.length) {
+        delimitedHeaders.push(`field${delimitedHeaders.length + 1}`);
       }
       dataLines = lines;
     } else {
-      headers = firstCells;
+      delimitedHeaders = firstCells;
       dataLines = lines.slice(1);
     }
     if (!dataLines.length) throw new Error('Dữ liệu tự điền cần ít nhất một bản ghi.');
     records = dataLines.map(line => {
       const cells = line.split('|').map(c => c.trim());
-      const rec = {};
-      headers.forEach((h, idx) => {
-        rec[h] = cells[idx] ?? '';
-      });
-      return rec;
+      if (cells.length > delimitedHeaders.length) throw new Error('Dòng dữ liệu dạng pipe có nhiều ô hơn số cột.');
+      return cells;
     });
   } else {
     const rows = [];
@@ -112,46 +112,39 @@ function parseAutofillRecords(source) {
     if (quoted) throw new Error('CSV có dấu nháy kép chưa đóng.');
     row.push(value);
     if (row.some(cell => cell.trim())) rows.push(row);
-    const headers = rows.shift()?.map(header => header.trim().replace(/^\uFEFF/, ''));
-    if (!headers?.length || !rows.length) throw new Error('CSV cần hàng tiêu đề và ít nhất một bản ghi.');
-    records = rows.map(cells => {
-      if (cells.length !== headers.length) throw new Error('CSV có dòng không cùng số cột với tiêu đề.');
-      return Object.fromEntries(headers.map((header, index) => [header, cells[index]]));
-    });
+    delimitedHeaders = rows.shift()?.map(header => header.trim().replace(/^\uFEFF/, ''));
+    if (!delimitedHeaders?.length || !rows.length) throw new Error('CSV cần hàng tiêu đề và ít nhất một bản ghi.');
+    if (rows.some(cells => cells.length !== delimitedHeaders.length)) throw new Error('CSV có dòng không cùng số cột với tiêu đề.');
+    records = rows;
   }
   if (!Array.isArray(records) || !records.length) {
     throw new Error('Dữ liệu tự điền cần ít nhất một bản ghi.');
   }
   const allHeaders = new Set();
-  for (const record of records) {
-    if (record && typeof record === 'object' && !Array.isArray(record)) {
-      for (const key of Object.keys(record)) {
-        if (key.trim()) allHeaders.add(key.trim());
-      }
-    }
-  }
-  const headers = [...allHeaders];
-  if (!headers.length) {
-    throw new Error('Dữ liệu tự điền cần ít nhất một tên cột hợp lệ.');
-  }
-  const normalizedHeaders = headers.map(normalizeFieldName);
-  if (new Set(normalizedHeaders).size !== headers.length || normalizedHeaders.includes('')) {
-    throw new Error('Tên cột tự điền bị trùng hoặc không hợp lệ.');
-  }
-  return records.map(record => {
-    if (!record || Array.isArray(record) || typeof record !== 'object') {
+  const suppliedRecords = records.map(record => {
+    if (!delimitedHeaders && (!record || Array.isArray(record) || typeof record !== 'object')) {
       throw new Error('Mỗi bản ghi phải là một đối tượng dữ liệu.');
     }
-    const normalized = Object.fromEntries(headers.map(header => {
-      const value = record[header] ?? '';
-      if (/^mcp_answer_/i.test(header) && Array.isArray(value) && value.every(item => typeof item === 'string' && item.trim())) {
-        return [normalizeFieldName(header), JSON.stringify(value)];
+    const entries = delimitedHeaders ? delimitedHeaders.map((header, index) => [header, record[index] ?? '']) : Object.entries(record);
+    const supplied = Object.fromEntries(entries.map(([header, value]) => {
+      const key = normalizeFieldName(header);
+      if (!key) throw new Error('Tên cột tự điền không hợp lệ.');
+      allHeaders.add(key);
+      if (/^mcp_answer_/i.test(header.trim()) && Array.isArray(value) && value.every(item => typeof item === 'string' && item.trim())) {
+        return [key, JSON.stringify(value)];
       }
       if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) {
         throw new Error('Giá trị tự điền phải là chữ, số hoặc true/false.');
       }
-      return [normalizeFieldName(header), String(value ?? '').trim()];
+      return [key, String(value ?? '').trim()];
     }));
+    if (Object.keys(supplied).length !== entries.length) throw new Error('Tên cột tự điền bị trùng sau chuẩn hóa.');
+    return supplied;
+  });
+  if (!allHeaders.size) throw new Error('Dữ liệu tự điền cần ít nhất một tên cột hợp lệ.');
+  const emptyRecord = Object.fromEntries(Array.from(allHeaders, key => [key, '']));
+  return suppliedRecords.map(supplied => {
+    const normalized = { ...emptyRecord, ...supplied };
 
     // Tự động làm giàu các trường (Enrichment) để tương thích tối đa với mọi mẫu form:
     // Chỉ tạo các bí danh ngày sinh khi hồ sơ có đủ ngày, tháng và năm.
@@ -177,10 +170,10 @@ function parseAutofillRecords(source) {
     // 2.5. Mã bưu điện (Zip / Postal Code): map đầy đủ mọi biến thể tên cột
     const resolvedZip = normalized.zipcode || normalized.zip || normalized.ziporpostcode || normalized.ziporpostalcode || normalized.postalcode || normalized.postcode || normalized.postal || normalized.mabuudien;
     if (resolvedZip) {
-      normalized.zipcode = resolvedZip;
-      normalized.zip = resolvedZip;
-      normalized.postalcode = resolvedZip;
-      normalized.ziporpostcode = resolvedZip;
+      normalized.zipcode ||= resolvedZip;
+      normalized.zip ||= resolvedZip;
+      normalized.postalcode ||= resolvedZip;
+      normalized.ziporpostcode ||= resolvedZip;
     }
 
     // 3. Bang / Tỉnh (State Or Province)
@@ -191,9 +184,9 @@ function parseAutofillRecords(source) {
     // 3.5. Thành phố / Thị trấn (City / Town): chuẩn hóa mọi biến thể hoặc suy ra fallback chuẩn
     const resolvedCity = normalized.city || normalized.town || normalized.cityname || normalized.city_name || normalized.shippingcity || normalized.thanhpho;
     if (resolvedCity) {
-      normalized.city = resolvedCity;
-      normalized.town = resolvedCity;
-      normalized.cityname = resolvedCity;
+      normalized.city ||= resolvedCity;
+      normalized.town ||= resolvedCity;
+      normalized.cityname ||= resolvedCity;
     } else {
       const fallbackCity = getFallbackCity(normalized.state || normalized.stateorprovince, normalized.zipcode || normalized.zip);
       normalized.city = fallbackCity;
@@ -204,11 +197,11 @@ function parseAutofillRecords(source) {
     // 4. Địa chỉ (Address Line 1 / Street / Street Address)
     const resolvedAddress = normalized.address || normalized.addressline1 || normalized.address1 || normalized.streetaddress || normalized.street || normalized.addressline || normalized.addr || normalized.homeaddress || normalized.streetaddr || '';
     if (resolvedAddress) {
-      normalized.address = resolvedAddress;
-      normalized.addressline1 = resolvedAddress;
-      normalized.address1 = resolvedAddress;
-      normalized.streetaddress = resolvedAddress;
-      normalized.street = resolvedAddress;
+      normalized.address ||= resolvedAddress;
+      normalized.addressline1 ||= resolvedAddress;
+      normalized.address1 ||= resolvedAddress;
+      normalized.streetaddress ||= resolvedAddress;
+      normalized.street ||= resolvedAddress;
     }
 
     // Bổ sung bí danh còn thiếu, giữ nguyên các số riêng đã khai cho nhà và di động.
@@ -233,9 +226,9 @@ function parseAutofillRecords(source) {
     if (normalized.cardexpiresyear && !normalized.cardexpyear) {
       normalized.cardexpyear = normalized.cardexpiresyear;
     }
-    if (normalized.cardvalidationcode && !normalized.cvv) {
-      normalized.cvv = normalized.cardvalidationcode;
-      normalized.cvc = normalized.cardvalidationcode;
+    if (normalized.cardvalidationcode) {
+      normalized.cvv ||= normalized.cardvalidationcode;
+      normalized.cvc ||= normalized.cardvalidationcode;
     }
     if (normalized.cardnumber && !normalized.creditcard) {
       normalized.creditcard = normalized.cardnumber;

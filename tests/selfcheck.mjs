@@ -395,6 +395,27 @@ assert.equal(
   'IP đã click offer trước đó (Toffers Duplicate IP)',
 );
 
+// Các cột người dùng khai báo có thể khác nhau ngay cả khi chúng thường là bí danh.
+const importedColumns = {
+  ' nickname ': 'Bông', city: 'City A', town: 'Town B', address: '1 Test Ave', street: '2 Test St',
+  zipcode: '01234', postalcode: '04567', cardvalidationcode: 'test-a', cvc: 'test-b', floor: 0, lift: false,
+};
+const [independentColumns] = parseAutofillRecords(JSON.stringify(importedColumns));
+for (const [column, value] of Object.entries(importedColumns)) {
+  assert.equal(independentColumns[column.trim()], String(value), column);
+}
+assert.equal(independentColumns.cvv, 'test-a');
+const differentHeaderSpellings = parseAutofillRecords('[{" My Code ":"a"},{"my-code":"b","label":0}]');
+assert.deepEqual(differentHeaderSpellings.map(row => [row.mycode, row.label]), [['a', ''], ['b', '0']]);
+for (const duplicateColumns of ['[{"Code":"a"," Code ":"b"}]', 'Code,Code\na,b', 'Code|Code\na|b']) {
+  assert.throws(() => parseAutofillRecords(duplicateColumns), /trùng/);
+}
+const [independentCsv] = parseAutofillRecords('city,town,zip,postalcode\nCity A,Town B,01234,04567');
+assert.equal(independentCsv.town, 'Town B');
+assert.equal(independentCsv.postalcode, '04567');
+assert.equal(parseAutofillRecords('name,note\nFixture,"A | B"')[0].note, 'A | B');
+assert.equal(parseAutofillRecords('{\n\t"note": "mốc ,} và ,]"\n}')[0].note, 'mốc ,} và ,]');
+
 // Test parseAutofillRecords: hỗ trợ đầy đủ các trường SSN, Email, Banking và tự phục hồi JSON cắt cụt
 const sampleLeadJson = `[
   {

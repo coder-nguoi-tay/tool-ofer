@@ -10,6 +10,19 @@ import { matchFieldValue as matchSeparateProfileField } from '../src/autofill/of
 import { resolveProvidedFieldValue } from '../src/autofill/record-values/resolve-provided-field-value.mjs';
 import { parseAutofillRecords } from '../src/autofill/parse-autofill-records.mjs';
 
+test('ô điện thoại công việc và điện thoại nhà có nhãn tùy chọn dùng đúng số hồ sơ', () => {
+  const profile = { phone: '2025550147', workphone: '2025550190', homephone: '2025550180' };
+  for (const [label, name, record, expected] of [
+    ['Work phone (optional)', 'workphone', profile, profile.workphone],
+    ['Home telephone number - required', 'phone', profile, profile.homephone],
+    ['Work phone (optional)', 'phone', { phone: profile.phone }, null],
+  ]) {
+    const metadata = { type: 'tel', label, name, names: [name, label] };
+    assert.equal(matchFieldValue(metadata.names, record, metadata), expected, label);
+    assert.equal(resolveProvidedFieldValue(metadata, record), expected, label);
+  }
+});
+
 test('các đường đọc hồ sơ từ chối ô định danh mơ hồ, mã xác minh và thông tin người khác', () => {
   const profile = { ssn: '000-00-4321', firstname: 'Fixture', dob: '1994-03-09', phone: '2025550147' };
   const [suffixOnly] = parseAutofillRecords('ssn_last4\n4321');
