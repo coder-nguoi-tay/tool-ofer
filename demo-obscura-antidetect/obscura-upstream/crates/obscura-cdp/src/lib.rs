@@ -2,6 +2,7 @@ pub mod server;
 pub mod dispatch;
 pub mod types;
 pub mod domains;
+mod input_log;
 pub mod cookie_params;
 pub(crate) mod util;
 pub(crate) mod windows;

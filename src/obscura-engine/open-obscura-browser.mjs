@@ -45,7 +45,7 @@ export function obscuraViewport(profile) {
  * @return {Promise<object>} Phiên có BrowserContext, kết nối CDP và điều khiển vòng đời engine.
  * @throws {Error} Khi binary, proxy, cấu hình hoặc kết nối CDP thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-20
  */
 export async function openObscuraBrowser({ slot = 1, port = null, seed = null, os = 'windows', proxy = null,
   targetUrl = null, geo = null, registerSession = true, antiFingerprint = {}, startupSession = null, previousIdentity = null } = {}) {
@@ -97,7 +97,7 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
   });
   let browser, startupRecord, engine;
   try {
-    engine = await startObscuraSession({ port: await findFreePort(port ?? 9220 + slot), proxy: proxyUrl,
+    engine = await startObscuraSession({ slot, port: await findFreePort(port ?? 9220 + slot), proxy: proxyUrl,
       timezone: profile.timezone, userAgent: profile.user_agent, headers,
       tlsProfile: obscuraTlsProfile(profile), identity: { ...profile, seed: String(profileSeed), public_ip: geo?.ip || null, anti_fingerprint: antiFingerprint,
         geolocation: geo?.ll?.length === 2 ? { latitude: geo.ll[0], longitude: geo.ll[1] } : null },

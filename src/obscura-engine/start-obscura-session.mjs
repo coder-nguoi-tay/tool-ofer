@@ -1,7 +1,11 @@
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import { createInterface } from 'node:readline';
 import { resolveObscuraBinary } from './resolve-obscura-binary.mjs';
 import { OBSCURA_DEFAULT_PORT, OBSCURA_CONNECT_TIMEOUT_MS, OBSCURA_READY_POLL_INTERVAL_MS } from './constants.mjs';
+
+// Chỉ chuyển các bản ghi cố định của Rust vào log vận hành ở chế độ access.
+const inputTraceLine = /^\[ObscuraInput\] (?:ready|rate_limited|begin seq=\d+ tab=\d+ id=\d+ op=(?:down|up|touch_start|touch_end)|end seq=\d+ frame=\d+ result=(?:pressed|clicked|checked|unchecked|label_activated|cancelled|disabled|unmatched_press|no_target|no_tab|touch_unhandled|unknown) wait_ms=\d+ run_ms=\d+)$/;
 
 /**
  * Kiểm tra xem cổng HTTP của Obscura CDP Server đã sẵn sàng nhận kết nối hay chưa.
@@ -56,6 +60,7 @@ async function waitForObscuraReady(port, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS,
  * Khởi động một phiên Obscura CDP Server độc lập.
  *
  * @param {object} options
+ * @param {number} [options.slot=0] Slot gắn với tiến trình trong log chẩn đoán.
  * @param {number} [options.port=9222] Cổng lắng nghe CDP.
  * @param {string} [options.proxy] Proxy upstream (http:// hoặc socks5://).
  * @param {number} [options.timeoutMs=15000] Thời gian tối đa chờ server sẵn sàng.
@@ -68,9 +73,9 @@ async function waitForObscuraReady(port, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS,
  * @throws {Error} Khi spawn hoặc CDP không sẵn sàng.
  * @return {Promise<{ port: number, cdpEndpoint: string, process: import('node:child_process').ChildProcess, pid: number }>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-20
  */
-export async function startObscuraSession({ port = OBSCURA_DEFAULT_PORT, proxy = null, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS, timezone = 'UTC', userAgent = '', headers = {}, onSpawn = null,
+export async function startObscuraSession({ slot = 0, port = OBSCURA_DEFAULT_PORT, proxy = null, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS, timezone = 'UTC', userAgent = '', headers = {}, onSpawn = null,
   tlsProfile = 'chrome-windows', identity = null } = {}) {
   const binary = resolveObscuraBinary();
   const args = ['serve', String(port)];
@@ -78,10 +83,11 @@ export async function startObscuraSession({ port = OBSCURA_DEFAULT_PORT, proxy =
     args.push(proxy);
   }
 
+  const inputLogging = (process.env.AUTOLEADPC_OBSCURA_INPUT_LOG ?? '1') === '1';
   const child = spawn(binary, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, TZ: timezone, AUTOLEADPC_OBSCURA_PERSISTENT: '1', AUTOLEADPC_OBSCURA_USER_AGENT: userAgent, AUTOLEADPC_OBSCURA_HEADERS: JSON.stringify(headers),
+    env: { ...process.env, TZ: timezone, AUTOLEADPC_OBSCURA_PERSISTENT: '1', AUTOLEADPC_OBSCURA_INPUT_LOG: inputLogging ? '1' : '0', AUTOLEADPC_OBSCURA_USER_AGENT: userAgent, AUTOLEADPC_OBSCURA_HEADERS: JSON.stringify(headers),
       // TLS/HTTP2 giống trình duyệt thật theo thiết bị; không chặn tracker vì offer cần script chứng thực lead/pixel.
       AUTOLEADPC_OBSCURA_TLS_PROFILE: tlsProfile, OBSCURA_BLOCK_TRACKERS: '0',
       // Danh tính thiết bị để engine trả giá trị gốc (WebGL, font, giọng đọc, media, WebRTC) thay vì vá bằng script tiêm.
@@ -90,9 +96,12 @@ export async function startObscuraSession({ port = OBSCURA_DEFAULT_PORT, proxy =
 
   onSpawn?.(child);
   child.stdout.resume();
-  child.stderr.on('data', (chunk) => {
-    const msg = chunk.toString().trim();
-    if (msg) console.debug(`[Obscura:${port}:stderr]`, msg);
+  createInterface({ input: child.stderr }).on('line', line => {
+    if (inputLogging && inputTraceLine.test(line)) {
+      console.info(`[Process] ${new Date().toISOString()} slot=${Number.isSafeInteger(slot) ? slot : 0} pid=${child.pid} ${line}`);
+    } else if (line) {
+      console.debug(`[Obscura:${port}:stderr]`, line);
+    }
   });
 
   child.on('error', (err) => {

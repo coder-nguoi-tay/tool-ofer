@@ -795,7 +795,7 @@ pub async fn dispatch(req: &CdpRequest, ctx: &mut CdpContext) -> CdpResponse {
 /// @return CdpResponse Response thành công hoặc lỗi CDP.
 /// @throws never Chuyển lỗi handler thành CDP response.
 /// @author ductv <ductv@getflycrm.com>
-/// @since 2026-11-19
+/// @since 2026-11-20
 pub(crate) async fn dispatch_with_deferred(
     req: &CdpRequest,
     ctx: &mut CdpContext,
@@ -828,6 +828,7 @@ pub(crate) async fn dispatch_with_deferred(
     // audited to confirm it never reaches `JsRuntime::execute_script` or DOM
     // mutation that re-enters V8. (`get_session_page_mut` itself no longer
     // enters V8 as of #872, so calling it is not what gates a method here.)
+    let input_trace = crate::input_log::InputTrace::begin(req, ctx);
     let _v8_guard = if is_v8_free_method(&req.method) {
         None
     } else {
@@ -896,7 +897,7 @@ pub(crate) async fn dispatch_with_deferred(
         "Network" => domains::network::handle(method, &req.params, ctx, &req.session_id).await,
         "Fetch" => domains::fetch::handle(method, &req.params, ctx, &req.session_id).await,
         "IO" => domains::io::handle(method, &req.params, ctx).await,
-        "Input" => domains::input::handle(method, &req.params, ctx, &req.session_id).await,
+        "Input" => domains::input::handle_traced(method, &req.params, ctx, &req.session_id, input_trace).await,
         "Emulation" => domains::emulation::handle(method, &req.params, ctx, &req.session_id).await,
         "Storage" => domains::storage::handle(method, &req.params, ctx, &req.session_id).await,
         "LP" => domains::lp::handle(method, &req.params, ctx, &req.session_id).await,

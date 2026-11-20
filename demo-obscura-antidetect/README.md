@@ -111,3 +111,15 @@ page.add_preload_script(&stealth_js);
 // Điều hướng trang web
 page.goto("https://bot.sannysoft.com").await?;
 ```
+
+## Nhật ký thao tác bấm trong app Mac
+
+Khi mở engine từ app, Rust ghi `[ObscuraInput] ready` vào nhật ký của instance. Với instance 2, có thể theo dõi bằng lệnh sau.
+
+```sh
+tail -F /tmp/autoleadpc-2.log | rg --line-buffered -F '[ObscuraInput]'
+```
+
+Ghép hai dòng `begin` và `end` bằng cùng `pid` và `seq`. Dòng đầu ghi slot, tab và lệnh trước khi dispatcher đợi khóa V8. Dòng cuối ghi frame, kết quả xử lý, thời gian đợi vào handler (`wait_ms`) và thời gian chạy handler (`run_ms`). `checked` và `unchecked` cho biết trạng thái của ô native vừa được bấm trực tiếp. `cancelled` nghĩa là trang đã hủy sự kiện click. `label_activated` ghi nhận việc chuyển kích hoạt qua nhãn. `touch_unhandled` cho biết engine đã nhận lệnh chạm nhưng chưa phát sự kiện DOM. Việc trang đổi câu hỏi hoặc nhận dữ liệu trên server cần bằng chứng riêng.
+
+Mỗi engine ghi tối đa 60 lệnh nhấn/thả trong mỗi cửa sổ 60 giây và báo `rate_limited` một lần khi vượt ngưỡng. Log chỉ chứa mã số, trạng thái và thời gian. Có thể tắt cho các engine mở sau bằng `AUTOLEADPC_OBSCURA_INPUT_LOG=0` trong môi trường launcher. Khi chạy binary độc lập, đặt biến này bằng `1` để bật.

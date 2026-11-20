@@ -150,3 +150,64 @@ test('giao diện chỉ đổi tab khi API thành công và thông báo khi chuy
   assert.equal(renders, 1);
 });
 
+
+for (const logging of ['default', 'off']) {
+  test(`ObscuraInput ${logging} ghi đúng kết quả click của engine`, { skip: !available, timeout: 30000 }, async t => {
+    const originalFlag = process.env.AUTOLEADPC_OBSCURA_INPUT_LOG;
+    if (logging === 'off') process.env.AUTOLEADPC_OBSCURA_INPUT_LOG = '0';
+    else delete process.env.AUTOLEADPC_OBSCURA_INPUT_LOG;
+    t.after(() => {
+      if (originalFlag === undefined) delete process.env.AUTOLEADPC_OBSCURA_INPUT_LOG;
+      else process.env.AUTOLEADPC_OBSCURA_INPUT_LOG = originalFlag;
+    });
+    const lines = [];
+    t.mock.method(console, 'info', line => {
+      if (String(line).includes('[ObscuraInput]')) lines.push(line);
+    });
+    const session = await openObscuraBrowser({ slot: 997, port: 0, registerSession: false });
+    t.after(() => session.close());
+    const page = session.page;
+    await page.goto('data:text/html,<body><input type="radio" id="private-fixture" style="width:40px;height:40px"></body>');
+    const input = page.locator('input');
+    const bounds = await input.boundingBox();
+    assert.ok(bounds);
+    const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, button: 'left' };
+    const client = await session.browser.newCDPSession(page);
+    await client.send('Input.dispatchMouseEvent', { ...point, type: 'mouseMoved' });
+    await client.send('Input.dispatchMouseEvent', { ...point, type: 'mouseReleased' });
+    await input.evaluate(el => el.addEventListener('click', event => event.preventDefault(), { once: true }));
+    await page.mouse.click(point.x, point.y);
+    assert.equal(await input.isChecked(), false);
+    await page.mouse.click(point.x, point.y);
+    assert.equal(await input.isChecked(), true);
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: point.x, y: point.y }] });
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+
+    // Chờ pipe stderr bất đồng bộ được tháo hết trước khi kiểm tra cả trường hợp tắt log.
+    const engineClosed = new Promise(resolve => session.process.once('close', resolve));
+    if (logging === 'default') {
+      for (let i = 0; i < 60; i++) await client.send('Input.dispatchMouseEvent', { ...point, type: 'mouseReleased' });
+    }
+    await session.close();
+    await engineClosed;
+    if (logging === 'off') {
+      assert.deepEqual(lines, []);
+      return;
+    }
+    assert.match(lines[0], /^\[Process\] \S+ slot=997 pid=\d+ \[ObscuraInput\] ready$/);
+    const begin = lines.filter(line => line.includes(' begin '));
+    const end = lines.filter(line => line.includes(' end '));
+    assert.equal(begin.length, 60);
+    assert.equal(end.length, 60);
+    assert.equal(lines.filter(line => line.endsWith(' rate_limited')).length, 1);
+    assert.deepEqual(begin.slice(0, 7).map(line => line.match(/ op=(\w+)$/)[1]),
+      ['up', 'down', 'up', 'down', 'up', 'touch_start', 'touch_end']);
+    assert.deepEqual(end.slice(0, 7).map(line => line.match(/ result=(\w+)/)[1]),
+      ['unmatched_press', 'pressed', 'cancelled', 'pressed', 'checked', 'touch_unhandled', 'touch_unhandled']);
+    for (let i = 0; i < begin.length; i++) {
+      assert.match(begin[i], new RegExp(` begin seq=${i + 1} tab=[1-9]\\d* id=\\d+ op=\\w+$`));
+      assert.match(end[i], new RegExp(` end seq=${i + 1} frame=0 result=\\w+ wait_ms=\\d+ run_ms=\\d+$`));
+    }
+    assert.equal(lines.some(line => /private-fixture|data:text|mouseMoved/.test(line)), false);
+  });
+}

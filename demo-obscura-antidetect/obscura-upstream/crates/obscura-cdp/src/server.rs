@@ -387,7 +387,12 @@ pub async fn start_with_serve_options_and_limit(
     .await
 }
 
-/// Full serve entry point with optional atomic startup notification.
+/// Khởi động CDP server và báo engine sẵn sàng cho launcher.
+/// @param port, host Địa chỉ lắng nghe. @param proxy, stealth, user_agent Cấu hình trình duyệt.
+/// @param allow_file_access, storage_dir, allow_private_network Quyền và lưu trữ.
+/// @param max_connections Giới hạn kết nối. @param ready_file Tệp thông báo sẵn sàng.
+/// @return Kết quả vòng đời server. @throws Trả lỗi cấu hình hoặc I/O.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 #[allow(clippy::too_many_arguments)]
 pub async fn start_with_serve_options_limit_and_ready_file(
     port: u16,
@@ -452,6 +457,7 @@ pub async fn start_with_serve_options_limit_and_ready_file(
         .map_err(|e| anyhow::anyhow!("read bound address: {}", e))?;
     let port = bound_addr.port();
 
+    crate::input_log::ready();
     info!("Obscura CDP server listening on ws://{}", bound_addr);
     info!(
         "DevTools endpoint: ws://{}:{}/devtools/browser",

@@ -181,12 +181,32 @@ fn document_at_point(page: &mut obscura_browser::Page, mut x: f64, mut y: f64) -
     (current,x,y)
 }
 
+/// Phát lệnh input CDP qua API công khai của crate.
+/// @param method, params Tên và tham số lệnh. @param ctx, session_id Context và phiên đích.
+/// @return Kết quả handler. @throws Trả lỗi CDP khi lệnh không hợp lệ.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 pub async fn handle(
     method: &str,
     params: &Value,
     ctx: &mut CdpContext,
     session_id: &Option<String>,
 ) -> Result<Value, String> {
+    handle_traced(method, params, ctx, session_id, None).await
+}
+
+/// Phát sự kiện và ghi kết quả hit-test khi dispatcher đã mở một lượt chẩn đoán.
+/// @param method, params Lệnh và tham số. @param ctx, session_id Context và phiên đích.
+/// @param trace Lượt chẩn đoán trước khi lấy khóa V8.
+/// @return Kết quả handler. @throws Trả lỗi CDP khi lệnh không hợp lệ.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
+pub(crate) async fn handle_traced(
+    method: &str,
+    params: &Value,
+    ctx: &mut CdpContext,
+    session_id: &Option<String>,
+    trace: Option<crate::input_log::InputTrace>,
+) -> Result<Value, String> {
+    let handler_started = trace.as_ref().map(|_| std::time::Instant::now());
     match method {
         "dispatchMouseEvent" => {
             let event_type = params.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -203,6 +223,7 @@ pub async fn handle(
             let modifiers = params.get("modifiers").and_then(|v| v.as_u64()).unwrap_or(0);
             let (alt_key, ctrl_key, meta_key, shift_key) = modifier_flags(modifiers);
 
+            let mut outcome = Value::Null;
             if event_type == "mouseMoved" {
                 if let Some(page) = ctx.get_session_page_mut(session_id) {
                     let code = format!(
@@ -236,7 +257,7 @@ pub async fn handle(
                     let code = format!(
                         "(function() {{\
                             var target = (document.elementFromPoint && document.elementFromPoint({x},{y})) || globalThis.__obscura_click_target || document.activeElement || document.body;\
-                            if (!target) return;\
+                            if (!target) return 'no_target';\
                             globalThis.__obscura_click_target = target;\
                             globalThis.__obscura_mouse_down = {{target:target,button:{button_code},clickCount:{click_count}}};\
                             var previousTarget = globalThis.__obscura_mouse_over_target || null;\
@@ -269,6 +290,7 @@ pub async fn handle(
                                 if (focusTarget && !globalThis.__obscura_isDisabled(focusTarget)) focusTarget.focus();\
                                 else if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();\
                             }}\
+                            return 'pressed';\
                         }})()",
                         x = x,
                         y = y,
@@ -281,29 +303,29 @@ pub async fn handle(
                         shift_key = shift_key,
                         pointer_pressure = if buttons == 0 { 0.0 } else { 0.5 },
                     );
-                    evaluate_input(page, input_frame, &code);
+                    outcome = evaluate_input(page, input_frame, &code);
                 }
             } else if event_type == "mouseReleased" {
                 let moved_frame = if let Some(page) = ctx.get_session_page_mut(session_id) {
                     let code = format!(
                         "(function() {{\
                             var target = (document.elementFromPoint && document.elementFromPoint({x},{y})) || globalThis.__obscura_click_target || document.activeElement || document.body;\
-                            if (!target) return;\
+                            if (!target) return 'no_target';\
                             var down = globalThis.__obscura_mouse_down;\
                             globalThis.__obscura_mouse_down = null;\
                             var pointer = globalThis.__obscura_markTrusted(new PointerEvent('pointerup', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},button:{button_code},buttons:0,detail:0,pointerId:1,pointerType:'mouse',isPrimary:true,pressure:0,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
                             target.dispatchEvent(pointer);\
                             var evt = globalThis.__obscura_markTrusted(new MouseEvent('mouseup', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},button:{button_code},buttons:0,detail:{click_count},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
                             target.dispatchEvent(evt);\
-                            if (!down || down.button !== {button_code} || {button_code} !== 0) return;\
+                            if (!down || down.button !== {button_code} || {button_code} !== 0) return 'unmatched_press';\
                             var clickTarget = down.target;\
                             while (clickTarget && clickTarget !== target && !(clickTarget.contains && clickTarget.contains(target))) {{\
                                 clickTarget = clickTarget.parentElement;\
                             }}\
-                            if (!clickTarget) return;\
+                            if (!clickTarget) return 'no_target';\
                             var tag = clickTarget.tagName;\
                             var type = (clickTarget.getAttribute && clickTarget.getAttribute('type') || '').toLowerCase();\
-                            if (globalThis.__obscura_isDisabled(clickTarget)) return;\
+                            if (globalThis.__obscura_isDisabled(clickTarget)) return 'disabled';\
                             var checkable = tag === 'INPUT' && (type === 'checkbox' || type === 'radio');\
                             var oldChecked = checkable ? globalThis.__obscura_inputChecked(clickTarget) : false;\
                             var oldIndeterminate = checkable ? globalThis.__obscura_inputIndeterminate(clickTarget) : false;\
@@ -331,7 +353,7 @@ pub async fn handle(
                                 if (radioStates) {{\
                                     for (var rr = 0; rr < radioStates.length; rr++) globalThis.__obscura_setInputChecked(radioStates[rr][0], radioStates[rr][1]);\
                                 }} else if (checkable) {{ globalThis.__obscura_setInputChecked(clickTarget, oldChecked); globalThis.__obscura_setInputIndeterminate(clickTarget, oldIndeterminate); }}\
-                                return;\
+                                return 'cancelled';\
                             }}\
                             if ({click_count} === 2) {{\
                                 var doubleClick = globalThis.__obscura_markTrusted(new MouseEvent('dblclick', {{bubbles:true,cancelable:true,view:globalThis,clientX:{x},clientY:{y},button:0,buttons:0,detail:2,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
@@ -340,15 +362,15 @@ pub async fn handle(
                             if (checkable && globalThis.__obscura_inputChecked(clickTarget) !== oldChecked) {{\
                                 try {{ clickTarget.dispatchEvent(globalThis.__obscura_markTrusted(new Event('input', {{bubbles:true}}))); }} catch(e) {{}}\
                                 try {{ clickTarget.dispatchEvent(globalThis.__obscura_markTrusted(new Event('change', {{bubbles:true}}))); }} catch(e) {{}}\
-                                return;\
+                                return {tracing} && globalThis.__obscura_inputChecked(clickTarget) ? 'checked' : 'unchecked';\
                             }}\
                             var labelHost = tag === 'LABEL' ? clickTarget : (clickTarget.closest ? clickTarget.closest('label') : null);\
                             var interactiveHost = globalThis.__obscura_interactiveHost(clickTarget);\
                             if (labelHost && !(interactiveHost && labelHost.contains(interactiveHost))) {{\
                                 var ctl = globalThis.__obscura_labeledControl(labelHost);\
-                                if (ctl && ctl !== clickTarget && globalThis.__obscura_activateLabel(labelHost, ctl, true)) {{ return; }}\
+                                if (ctl && ctl !== clickTarget && globalThis.__obscura_activateLabel(labelHost, ctl, true)) {{ return 'label_activated'; }}\
                             }}\
-                            if (globalThis.__obscura_activateSummary(clickTarget)) return;\
+                            if (globalThis.__obscura_activateSummary(clickTarget)) return 'clicked';\
                             var link = clickTarget.closest ? clickTarget.closest('a[href]') : null;\
                             if (!link && tag === 'A' && clickTarget.getAttribute('href')) link = clickTarget;\
                             var submitButton = tag === 'BUTTON' ? clickTarget : (clickTarget.closest ? clickTarget.closest('button') : null);\
@@ -366,7 +388,9 @@ pub async fn handle(
                                 if (clickTarget.setSelectionRange) clickTarget.setSelectionRange(0, len);\
                                 else {{ clickTarget.selectionStart = 0; clickTarget.selectionEnd = len; }}\
                             }}\
+                            return {tracing} && checkable ? (globalThis.__obscura_inputChecked(clickTarget) ? 'checked' : 'unchecked') : 'clicked';\
                         }})()",
+                        tracing = trace.is_some(),
                         x = x,
                         y = y,
                         button_code = button_code,
@@ -376,7 +400,7 @@ pub async fn handle(
                         meta_key = meta_key,
                         shift_key = shift_key,
                     );
-                    evaluate_input(page, input_frame, &code);
+                    outcome = evaluate_input(page, input_frame, &code);
                     // Document navigation runs after the input acknowledgement.
                     // Same-document routing still needs a frame notification.
                     if !page.has_pending_navigation() && page.sync_virtual_url() {
@@ -441,6 +465,10 @@ pub async fn handle(
                 }
             }
 
+            if let (Some(trace), Some(started)) = (trace, handler_started) {
+                let result = if ctx.get_session_page(session_id).is_none() { "no_tab" } else { outcome.as_str().unwrap_or("unknown") };
+                trace.finish(started, input_frame, result);
+            }
             Ok(json!({}))
         }
         // Chrome's Input.insertText: Playwright's fill() focuses the field in
@@ -555,7 +583,12 @@ pub async fn handle(
 
             Ok(json!({}))
         }
-        "dispatchTouchEvent" => Ok(json!({})),
+        "dispatchTouchEvent" => {
+            if let (Some(trace), Some(started)) = (trace, handler_started) {
+                trace.finish(started, 0, "touch_unhandled");
+            }
+            Ok(json!({}))
+        }
         "setIgnoreInputEvents" => Ok(json!({})),
         _ => Err(format!("Unknown Input method: {}", method)),
     }
