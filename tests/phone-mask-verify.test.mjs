@@ -103,6 +103,8 @@ test('ô phone có mask (814-362-6091) được coi là đã điền đúng, kh�
   t.after(() => browser.close());
   const { context, page } = await createFormScopeFixture(browser, `<form><input id="phone" name="phone" type="tel" oninput="const d=this.value.replace(/\\D/g,'').slice(0,10);this.value=d.replace(/(\\d{3})(\\d{0,3})(\\d{0,4})/,(m,a,b,c)=>[a,b,c].filter(Boolean).join('-'));window.typed=(window.typed||0)+1"></form>`);
   t.after(() => context.close());
+  // Đo số lần nhập lại khi các chữ số đã đúng ngay từ lượt đầu.
+  t.mock.method(Math, 'random', () => 0.5);
   const logs = [];
   await fillSelectOrTextField({ metadata: { type: 'tel', id: 'phone', names: ['phone'] }, field: page.locator('#phone'), page, frame: page, valueToFill: '8143626091', options: { onLog: entry => logs.push(entry) }, session: {}, frameProgress: { filledInThisPass: 0 }, unmatchedFieldNames: new Set(), record: {} });
   assert.equal(await page.inputValue('#phone'), '814-362-6091');

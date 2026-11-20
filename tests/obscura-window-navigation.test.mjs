@@ -252,8 +252,14 @@ test('Obscura phân biệt timeout trước header, giữa body và tài nguyên
   for (const [path, type] of [['css', 'Stylesheet'], ['script', 'Script']]) {
     await t.test('HTML 200 vẫn hoàn tất khi ' + type + ' hết hạn', async () => {
       failures.length = 0;
-      await cdp.send('Page.navigate', { url: origin + '/' + path });
-      assert.equal(await session.page.evaluate(() => window.fixtureReady), true);
+      const destination = origin + '/' + path;
+      await cdp.send('Page.navigate', { url: destination });
+      await assertEventually(() => session.page.evaluate(
+        expected => location.href === expected && window.fixtureReady === true, destination,
+      ).catch(error => {
+        if (/execution context was destroyed/i.test(error.message)) return false;
+        throw error;
+      }), 'Document đích phải chạy xong script của fixture');
       assert.equal((await cdp.send('Page.getFrameTree')).frameTree.frame.url, origin + '/' + path);
       if (path === 'css') {
         assert.equal(await session.page.evaluate(() => getComputedStyle(document.getElementById('probe')).width), '77px');
