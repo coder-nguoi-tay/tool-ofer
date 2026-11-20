@@ -1,3 +1,5 @@
+import { parseDobComponents } from './parse-dob-components.mjs';
+
 /**
  * Lấy ngày sinh gộp trong hồ sơ hoặc ghép từ ba thành phần đã cung cấp.
  * @param {object} record Bản ghi chứa cột ngày sinh đầy đủ hoặc các cột tách biệt.
@@ -10,6 +12,7 @@ export function getDobString(record) {
   if (!record) return '';
   const full = record.dob || record.dateofbirth || record.birthdate || record.ngaythangnamsinh || record.birth || record.bday;
   if (full) return String(full);
+  if (parseDobComponents(record.namsinh)) return String(record.namsinh);
   const day = record.birthday || record.dobday || record.ngaysinh;
   if (day && !/^\d{1,2}$/.test(String(day))) return String(day);
   const month = record.birthmonth || record.dobmonth;
