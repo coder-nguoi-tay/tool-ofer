@@ -1,3 +1,4 @@
+import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { readAddressSelection } from './read-address-selection.mjs';
 import { collectFieldMetadata } from './collect-field-metadata.mjs';
 import { locateFormElements } from './form-scope/locate-form-elements.mjs';
@@ -18,6 +19,7 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
   const scope = context?._activeAutofillFormScope;
   if (!scope?.rootSelector || !scope.memberSelector || scope.active === false || scope.unavailable) return { success: false };
   let handle;
+  let decision;
   try {
     if (!field) {
       const candidates = locateFormElements(context, 'input:not([type]), input[type=text], input[type=tel], input[type=search], textarea', scope);
@@ -45,7 +47,14 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
       const selection = await handle.evaluate(readAddressSelection, expectedAddress || undefined);
       if (selection.retained || selection.pending) return { success: selection.retained && action !== 'inspect', retained: selection.retained };
     }
-    return await context.evaluate(({ scope, input, selectors, action, expectedAddress }) => {
+    /**
+     * Tìm gợi ý đầu tiên hợp lệ của ô hiện tại trong chính tài liệu chứa form.
+     * @param {object} request Phạm vi, ô nhập và truy vấn địa chỉ.
+     * @return {Element|object} Dòng cần click hoặc kết quả kiểm tra DOM.
+     * @author ductv <ductv@getflycrm.com>
+     * @since 2026-11-20
+     */
+    const findAddressOption = ({ scope, input, selectors, action, expectedAddress, isAddress }) => {
       const root = document.querySelector(scope.rootSelector);
       const outside = 'footer, header, nav, aside, [role="navigation"], [role="contentinfo"], [role="banner"], [role="complementary"], [role="search"], .footer, .site-footer, #footer, .ow-attribution, [data-ux-footer-link], [hidden], [inert], [aria-hidden="true"], [aria-disabled="true"]';
       const visible = element => {
@@ -82,8 +91,9 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
         ));
       };
       const normalize = text => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-        .replace(/\b(street|road|avenue|boulevard|lane|drive)\b/g, word =>
-          ({ street: 'st', road: 'rd', avenue: 'ave', boulevard: 'blvd', lane: 'ln', drive: 'dr' })[word]);
+        .replace(/\b(street|road|avenue|boulevard|lane|drive|north|south|east|west|northeast|northwest|southeast|southwest)\b/g, word =>
+          ({ street: 'st', road: 'rd', avenue: 'ave', boulevard: 'blvd', lane: 'ln', drive: 'dr',
+             north: 'n', south: 's', east: 'e', west: 'w', northeast: 'ne', northwest: 'nw', southeast: 'se', southwest: 'sw' })[word]);
       const query = expectedAddress || input._autoleadAddressQuery || input.value;
       const expected = normalize(query);
       const selector = selectors.join(',');
@@ -108,8 +118,9 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
       }
       const items = [...choices];
       const matching = expected ? items.filter(item =>
-        (' ' + normalize(item.getAttribute('data-street_line') || item.textContent || item.value) + ' ').includes(' ' + expected + ' ')) : items;
-      if (matching.length !== 1) return { success: false };
+        [item.getAttribute('data-street_line'), item.getAttribute('aria-label'), item.textContent || item.value]
+          .some(label => label && (' ' + normalize(label) + ' ').includes(' ' + expected + ' '))) : items;
+      if (!matching.length || matching.length > 1 && (!isAddress || !expected)) return { success: false };
       const item = matching[0];
       const text = (item.textContent || item.value || '').trim();
       const prior = input._autoleadAddressChoice;
@@ -152,14 +163,36 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
       const rect = item.getBoundingClientRect();
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       if (!item.contains(hit) || hit.closest('a[href], button') !== item.closest('a[href], button')) return { success: false };
-      item.click();
-      choice.display = input.value;
+      // Giữ đúng dòng đã kiểm tra qua lượt click, kể cả khi widget thay danh sách lúc nhấn chuột.
       input._autoleadAddressChoice = choice;
-      return { success: true, text };
-    }, { scope, input: handle || null, selectors: ADDRESS_SUGGESTION_SELECTORS, action, expectedAddress });
+      return item;
+    };
+    const request = { scope, input: handle, selectors: ADDRESS_SUGGESTION_SELECTORS, action, expectedAddress, isAddress: meaning === 'address' };
+    const page = typeof context.page === 'function' ? context.page() : context;
+    if (action !== 'inspect' && shouldStopAfterLead(page._autofillSession)) return { success: false };
+    if (action !== 'select') return await context.evaluate(findAddressOption, request);
+    decision = await context.evaluateHandle(findAddressOption, request);
+    const option = decision.asElement();
+    if (!option) return await decision.jsonValue();
+    const clicked = !shouldStopAfterLead(page._autofillSession) &&
+      await option.click({ timeout: 1000 }).then(() => true, () => false);
+    if (!clicked) {
+      await handle.evaluate((input, item) => {
+        if (input._autoleadAddressChoice?.item === item) delete input._autoleadAddressChoice;
+      }, option).catch(() => {});
+      return { success: false };
+    }
+    const text = await handle.evaluate((input, item) => {
+      const choice = input._autoleadAddressChoice;
+      if (choice?.item !== item) return '';
+      choice.display = input.value;
+      return choice.label;
+    }, option).catch(() => '');
+    return { success: true, text };
   } catch {
     return { success: false };
   } finally {
+    await decision?.dispose().catch(() => {});
     await handle?.dispose().catch(() => {});
   }
 }

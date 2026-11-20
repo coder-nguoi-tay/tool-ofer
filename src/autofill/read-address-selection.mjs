@@ -14,15 +14,16 @@ export function readAddressSelection(input, query) {
   const priorQuery = input._autoleadAddressQuery;
   query ??= priorQuery || choice?.query || display;
   /**
-   * Chuẩn hóa ranh giới từ để không nhầm số nhà 10 với 110.
+   * Chuẩn hóa hậu tố đường, hướng và ranh giới từ để không nhầm số nhà 10 với 110.
    * @param {string} text Giá trị truy vấn hoặc nhãn được chọn.
    * @return {string} Chuỗi từ dùng để so khớp địa chỉ.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-19
+   * @since 2026-11-20
    */
   const normalized = text => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-    .replace(/\b(street|road|avenue|boulevard|lane|drive)\b/g, word =>
-      ({ street: 'st', road: 'rd', avenue: 'ave', boulevard: 'blvd', lane: 'ln', drive: 'dr' })[word]);
+    .replace(/\b(street|road|avenue|boulevard|lane|drive|north|south|east|west|northeast|northwest|southeast|southwest)\b/g, word =>
+      ({ street: 'st', road: 'rd', avenue: 'ave', boulevard: 'blvd', lane: 'ln', drive: 'dr',
+         north: 'n', south: 's', east: 'e', west: 'w', northeast: 'ne', northwest: 'nw', southeast: 'se', southwest: 'sw' })[word]);
   const current = normalized(display);
   const expected = normalized(query);
   const valid = input.getAttribute('aria-invalid') !== 'true' && input.validity?.valid !== false;
@@ -87,10 +88,13 @@ export function readAddressSelection(input, query) {
         if ((' ' + label + ' ').includes(' ' + expected + ' ') && (matchesQuery || current === label)) result.retained = true;
       }
     }
-    if (list.localName === 'select' && !list.hasAttribute('multiple') && choice?.item?.closest('select') === list) {
-      result.pending = false;
-      if (list.selectedIndex < 0 || !list.value || list.options[list.selectedIndex] !== choice.item) continue;
+    if (list.localName === 'select' && !list.hasAttribute('multiple')) {
       const selected = list.options[list.selectedIndex];
+      if (!selected || !list.value || selected.disabled || selected.closest('optgroup[disabled]')) continue;
+      const initial = [...list.options].filter(option => option.defaultSelected).at(-1) ||
+        [...list.options].find(option => !option.disabled && !option.closest('optgroup[disabled]'));
+      if (selected !== choice?.item && selected === initial) continue;
+      result.pending = false;
       const label = normalized(selected?.textContent || selected?.value);
       if ((' ' + label + ' ').includes(' ' + expected + ' ') && (supportsQuery || current === label)) result.retained = true;
     }

@@ -21,7 +21,7 @@ test('địa chỉ: kiểm tra gợi ý trong Chromium cục bộ', { skip: !exi
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.route('**/*', route => route.abort());
-  const suggestions = '<div role="listbox" id="results"><div role="option" onmousedown="this.dataset.clicks=Number(this.dataset.clicks||0)+1" onclick="this.dataset.clicks=Number(this.dataset.clicks||0)+1">10 Oak St</div></div>';
+  const suggestions = '<div role="listbox" id="results"><div role="option" onmousedown="this.dataset.presses=Number(this.dataset.presses||0)+1" onclick="this.dataset.clicks=Number(this.dataset.clicks||0)+1">10 Oak St</div></div>';
   const field = '<input name="address" value="10 Oak St" aria-controls="results">';
 
   await t.test('chỉ chọn một lần trong danh sách ARIA do ô nhập sở hữu', async () => {
@@ -30,6 +30,7 @@ test('địa chỉ: kiểm tra gợi ý trong Chromium cục bộ', { skip: !exi
     const input = page.locator('input');
     assert.equal(await hasActiveAddressSuggestions(page, page, input), true);
     assert.equal(await selectFirstAddressSuggestion(page, page, input), true);
+    assert.equal(await page.locator('#results [role=option]').getAttribute('data-presses'), '1');
     assert.equal(await page.locator('#results [role=option]').getAttribute('data-clicks'), '1');
     assert.equal(await page.locator('[data-wrong]').count(), 0);
   });
@@ -69,7 +70,7 @@ test('địa chỉ: kiểm tra gợi ý trong Chromium cục bộ', { skip: !exi
     assert.equal(await page.locator('[data-clicks]').count(), 0);
   });
 
-  await t.test('select chỉ đổi khi đúng form, đúng địa chỉ và có một lựa chọn khớp', async () => {
+  await t.test('select chọn lựa chọn đầu tiên khớp địa chỉ trong đúng form', async () => {
     const select = '<select name="verified_address"><option value="">Choose</option><option value="a">110 Oak St</option><option value="b">10 Oak St</option></select>';
     await page.setContent('<form id="active"><input name="address" value="10 Oak St">' + select + '</form><footer><form>' + select + '</form></footer>');
     const input = page.locator('#active input');
@@ -83,8 +84,26 @@ test('địa chỉ: kiểm tra gợi ý trong Chromium cục bộ', { skip: !exi
       select.add(new Option('10 Oak St, unit B', 'c'));
       select.value = '';
     });
-    assert.equal((await handleAddressSelectDropdown(page, { address: '10 Oak St' }, input)).success, false);
-    assert.equal(await page.locator('#active select').inputValue(), '');
+    assert.equal((await handleAddressSelectDropdown(page, { address: '10 Oak St' }, input)).success, true);
+    assert.equal(await page.locator('#active select').inputValue(), 'b');
+  });
+
+  await t.test('giữ mục select người dùng chọn, kiểm tra lại khi record hoặc trạng thái hợp lệ thay đổi', async () => {
+    const { readAddressSelection } = await import('../src/autofill/read-address-selection.mjs');
+    await page.setContent(`<form><input name="address" value="10 North Oak Street" aria-controls="choices">
+      <select id="choices" onchange="this.form.dataset.changes=Number(this.form.dataset.changes||0)+1">
+        <option value="">Choose</option><option value="a">10 N Oak St Unit A</option><option value="b">10 N Oak St Unit B</option>
+      </select></form>`);
+    const input = page.locator('input');
+    await page.locator('select').selectOption('b');
+    await resolveActiveFormScope(page);
+    assert.equal((await input.evaluate(readAddressSelection, '10 North Oak Street')).retained, true);
+    assert.equal((await handleAddressSelectDropdown(page, { address: '10 North Oak Street' }, input)).success, true);
+    assert.equal(await page.locator('select').inputValue(), 'b');
+    assert.equal(await page.locator('form').getAttribute('data-changes'), '1');
+    assert.equal((await input.evaluate(readAddressSelection, '110 North Oak Street')).retained, false);
+    await input.evaluate(field => field.setAttribute('aria-invalid', 'true'));
+    assert.equal((await input.evaluate(readAddressSelection, '10 North Oak Street')).retained, false);
   });
 
   await t.test('từ chối link hoặc khi tâm mục gợi ý bị phần tử khác che', async () => {
@@ -289,14 +308,15 @@ test('Mailing Address qua toàn bộ lượt quét: giữ nguyên truy vấn đ�
   });
   const menu = page.locator('.address-suggestions');
   assert.match((await fillPageForms(page, context))?.waitReason || '', /gợi ý/);
-  for (const results of [['110 Oak St'], ['10 Oak St Unit A', '10 Oak St Unit B']]) {
-    await menu.evaluate((list, results) => { list.innerHTML = results.map((text, index) =>
-        '<div class="' + (index ? 'address-suggestion' : 'address-item') + '">' + text + '</div>').join(''); }, results);
-    assert.equal((await fillPageForms(page, context))?.waitingForAddress, true);
-  }
+  await menu.evaluate(list => { list.innerHTML = '<div class="address-item">110 Oak St</div>'; });
+  assert.equal((await fillPageForms(page, context))?.waitingForAddress, true);
   assert.deepEqual(await page.evaluate(() => window.events), { inputs: 1, choices: 0, submits: 0 });
-  await menu.evaluate(list => { list.innerHTML = '<div class="address-item">10 Oak St, Test City</div>'; });
+  await menu.evaluate(list => {
+    list.innerHTML = '<div class="address-item" aria-disabled="true">10 Oak St (disabled)</div><div class="address-item">10 Oak St, Test City</div><div class="address-item">10 Oak St Unit B</div>';
+    list.addEventListener('click', event => { list.dataset.chosen = event.target.textContent; });
+  });
   assert.match((await fillPageForms(page, context))?.waitReason || '', /xác nhận/);
+  assert.equal(await menu.getAttribute('data-chosen'), '10 Oak St, Test City');
   await page.locator('#address').evaluate(input => { input.value = '10 Oak Street, Test City'; });
   assert.match((await fillPageForms(page, context))?.waitReason || '', /xác nhận/);
   await page.waitForTimeout(2600);
@@ -310,4 +330,49 @@ test('Mailing Address qua toàn bộ lượt quét: giữ nguyên truy vấn đ�
   await fillPageForms(page, context);
   assert.deepEqual(await page.evaluate(() => window.events), { inputs: 1, choices: 1, submits: 1 });
   assert.equal(await page.locator('#address').inputValue(), '10 Oak Street, Test City');
+});
+
+test('địa chỉ đã chọn bằng tay được giữ sau khi widget xác nhận cách viết chuẩn', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { fillPageForms } = await import('../src/autofill/fill-page-forms.mjs');
+  const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<form>
+    <label>Mailing Address<input id="address" name="address" required data-type="address" data-populated="false"></label>
+    <input type="hidden" name="place_id"><div class="address-suggestions"></div><button disabled>Continue</button></form>`);
+  session.slot = 2;
+  const context = { session, sessionRecord: { address: '10 North Oak St' }, options: {} };
+  await page.evaluate(() => {
+    const form = document.querySelector('form');
+    window.events = { inputs: 0, choices: 0, submits: 0 };
+    form.elements.address.oninput = () => { window.events.inputs++; };
+    form.onsubmit = event => { event.preventDefault(); window.events.submits++; form.hidden = true; };
+  });
+  assert.equal((await fillPageForms(page, context))?.waitingForAddress, true);
+  await page.evaluate(() => {
+    const form = document.querySelector('form'), input = form.elements.address;
+    const list = form.querySelector('.address-suggestions');
+    list.innerHTML = '<button class="address-item" type="button">10 N Oak Street, Test City</button>';
+    list.firstElementChild.onmousedown = () => {
+      window.events.choices++;
+      input.value = '10 N Oak Street, Test City';
+      input.dataset.street_line = '10 N Oak Street';
+      input.dataset.populated = 'true';
+      form.elements.place_id.value = 'local-result';
+      form.querySelector('button[disabled]').disabled = false;
+      list.replaceChildren();
+    };
+  });
+  await page.locator('.address-item').click();
+  const { readAddressSelection } = await import('../src/autofill/read-address-selection.mjs');
+  const field = page.locator('#address'), token = page.locator('[name=place_id]');
+  await token.evaluate(input => { input.value = ''; });
+  assert.equal((await field.evaluate(readAddressSelection, context.sessionRecord.address)).retained, false);
+  await token.evaluate(input => { input.value = 'local-result'; });
+  await field.evaluate(input => { input.value = '110 N Oak Street, Test City'; });
+  assert.equal((await field.evaluate(readAddressSelection, context.sessionRecord.address)).retained, false);
+  await field.evaluate(input => { input.value = '10 N Oak Street, Test City'; });
+  await fillPageForms(page, context);
+  assert.deepEqual(await page.evaluate(() => window.events), { inputs: 1, choices: 1, submits: 1 });
+  assert.equal(await page.locator('#address').inputValue(), '10 N Oak Street, Test City');
 });

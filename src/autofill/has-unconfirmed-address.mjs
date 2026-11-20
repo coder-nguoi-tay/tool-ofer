@@ -28,7 +28,7 @@ export async function getAddressWaitReason(frame, scope, address) {
       if (!choice.requiresSelection || choice.retained) continue;
       if (!address && !choice.display) return 'Record chưa có địa chỉ cho trường bắt buộc.';
       if (choice.attempted || choice.pending) return 'Chờ form xác nhận địa chỉ đã chọn.';
-      return 'Chờ một gợi ý địa chỉ khớp duy nhất với record.';
+      return 'Chờ gợi ý địa chỉ khớp với record.';
     }
     return '';
   } finally {
