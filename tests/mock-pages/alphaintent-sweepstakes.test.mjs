@@ -146,6 +146,6 @@ test('Alpha Intent / SweepstakesAlerts: fillAlphaIntentSpecialFields handles #ai
   assert.equal(values.inputAddress, '123 Main St', 'hidden input-address synced');
   assert.equal(values.date, '08/15/1990', 'date of birth formatted MM/DD/YYYY');
   assert.equal(values.inputDob, '08/15/1990', 'hidden input-dob synced');
-  assert.match(values.phone, /^\((814|817)\) \d{3}-\d{4}$/, 'phone formatted (XXX) XXX-XXXX');
+  assert.equal(values.phone, '(201) 555-0144', 'phone is formatted with the area code supplied by the fixture');
   assert.equal(values.inputPhone, values.phone, 'hidden input-phone synced');
 });

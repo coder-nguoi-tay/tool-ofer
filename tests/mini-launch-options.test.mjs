@@ -7,8 +7,9 @@ import vm from 'node:vm';
  * Chạy script tab Vận hành của giao diện mini trên DOM giả, bắt các request gửi lên server.
  * @param {object} [globals] Biến toàn cục bổ sung (vd. hàm của tab Cài đặt).
  * @return {object} VM, DOM giả và các request đã gửi.
+ * @throws {Error} Khi không thể đọc hoặc nạp script giao diện vào VM.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-14
+ * @since 2026-11-20
  */
 function createMini(globals = {}) {
   const elements = new Map();
@@ -26,7 +27,7 @@ function createMini(globals = {}) {
     fetch: async (url, options) => { requests.push({ url, body: JSON.parse(options.body) }); return { json: async () => ({ success: true }) }; },
     ...globals,
   });
-  for (const file of ['features/run/run-tools.js', 'setup/window-set-browser-mode-mode.js', 'setup/btn-start-launch-click.js']) {
+  for (const file of ['functions/load-last-launch-settings.js', 'features/run/run-tools.js', 'setup/window-set-browser-mode-mode.js', 'setup/btn-start-launch-click.js']) {
     vm.runInContext(readFileSync(new URL(`../ui/mini/${file}`, import.meta.url), 'utf8'), context);
   }
   const launch = () => requests.find(request => request.url === '/launch' || request.url === '/auto-refill/sequential');

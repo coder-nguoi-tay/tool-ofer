@@ -10,8 +10,9 @@ const helpers = ['get-lead-check-settings', 'select-lead-check-interval', 'toggl
  * Dựng giao diện giả và bắt payload Start mà không gọi API hoặc mở trình duyệt thật.
  * @param {string} mode Luồng thường hoặc sequential.
  * @return {object} Checkbox, VM và các lệnh đã gửi.
+ * @throws {Error} Khi không thể đọc hoặc nạp script giao diện vào VM.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-20
  */
 function createDashboard(mode = 'parallel') {
   const elements = new Map();
@@ -20,6 +21,7 @@ function createDashboard(mode = 'parallel') {
     return elements.get(id);
   };
   getElement('txtLinkOffer').value = 'https://offer.test/form';
+  getElement('nudThread').value = '1';
   getElement('cbxAuto').value = mode;
   const requests = [];
   const context = vm.createContext({ window: { cachedSessions: [] }, document: { getElementById: getElement },
@@ -27,7 +29,7 @@ function createDashboard(mode = 'parallel') {
     showWinAlert: message => assert.fail(message), saveOfferConfig: async () => ({ success: true }),
     api: async (path, options) => { requests.push({ path, body: JSON.parse(options.body) }); return {}; },
   });
-  for (const name of [...helpers, 'handle-start']) vm.runInContext(readFileSync(new URL(`../ui/desktop/functions/${name}.js`, import.meta.url), 'utf8'), context);
+  for (const name of [...helpers, 'apply-offer-run-options', 'handle-start']) vm.runInContext(readFileSync(new URL(`../ui/desktop/functions/${name}.js`, import.meta.url), 'utf8'), context);
   return { getElement, context, requests };
 }
 
