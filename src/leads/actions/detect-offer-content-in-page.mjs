@@ -7,7 +7,7 @@
  * @return {object} Trạng thái tải, bằng chứng tương tác và nội dung đang hiển thị trong tài liệu.
  * @throws {Error} Khi tài liệu bị hủy trong quá trình quét.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export function detectOfferContentInPage({ subTab = false, frameStatus = false, loadingOnly = false, remainingIframeWork = false } = {}) {
   const mainSelector = 'main, [role="main"], #main, #content, .main-content, .site-main';
@@ -15,7 +15,7 @@ export function detectOfferContentInPage({ subTab = false, frameStatus = false, 
     '[id^="sign_up_step"], [id^="twy-campaigns-"], .twy-campaigns, .twy-customquestion, ' +
     '.form-step, .survey-step, .step.active, .current-step, .form-container, .survey-container, .quiz-container, .question-container, [data-question-id]' +
     (subTab ? ', .Survey .Qst' : '');
-  const offerCardSelector = '.offerwall-card-wrap, .offerwall-card, form[data-tf-element-role="offer"], .campaign-card, ' +
+  const offerCardSelector = '.offerwall-card-wrap, .offerwall-card, form[data-tf-element-role="offer"]:not([data-object-type="form"]), .campaign-card, ' +
     '.offer-container-v2, .offer-item, .reward-card, .offer-tile, .tile-offer, .offers-list .card, ' +
     '[data-offer-id], [data-campaign-id], [data-creative-id], [data-mock-secondary-offer-card], [class*="offer"][class*="card"]';
   const excludedSelector = 'header, nav, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"], ' +

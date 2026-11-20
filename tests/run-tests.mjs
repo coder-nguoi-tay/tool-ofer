@@ -21,6 +21,7 @@ const TEST_FILES = [
   'obscura-engine.test.mjs',
   'obscura-runtime.test.mjs',
   'obscura-window-navigation.test.mjs',
+  'obscura-form-and-tab-regressions.test.mjs',
   'obscura-script-lifecycle.test.mjs',
   'obscura-native-configuration.test.mjs',
   'obscura-iframe-navigation.test.mjs',

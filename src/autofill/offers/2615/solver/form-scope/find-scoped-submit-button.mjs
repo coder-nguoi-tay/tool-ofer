@@ -3,13 +3,13 @@ import { FORM_UTILITY_REGIONS } from '../../../../../browser/locators/form-utili
 import { SURVEY_LEGAL_NOISE_RE } from '../../../../../survey-solver/state/survey-legal-noise-re.mjs';
 
 /**
- * Tìm nút gửi thuộc đúng form, kể cả nút HTML liên kết bằng thuộc tính form ở bên ngoài.
+ * Tìm nút gửi của form liên hệ và control liên kết, phân biệt với CTA của thẻ offer.
  * @param {object} frame Frame chứa form đang điền.
  * @param {object|null} formScope Phạm vi hiện tại, không giới hạn theo vị trí đầu trang.
  * @return {Promise<object|null>} Locator nút gửi sẵn sàng hoặc null.
  * @throws {never} Phạm vi không còn đọc được trả về null.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function findScopedSubmitButton(frame, formScope) {
   if (!formScope?.active || formScope.unavailable) return null;
@@ -42,7 +42,7 @@ export async function findScopedSubmitButton(frame, formScope) {
      * @since 2026-11-19
      */
     const isExcludedNav = element => {
-      if (element.closest(excludedRegions + ', [data-ux-footer-link], .offerwall-card, .offerwall-card-wrap, [data-ux-card-id], [data-tf-element-role="offer-btn"], form[data-tf-element-role="offer"]')) return true;
+      if (element.closest(excludedRegions + ', [data-ux-footer-link], .offerwall-card, .offerwall-card-wrap, [data-ux-card-id], [data-tf-element-role="offer-btn"], form[data-tf-element-role="offer"]:not([data-object-type="form"])')) return true;
       const headerEl = element.closest?.('header, [role="banner"], .site-header');
       if (headerEl) {
         const headerHasInputs = Boolean(headerEl.querySelector?.('input:not([type="hidden"]), select, textarea'));

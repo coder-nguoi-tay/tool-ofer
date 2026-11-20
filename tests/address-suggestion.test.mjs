@@ -286,7 +286,7 @@ test('Mailing Address qua toàn bộ lượt quét: giữ nguyên truy vấn đ�
   const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
   const browser = await chromium.launch();
   t.after(() => browser.close());
-  const { page, session } = await createFormScopeFixture(browser, `<form>
+  const { page, session } = await createFormScopeFixture(browser, `<form data-object-type="form" data-tf-element-role="offer">
     <label for="address">Mailing Address</label>
     <input id="address" name="address" data-type="address" data-populated="false" required placeholder="Street Address, City, State">
     <div class="address-suggestions"></div><button disabled>Continue</button></form>`);
@@ -308,6 +308,7 @@ test('Mailing Address qua toàn bộ lượt quét: giữ nguyên truy vấn đ�
   });
   const menu = page.locator('.address-suggestions');
   assert.match((await fillPageForms(page, context))?.waitReason || '', /gợi ý/);
+  assert.equal(page.mainFrame()._activeAutofillFormScope?.nativeForm, true, 'Form liên hệ gắn nhãn offer vẫn có phạm vi native');
   await menu.evaluate(list => { list.innerHTML = '<div class="address-item">110 Oak St</div>'; });
   assert.equal((await fillPageForms(page, context))?.waitingForAddress, true);
   assert.deepEqual(await page.evaluate(() => window.events), { inputs: 1, choices: 0, submits: 0 });
@@ -337,7 +338,7 @@ test('địa chỉ đã chọn bằng tay được giữ sau khi widget xác nh�
   const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
   const browser = await chromium.launch();
   t.after(() => browser.close());
-  const { page, session } = await createFormScopeFixture(browser, `<form>
+  const { page, session } = await createFormScopeFixture(browser, `<form data-object-type="form" data-tf-element-role="offer">
     <label>Mailing Address<input id="address" name="address" required data-type="address" data-populated="false"></label>
     <input type="hidden" name="place_id"><div class="address-suggestions"></div><button disabled>Continue</button></form>`);
   session.slot = 2;

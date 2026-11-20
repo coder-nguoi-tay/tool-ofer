@@ -1,15 +1,15 @@
 /**
- * Chọn form đang hiển thị trong document và đánh dấu các control liên kết ngoài form.
+ * Chọn form đang hiển thị, bao gồm form liên hệ được gắn nhãn offer, và đánh dấu control liên kết.
  * @param {object} context Định danh phạm vi cũ và định danh cấp mới từ phía ứng dụng.
  * @return {object|null} Phạm vi biểu mẫu cùng selector thành viên, hoặc null nếu không có.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export function selectActiveForm({ previousId, nextId, flowId, excludedRegions = 'footer, nav, aside, [role="search"], .site-footer' }) {
   const controlSelector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea';
   const isExcluded = el => {
     if (!el) return false;
-    if (el.closest?.(excludedRegions + ', .offerwall-card, form[data-tf-element-role="offer"]')) return true;
+    if (el.closest?.(excludedRegions + ', .offerwall-card, form[data-tf-element-role="offer"]:not([data-object-type="form"])')) return true;
     if (mainRegions.length && !el.closest?.('[role="dialog"], [aria-modal="true"], dialog[open]')) {
       const form = el.form || el.closest?.('form, [role="form"]');
       if (!mainRegions.some(main => main.contains(el) || form && (main.contains(form) || form.contains(main)))) return true;

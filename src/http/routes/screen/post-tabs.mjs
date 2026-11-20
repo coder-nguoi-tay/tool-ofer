@@ -6,12 +6,12 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 
 /**
- * Xử lý API screen-tabs.
+ * Chuyển nguồn Screen View sang tab đã chọn, giữ trình duyệt headless hoạt động nền.
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 export async function handlePostScreenTabs(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/screen/tabs/')) {
@@ -33,12 +33,13 @@ export async function handlePostScreenTabs(request, response) {
         });
         return true;
       }
-      await targetPage.bringToFront();
+      // Obscura headless chọn tab bằng nguồn CDP của stream, không có cửa sổ native để đưa lên trước.
+      if (!session.isObscura && session.engine !== 'obscura') await targetPage.bringToFront();
       const sc = screencastSessions.get(slot);
       if (sc) {
-        await releaseScreencast(sc);
         const newCdp = await session.browser.newCDPSession(targetPage);
-        await attachScreencastSession(sc, newCdp, targetPage);
+        await releaseScreencast(sc);
+        await attachScreencastSession(sc, newCdp, targetPage, slot, session);
       }
       respondWithJson(response, 200, {
         ok: true
