@@ -1129,7 +1129,33 @@ impl DomTree {
         self.detach_for_reparent(node_id, true);
     }
 
+    /// Identify a select whose own option list changes when a subtree leaves it.
+    /// @param root Root of the subtree before unlinking.
+    /// @return The affected select, excluding nested select and datalist boundaries.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    fn select_losing_options(&self, root: NodeId) -> Option<NodeId> {
+        let (is_option, may_contain_options) = self.with_node(root, |node| {
+            let tag = Self::html_tag(node);
+            (node.parent.is_some() && tag == Some("option"),
+             node.parent.is_some() && node.first_child.is_some() && !matches!(tag, Some("select" | "datalist")))
+        })?;
+        if !is_option && !may_contain_options { return None; }
+        let select = self.option_owner_select(root).ok()??;
+        if is_option { return Some(select); }
+        let options = self.select_options(select)?;
+        let inner = self.inner.borrow();
+        options.iter().any(|&option| Self::ordinary_ancestor(&inner.nodes, root, option)).then_some(select)
+    }
+
+    /// Unlink a subtree and restore the owning single-select's default when applicable.
+    /// @param node_id Subtree to detach.
+    /// @param disconnect Whether its connected state should be cleared.
+    /// @return Updates parent links and affected form control state in place.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
     fn detach_for_reparent(&self, node_id: NodeId, disconnect: bool) {
+        let affected_select = self.select_losing_options(node_id);
         self.parser_depth_cache.set(None);
         self.invalidate_form_caches();
         let mut inner = self.inner.borrow_mut();
@@ -1186,6 +1212,16 @@ impl DomTree {
             node.parent = None;
             node.prev_sibling = None;
             node.next_sibling = None;
+        }
+        drop(inner);
+        if let Some(select) = affected_select {
+            if let Some(options) = self.select_options(select) {
+                if self.selected_option_indexes(select, &options, false).is_empty() {
+                    if let Some(&index) = self.selected_option_indexes(select, &options, true).first() {
+                        self.update_form_control_state(options[index], |state| state.selected = Some(true));
+                    }
+                }
+            }
         }
     }
 

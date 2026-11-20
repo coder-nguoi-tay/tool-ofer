@@ -5199,15 +5199,12 @@ class Element extends Node {
     const tag = this.localName;
     if (tag === 'select') {
       const option = this.options[this.selectedIndex];
-      return option ? option.getAttribute('value') ?? option.textContent : '';
+      return option ? option.value : '';
     }
+    if (tag === 'option') return this.getAttribute('value') ?? this.text;
     if (_formValues[this._nid] === undefined) _loadFormState(this._nid);
     if (_formValues[this._nid] !== undefined) return _formValues[this._nid];
     if (tag === 'textarea') return this.textContent;
-    if (tag === 'option') {
-      const attr = this.getAttribute('value');
-      return attr !== null ? attr : this.textContent;
-    }
     if (tag === 'input') {
       const itype = (this.getAttribute('type') || '').toLowerCase();
       if (itype === 'checkbox' || itype === 'radio') {
@@ -5248,7 +5245,7 @@ class Element extends Node {
       const wanted = String(v);
       const opts = this.namespaceURI === 'http://www.w3.org/1999/xhtml'
         ? _selectOptions(this) : this.querySelectorAll('option');
-      this.selectedIndex = Array.prototype.findIndex.call(opts, option => (option.getAttribute('value') ?? option.textContent) === wanted);
+      this.selectedIndex = Array.prototype.findIndex.call(opts, option => option.value === wanted);
       return;
     }
     const value = String(v);
@@ -5372,8 +5369,12 @@ class Element extends Node {
   get selected() { return _domParse('option_selected', this._nid); }
   /** Set current option state without changing its HTML default. @param {*} v New selectedness. @return {void} @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
   set selected(v) { _dom('set_option_selected', this._nid, String(!!v)); }
+  /** Read option text with HTML whitespace collapsed. @return {string|undefined} Reflected text. @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
   get text() {
-    if (['option', 'script', 'title', 'a'].includes(this.localName)) {
+    if (this.localName === 'option') {
+      return this.textContent.replace(/[\t\n\f\r ]+/g, ' ').replace(/^ | $/g, '');
+    }
+    if (['script', 'title', 'a'].includes(this.localName)) {
       return this.textContent;
     }
     return undefined;
@@ -5829,7 +5830,7 @@ class Element extends Node {
           const disabled = opt.hasAttribute('disabled')
             || (parent && parent.namespaceURI === 'http://www.w3.org/1999/xhtml'
                 && parent.localName === 'optgroup' && parent.hasAttribute('disabled'));
-          if (!disabled) pairs.push(enc(name) + '=' + enc(opt.getAttribute('value') ?? opt.textContent));
+          if (!disabled) pairs.push(enc(name) + '=' + enc(opt.value));
         }
         continue;
       } else if (tag === 'textarea') {

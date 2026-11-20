@@ -415,3 +415,33 @@ test('nhập tay thay email đã chọn, giữ số khi nhập sai và nhận ra
   assert.equal(await page.evaluate(() => document.activeElement.id), 'amount');
   assert.equal(await page.evaluate(() => window.keyCount), 0);
 });
+
+test('select động giữ lựa chọn hợp lệ khi danh sách thay đổi và dùng đúng giá trị gửi form', async t => {
+  try { resolveObscuraBinary(); } catch { return t.skip('Thiếu binary Obscura'); }
+  const native = await startObscuraSession({ port: await findFreePort(0) });
+  t.after(() => stopObscuraSession(native.process));
+  const browser = await chromium.connectOverCDP(native.cdpEndpoint);
+  const page = await browser.contexts()[0].newPage();
+
+  await t.test('xóa optgroup đang chọn sẽ chọn lại mục khả dụng', async () => {
+    await page.setContent('<form><select name="region"><option disabled>Choose</option><option>A</option><optgroup label="Other"><option>B</option></optgroup></select></form>');
+    const result = await page.locator('select').evaluate(select => {
+      select.selectedIndex = 2;
+      select.querySelector('optgroup').remove();
+      const restored = [select.selectedIndex, select.options[1].selected, new FormData(select.form).get('region')];
+      select.selectedIndex = -1;
+      return [...restored, select.selectedIndex];
+    });
+    assert.deepEqual(result, [1, true, 'A', -1]);
+  });
+
+  await t.test('option không có value dùng chữ đã chuẩn hóa khoảng trắng HTML', async () => {
+    await page.setContent('<form><select name="region"><option value=" A ">Explicit</option><option>  New\n   York  </option><option>A&nbsp;B</option></select></form>');
+    const result = await page.locator('select').evaluate(select => {
+      const explicit = select.value;
+      select.value = 'New York';
+      return [explicit, select.selectedIndex, select.value, select.options[1].text, new FormData(select.form).get('region'), select.options[2].value];
+    });
+    assert.deepEqual(result, [' A ', 1, 'New York', 'New York', 'New York', 'A\u00a0B']);
+  });
+});
