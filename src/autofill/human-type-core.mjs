@@ -219,7 +219,10 @@ async function humanTypeCore(field, text, page = null, options = {}) {
     } catch {}
   }
 
-  if (options.address && (await field.evaluate(readAddressSelection, str).catch(() => null))?.retained) return;
+  if (options.address) {
+    const selection = await field.evaluate(readAddressSelection, str).catch(() => null);
+    if (selection?.requiresSelection) return;
+  }
   // Kiểm tra lại giá trị sau khi gõ: nếu rỗng (do mask hoặc validator trang), đặt qua property descriptor
   let postVal = '';
   if (typeof field.inputValue === 'function') {

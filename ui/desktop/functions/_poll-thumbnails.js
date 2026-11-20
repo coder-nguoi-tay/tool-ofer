@@ -2,7 +2,7 @@
  * Đồng bộ các ô trình duyệt và chỉ tải thumbnail đang nằm trong vùng nhìn của người dùng.
  * @return {void} Cập nhật thông tin và lên lịch tải ảnh có giới hạn.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-20
  */
 function _pollThumbnails() {
       if (!_screenViewActive || document.hidden) return;
@@ -124,6 +124,8 @@ function _pollThumbnails() {
             statusHtml = `<span class="tile-status status-idle">⚡ ${escHtml(currentAction || 'Đang mở offer...')}</span>`;
           }
 
+          const waitingTabs = (entry.tabs || []).filter(tab => tab.autofillWaitReason).map(tab =>
+            `<div class="tile-status status-checking" title="${escHtml(tab.autofillWaitReason)}">Tab ${Number(tab.index) + 1} · ${escHtml(tab.autofillWaitReason)}</div>`).join('');
           const bwBadge = entry.bandwidthFormatted
             ? `<span class="screen-tile-bw-badge" title="Băng thông: ↑${entry.bytesSent ? formatBytes(entry.bytesSent) : '0 B'} · ↓${entry.bytesReceived ? formatBytes(entry.bytesReceived) : '0 B'}">📶 ${entry.bandwidthFormatted}</span>`
             : '';
@@ -147,6 +149,7 @@ function _pollThumbnails() {
               ${statusHtml}
               ${emailChip}
             </div>
+            ${waitingTabs}
           `;
           if (footer._uxHtml !== footerHtml) {
             footer.innerHTML = footerHtml;

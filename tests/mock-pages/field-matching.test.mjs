@@ -64,14 +64,14 @@ test('matchFieldValue: Street Address, Zip Code, City never match phone even if 
   assert.equal(matchedPhone, '8145551234', 'Phone field must match phone');
 });
 
-test('nhãn và placeholder địa chỉ thắng id/name/type phone; thiếu địa chỉ phải để trống', () => {
+test('giữ trống khi nhãn địa chỉ mâu thuẫn kiểu điện thoại', () => {
   const record = { address: '123 Example Street', address2: 'Apt 4', phone: '8175550147', email: 'fixture@example.invalid' };
   for (const hint of [{ label: 'Street Address' }, { placeholder: 'Enter your street address' }, { ariaLabel: 'Mailing Address' }, { label: 'Địa chỉ' }, { placeholder: 'Nhập địa chỉ của bạn' }]) {
     const metadata = { name: 'phone', id: 'phone_number', type: 'tel', names: ['phone'], ...hint };
-    assert.equal(matchFieldValue(metadata.names, record, metadata), record.address);
+    assert.equal(matchFieldValue(metadata.names, record, metadata), null);
     assert.equal(matchFieldValue(metadata.names, { phone: record.phone }, metadata), null);
   }
-  assert.equal(matchFieldValue(['phone'], record, { label: 'Address Line 2', type: 'tel', name: 'phone' }), record.address2);
+  assert.equal(matchFieldValue(['phone'], record, { label: 'Address Line 2', type: 'tel', name: 'phone' }), null);
   assert.equal(matchFieldValue(['email'], record, { label: 'Mailing Address', type: 'email', names: ['email'] }), null);
   assert.equal(matchFieldValue(['email'], record, { label: 'Email Address', type: 'email' }), record.email);
 });
@@ -95,7 +95,7 @@ test('metadata đọc nhãn liên kết/nhãn nổi/placeholder từng ô, khôn
   const record = { address: '123 Example Street', phone: '8175550147' };
   for (const id of ['phone', 'floating', 'hint', 'aria-hint', 'real-address']) {
     const metadata = await page.locator('#' + id).evaluate(collectFieldMetadata);
-    assert.equal(matchFieldValue(metadata.names, record, metadata), record.address, id);
+    assert.equal(matchFieldValue(metadata.names, record, metadata), id === 'aria-hint' ? record.address : null, id);
   }
   const phone = await page.locator('#real-phone').evaluate(collectFieldMetadata);
   assert.equal(phone.label, 'Phone Number');
@@ -104,14 +104,14 @@ test('metadata đọc nhãn liên kết/nhãn nổi/placeholder từng ô, khôn
   const { fillPageForms } = await import('../../src/autofill/fill-page-forms.mjs');
   const session = { currentRecord: record, enableLeadCheck: false, firstSubmitHandled: true, completedScreens: 1, autofillFields: 0 };
   await fillPageForms(page, { session, sessionRecord: record, options: { autoSubmit: false }, triggerLeadCheckAfterEmail() {} });
-  assert.equal(await page.locator('#phone').inputValue(), record.address, 'luồng autofill thực sự nhập địa chỉ vào input tel bị đặt tên sai');
+  assert.equal(await page.locator('#phone').inputValue(), '', 'giữ trống ô tel có nhãn địa chỉ');
   assert.equal((await page.locator('#actual-phone').inputValue()).replace(/\D/g, ''), record.phone, 'không bỏ qua ô phone thật nằm sau ô địa chỉ type tel');
 });
 
 test('ARIA chọn đúng dữ liệu khi name/id/type mâu thuẫn và giữ phone chia phần', () => {
   const record = { firstname: 'Ada', lastname: 'Lovelace', email: 'ada@example.invalid', phone: '8175550147', address: '123 Example Street', zipcode: '12345' };
   for (const [accessibleName, expected] of [['First Name', record.firstname], ['Last Name', record.lastname], ['Email Address', record.email], ['Phone Number', record.phone], ['Street Address', record.address], ['Zip Code', record.zipcode]]) {
-    assert.equal(matchFieldValue(['phone'], record, { name: 'phone', id: 'phone', type: 'tel', accessibleName }), expected, accessibleName);
+    assert.equal(matchFieldValue(['phone'], record, { name: 'phone', id: 'phone', type: 'tel', accessibleName }), accessibleName === 'Street Address' ? null : expected, accessibleName);
     assert.equal(matchFieldValue(['address'], record, { name: 'address', id: 'address', type: 'text', ariaLabel: accessibleName }), expected, accessibleName);
   }
   assert.equal(matchFieldValue(['Phone Number', 'phone2'], record, { name: 'phone2', type: 'tel', accessibleName: 'Phone Number', maxLength: 3 }), '555');
@@ -144,7 +144,7 @@ test('aria-labelledby ghép nhiều ID đúng thứ tự, ưu tiên hơn aria-la
   assert.equal((await page.locator('#address').evaluate(collectFieldMetadata)).accessibleName, 'Email Address');
   const session = { currentRecord: record, enableLeadCheck: false, firstSubmitHandled: true, completedScreens: 1, autofillFields: 0 };
   await fillPageForms(page, { session, sessionRecord: record, options: { autoSubmit: false }, triggerLeadCheckAfterEmail() {} });
-  for (const [id, expected] of [['phone', record.firstname], ['address', record.email], ['last', record.lastname], ['location', record.zipcode], ['street', record.address]]) {
+  for (const [id, expected] of [['phone', record.firstname], ['address', record.email], ['last', record.lastname], ['location', record.zipcode], ['street', '']]) {
     assert.equal(await page.locator('#' + id).inputValue(), expected, id);
   }
 });
@@ -154,7 +154,7 @@ test('nhãn riêng quyết định dữ liệu trong autofill và repair, mâu t
   for (const [metadata, expected] of [
     [{ name: 'address', label: 'Số điện thoại', type: 'tel' }, record.phone],
     [{ name: 'address', placeholder: 'Số điện thoại', type: 'text' }, record.phone],
-    [{ name: 'phone', label: 'Địa chỉ đường phố', type: 'tel' }, record.address],
+    [{ name: 'phone', label: 'Địa chỉ đường phố', type: 'tel' }, null],
     [{ name: 'address', label: 'Địa chỉ email', type: 'text' }, record.email],
     [{ name: 'phone', autocomplete: 'postal-code', type: 'tel' }, record.zipcode],
     [{ name: 'address', type: 'tel' }, null],
@@ -230,4 +230,22 @@ test('đường nhập nhanh nhường ô có nhãn trái với selector, giữ 
   await page.setContent('<form id="reg-container"><label>Street address<input id="tl" type="tel"></label><label>Phone number<input id="ad"></label></form>');
   await fillUplevelVisibleFields(page, { address: '10 Oak St', phone: '8175550147' });
   assert.deepEqual(await page.locator('input').evaluateAll(fields => fields.map(field => field.value)), ['', '']);
+});
+
+test('địa chỉ tổng hợp được nhận diện nhất quán khi điền và khi sửa form', () => {
+  const record = { address: '10 Oak St', phone: '2025550123', address2: 'Unit 4', city: 'Austin', state: 'TX', zipcode: '78701' };
+  for (const [label, placeholder, type, expected] of [
+    ['Mailing Address', 'Street Address, City, State', 'text', record.address],
+    ['Mailing Address', 'Street Address, City, State, ZIP Code', 'text', record.address],
+    ['State', 'State abbreviation', 'text', record.state],
+    ['City', 'City', 'text', record.city],
+    ['ZIP Code', 'ZIP', 'text', record.zipcode],
+    ['Address Line 2', 'Apartment number', 'text', record.address2],
+    ['Mailing Address', 'Street Address, City, State', 'tel', null],
+    ['Phone Number', 'Street Address, City, State', 'text', null],
+  ]) {
+    const metadata = { label, placeholder, type, name: 'contact' };
+    assert.equal(matchFieldValue(['contact'], record, metadata), expected, label);
+    assert.equal(resolveProvidedFieldValue(metadata, record), expected, label);
+  }
 });

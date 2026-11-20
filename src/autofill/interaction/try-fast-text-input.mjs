@@ -28,7 +28,13 @@ export async function tryFastTextInput(field, value, page = null, address = fals
         if (selection.retained || selection.pending) return true;
       }
       await input.fill(value, { timeout: 1500 });
-      if (address && (await input.evaluate(readAddressSelection, value))?.retained) return true;
+      if (address) {
+        const choice = await input.evaluate(readAddressSelection, value);
+        if (choice.retained || choice.pending || choice.requiresSelection && choice.display === value) {
+          await waitForInputPacing(page);
+          return true;
+        }
+      }
       if (typeof input.press === 'function' && await retainsInputFocus(input)) await input.press('Tab', { timeout: 500 }).catch(() => {});
       await waitForInputPacing(page);
       const actual = await input.inputValue({ timeout: 500 });

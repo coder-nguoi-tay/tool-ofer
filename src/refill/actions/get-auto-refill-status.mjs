@@ -13,7 +13,7 @@ import { pruneDeadManagedSessions } from '../../runtime/actions/prune-dead-manag
  *
  * @return {object} Trạng thái hiện tại của trình duyệt và cơ chế tự bù.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-20
  */
 export function getAutoRefillStatus() {
   void pruneDeadManagedSessions().catch(() => {});
@@ -34,6 +34,7 @@ export function getAutoRefillStatus() {
       const tabsInfo = livePages.map((p, idx) => ({
         index: idx,
         url: (typeof p.url === 'function' ? p.url() : '') || '',
+        autofillWaitReason: p._autofillWaitReason || null,
         aiRunning: Boolean(p._aiAssistRunning || p._aiFormFixing),
         bandwidthBytes: p._bandwidthBytes || 0,
         bandwidthFormatted: formatBytes(p._bandwidthBytes || 0),

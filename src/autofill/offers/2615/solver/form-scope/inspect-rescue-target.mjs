@@ -2,9 +2,9 @@
 /**
  * Định danh chính field lỗi đang hiển thị, tránh trùng id hoặc mượn control của form khác.
  * @param {object} context Field báo lỗi và phạm vi hiện tại.
- * @return {string|null} Selector marker của target cần repair.
+ * @return {{selector:string,state:unknown[]}|null} Trường lỗi và trạng thái quyết định có cần thử lại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-20
  */
 export function inspectRescueTarget({ fieldInfo, formScope }) {
   const elements = Array.from(document.querySelectorAll('input,textarea,select'));
@@ -20,7 +20,14 @@ export function inspectRescueTarget({ fieldInfo, formScope }) {
     return bounds.width > 0 && bounds.height > 0;
   });
   if (!target || Date.now() - Number(target.getAttribute('data-ux-typing') || 0) < 15000) return null;
-  const marker = crypto.randomUUID();
+  const marker = target._autoleadRescueId ||= crypto.randomUUID();
   target.setAttribute('data-ux-rescue-target',marker);
-  return `[data-ux-rescue-target="${marker}"]`;
+  return {
+    selector: `[data-ux-rescue-target="${marker}"]`,
+    state: [target.name, target.type, target.value, target.checked, target.placeholder, target.autocomplete,
+      target.validationMessage, target.getAttribute('aria-invalid'), target.getAttribute('aria-label'),
+      [...(target.labels || [])].map(label => label.textContent),
+      (target.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)?.textContent),
+      target.options && [...target.options].map(option => [option.value, option.label, option.disabled, option.selected])]
+  };
 }

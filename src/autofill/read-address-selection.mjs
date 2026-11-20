@@ -2,7 +2,7 @@
  * Đọc lựa chọn của widget từ chính ô địa chỉ. Dùng được trong evaluate của Chromium và Obscura.
  * @param {HTMLInputElement} input Ô nhập đang kiểm tra.
  * @param {string} query Địa chỉ nguồn của lượt điền.
- * @return {{display:string,retained:boolean,pending:boolean,requiresSelection:boolean}} Chữ hiện tại và trạng thái để tránh phát lại sự kiện nhập.
+ * @return {{display:string,retained:boolean,pending:boolean,attempted?:boolean,requiresSelection:boolean}} Chữ hiện tại và trạng thái để tránh phát lại sự kiện nhập.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -60,9 +60,12 @@ export function readAddressSelection(input, query) {
   const references = [input.getAttribute('aria-controls'), input.getAttribute('aria-owns'), input.getAttribute('list')].filter(Boolean).join(' ').split(/\s+/).filter(Boolean);
   const menus = references.map(id => input.ownerDocument.getElementById(id)).filter(Boolean);
   const localMenu = ownsGroup && group.querySelector('.address-suggestions, .address-results, .address-list, .pac-container, select.address-select, select[name*=address i], select[id*=address i]');
-  result.requiresSelection = Boolean(tokens.length || choice || localMenu || input.matches('[role=combobox], [aria-autocomplete=list], [aria-autocomplete=both]') ||
+  const addressWidget = input.matches('[data-type=address][data-populated]');
+  result.requiresSelection = Boolean(addressWidget || tokens.length || choice || localMenu || input.matches('[role=combobox], [aria-autocomplete=list], [aria-autocomplete=both]') ||
     menus.some(menu => menu.matches('select, [role=listbox]')));
   if (!expected || (priorQuery && priorQuery !== query) || (choice && choice.query !== query)) return result;
+  result.attempted = Boolean(choice && choice.form === input.form && choice.query === query &&
+    (choice.display === display || current && current === normalized(choice.label)));
   const rewritten = Boolean(current && result.requiresSelection && (priorQuery === query || choice?.query === query) && display !== query);
   if (rewritten && (input._autoleadAddressPending?.display !== display || input._autoleadAddressPending.query !== query)) {
     input._autoleadAddressPending = { display, query, since: Date.now() };
@@ -106,9 +109,15 @@ export function readAddressSelection(input, query) {
     if (result.retained && choice && choice.form === input.form) choice.confirmed = true;
     result.pending = !result.retained && (waitingForWidget || Boolean(hasId && priorQuery === query && current));
   }
+  if (addressWidget) {
+    // Chỉ widget sở hữu trường này mới xác nhận lựa chọn được API chấp nhận.
+    result.retained = input.dataset.populated === 'true' && valid && Boolean(current) &&
+      (matchesQuery || result.retained) && (!tokens.length || result.retained);
+  }
   if (result.retained && !valid) {
     result.retained = false;
     result.pending = true;
   }
+  if (result.retained && choice && choice.form === input.form) choice.confirmed = true;
   return result;
 }

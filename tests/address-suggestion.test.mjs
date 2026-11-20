@@ -261,3 +261,53 @@ test('menu của ô mang nhãn điện thoại không được dùng như danh s
   assert.equal(await selectFirstAddressSuggestion(page, page, page.locator('input')), false);
   assert.equal(await page.locator('[data-clicked]').count(), 0);
 });
+
+test('Mailing Address qua toàn bộ lượt quét: giữ nguyên truy vấn đến khi form xác nhận', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { fillPageForms } = await import('../src/autofill/fill-page-forms.mjs');
+  const { createFormScopeFixture } = await import('./helpers/form-scope-browser-fixture.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, `<form>
+    <label for="address">Mailing Address</label>
+    <input id="address" name="address" data-type="address" data-populated="false" required placeholder="Street Address, City, State">
+    <div class="address-suggestions"></div><button disabled>Continue</button></form>`);
+  session.slot = 2;
+  const context = { session, sessionRecord: { address: '10 Oak St' }, options: {}, triggerLeadCheckAfterEmail() {} };
+  await page.evaluate(() => {
+    const form = document.querySelector('form'), address = form.elements.address;
+    window.events = { inputs: 0, choices: 0, submits: 0 };
+    address.oninput = () => { window.events.inputs++; address.dataset.populated = 'false'; };
+    form.querySelector('.address-suggestions').onclick = event => {
+      if (!event.target.matches('.address-item')) return;
+      window.events.choices++;
+    };
+    form.onsubmit = event => {
+      event.preventDefault();
+      window.events.submits++;
+      form.hidden = true;
+    };
+  });
+  const menu = page.locator('.address-suggestions');
+  assert.match((await fillPageForms(page, context))?.waitReason || '', /gợi ý/);
+  for (const results of [['110 Oak St'], ['10 Oak St Unit A', '10 Oak St Unit B']]) {
+    await menu.evaluate((list, results) => { list.innerHTML = results.map((text, index) =>
+        '<div class="' + (index ? 'address-suggestion' : 'address-item') + '">' + text + '</div>').join(''); }, results);
+    assert.equal((await fillPageForms(page, context))?.waitingForAddress, true);
+  }
+  assert.deepEqual(await page.evaluate(() => window.events), { inputs: 1, choices: 0, submits: 0 });
+  await menu.evaluate(list => { list.innerHTML = '<div class="address-item">10 Oak St, Test City</div>'; });
+  assert.match((await fillPageForms(page, context))?.waitReason || '', /xác nhận/);
+  await page.locator('#address').evaluate(input => { input.value = '10 Oak Street, Test City'; });
+  assert.match((await fillPageForms(page, context))?.waitReason || '', /xác nhận/);
+  await page.waitForTimeout(2600);
+  assert.match((await fillPageForms(page, context))?.waitReason || '', /xác nhận/);
+  assert.deepEqual(await page.evaluate(() => window.events), { inputs: 1, choices: 1, submits: 0 });
+  await page.evaluate(() => {
+    document.querySelector('#address').dataset.populated = 'true';
+    document.querySelector('button').disabled = false;
+  });
+  await fillPageForms(page, context);
+  await fillPageForms(page, context);
+  assert.deepEqual(await page.evaluate(() => window.events), { inputs: 1, choices: 1, submits: 1 });
+  assert.equal(await page.locator('#address').inputValue(), '10 Oak Street, Test City');
+});

@@ -53,6 +53,7 @@ test('luồng còn chạy thì không F5: giao diện đổi, có thao tác, ho�
 
 test('đang có việc chạy nền thì không F5 và không tính giờ: AI, agent, chờ lead, phục hồi lead, mở offer', async () => {
   const cases = [
+    ['form chờ xác nhận địa chỉ', page => { page._autofillWaitReason = 'Chờ xác nhận'; }],
     ['AI assist', page => { page._aiAssistRunning = true; }],
     ['AI sửa form', page => { page._aiFormFixing = true; }],
     ['agent liên tục', page => { page._continuousAgent = {}; }],

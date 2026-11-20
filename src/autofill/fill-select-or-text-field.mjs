@@ -136,14 +136,14 @@ export async function fillSelectOrTextField({
     if (isAddressField) {
       const choice = await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
       if (choice?.retained || choice?.pending) return true;
-      if (choice?.requiresSelection && choice.display === requestedAddress) {
-        await selectFirstAddressSuggestion(page, frame, field, options);
-        return !(await field.evaluate(readAddressSelection, requestedAddress).catch(() => null))?.retained;
-      }
       await field.evaluate((input, query) => {
         if (input._autoleadAddressChoice?.query !== query) delete input._autoleadAddressChoice;
         input._autoleadAddressQuery = query;
       }, requestedAddress).catch(() => {});
+      if (choice?.requiresSelection && (choice.display === requestedAddress || choice.attempted)) {
+        await selectFirstAddressSuggestion(page, frame, field, options);
+        return !(await field.evaluate(readAddressSelection, requestedAddress).catch(() => null))?.retained;
+      }
     }
     // Nhập từ từ mô phỏng nhịp gõ phím của người thật (chống bị phát hiện bot autofill)
     await humanType(field, valueToFill, page, { address: isAddressField });

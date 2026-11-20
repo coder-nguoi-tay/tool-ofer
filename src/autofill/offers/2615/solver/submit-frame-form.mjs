@@ -179,6 +179,7 @@ export async function submitFrameForm({
           // Trước đây mỗi lần vẫn cộng action nên watcher bấm Continue lặp mãi (log 2026-11-12: 54 lần).
           const rejectedDialog = submitDispatched && page._uxLastDialog?.validation && page._uxLastDialog.at >= clickStartedAt ? page._uxLastDialog : null;
           if (rejectedDialog) {
+            frameProgress.waitReason = 'Form yêu cầu kiểm tra lại dữ liệu sau khi gửi.';
             page.off?.('popup', popupHandler);
             options.onLog?.({ type: 'submit_rejected_dialog', id: btnInfo.id, detail: `Website chặn ${submitLabel} bằng thông báo: "${rejectedDialog.message.slice(0, 120)}"; không tính là tiến triển.` }, page);
             return false;
@@ -257,6 +258,7 @@ export async function submitFrameForm({
             return true;
           }
           if (submitError?.hasError) {
+            frameProgress.waitReason = 'Form báo lỗi ở trường ' + (submitError.fieldName || submitError.fieldId || submitError.fieldTag || 'chưa xác định') + '.';
             console.log(`[Autofill] Submit chưa qua được do trang báo lỗi: ${submitError.firstError}. Đang gọi AI chẩn đoán và tự sửa lỗi...`);
             const fieldIdentity = submitError.fieldId || submitError.fieldName ? `${submitError.fieldTag || 'field'}#${submitError.fieldId || submitError.fieldName} class="${submitError.fieldClass || '?'}" container="${submitError.fieldContainerClass || '?'}"` : 'không rõ trường';
             console.log(`[Autofill] Phần tử lỗi: ${fieldIdentity} — nút submit: <${btnInfo?.tag || '?'}> id="${btnInfo?.id || '?'}" class="${btnInfo?.className || '?'}"`);

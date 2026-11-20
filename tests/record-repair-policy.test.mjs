@@ -129,6 +129,31 @@ test('sửa theo nhãn của ô bị báo lỗi và chỉ xác nhận khi valida
   assert.equal(rejected.reason, 'field_validation_pending');
   await page.locator('#address').evaluate(input => input.removeAttribute('aria-invalid'));
   assert.equal((await executeAction(page, { action: 'fill', selector: '#address' }, {}, policy)).verified, true);
+  assert.equal((await executeAction(page, { action: 'fill', selector: '#phone', value: record.phone }, {}, policy)).ok, false);
+  assert.equal(await page.locator('#phone').inputValue(), '');
+  await page.locator('#phone').evaluate(field => { field.type = 'text'; });
   assert.equal((await executeAction(page, { action: 'fill', selector: '#phone', value: record.phone }, {}, policy)).verified, true);
   assert.equal(await page.locator('#phone').inputValue(), record.address);
+});
+
+test('giới hạn lần sửa trường không đổi, thử lại khi danh sách hoặc record thay đổi', async t => {
+  const { rescueRequiredField } = await import('../src/autofill/form-scope/rescue-required-field.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page, session } = await createFormScopeFixture(browser, '<form><label>State<select id="state" required><option value="">Choose</option></select></label></form>');
+  const frame = page.mainFrame();
+  const { resolveActiveFormScope } = await import('../src/autofill/form-scope/resolve-active-form-scope.mjs');
+  const formScope = await resolveActiveFormScope(frame);
+  const logs = [];
+  const record = { state: 'TX' };
+  const args = { frame, page, fieldInfo: { id: 'state', type: 'select-one', reason: 'missing_required' },
+    record, session, formScope, options: { onLog: entry => logs.push(entry) } };
+  for (let pass = 0; pass < 4; pass++) assert.equal(await rescueRequiredField(args), false);
+  assert.equal(logs.length, 2);
+  record.state = 'CA';
+  assert.equal(await rescueRequiredField(args), false);
+  assert.equal(logs.length, 3);
+  await page.locator('#state').evaluate(select => select.add(new Option('California', 'CA')));
+  assert.equal(await rescueRequiredField(args), true);
+  assert.equal(await page.locator('#state').inputValue(), 'CA');
 });

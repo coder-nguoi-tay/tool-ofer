@@ -81,68 +81,81 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
           '.pac-container, .address-suggestions, .address-results, .address-predictions, .address-list, [data-testid="address-suggestions"], select.address-select, select[name*="address" i], select[id*="address" i], select[name*="street" i], select[id*="street" i]'
         ));
       };
-      const normalize = text => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-      const expected = normalize(expectedAddress || input.value);
-      for (const selector of selectors) {
-        const candidates = areas.flatMap(area => [...area.querySelectorAll(selector)]).filter(item => {
-          if (!owned(item) || item.closest('a[href]:not([href="#"]):not([href=""])') || item.closest('button:not([type="button"])')?.form) return false;
-          if (item.tagName === 'OPTION') {
-            const select = item.closest('select');
-            return !item.disabled && !item.closest('optgroup[disabled]') && item.value &&
-              (select ? visible(select) && (!select.form || select.form === input.form) : input.list && item.parentElement === input.list);
-          }
-          return action !== 'select-native' && visible(item);
-        });
-        if (!candidates.length) continue;
-        const matching = expected ? candidates.filter(item =>
-          (' ' + normalize(item.getAttribute('data-street_line') || item.textContent || item.value) + ' ').includes(' ' + expected + ' ')) : candidates;
-        if (matching.length !== 1) return { success: false };
-        const item = matching[0];
-        const text = (item.textContent || item.value || '').trim();
-        const prior = input._autoleadAddressChoice;
-        const sameOption = item.tagName === 'OPTION' && item.closest('select') && item.selected && prior?.item === item && prior.form === input.form && prior.query === (expectedAddress || input._autoleadAddressQuery || input.value);
-        const sameChoice = prior?.item === item && prior.form === input.form && prior.display === input.value &&
-          input.getAttribute('aria-invalid') !== 'true' && input.validity?.valid !== false &&
-          (item.getAttribute('aria-selected') === 'true' || prior.display !== prior.query || input.getAttribute('aria-expanded') === 'false');
-        const owner = fieldGroup || input.form;
-        const tokens = [...(owner?.querySelectorAll('input[type=hidden]') || [])].filter(token =>
-          token.form === input.form && [token.name, token.id].some(name => /^(placeid|addressid)$/i.test((name || '').replace(/[-_]/g, ''))));
-        const hasToken = tokens.length === 1 && Boolean(tokens[0].value.trim());
-        if (hasToken && item.tagName === 'OPTION' && item.selected && addressFields.length === 1 && addressFields[0] === input) {
-          if (prior) prior.confirmed = true;
-          return { success: action !== 'inspect' && input.getAttribute('aria-invalid') !== 'true', text, retained: true };
-        }
-        const lostToken = tokens.length && !hasToken && prior?.confirmed;
-        if (!lostToken && (sameOption || sameChoice)) {
-          const confirmed = (!tokens.length || hasToken) && input.getAttribute('aria-invalid') !== 'true';
-          if (hasToken) prior.confirmed = true;
-          return { success: confirmed && action !== 'inspect', text, retained: confirmed };
-        }
-        if (action === 'inspect') return { success: true };
-        const query = expectedAddress || input._autoleadAddressQuery || input.value;
-        const choice = { query, label: text, item, form: input.form, display: input.value };
+      const normalize = text => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+        .replace(/\b(street|road|avenue|boulevard|lane|drive)\b/g, word =>
+          ({ street: 'st', road: 'rd', avenue: 'ave', boulevard: 'blvd', lane: 'ln', drive: 'dr' })[word]);
+      const query = expectedAddress || input._autoleadAddressQuery || input.value;
+      const expected = normalize(query);
+      const selector = selectors.join(',');
+      const candidates = [...new Set(areas.flatMap(area => [...area.querySelectorAll(selector)]))].filter(item => {
+        if (item.matches('.address-suggestions, .address-results, .address-list, [data-testid=address-suggestions], [role=listbox]')) return false;
+        if (!owned(item) || item.closest('a[href]:not([href="#"]):not([href=""])') || item.closest('button:not([type="button"])')?.form) return false;
         if (item.tagName === 'OPTION') {
           const select = item.closest('select');
-          if (action === 'select-native' && (!select || !expected)) return { success: false };
-          const target = select || input;
-          target.value = item.value;
-          target.dispatchEvent(new Event('input', { bubbles: true }));
-          target.dispatchEvent(new Event('change', { bubbles: true }));
-          choice.display = input.value;
-          input._autoleadAddressChoice = choice;
-          choice.confirmed = tokens.length === 1 && Boolean(tokens[0].value.trim());
-          return { success: !tokens.length || choice.confirmed, text };
+          return !item.disabled && !item.closest('optgroup[disabled]') && item.value &&
+            (select ? visible(select) && (!select.form || select.form === input.form) : input.list && item.parentElement === input.list);
         }
-        item.scrollIntoView({ block: 'nearest' });
-        const rect = item.getBoundingClientRect();
-        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        if (!item.contains(hit) || hit.closest('a[href], button') !== item.closest('a[href], button')) return { success: false };
-        item.click();
+        return action !== 'select-native' && visible(item);
+      });
+      // Gộp các phần chữ của một lựa chọn và bỏ phần tử cha bao quanh nhiều lựa chọn.
+      const eligible = new Set(candidates);
+      const choices = new Set(candidates.map(item => {
+        const row = item.closest('[role=option], option, .pac-item, .ui-menu-item, .address-item, [data-street_line]');
+        return eligible.has(row) ? row : item;
+      }));
+      for (const item of choices) {
+        for (let parent = item.parentElement; parent; parent = parent.parentElement) choices.delete(parent);
+      }
+      const items = [...choices];
+      const matching = expected ? items.filter(item =>
+        (' ' + normalize(item.getAttribute('data-street_line') || item.textContent || item.value) + ' ').includes(' ' + expected + ' ')) : items;
+      if (matching.length !== 1) return { success: false };
+      const item = matching[0];
+      const text = (item.textContent || item.value || '').trim();
+      const prior = input._autoleadAddressChoice;
+      const widgetPending = input.matches('[data-type=address][data-populated]') && input.dataset.populated !== 'true';
+      if (prior?.item === item && prior.query === query && prior.form === input.form && prior.label === text &&
+          !prior.confirmed && (widgetPending || input.getAttribute('aria-expanded') === 'true')) return { success: false };
+      const sameOption = item.tagName === 'OPTION' && item.closest('select') && item.selected && prior?.item === item && prior.form === input.form && prior.query === query;
+      const sameChoice = prior?.item === item && prior.form === input.form && prior.display === input.value &&
+        input.getAttribute('aria-invalid') !== 'true' && input.validity?.valid !== false &&
+        (item.getAttribute('aria-selected') === 'true' || prior.display !== prior.query || input.getAttribute('aria-expanded') === 'false');
+      const owner = fieldGroup || input.form;
+      const tokens = [...(owner?.querySelectorAll('input[type=hidden]') || [])].filter(token =>
+        token.form === input.form && [token.name, token.id].some(name => /^(placeid|addressid)$/i.test((name || '').replace(/[-_]/g, ''))));
+      const hasToken = tokens.length === 1 && Boolean(tokens[0].value.trim());
+      if (hasToken && item.tagName === 'OPTION' && item.selected && addressFields.length === 1 && addressFields[0] === input) {
+        if (prior) prior.confirmed = true;
+        return { success: action !== 'inspect' && input.getAttribute('aria-invalid') !== 'true', text, retained: true };
+      }
+      const lostToken = tokens.length && !hasToken && prior?.confirmed;
+      if (!lostToken && (sameOption || sameChoice)) {
+        const confirmed = (!tokens.length || hasToken) && input.getAttribute('aria-invalid') !== 'true';
+        if (hasToken) prior.confirmed = true;
+        return { success: confirmed && action !== 'inspect', text, retained: confirmed };
+      }
+      if (action === 'inspect') return { success: true };
+      const choice = { query, label: text, item, form: input.form, display: input.value };
+      if (item.tagName === 'OPTION') {
+        const select = item.closest('select');
+        if (action === 'select-native' && (!select || !expected)) return { success: false };
+        const target = select || input;
+        target.value = item.value;
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
         choice.display = input.value;
         input._autoleadAddressChoice = choice;
-        return { success: true, text };
+        choice.confirmed = tokens.length === 1 && Boolean(tokens[0].value.trim());
+        return { success: !tokens.length || choice.confirmed, text };
       }
-      return { success: false };
+      item.scrollIntoView({ block: 'nearest' });
+      const rect = item.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      if (!item.contains(hit) || hit.closest('a[href], button') !== item.closest('a[href], button')) return { success: false };
+      item.click();
+      choice.display = input.value;
+      input._autoleadAddressChoice = choice;
+      return { success: true, text };
     }, { scope, input: handle || null, selectors: ADDRESS_SUGGESTION_SELECTORS, action, expectedAddress });
   } catch {
     return { success: false };

@@ -1,3 +1,5 @@
+import { getAddressWaitReason } from './has-unconfirmed-address.mjs';
+import { getAddressString } from './get-address-string.mjs';
 import { isLeadWaitEnabled } from './is-lead-wait-enabled.mjs';
 import { handleSweepstakesCardPage } from './offerwall/handle-sweepstakes-card-page.mjs';
 import { shouldPauseForLead } from './should-pause-for-lead.mjs';
@@ -33,7 +35,7 @@ import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
  * Xử lý form theo phiên. Tab gốc dùng các bước riêng của trang, tab phụ chỉ làm việc bên trong iframe đã chọn.
  * @param {object} page Tab cần xử lý.
  * @param {object} context Dữ liệu phiên và callback điều phối được giữ bởi attachAutofill.
- * @return {Promise<void>} Hoàn tất thao tác trên tab.
+ * @return {Promise<void|{waitReason:string, waitingForAddress?:boolean}>} Lý do form đang chờ, nếu có.
  * @throws {Error} Khi thao tác trình duyệt thất bại ngoài các nhánh phục hồi hiện có.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
@@ -264,6 +266,10 @@ export async function fillPageForms(page, {
       page,
       frame
     })) return;
+    if (frameProgress.hasAddressField && frameProgress.formScope?.active) {
+      const waitReason = await getAddressWaitReason(frame, frameProgress.formScope, getAddressString(record));
+      if (waitReason) return { waitReason, waitingForAddress: true };
+    }
     let rescueSucceeded = false;
     if (hasUnfilledRequiredOrErrorField?.unfilled) {
       console.log(`[Autofill] Phát hiện trường bắt buộc chưa điền hoặc bị lỗi: ${hasUnfilledRequiredOrErrorField.id} (${hasUnfilledRequiredOrErrorField.type}, class="${hasUnfilledRequiredOrErrorField.className || '?'}", container="${hasUnfilledRequiredOrErrorField.containerClass || '?'}"). Đang thử điền cứu trợ...`);
@@ -304,9 +310,9 @@ export async function fillPageForms(page, {
           }
         });
       }
-      return;
+      return { waitReason: session.autofillError };
     }
-    if (await submitFrameForm({
+    const stopScan = await submitFrameForm({
       options,
       frame,
       page,
@@ -315,7 +321,9 @@ export async function fillPageForms(page, {
       record,
       screenInfo,
       scanStartUrl
-    })) return;
+    });
+    if (frameProgress.waitReason) return { waitReason: frameProgress.waitReason };
+    if (stopScan) return;
   }
   if (session.autofillFields || session.autofillActions) return;
   if (unmatchedFieldNames.size) {

@@ -107,3 +107,34 @@ test('screen view stream frame queue drops superseded frames to prevent lag', ()
   renderLoop();
   assert.deepEqual(renderedFrames, [1, 3], 'Frame 2 bị drop để frame 3 được render ngay lập tức, không bị dồn trễ');
 });
+
+test('Screen View hiển thị lý do chờ theo đúng tab và xóa khi form đã sẵn sàng', async t => {
+  const { existsSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { chromium } = await import('playwright');
+  if (!existsSync(chromium.executablePath())) return t.skip('Chưa cài Chromium');
+  const { createLeadTestSession } = await import('./helpers/lead-session-fixture.mjs');
+  const { activeBrowsers } = await import('../src/browser/sessions.mjs');
+  const { getAutoRefillStatus } = await import('../src/refill/actions/get-auto-refill-status.mjs');
+  const { session, browser: tabs } = createLeadTestSession('192.0.2.12', 12);
+  const waitingPage = await tabs.newPage();
+  waitingPage._autofillWaitReason = 'Form yêu cầu kiểm tra <địa chỉ>.';
+  activeBrowsers.add(session);
+  t.after(() => activeBrowsers.delete(session));
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const view = await browser.newPage();
+  await view.setContent('<div id="thumbnailTiles"></div><div id="thumbnailEmpty"></div>');
+  await view.evaluate(() => Object.assign(window, { _screenViewActive: true, currentSelectedRunningOfferTab: 'all', _screenActiveSlot: 12 }));
+  for (const file of ['esc-html', 'get-device-icon', 'get-clean-device-name', 'get-clean-browser-version', 'get-short-domain', 'format-bytes', '_update-screen-slots', '_poll-thumbnails']) {
+    await view.addScriptTag({ path: fileURLToPath(new URL('../ui/desktop/functions/' + file + '.js', import.meta.url)) });
+  }
+  for (const reason of [waitingPage._autofillWaitReason, '']) {
+    waitingPage._autofillWaitReason = reason;
+    const reported = getAutoRefillStatus().chromeSessions.find(row => row.slot === 12);
+    assert.deepEqual(reported.tabs.map(tab => tab.autofillWaitReason), [null, reason || null]);
+    await view.evaluate(session => { _updateScreenSlots([session]); _pollThumbnails(); }, reported);
+    const rows = view.locator('.screen-tile-footer .status-checking');
+    assert.deepEqual(await rows.allTextContents(), reason ? ['Tab 2 · ' + reason] : []);
+  }
+});

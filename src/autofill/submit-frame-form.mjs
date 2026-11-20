@@ -24,6 +24,7 @@ import { selectFirstAddressSuggestion } from './select-first-address-suggestion.
  * @param {object} session Phiên nhận thông báo lỗi.
  * @param {object} options Callback nhật ký của lượt quét.
  * @param {object} page Tab nhận thông báo.
+ * @param {object} frameProgress Kết quả và lý do chờ của lượt quét.
  * @param {string} address Địa chỉ nguồn để xác minh widget của form.
  * @param {Function} dispatch Thao tác gửi hiện có, trả false/null nếu chưa gửi.
  * @return {Promise<*>} Kết quả thao tác, hoặc null khi validation chặn gửi.
@@ -31,7 +32,7 @@ import { selectFirstAddressSuggestion } from './select-first-address-suggestion.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
-async function submitWithValidation(frame, formScope, session, options, page, address, dispatch) {
+async function submitWithValidation(frame, formScope, session, options, page, frameProgress, address, dispatch) {
   if (!formScope) return dispatch();
   const observation = await frame.evaluateHandle(observeFormValidation, formScope);
   try {
@@ -54,6 +55,7 @@ async function submitWithValidation(frame, formScope, session, options, page, ad
     }
     const detail = 'Kiểm tra lại trường trên form: ' + fields.map(field => field.label).join(', ');
     session.hasSubmittedCurrentScreen = false;
+    frameProgress.waitReason = detail;
     session.autofillError = detail;
     options.onLog?.({ type: eventType, fields, detail }, page);
     return null;
@@ -212,7 +214,7 @@ export async function submitFrameForm({
           let submitDispatched;
           try {
             if (validationScope) validationScope.skipNativeValidation = btnInfo.skipNativeValidation;
-            submitDispatched = await submitWithValidation(frame, validationScope, session, options, page, record?.address, async () => {
+            submitDispatched = await submitWithValidation(frame, validationScope, session, options, page, frameProgress, record?.address, async () => {
               console.log(`[Autofill] Bấm nút submit: <${btnInfo.tag}> "${submitLabel}" id="${btnInfo.id}" class="${btnInfo.className || ''}"`);
 
               // Ghi log submit rõ ràng vào session logs
@@ -234,6 +236,7 @@ export async function submitFrameForm({
           // Trước đây mỗi lần vẫn cộng action nên watcher bấm Continue lặp mãi (log 2026-11-12: 54 lần).
           const rejectedDialog = submitDispatched && page._uxLastDialog?.validation && page._uxLastDialog.at >= clickStartedAt ? page._uxLastDialog : null;
           if (rejectedDialog) {
+            frameProgress.waitReason = 'Form yêu cầu kiểm tra lại dữ liệu sau khi gửi.';
             page.off?.('popup', popupHandler);
             options.onLog?.({ type: 'submit_rejected_dialog', id: btnInfo.id, detail: `Website chặn ${submitLabel} bằng thông báo: "${rejectedDialog.message.slice(0, 120)}"; không tính là tiến triển.` }, page);
             return false;
@@ -312,6 +315,7 @@ export async function submitFrameForm({
             return true;
           }
           if (submitError?.hasError) {
+            frameProgress.waitReason = 'Form báo lỗi ở trường ' + (submitError.fieldName || submitError.fieldId || submitError.fieldTag || 'chưa xác định') + '.';
             console.log(`[Autofill] Submit chưa qua được do trang báo lỗi: ${submitError.firstError}. Đang gọi AI chẩn đoán và tự sửa lỗi...`);
             const fieldIdentity = submitError.fieldId || submitError.fieldName ? `${submitError.fieldTag || 'field'}#${submitError.fieldId || submitError.fieldName} class="${submitError.fieldClass || '?'}" container="${submitError.fieldContainerClass || '?'}"` : 'không rõ trường';
             console.log(`[Autofill] Phần tử lỗi: ${fieldIdentity} — nút submit: <${btnInfo?.tag || '?'}> id="${btnInfo?.id || '?'}" class="${btnInfo?.className || '?'}"`);
@@ -366,7 +370,7 @@ export async function submitFrameForm({
         // FALLBACK NẾU THIẾU NÚT BẤM HOẶC NÚT BẤM KHÔNG ĐƯỢC NHẬN DIỆN:
         // Chỉ chạy khi TRONG LƯỢT QUÉT NÀY vừa điền thêm được ô mới.
         // Trả về định danh phần tử đã gửi (id/class của div/button/form) để log nâng cấp matcher.
-        const formSubmitted = await submitWithValidation(frame, validationScope, session, options, page, record?.address,
+        const formSubmitted = await submitWithValidation(frame, validationScope, session, options, page, frameProgress, record?.address,
           () => frame.evaluate(submitVisibleFormFallback, formScope).catch(() => ({ method: 'error' })));
         if (formSubmitted && formSubmitted.method !== 'none' && formSubmitted.method !== 'error') {
           const fallbackIdentity = formSubmitted.id || formSubmitted.className ? `${formSubmitted.tag || 'element'}#${formSubmitted.id || '?'} class="${formSubmitted.className || '?'}"` : 'không rõ định danh';

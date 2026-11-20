@@ -25,6 +25,8 @@ function contactHint(hint) {
   if (Number(email) + Number(phone) + Number(street) > 1) return 'conflict';
   if (email) return 'email';
   if (phone) return 'phone';
+  // Danh sách thành phần sau địa chỉ mô tả một ô tìm địa chỉ đầy đủ.
+  if (/\b(?:street(?: address)?|mailing address|address)\s*,\s*(?:city|town)\s*,\s*(?:state|province)(?:\s*,?\s*(?:zip(?: code)?|postal code))?[.*\s]*$/.test(text)) return 'address';
   if (/addresslevel2|thanhpho|^citytown$/.test(key) || /\b(?:city|town)(?: name| of residence)?[\s:*?]*$/.test(text)) return 'city';
   if (/addresslevel1|^stateorprovince$/.test(key) || /\b(?:state|province)(?: name| abbreviation| of residence)?[\s:*?]*$/.test(text) ||
       /^(?:tinh|tinh\s*\/\s*thanh)\s*\*?$/.test(text)) return 'state';
@@ -71,6 +73,7 @@ export function resolveContactField(metadata) {
   if (!kind && metadata.type === 'tel' && ['address', 'email'].includes(identifiers[0])) return 'conflict';
   kind ||= identifiers[0] || '';
   if (kind && ['date', 'time', 'month', 'week', 'datetime-local', 'url'].includes(metadata.type)) return 'conflict';
+  if (metadata.type === 'tel' && ['address', 'address2'].includes(kind)) return 'conflict';
   if (metadata.type === 'number' && ['address', 'address2', 'email'].includes(kind)) return 'conflict';
   if (metadata.type === 'email' && kind && kind !== 'email') return 'conflict';
   if (!kind && metadata.type === 'email') return 'email';

@@ -23,11 +23,13 @@ const states = new WeakMap();
  * @param {object} session Phiên.
  * @param {object} options Tuỳ chọn autofill (chính sách chờ lead).
  * @return {boolean} True nếu phải bỏ qua.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
  */
 function isBusyOrHandledElsewhere(page, session, options) {
   const url = page.url();
   return !/^https?:/i.test(url) || session.isClosed || page.isClosed()
-    || page._aiAssistRunning || page._aiFormFixing || page._continuousAgent || page._leadRecoveryInProgress || page._lateProgressRecoveryActive
+    || page._autofillWaitReason || page._aiAssistRunning || page._aiFormFixing || page._continuousAgent || page._leadRecoveryInProgress || page._lateProgressRecoveryActive
     || session.leadCheckStatus === 'checking' || shouldPauseForLead(session, options)
     || ['manual', 'skip', 'consent_only'].includes(session.offerMode)
     || isThankYouUrl(url) || isFinancialhelpThankyouUrl(url) || isFinancialhelpPathThankyouUrl(url)

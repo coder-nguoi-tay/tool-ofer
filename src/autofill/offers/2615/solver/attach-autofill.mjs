@@ -181,9 +181,9 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
    * Điền các trường còn trống trên form đang hiển thị của một trang và các frame con.
    *
    * @param {object} page Trang Chrome cần xử lý.
-   * @return {Promise<void>} Hoàn tất lượt quét form.
+   * @return {Promise<void|{waitReason:string, waitingForAddress?:boolean}>} Lý do chờ của tab sau lượt quét.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-10-21
+   * @since 2026-11-20
    */
   async function fillVisibleForms(page) {
     return fillPageForms(page, {

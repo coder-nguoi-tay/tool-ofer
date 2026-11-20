@@ -24,7 +24,7 @@ export function syncAlphaHiddenContactData(scopePayload) {
   
   const addr = findControl('#address');
   const hiddenAddr = findControl('#input-address');
-  const addressWidget = addr?.matches?.('[role=combobox], [aria-autocomplete], [aria-controls], [aria-owns], [list], .autocomplete, .typeahead') || addr?._autoleadAddressChoice ||
+  const addressWidget = addr?.matches?.('[data-type=address][data-populated], [role=combobox], [aria-autocomplete], [aria-controls], [aria-owns], [list], .autocomplete, .typeahead') || addr?._autoleadAddressChoice ||
     addr?.form?.querySelector('input[name=place_id], input[name=address_id], select[name*=address i], .address-suggestions') ||
     /^(placeid|addressid)$/i.test((hiddenAddr?.name || '').replace(/[-_]/g, ''));
   if (addr?.value && hiddenAddr?.readOnly && hiddenAddr.form === addr.form && hiddenAddr.value !== addr.value && !addressWidget) {

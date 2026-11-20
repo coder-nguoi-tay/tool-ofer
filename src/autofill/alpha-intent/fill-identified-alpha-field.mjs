@@ -17,7 +17,8 @@ import { tryFastTextInput } from '../interaction/try-fast-text-input.mjs';
 export async function fillIdentifiedAlphaField(field, value, page, record) {
   const metadata = await field.evaluate(collectFieldMetadata, undefined, { timeout: 1000 }).catch(() => null);
   if (!metadata) return false;
-  if (metadata.accessibleName || resolveContactField(metadata)) {
+  const contact = resolveContactField(metadata);
+  if (metadata.accessibleName || contact) {
     const matched = matchFieldValue(metadata.names, record, metadata);
     if (matched === null) return false;
     const expected = String(matched).trim().replace(/\s+/g, ' ').toLowerCase();
@@ -26,5 +27,5 @@ export async function fillIdentifiedAlphaField(field, value, page, record) {
       && expected.replace(/\D/g, '') === proposed.replace(/\D/g, '');
     if (expected !== proposed && !sameNumericValue) return false;
   }
-  return tryFastTextInput(field, value, page);
+  return tryFastTextInput(field, value, page, contact === 'address');
 }

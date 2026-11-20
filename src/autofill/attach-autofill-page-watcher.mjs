@@ -29,7 +29,7 @@ import { verifyOffer2615Landing } from './offers/2615/verify-offer-landing.mjs';
  * @return {void} Hoàn tất thao tác trên tab.
  * @throws {Error} Khi không đăng ký được listener của tab.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export function attachAutofillPageWatcher(page, {
   trackedPages,
@@ -45,6 +45,7 @@ export function attachAutofillPageWatcher(page, {
   if (trackedPages.has(page)) return;
   trackedPages.add(page);
   attachFrameRequestTracking(page);
+  let navigationRevision = 0;
   let filling = false;
   let nextScanAt = 0;
   let scanDelayMs = 500;
@@ -86,7 +87,7 @@ export function attachAutofillPageWatcher(page, {
    * @return {Promise<void>} Hoàn tất lượt quét độc lập của tab.
    * @throws {Error} Khi tab hoặc phiên mất kết nối giữa lượt quét.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-19
+   * @since 2026-11-20
    */
   const scanOnce = async () => {
     protectConfirmedLeadSession(session);
@@ -154,12 +155,20 @@ export function attachAutofillPageWatcher(page, {
       }, page);
     }, 20000);
     stuckTimer.unref?.();
+    const revision = navigationRevision;
+    let outcome;
     try {
-      await fillVisibleForms(page);
+      outcome = await fillVisibleForms(page);
+      if (revision !== navigationRevision || page.url() !== u) return;
+      page._autofillWaitReason = outcome?.waitReason || '';
     } catch {
       // Trang có thể điều hướng hoặc đóng giữa hai lần quét.
     } finally {
       clearTimeout(stuckTimer);
+    }
+    if (outcome?.waitingForAddress) {
+      scanDelayMs = getAutofillScanDelay(++noProgressRounds);
+      return;
     }
     const filled = (session.autofillFields ?? 0) + (session.autofillActions ?? 0) - fieldsBefore;
     if (filled > 0) {
@@ -194,7 +203,7 @@ export function attachAutofillPageWatcher(page, {
         return;
       }
       // Dùng chung nhận diện visible/iframe với AI, không coi iframe trắng là form bị kẹt.
-      if (!iframeOnly && await recoverEmptyProgress(page, session, options)) { scanDelayMs = 5000; return; }
+      if (!iframeOnly && !page._autofillWaitReason && await recoverEmptyProgress(page, session, options)) { scanDelayMs = 5000; return; }
       const visibleState = await readVisiblePageState(page);
       const hasInteractable = visibleState.available ? visibleState.hasWork : true;
       if (shouldPauseForLead(session, options)) {
@@ -295,6 +304,10 @@ export function attachAutofillPageWatcher(page, {
       try {
         const u = typeof page.url === 'function' ? page.url() : '';
         const isMain = !navFrame || typeof page.mainFrame === 'function' && navFrame === page.mainFrame();
+        if (isMain || navFrame === page._activeAutofillFrame) {
+          navigationRevision++;
+          page._autofillWaitReason = '';
+        }
         if (isMain && u && !u.startsWith('about:') && !u.startsWith('chrome:')) {
           const cleanU = u.split('#')[0];
           if (session.lastTrackedNavUrl && session.lastTrackedNavUrl.split('#')[0] !== cleanU) {
