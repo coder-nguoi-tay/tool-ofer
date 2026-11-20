@@ -149,6 +149,24 @@ function makeSession(pages) {
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
 
+test('khung hình đến ngay khi bắt đầu stream thay cho ảnh chụp bù ban đầu', async () => {
+  const cdp = fakeCdp();
+  const send = cdp.send;
+  cdp.send = async (method, params) => {
+    if (method === 'Page.startScreencast') cdp.emit('Page.screencastFrame', { data: 'FIRST', sessionId: 1 });
+    return send(method, params);
+  };
+  const stream = { sseResponse: fakeResponse() };
+  try {
+    await attachScreencastSession(stream, cdp, fakePage);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(stream.sseResponse.writes, ['data: FIRST\n\n']);
+    assert.equal(cdp.calls.some(call => call.method === 'Page.captureScreenshot'), false);
+  } finally {
+    await releaseScreencast(stream);
+  }
+});
+
 test('thanh tab phản hồi trong khi một tab chậm đọc tiêu đề, kể cả khi đổi URL', { timeout: 2000 }, async t => {
   const page = makePage();
   let url = 'about:blank';

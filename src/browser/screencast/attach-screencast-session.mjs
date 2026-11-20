@@ -32,6 +32,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   scObj.lastFrameTime = Date.now();
 
   let attached = true;
+  let receivedFrame = false;
   let reconnecting = false;
   let captureInFlight = false;
 
@@ -84,6 +85,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
     }
     const res = scObj.sseResponse;
     if (scObj.cleaned || res.writableEnded || res.destroyed) return;
+    receivedFrame = true;
     // Chống nghẽn riêng từng slot: chỉ báo Chrome "đã nhận" khi socket người xem đẩy xong frame.
     // Người xem chậm (Telegram qua tunnel) thì Chrome tự giãn nhịp frame của slot đó,
     // không dồn frame trong RAM Node và không làm trễ các slot khác.
@@ -120,12 +122,12 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   // 4. Frame ban đầu chụp NỀN, không await, và KHÔNG chụp khi cửa sổ đang thu nhỏ (xem isWindowMinimized):
   // lệnh chụp treo sẽ chặn screencast của slot. Lúc đó screencast tự gửi frame đầu.
   // Bỏ fallback page.screenshot: nó cũng gọi captureScreenshot nên treo y như vậy.
-  void isWindowMinimized(cdpSession).then(minimized => minimized || !attached ? null : cdpSession.send('Page.captureScreenshot', {
+  if (!receivedFrame) void isWindowMinimized(cdpSession).then(minimized => minimized || !attached || receivedFrame ? null : cdpSession.send('Page.captureScreenshot', {
     format: 'jpeg',
     quality: 58
   })).then(initShot => {
     const res = scObj.sseResponse;
-    if (initShot?.data && attached && !scObj.cleaned && !res.writableEnded && !res.destroyed) {
+    if (initShot?.data && attached && !receivedFrame && !scObj.cleaned && !res.writableEnded && !res.destroyed) {
       scObj.lastFrameTime = Date.now();
       res.write(`data: ${initShot.data}\n\n`);
     }

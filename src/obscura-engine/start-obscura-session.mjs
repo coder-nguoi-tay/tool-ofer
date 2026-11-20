@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import { createInterface } from 'node:readline';
 import { resolveObscuraBinary } from './resolve-obscura-binary.mjs';
 import { OBSCURA_DEFAULT_PORT, OBSCURA_CONNECT_TIMEOUT_MS, OBSCURA_READY_POLL_INTERVAL_MS } from './constants.mjs';
 
@@ -56,6 +57,7 @@ async function waitForObscuraReady(port, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS,
  * Khởi động một phiên Obscura CDP Server độc lập.
  *
  * @param {object} options
+ * @param {number} [options.slot] Slot hiển thị cùng số đo khi bật debug hiệu năng.
  * @param {number} [options.port=9222] Cổng lắng nghe CDP.
  * @param {string} [options.proxy] Proxy upstream (http:// hoặc socks5://).
  * @param {number} [options.timeoutMs=15000] Thời gian tối đa chờ server sẵn sàng.
@@ -68,9 +70,9 @@ async function waitForObscuraReady(port, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS,
  * @throws {Error} Khi spawn hoặc CDP không sẵn sàng.
  * @return {Promise<{ port: number, cdpEndpoint: string, process: import('node:child_process').ChildProcess, pid: number }>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-20
  */
-export async function startObscuraSession({ port = OBSCURA_DEFAULT_PORT, proxy = null, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS, timezone = 'UTC', userAgent = '', headers = {}, onSpawn = null,
+export async function startObscuraSession({ slot, port = OBSCURA_DEFAULT_PORT, proxy = null, timeoutMs = OBSCURA_CONNECT_TIMEOUT_MS, timezone = 'UTC', userAgent = '', headers = {}, onSpawn = null,
   tlsProfile = 'chrome-windows', identity = null } = {}) {
   const binary = resolveObscuraBinary();
   const args = ['serve', String(port)];
@@ -90,10 +92,18 @@ export async function startObscuraSession({ port = OBSCURA_DEFAULT_PORT, proxy =
 
   onSpawn?.(child);
   child.stdout.resume();
-  child.stderr.on('data', (chunk) => {
-    const msg = chunk.toString().trim();
-    if (msg) console.debug(`[Obscura:${port}:stderr]`, msg);
-  });
+  if (process.env.AUTOLEADPC_OBSCURA_PERF === '1') {
+    const timings = /^\[ObscuraPerf\] (?:begin|end|navigation_wait|queue_full|navigation_end|first_frame|ack_wait|ack_resume)(?: (?:op=(?:attach|detach|start_stream|stop_stream|navigate|reload)|(?:tab|loading_tab|conn|id|queue_ms|tabs|deferred|run_ms|stream|render_us|encode_pack_us|wait_ms|elapsed_ms|committed|cancelled|failed|requested_post|http_status)=\d+))+$/;
+    createInterface({ input: child.stderr }).on('line', line => {
+      if (timings.test(line)) console.info(`[Process] ${new Date().toISOString()} slot=${Number.isInteger(slot) ? slot : 0} port=${port} pid=${child.pid} ${line}`);
+      else if (line) console.debug(`[Obscura:${port}:stderr]`, line);
+    });
+  } else {
+    child.stderr.on('data', (chunk) => {
+      const msg = chunk.toString().trim();
+      if (msg) console.debug(`[Obscura:${port}:stderr]`, msg);
+    });
+  }
 
   child.on('error', (err) => {
     console.error(`[Obscura:${port}] Lỗi tiến trình:`, err);

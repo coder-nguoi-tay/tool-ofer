@@ -80,6 +80,18 @@ cargo run -- demo
 
 ---
 
+### Đo thời gian chuyển tab trong Screen View
+
+Đặt `AUTOLEADPC_OBSCURA_PERF=1` trong môi trường khởi động app. Mỗi tiến trình Obscura mới đọc cờ một lần. Wrapper macOS chuyển các dòng `[ObscuraPerf]` vào `/tmp/autoleadpc-<instance>.log` kể cả khi app dùng chế độ log `access`. Mỗi dòng của app có thời điểm, slot, cổng và PID. Trường `tab` và `loading_tab` là số nội bộ theo thứ tự tạo trang trong kết nối. Đối chiếu `conn` và `id` để theo cùng một lệnh.
+
+| Dấu mốc | Cách đọc |
+| --- | --- |
+| `navigation_wait`, `queue_full` | Core hoãn lệnh đến sau điều hướng, hoặc từ chối vì hàng đợi đầy. |
+| `begin`, `end` | `queue_ms` là thời gian từ lúc đưa lệnh vào hàng đợi Rust đến lúc bắt đầu xử lý. `run_ms` là thời gian xử lý trong core. |
+| `first_frame` | `render_us` đo dựng và đổi kích thước ảnh đầu. `encode_pack_us` đo mã hóa và đóng gói sự kiện trước khi gửi qua WebSocket. |
+| `ack_wait`, `ack_resume` | Luồng ảnh có thay đổi nhưng phải chờ bên xem xác nhận ảnh trước. Core ghi nhận lần chờ từ 250 ms. |
+| `navigation_end` | `requested_post=1` khi điều hướng yêu cầu POST. `http_status` là mã phản hồi tài liệu chính cuối cùng quan sát được, hoặc 0 nếu chưa có. |
+
 ## 4. Cách tích hợp vào repo Obscura thật
 
 ### Phương án A: Tích hợp qua CDP (`Page.addScriptToEvaluateOnNewDocument`)
