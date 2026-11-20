@@ -5194,19 +5194,12 @@ class Element extends Node {
     this._internalsAttached = true;
     return new ElementInternals(this);
   }
+  /** Read the current control value using the native selected option for a select. @return {string} Current value. @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
   get value() {
     const tag = this.localName;
     if (tag === 'select') {
-      // Selected option wins; otherwise first option (HTML default).
-      const opts = this.namespaceURI === 'http://www.w3.org/1999/xhtml'
-        ? _selectOptions(this) : this.querySelectorAll('option');
-      for (let i = 0; i < opts.length; i++) {
-        if (opts[i].selected) {
-          return opts[i].getAttribute('value') !== null ? opts[i].getAttribute('value') : opts[i].textContent;
-        }
-      }
-      if (opts.length) return opts[0].getAttribute('value') !== null ? opts[0].getAttribute('value') : opts[0].textContent;
-      return '';
+      const option = this.options[this.selectedIndex];
+      return option ? option.getAttribute('value') ?? option.textContent : '';
     }
     if (_formValues[this._nid] === undefined) _loadFormState(this._nid);
     if (_formValues[this._nid] !== undefined) return _formValues[this._nid];
@@ -5238,6 +5231,7 @@ class Element extends Node {
     if ((this.getAttribute('type') || '').toLowerCase() !== 'file') return null;
     return this._files || _emptyFileList();
   }
+  /** Assign a live form value, choosing the first matching option in a select. @param {*} v Assigned value. @return {void} @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
   set value(v) {
     const tag = this.localName;
     if (tag === 'option') {
@@ -5254,11 +5248,7 @@ class Element extends Node {
       const wanted = String(v);
       const opts = this.namespaceURI === 'http://www.w3.org/1999/xhtml'
         ? _selectOptions(this) : this.querySelectorAll('option');
-      for (let i = 0; i < opts.length; i++) {
-        const attrV = opts[i].getAttribute('value');
-        const optVal = attrV !== null ? attrV : opts[i].textContent;
-        opts[i].selected = optVal === wanted;
-      }
+      this.selectedIndex = Array.prototype.findIndex.call(opts, option => (option.getAttribute('value') ?? option.textContent) === wanted);
       return;
     }
     const value = String(v);
@@ -5378,19 +5368,10 @@ class Element extends Node {
   set indeterminate(v) {
     _setInputIndeterminate(this, v);
   }
-  get selected() {
-    if (this._selected !== undefined) return this._selected;
-    return this.hasAttribute("selected");
-  }
-  set selected(v) {
-    this._selected = !!v;
-    // Keep the native DOM tree in sync so layout/paint observes live form
-    // state after scripts construct or change an option.
-    if (this.localName === 'option') {
-      if (this._selected) this.setAttribute('selected', '');
-      else this.removeAttribute('selected');
-    }
-  }
+  /** Read selectedness from the native DOM. @return {boolean} Current option state. @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
+  get selected() { return _domParse('option_selected', this._nid); }
+  /** Set current option state without changing its HTML default. @param {*} v New selectedness. @return {void} @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
+  set selected(v) { _dom('set_option_selected', this._nid, String(!!v)); }
   get text() {
     if (['option', 'script', 'title', 'a'].includes(this.localName)) {
       return this.textContent;
@@ -5784,21 +5765,10 @@ class Element extends Node {
     const parent = reference ? reference.parentNode : this;
     parent.insertBefore(item, reference);
   }
-  get selectedIndex() {
-    const opts = this.options;
-    for (let i = 0; i < opts.length; i++) {
-      if (opts[i].selected || opts[i].hasAttribute('selected')) return i;
-    }
-    // Only a single select implicitly selects its first option; a multiple
-    // select with nothing chosen idles at -1 like a real browser.
-    return opts.length && !this.hasAttribute('multiple') ? 0 : -1;
-  }
-  set selectedIndex(v) {
-    const opts = this.options;
-    for (let i = 0; i < opts.length; i++) {
-      opts[i]._selected = (i === v);
-    }
-  }
+  /** Read the first current option index. @return {number} Index or -1 for no selection. @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
+  get selectedIndex() { return _domParse('selected_option_indexes', this._nid)?.[0] ?? -1; }
+  /** Select one option, including on multiple selects. @param {number} v Option index. @return {void} @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
+  set selectedIndex(v) { _dom('set_select_index', this._nid, String(+v | 0)); }
   // Per the HTML spec, the submit() METHOD submits the form WITHOUT firing a
   // cancelable `submit` event: a page's submit listener cannot veto it. Only
   // requestSubmit() and user-initiated submits fire the cancelable event.
@@ -5853,27 +5823,12 @@ class Element extends Node {
       let val;
       if (tag === 'select') {
         const opts = _selectOptions(f);
-        const multiple = f.hasAttribute('multiple');
-        const chosen = [];
-        let explicit = false;
-        let firstEnabled = null;
-        for (const opt of opts) {
-          explicit ||= opt._selected !== undefined;
+        for (const index of _domParse('selected_option_indexes', f._nid)) {
+          const opt = opts[index];
           const parent = opt.parentElement;
           const disabled = opt.hasAttribute('disabled')
             || (parent && parent.namespaceURI === 'http://www.w3.org/1999/xhtml'
                 && parent.localName === 'optgroup' && parent.hasAttribute('disabled'));
-          if (!disabled && !firstEnabled) firstEnabled = opt;
-          if (opt.selected) {
-            if (!multiple) chosen.length = 0;
-            chosen.push([opt, disabled]);
-          }
-        }
-        if (!multiple && !chosen.length && !explicit
-            && (parseInt(f.getAttribute('size'), 10) || 0) <= 1 && firstEnabled) {
-          chosen.push([firstEnabled, false]);
-        }
-        for (const [opt, disabled] of chosen) {
           if (!disabled) pairs.push(enc(name) + '=' + enc(opt.getAttribute('value') ?? opt.textContent));
         }
         continue;
@@ -15060,6 +15015,7 @@ globalThis.HTMLFormElement = class HTMLFormElement extends Element {
   get elements() { return _formControls(this); }
   get length() { return this.elements.length; }
   // submit() bypasses the submit event; requestSubmit() dispatches it.
+  /** Restore each control's authored default after an uncanceled reset event. @return {void} @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
   reset() {
     if (!this.dispatchEvent(new Event('reset', { bubbles: true, cancelable: true }))) return;
     for (const f of this.elements) {
@@ -15071,6 +15027,8 @@ globalThis.HTMLFormElement = class HTMLFormElement extends Element {
         } else {
           f.value = f.getAttribute('value') || '';
         }
+      } else if (f.localName === 'select') {
+        _dom('set_select_index', f._nid, 'default');
       } else if ('value' in f) {
         f.value = '';
       }
@@ -15572,6 +15530,13 @@ Object.defineProperties(HTMLSelectElement.prototype, {
 });
 Object.defineProperty(HTMLSelectElement, 'length', {value: 0, configurable: true});
 Object.defineProperty(HTMLOptionElement, 'length', {value: 0, configurable: true});
+Object.defineProperty(HTMLOptionElement.prototype, 'defaultSelected', {
+  /** Read the HTML selection default. @return {boolean} Whether selected is present in markup. @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
+  get() { return this.hasAttribute('selected'); },
+  /** Reflect the authored default separately from the current selection. @param {*} value Default flag. @return {void} @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
+  set(value) { this.toggleAttribute('selected', !!value); },
+  configurable: true, enumerable: true,
+});
 Object.defineProperty(_optionIndexGetter, 'name', {value: 'get index', configurable: true});
 Object.defineProperty(HTMLOptionElement.prototype, 'index', {
   get: _optionIndexGetter, configurable: true, enumerable: true,
@@ -19696,7 +19661,7 @@ if (typeof Option === 'undefined') {
     // Selectedness follows `selected` alone, so defaultSelected without
     // selected leaves the attribute in place on an unselected option.
     if (selected) option.selected = true;
-    else if (defaultSelected) option._selected = false;
+    else if (defaultSelected) option.selected = false;
     return option;
   };
   globalThis.Option.prototype = globalThis.HTMLOptionElement.prototype;

@@ -128,17 +128,30 @@ test('Screen View Obscura chuyển CDP, hình ảnh và trang điều khiển qu
 });
 
 test('giao diện chỉ đổi tab khi API thành công và thông báo khi chuyển thất bại', async () => {
-  const code = await readFile(new URL('../ui/desktop/functions/_switch-tab.js', import.meta.url), 'utf8');
+  const scripts = await Promise.all(['_fetch-and-render-tabs', '_switch-tab'].map(name =>
+    readFile(new URL('../ui/desktop/functions/' + name + '.js', import.meta.url), 'utf8')));
   const errors = [];
-  let success = false, renders = 0;
+  let success = false, renders = 0, serverTabIndex = 0;
   const panel = { style: { display: 'block' }, dataset: {} };
+  const tabBar = { appendChild() {} };
   const sandbox = {
-    _screenActiveTabIndex: 0, document: { getElementById: () => panel },
-    fetch: async () => ({ ok: success, json: async () => success ? { ok: true } : { error: 'fixture failure' } }),
+    _screenActiveTabIndex: 0, _screenActiveSlot: 1, _screenEventSource: {},
+    document: {
+      getElementById: id => ({ screenHtmlPanel: panel, screenTabBar: tabBar })[id],
+      createElement: () => ({ appendChild() {} }),
+    },
+    fetch: async (url, options) => {
+      assert.equal(url, '/screen/tabs/1');
+      if (options?.method === 'POST') {
+        if (success) serverTabIndex = JSON.parse(options.body).index;
+        return { ok: success, json: async () => success ? { ok: true } : { error: 'fixture failure' } };
+      }
+      renders++;
+      return { ok: true, json: async () => ({ tabs: [0, 1].map(index => ({ index, active: index === serverTabIndex })) }) };
+    },
     showToast: message => errors.push(message),
-    _fetchAndRenderTabs: async () => { renders++; }
   };
-  runInNewContext(code, sandbox);
+  runInNewContext(scripts.join('\n'), sandbox);
   await sandbox._switchTab(1, 1);
   assert.equal(sandbox._screenActiveTabIndex, 0);
   assert.equal(panel.style.display, 'block');
@@ -149,9 +162,15 @@ test('giao diện chỉ đổi tab khi API thành công và thông báo khi chuy
   assert.equal(panel.style.display, 'none');
   assert.equal(renders, 1);
   let answerB;
-  sandbox.fetch = async (_url, options) => {
+  const serverFetch = sandbox.fetch;
+  sandbox.fetch = async (url, options) => {
+    if (!options) {
+      renders++;
+      return { ok: true, json: async () => ({ tabs: [0, 1, 2].map(index => ({ index, active: index === serverTabIndex })) }) };
+    }
     if (JSON.parse(options.body).index === 1) await new Promise(resolve => { answerB = resolve; });
-    return { ok: true, json: async () => ({ ok: true }) };
+    if (JSON.parse(options.body).index === 2) return serverFetch(url, options);
+    return { ok: false, json: async () => ({ superseded: true }) };
   };
   const b = sandbox._switchTab(1, 1);
   await sandbox._switchTab(1, 2);

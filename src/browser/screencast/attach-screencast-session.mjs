@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { activeBrowsers } from '../sessions.mjs';
 import { isWindowMinimized } from './is-window-minimized.mjs';
 
@@ -25,6 +26,10 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
     clearInterval(scObj.keepaliveTimer);
     scObj.keepaliveTimer = null;
   }
+  const sourceId = randomUUID();
+  scObj.screenSourceId = sourceId;
+  scObj.sseResponse.resetFrame?.();
+  let frameRevision = 0;
   scObj.cdpClient = cdpSession;
   scObj.page = targetPage;
   scObj.slot = slot;
@@ -82,7 +87,8 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   targetPage.on?.('close', onDetachOrClose);
   // 2. Gắn listener TRƯỚC KHI gọi startScreencast để không bao giờ bị lỡ frame đầu
   const onFrame = frame => {
-    if (!attached) return;
+    if (!attached || scObj.screenSourceId !== sourceId) return;
+    frameRevision++;
     scObj.lastFrameTime = Date.now();
     if (frame.metadata) {
       scObj.deviceWidth = frame.metadata.deviceWidth;
@@ -97,7 +103,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
     const ack = () => cdpSession.send('Page.screencastFrameAck', {
       sessionId: frame.sessionId
     }).catch(() => {});
-    if (res.write(`data: ${frame.data}\n\n`)) ack();else res.once('drain', ack);
+    if (res.write(`id: ${sourceId}\ndata: ${frame.data}\n\n`)) ack();else res.once('drain', ack);
   };
   cdpSession.on('Page.screencastFrame', onFrame);
   scObj.unbindListeners = () => {
@@ -127,14 +133,15 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   // 4. Frame ban đầu chụp NỀN, không await, và KHÔNG chụp khi cửa sổ đang thu nhỏ (xem isWindowMinimized):
   // lệnh chụp treo sẽ chặn screencast của slot. Lúc đó screencast tự gửi frame đầu.
   // Bỏ fallback page.screenshot: nó cũng gọi captureScreenshot nên treo y như vậy.
+  const initialRevision = frameRevision;
   if (!stream?.obscuraAutonomousFrames && !receivedFrame) void isWindowMinimized(cdpSession).then(minimized => minimized || !attached || receivedFrame ? null : cdpSession.send('Page.captureScreenshot', {
     format: 'jpeg',
     quality: 58
   })).then(initShot => {
     const res = scObj.sseResponse;
-    if (initShot?.data && attached && !receivedFrame && !scObj.cleaned && !res.writableEnded && !res.destroyed) {
+    if (initShot?.data && attached && initialRevision === frameRevision && !receivedFrame && !scObj.cleaned && !res.writableEnded && !res.destroyed) {
       scObj.lastFrameTime = Date.now();
-      res.write(`data: ${initShot.data}\n\n`);
+      res.write(`id: ${sourceId}\ndata: ${initShot.data}\n\n`);
     }
   }).catch(() => {});
 
@@ -168,6 +175,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
     if (!stream?.obscuraAutonomousFrames && idleTime >= 1500) {
       if (captureInFlight) return;
       captureInFlight = true;
+      const captureRevision = frameRevision;
       try {
         // Cửa sổ thu nhỏ: không chụp bù (lệnh chụp treo sẽ chặn screencast của slot này).
         if (await isWindowMinimized(cdpSession) || !attached) return;
@@ -175,9 +183,9 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
           format: 'jpeg',
           quality: 50
         });
-        if (shot?.data && attached && !scObj.cleaned && !scObj.sseResponse.writableEnded) {
+        if (shot?.data && attached && captureRevision === frameRevision && !scObj.cleaned && !scObj.sseResponse.writableEnded) {
           scObj.lastFrameTime = Date.now();
-          scObj.sseResponse.write(`data: ${shot.data}\n\n`);
+          scObj.sseResponse.write(`id: ${sourceId}\ndata: ${shot.data}\n\n`);
         }
       } catch (err) {
         // Lỗi Playwright: "Target page, context or browser has been closed", "Session closed", "...detached".

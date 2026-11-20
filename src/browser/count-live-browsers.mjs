@@ -6,13 +6,19 @@ import { activeBrowsers } from './sessions.mjs';
  * Không dùng activeBrowsers.size: sau Stop/đóng, phiên đang đóng (isClosed) hoặc đã mất kết nối vẫn còn trong tập
  * một lúc (Obscura chưa xác nhận thoát còn được thêm lại). Start ngay lúc đó làm mục tiêu thành "số phiên chết + N",
  * rồi lượt bù dọn phiên chết và mở hàng loạt vượt số người dùng chọn (lỗi 2026-11-18: chọn 1 mà mở 10 slot/lượt).
+ * @param {void} Không có tham số.
  * @return {number} Số phiên chưa đóng và còn kết nối.
+ * @throws {Error} Khi một bộ kiểm tra trạng thái engine đang chạy ném lỗi.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-18
  */
 export function countLiveBrowsers() {
   let count = 0;
   for (const session of activeBrowsers) {
+    if (session.isGoLogin && session.isGoLoginProcessAlive?.()) {
+      count++;
+      continue;
+    }
     if (session.isClosed) continue;
     if (session.isObscuraProcessAlive?.()) {
       count++;
@@ -28,13 +34,19 @@ export function countLiveBrowsers() {
 
 /**
  * Lấy danh sách các phiên trình duyệt còn sống thật sự.
+ * @param {void} Không có tham số.
  * @return {Array<object>} Danh sách phiên chưa đóng và còn kết nối.
+ * @throws {Error} Khi một bộ kiểm tra trạng thái engine đang chạy ném lỗi.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-18
  */
 export function getLiveBrowsers() {
   const live = [];
   for (const session of activeBrowsers) {
+    if (session.isGoLogin && session.isGoLoginProcessAlive?.()) {
+      live.push(session);
+      continue;
+    }
     if (session.isClosed) continue;
     if (session.isObscuraProcessAlive?.()) {
       live.push(session);

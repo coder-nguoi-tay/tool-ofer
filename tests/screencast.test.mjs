@@ -90,7 +90,7 @@ test('chống nghẽn: chỉ ack frame khi socket người xem đã drain', asyn
 
   cdp.emit('Page.screencastFrame', { data: 'AAA', sessionId: 7, metadata: {} });
   await new Promise((r) => setImmediate(r));
-  assert.equal(res.writes.at(-1), 'data: AAA\n\n');
+  assert.equal(res.writes.at(-1), 'id: ' + scObj.screenSourceId + '\ndata: AAA\n\n');
   assert.equal(acks(cdp), 0, 'socket đang nghẽn thì chưa được ack, để Chrome giãn nhịp frame');
 
   res.emit('drain');
@@ -163,7 +163,7 @@ test('khung hình đến ngay khi bắt đầu stream thay cho ảnh chụp bù 
   try {
     await attachScreencastSession(stream, cdp, fakePage);
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(stream.sseResponse.writes, ['data: FIRST\n\n']);
+    assert.deepEqual(stream.sseResponse.writes, [`id: ${stream.screenSourceId}\ndata: FIRST\n\n`]);
     assert.equal(cdp.calls.some(call => call.method === 'Page.captureScreenshot'), false);
   } finally {
     await releaseScreencast(stream);
@@ -231,7 +231,7 @@ test('đổi tab loại bỏ cả frame và ảnh chụp bù còn chờ của ng
   for (const resolve of captures) resolve({ data: 'OLD' });
   await pending;
   nextSource.emit('Page.screencastFrame', { data: 'NEW', sessionId: 1 });
-  assert.deepEqual(res.writes, ['data: NEW\n\n']);
+  assert.deepEqual(res.writes, [`id: ${stream.screenSourceId}\ndata: NEW\n\n`]);
   await releaseScreencast(stream);
 });
 
@@ -407,5 +407,5 @@ test('đổi A → B → C bỏ lượt đến muộn và không chờ CDP cũ d
   assert.deepEqual(newViewer.writes, ['event: screen-source\ndata: changed\n\n']);
   first.emit('Page.screencastFrame', { data: 'A', sessionId: 1 });
   c.emit('Page.screencastFrame', { data: 'C', sessionId: 3 });
-  assert.deepEqual(newViewer.writes.slice(1), ['data: C\n\n']);
+  assert.deepEqual(newViewer.writes.slice(1), [`id: ${stream.screenSourceId}\ndata: C\n\n`]);
 });

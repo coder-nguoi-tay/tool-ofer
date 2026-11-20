@@ -1,3 +1,4 @@
+import { restrictProfileField } from './record-values/restrict-profile-field.mjs';
 import { resolveRecordName } from './record-values/resolve-record-name.mjs';
 import { getAddressString } from './get-address-string.mjs';
 import { getRecordPhoneMask, resolveRecordPhone } from './record-values/resolve-record-phone.mjs';
@@ -45,17 +46,20 @@ function contactHint(hint) {
 /**
  * Đối chiếu nhãn và chữ gợi ý cùng ô với autocomplete và kiểu trước khi dùng định danh kỹ thuật.
  * @param {object} metadata Thuộc tính và nhãn do form cung cấp.
+ * @param {string[]} [candidates] Định danh bổ sung cần đối chiếu với nhãn.
  * @return {string} Khóa dữ liệu đã nhận diện, conflict khi không an toàn, hoặc rỗng để dùng matcher cũ.
  * @throws {never} Các dấu hiệu chưa đủ để phân giải được xử lý như xung đột.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
-export function resolveContactField(metadata) {
+export function resolveContactField(metadata, candidates) {
   const label = metadata.accessibleName || metadata.ariaLabelledByText || metadata.ariaLabel || metadata.label;
   const labelled = contactHint(label);
   const hinted = contactHint(metadata.placeholder);
   const token = (metadata.autocomplete || '').toLowerCase().trim().split(/\s+/).filter(part => part !== 'webauthn').at(-1);
   if (metadata.type === 'password' || ['one-time-code', 'current-password', 'new-password'].includes(token)) return 'conflict';
+  const restriction = restrictProfileField(metadata, candidates);
+  if (restriction) return restriction;
   const autocomplete = contactHint(token);
   const fieldName = contactHint(metadata.name);
   const identifiers = [fieldName, contactHint(metadata.id)].filter(Boolean);

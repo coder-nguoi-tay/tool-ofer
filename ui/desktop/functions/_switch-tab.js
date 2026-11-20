@@ -4,10 +4,12 @@
  * @param {number} index index.
  * @param {string} [manualCaptchaRequestId] Mã lượt chờ để xác nhận tab chưa đổi vị trí.
  * @return {Promise<void>} Kết quả xử lý  switch tab.
+ * @throws {Error} Khi không thể cập nhật thanh tab sau khi chuyển nguồn thành công.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
 async function _switchTab(slot, index, manualCaptchaRequestId) {
+      const stream = _screenEventSource;
       const requestId = Symbol();
       _switchTab.latest = requestId;
       try {
@@ -21,10 +23,10 @@ async function _switchTab(slot, index, manualCaptchaRequestId) {
         if (!response.ok || !result.ok) throw new Error(result.error || 'Chưa chuyển được tab đang xem.');
       } catch (error) {
         if (_switchTab.latest !== requestId) return;
-        showToast(error.message || 'Chưa chuyển được tab đang xem.', 'error');
+        if (slot === _screenActiveSlot && stream === _screenEventSource) showToast(error.message || 'Chưa chuyển được tab đang xem.', 'error');
         return;
       }
-      _screenActiveTabIndex = index;
+      if (slot !== _screenActiveSlot || stream !== _screenEventSource) return;
       const htmlPanel = document.getElementById('screenHtmlPanel');
       if (htmlPanel) { htmlPanel.style.display = 'none'; htmlPanel.dataset.request = String(Number(htmlPanel.dataset.request || 0) + 1); }
       await _fetchAndRenderTabs(slot);

@@ -5,6 +5,7 @@ import { getFallbackCity } from '../get-fallback-city.mjs';
 import { getNormalizedPhone } from '../get-normalized-phone.mjs';
 import { getPhoneAreaCode } from '../get-phone-area-code.mjs';
 import { parseDobComponents } from '../parse-dob-components.mjs';
+import { resolveRecordName } from '../record-values/resolve-record-name.mjs';
 
 /**
  * Danh sách mẫu nhận diện các trường thông dụng (đa ngôn ngữ Anh - Việt, hỗ trợ cả form gộp và form chia tách).
@@ -63,8 +64,9 @@ const semanticCategories = [
   type: 'dob_year',
   patterns: [/dob.*year/, /year.*dob/, /birth.*year/, /year.*birth/, /^year$/, /^yyyy$/, /^yy$/, /^doby$/, /^nam$/, /^namsinh$/, /birthyear/],
   resolve: (r, metadata = {}) => {
-    if (r.birthyear) {
-      const y = String(r.birthyear);
+    const year = r.birthyear || r.dobyear || r.namsinh || r.dob;
+    if (/^\d{4}$/.test(year)) {
+      const y = String(year);
       return metadata.maxLength === 2 ? y.slice(-2) : y;
     }
     const parsed = parseDobComponents(getDobString(r));
@@ -114,35 +116,18 @@ const semanticCategories = [
   }
 }, {
   type: 'ssn3',
-  patterns: [/^ssn3$/, /ssn.*last4/, /last4.*ssn/, /^last4$/, /^ssn4$/, /ssn_last_4/, /last_4/],
+  patterns: [/^ssn3$/, /^ssnlast4$/, /^last4digitsofssn$/, /^ssn4$/],
   resolve: r => {
     const ssn = (r.ssn || '').replace(/\D/g, '');
     if (ssn.length >= 9) return ssn.slice(5, 9);
-    if (r.ssn_last4) return String(r.ssn_last4).slice(-4);
-    // Fallback: lấy 4 số cuối của số điện thoại có sẵn trong dữ liệu (không dùng số tự sinh)
-    const rawDigits = String(r.phonenumber || r.phone || r.cellphone || r.homephone || r.workphone || '').replace(/\D/g, '');
-    if (rawDigits.length < 7) return null;
-    const digits = getNormalizedPhone(r).replace(/\D/g, '');
-    return digits.length >= 10 ? digits.slice(6, 10) : null;
+    return /^\d{4}$/.test(r.ssn_last4) ? String(r.ssn_last4) : null;
   }
 },
 // 4. Các trường họ tên
 {
   type: 'first_name',
-  patterns: [/^(first|fname|given|forename)/, /^ten$/, /firstname/, /^fn$/],
-  resolve: r => {
-    if (r.firstname || r.fname) return r.firstname || r.fname;
-    if (r.fullname) return r.fullname.trim().split(/\s+/)[0];
-    const email = r.email || r.emailaddress || '';
-    if (email && email.includes('@')) {
-      const local = email.split('@')[0];
-      const parts = local.split(/[._\d-]+/).filter(Boolean);
-      if (parts.length > 0 && parts[0].length >= 2) {
-        return parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
-      }
-    }
-    return null;
-  }
+  patterns: [/^(first|fname|given|forename)(name)?$/, /^ten$/, /firstname/, /^fn$/],
+  resolve: r => resolveRecordName('firstname', r)
 }, {
   type: 'middle_name',
   patterns: [/^(middle|mname|mid|initial|minitial|middleinitial)/, /^tendem$/],
@@ -156,20 +141,8 @@ const semanticCategories = [
   }
 }, {
   type: 'last_name',
-  patterns: [/^(last|lname|sur|family)/, /^ho$/, /lastname/, /^ln$/],
-  resolve: r => {
-    if (r.lastname || r.lname) return r.lastname || r.lname;
-    if (r.fullname) return r.fullname.trim().split(/\s+/).slice(1).join(' ') || r.fullname;
-    const email = r.email || r.emailaddress || '';
-    if (email && email.includes('@')) {
-      const local = email.split('@')[0];
-      const parts = local.split(/[._\d-]+/).filter(Boolean);
-      if (parts.length > 1 && parts[1].length >= 2) {
-        return parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase();
-      }
-    }
-    return null;
-  }
+  patterns: [/^(last|lname|sur|family)(name)?$/, /^ho$/, /lastname/, /^ln$/],
+  resolve: r => resolveRecordName('lastname', r)
 }, {
   type: 'full_name',
   patterns: [/^(full|your)?name$/, /^(hoten|customername)$/],
@@ -213,7 +186,7 @@ const semanticCategories = [
 // 8. SSN gộp
 {
   type: 'ssn',
-  patterns: [/ssn/, /socialsecurity/, /^social$/],
+  patterns: [/^ssn$/, /^socialsecurity(?:number)?$/],
   resolve: r => {
     // Chỉ dùng SSN có trong dữ liệu, không tự ghép từ số điện thoại.
     return r.ssn || r.socialsecurity || null;

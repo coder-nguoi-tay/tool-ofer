@@ -55,7 +55,7 @@ import { stopMultiloginProfile } from '../../../multilogin-profile.mjs';
  */
 export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
-  const requestedCount = normalizeRequestedBrowserCount(body.requestedCount ?? body.concurrency, 1);
+  const requestedCount = normalizeRequestedBrowserCount(body.requestedCount !== undefined ? body.requestedCount : body.concurrency, 1);
   body.requestedCount = String(requestedCount);
   body.concurrency = requestedCount;
   await pruneDeadManagedSessions();

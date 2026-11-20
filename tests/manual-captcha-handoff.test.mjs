@@ -40,6 +40,11 @@ for (const [name, watch] of [['chung', attachAutofillPageWatcher], ['2615', atta
     };
     watch(page, settings);
     await waitUntil(() => page._manualCaptchaPending);
+    const confirmation = page.evaluate(() => window.confirm('Discard unsaved changes?'));
+    await waitUntil(() => Boolean(page._manualFormDialog));
+    await page._manualFormDialog.dialog.dismiss();
+    delete page._manualFormDialog;
+    assert.equal(await confirmation, false);
     const ticket = page._manualCaptchaRequestId;
     const sibling = await context.newPage();
     await sibling.goto('https://form-scope.test/other');

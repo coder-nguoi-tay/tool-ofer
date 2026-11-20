@@ -482,6 +482,12 @@ impl<'a> Element for DomElement<'a> {
             .unwrap_or(false)
     }
 
+    /// Match stateful CSS pseudo-classes using the native DOM and current form selection.
+    /// @param pc Pseudo-class requested by the selector.
+    /// @param _context Current selector matching context.
+    /// @return Whether the element matches the pseudo-class.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
     fn match_non_ts_pseudo_class(
         &self,
         pc: &PseudoClass,
@@ -490,17 +496,13 @@ impl<'a> Element for DomElement<'a> {
         match pc {
             PseudoClass::Link => self.is_link(),
             PseudoClass::Visited => false,
-            // :enabled/:disabled/:checked reflect real, static DOM state (the
-            // disabled/checked attributes), not live user interaction, so
-            // they resolve the same way against a static snapshot as they
-            // would in a browser that never received an input event. Modern
-            // component systems (Codex, Material, Bootstrap, ...) lean on
-            // :enabled constantly for their default/base styling, so
-            // treating it as unconditionally false (as :hover/:active
-            // correctly are) made every such base rule silently inert.
-            PseudoClass::Enabled => self.is_form_control() && !self.has_boolean_attr("disabled"),
-            PseudoClass::Disabled => self.is_form_control() && self.has_boolean_attr("disabled"),
+            PseudoClass::Enabled | PseudoClass::Disabled => self.is_form_control()
+                && self.tree.with_node(self.node_id, |control| self.tree.control_or_optgroup_disabled(control))
+                    == Some(matches!(pc, PseudoClass::Disabled)),
             PseudoClass::Checked => {
+                if self.tree.with_node(self.node_id, |n| n.as_element().is_some_and(|name| name.local.as_ref() == "option")) == Some(true) {
+                    return self.tree.option_selected(self.node_id);
+                }
                 self.tree
                     .form_control_checked(self.node_id)
                     .unwrap_or_else(|| self.has_boolean_attr("checked") || self.has_boolean_attr("selected"))

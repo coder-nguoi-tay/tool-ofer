@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
  * @since 2026-11-10
  */
 const TEST_FILES = [
+  'form-data-integrity.test.mjs',
   'header-form-submit.test.mjs',
   'autofill-review-regressions.test.mjs',
   'obscura-engine.test.mjs',

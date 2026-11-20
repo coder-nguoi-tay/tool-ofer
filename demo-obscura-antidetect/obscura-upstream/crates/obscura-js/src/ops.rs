@@ -1736,6 +1736,10 @@ fn render_mutation_impact(
 ) -> RenderMutationImpact {
     let node = |value: &str| value.parse::<u32>().ok().map(NodeId::new);
     match cmd {
+        "set_select_index" | "set_option_selected" => RenderMutationImpact {
+            connected: node(arg1).is_some_and(|target| node_is_connected(dom, target)),
+            actual_change: true,
+        },
         "set_form_value" | "set_form_checked" | "set_form_indeterminate" => {
             let Some(target) = node(arg1) else {
                 return RenderMutationImpact::default();
@@ -2197,6 +2201,8 @@ fn is_render_mutation_command(cmd: &str) -> bool {
         cmd,
         "set_attribute"
             | "set_form_value"
+            | "set_select_index"
+            | "set_option_selected"
             | "set_form_checked"
             | "set_form_indeterminate"
             | "remove_attribute"
@@ -3155,6 +3161,33 @@ fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) ->
                 options.into_iter().map(|option| option.index()).collect::<Vec<_>>()
             })).to_string()
         }
+        "selected_option_indexes" => {
+            let select = NodeId::new(arg1.parse().unwrap_or(u32::MAX));
+            serde_json::json!(dom.select_options(select).map(|options| dom.selected_option_indexes(select, &options, false))).to_string()
+        }
+        "option_selected" => {
+            let option = NodeId::new(arg1.parse().unwrap_or(u32::MAX));
+            dom.option_selected(option).to_string()
+        }
+        "set_select_index" => {
+            let select = NodeId::new(arg1.parse().unwrap_or(u32::MAX));
+            let index = arg2.parse::<usize>().ok();
+            if let Some(options) = dom.select_options(select) {
+                for (position, option) in options.into_iter().enumerate() {
+                    let selected = (arg2 != "default").then_some(index == Some(position));
+                    dom.update_form_control_state(option, |state| {
+                        state.selected = selected;
+                        state.selection_dirty = selected.is_some() && (state.selection_dirty || index == Some(position));
+                    });
+                }
+            }
+            "null".to_string()
+        }
+        "set_option_selected" => {
+            let option = NodeId::new(arg1.parse().unwrap_or(u32::MAX));
+            dom.set_option_selected(option, arg2 == "true", true);
+            "null".to_string()
+        }
         "option_index" => {
             let nid = NodeId::new(arg1.parse().unwrap_or(u32::MAX));
             serde_json::json!(dom.option_index(nid)).to_string()
@@ -3272,6 +3305,7 @@ fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) ->
             let nid = arg1.parse::<u32>().unwrap_or(0);
             let node_id = NodeId::new(nid);
             if let Some((name, value)) = arg2.split_once('\0') {
+                if name == "selected" { dom.sync_option_selection_default(node_id, true); }
                 if name == "id" {
                     let old_id = dom
                         .with_node(node_id, |n| n.get_attribute("id").map(|s| s.to_string()))
@@ -3345,6 +3379,7 @@ fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) ->
         "remove_attribute" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
             let node_id = NodeId::new(nid);
+            if arg2 == "selected" { dom.sync_option_selection_default(node_id, false); }
             // Removing `id` must clear the id_index too, matching set_attribute /
             // remove_attribute_ns; otherwise getElementById keeps returning the
             // still-attached element (#1013).
@@ -3389,6 +3424,7 @@ fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) ->
                     .split_once(':')
                     .map(|(_, local)| local)
                     .unwrap_or(qualified);
+                if ns.is_empty() && local == "selected" { dom.sync_option_selection_default(node_id, true); }
                 if ns.is_empty() && local == "id" {
                     let old_id = dom
                         .with_node(node_id, |n| n.get_attribute("id").map(str::to_owned))
@@ -3409,6 +3445,7 @@ fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) ->
             let nid = arg1.parse::<u32>().unwrap_or(0);
             let node_id = NodeId::new(nid);
             let (ns, local) = arg2.split_once('\0').unwrap_or(("", arg2.as_str()));
+            if ns.is_empty() && local == "selected" { dom.sync_option_selection_default(node_id, false); }
             if ns.is_empty() && local == "id" {
                 let old_id = dom
                     .with_node(node_id, |n| n.get_attribute("id").map(str::to_owned))

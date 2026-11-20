@@ -5,11 +5,13 @@
  * @param {number} clientX Tọa độ ngang của chuột trong giao diện.
  * @param {number} clientY Tọa độ dọc của chuột trong giao diện.
  * @return {void} Hiện bộ chọn tại vị trí bấm.
+ * @throws {Error} Khi không thể dựng hoặc gắn danh sách chọn vào DOM.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
 function _openSelectPicker(slot, select, clientX, clientY) {
       _closeSelectPicker();
+      const screenSourceId = document.getElementById('screenCanvas')?.dataset.screenSourceId;
       const box = document.createElement('div');
       box.id = 'screenSelectPicker';
       box.style.cssText = 'position:fixed;z-index:99999;min-width:180px;max-width:360px;max-height:320px;overflow:auto;'
@@ -28,7 +30,7 @@ function _openSelectPicker(slot, select, clientX, clientY) {
           item.onclick = async () => {
             _closeSelectPicker();
             const result = await api(`/screen/input/${slot}`, {
-              method: 'POST', body: JSON.stringify({ type: 'select', uid: select.uid, index })
+              method: 'POST', body: JSON.stringify({ type: 'select', screenSourceId, uid: select.uid, index })
             });
             if (!result?.ok) showToast(result?.error || 'Không áp dụng được lựa chọn. Hãy mở lại danh sách.', 'error');
           };

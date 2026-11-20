@@ -112,7 +112,11 @@ export async function finishSweepstakesCardSession(session, closeSession, now = 
 
     stableSince.delete(session);
     await persistOutcome(session).catch(() => {});
-    if (root._manualCaptchaPending) return false;
+    const currentPages = (await session.browser.pages()).filter(tab => !tab.isClosed());
+    if (session.isClosed || session.suppressAutoRefill || shouldStopAfterLead(session) || shouldPauseForLead(session)
+        || root.isClosed() || root.url() !== root._uxSweepstakesCardPageUrl
+        || currentPages.some(tab => tab !== root || tab._manualCaptchaPending)
+        || hasPendingOpenings(root.context?.())) return false;
     session.addBrowserLog?.({ type: 'sweepstakes_completed', detail: 'Màn card đã mở hết offer và không còn tab con; đóng trình duyệt để nhường slot mới.' });
     await closeSession({ completedFinancialFlow: true });
     return session.isClosed === true;

@@ -6,8 +6,9 @@
  * @since 2026-11-20
  */
 viewport.addEventListener('touchend', async (e) => {
+      viewport._lastTouchEndedAt = Date.now();
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-      if (longPressTriggered) return;
+      if (longPressTriggered || !touchScreenSourceId || touchScreenSourceId !== canvas.dataset.screenSourceId) return;
 
       const elapsed = Date.now() - touchStartTime;
 
@@ -46,9 +47,10 @@ viewport.addEventListener('touchend', async (e) => {
             showTouchRipple(changeTouch.clientX - vpRect.left, changeTouch.clientY - vpRect.top);
             try { tg?.HapticFeedback?.impactOccurred('light'); } catch {}
 
-            // Gửi click nguyên tử đơn lượt (giảm 60% độ trễ, không bị rớt click)
+            const dialogAtTap = miniTextDialog;
             const res = await sendInput({
               type: 'click',
+              screenSourceId: touchScreenSourceId,
               x: pt.x,
               y: pt.y,
               button: 'left',
@@ -57,11 +59,12 @@ viewport.addEventListener('touchend', async (e) => {
               clientHeight: canvasNaturalHeight
             });
 
+            if (dialogAtTap !== miniTextDialog) return;
             if (res?.select && Array.isArray(res.select.options)) {
               openSelectPicker(res.select);
             } else if (res?.input?.isTextLike) {
               // Chạm trúng ô gõ chữ: tự động hiện hộp thoại gõ để bàn phím điện thoại bật lên
-              openTypeModalWithInput(res.input);
+              openTypeModal(res.input);
             }
           }
         } else if (currentInteractionMode === 'trackpad') {

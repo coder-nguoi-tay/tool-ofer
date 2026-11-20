@@ -7,17 +7,13 @@
  * @since 2026-11-20
  */
     viewport.addEventListener('click', async (e) => {
-      if (Date.now() - touchStartTime < 500) return;
+      if (e.sourceCapabilities?.firesTouchEvents || Date.now() - (viewport._lastTouchEndedAt || touchStartTime) < 500) return;
       const pt = getCanvasPoint(e.clientX, e.clientY);
       if (!pt) return;
       const vpRect = viewport.getBoundingClientRect();
       showTouchRipple(e.clientX - vpRect.left, e.clientY - vpRect.top);
-      const res = await sendInput({ type: 'mousedown', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
+      const res = await sendInput({ type: 'click', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
       if (res?.select && Array.isArray(res.select.options)) {
         openSelectPicker(res.select);
-      } else {
-        setTimeout(() => {
-          sendInput({ type: 'mouseup', x: pt.x, y: pt.y, button: 'left', clickCount: 1, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
-        }, 30);
       }
     });

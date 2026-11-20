@@ -73,7 +73,7 @@ export const proxyGatewayCooldown = { until: 0, detail: '' };
  */
 export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
-  const requestedCount = normalizeRequestedBrowserCount(body.requestedCount ?? body.concurrency, 1);
+  const requestedCount = normalizeRequestedBrowserCount(body.requestedCount !== undefined ? body.requestedCount : body.concurrency, 1);
   body.requestedCount = String(requestedCount);
   body.concurrency = requestedCount;
   const usedBeforeLaunch = countLiveBrowsers() + browserLaunchReservations.size;
@@ -91,15 +91,6 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
   }
   if (body.gologinToken) await saveGoLoginConfig({ token: apiToken });
   delete body.gologinToken;
-  if (!isAutomaticRefill) {
-    if (autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
-    invalidateRefillJobs();
-    autoRefill.stopRequested = false;
-    autoRefill.enabled = true;
-    autoRefill.settings = { ...body, browserMode: 'GoLogin', useGoLogin: true, gologinDevices: selectedDevices };
-    autoRefill.targetCount = requestedCount;
-    await saveAutoRefillSettings();
-  }
   // Như Chrome: ô Giới hạn = số phiên hoàn tất (Complete text) tối đa; đạt giới hạn thì không mở thêm.
   const newLimitRun = Math.max(0, Number(body.limitRun) || 0);
   if (newLimitRun > 0) applicationState.limitRunMax = newLimitRun;
@@ -112,13 +103,47 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
   const scriptSteps = body.scriptPath ? await loadScript(body.scriptPath) : null;
   const results = [], warnings = [];
   let proxyCursor = 0, nextIndex = 0, stopBatch = false;
+  /** @var {object[]} Reservations held for this bounded GoLogin request. */
+  const launchReservations = [];
+  try {
+    for (let index = 0; index < requestedCount; index++) {
+      const reservation = reserveBrowserLaunchSlot(countLiveBrowsers());
+      if (!reservation) {
+        throw new Error(`Máy này chỉ còn chỗ cho ${launchReservations.length} phiên trình duyệt (giới hạn ${maxAliveBrowsers}).`);
+      }
+      launchReservations.push(reservation);
+    }
+  } catch (error) {
+    for (const reservation of launchReservations) releaseBrowserLaunchSlot(reservation);
+    throw error;
+  }
+  if (!isAutomaticRefill) {
+    if (autoRefill.isStopping) {
+      for (const reservation of launchReservations) releaseBrowserLaunchSlot(reservation);
+      throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
+    }
+    invalidateRefillJobs();
+    autoRefill.stopRequested = false;
+    autoRefill.enabled = true;
+    autoRefill.settings = { ...body, browserMode: 'GoLogin', useGoLogin: true, gologinDevices: selectedDevices };
+    autoRefill.targetCount = requestedCount;
+    try {
+      await saveAutoRefillSettings();
+    } catch (error) {
+      for (const reservation of launchReservations) releaseBrowserLaunchSlot(reservation);
+      throw error;
+    }
+  }
   // Slot đã cấp cho lượt mở đang chạy song song nhưng chưa vào activeBrowsers.
   const reservedSlots = new Set();
+  /** @var {Set<object>} Reservations claimed by workers and released by startup promises. */
+  const claimedReservations = new Set();
   /**
-   * Mở một phiên: giữ slot, cấp proxy/IP độc quyền, tạo profile và khởi chạy Orbita.
-   * @param {number} index Thứ tự phiên trong lượt mở (quyết định offer).
-   * @return {Promise<string|undefined>} 'stop' khi cả lượt phải dừng (Stop, hết proxy, hết hạn mức profile).
-   * @author ductv <ductv@getflycrm.com>
+    * Mở một phiên: giữ slot, cấp proxy/IP độc quyền, tạo profile và khởi chạy Orbita.
+    * @param {number} index Thứ tự phiên trong lượt mở (quyết định offer).
+    * @return {Promise<string|undefined>} 'stop' khi cả lượt phải dừng (Stop, hết proxy, hết hạn mức profile).
+    * @throws {never} Lỗi khởi chạy được ghi nhận và xử lý trong luồng mở slot.
+    * @author ductv <ductv@getflycrm.com>
    * @since 2026-11-14
    */
   const launchOne = async index => {
@@ -134,17 +159,9 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
     const offer = assignedStreamRoles?.[index] ?? index % offerUrls.length + 1;
     const websiteUrl = offerUrls[offer - 1];
     if (!websiteUrl) { warnings.push(`Slot ${slot}: Offer ${offer} không có URL.`); return; }
-    let reservation;
-    try {
-      reservation = reserveBrowserLaunchSlot(countLiveBrowsers());
-    } catch (error) {
-      warnings.push(error.message);
-      return 'stop';
-    }
-    if (!reservation) {
-      warnings.push(`Đã đạt giới hạn tối đa ${maxAliveBrowsers} phiên trình duyệt đồng thời; không mở slot ${slot}.`);
-      return 'stop';
-    }
+    const reservation = launchReservations[index];
+    if (!reservation) return 'stop';
+    claimedReservations.add(reservation);
     reservedSlots.add(slot);
     // Slot giữ chỗ tới khi lượt mở thật sự kết thúc, kể cả khi đã bị bỏ vì quá hạn.
     const attempt = { abandoned: false, startupSession: null };
@@ -357,10 +374,16 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(GOLOGIN_PARALLEL_LAUNCHES, requestedCount) }, async () => {
+  try {
+    await Promise.all(Array.from({ length: Math.min(GOLOGIN_PARALLEL_LAUNCHES, requestedCount) }, async () => {
     while (!stopBatch && nextIndex < requestedCount) {
       if (await launchOne(nextIndex++) === 'stop') stopBatch = true;
     }
-  }));
+    }));
+  } finally {
+    for (const reservation of launchReservations) {
+      if (!claimedReservations.has(reservation)) releaseBrowserLaunchSlot(reservation);
+    }
+  }
   return { results, warnings };
 }

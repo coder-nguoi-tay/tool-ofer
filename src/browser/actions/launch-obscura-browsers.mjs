@@ -4,7 +4,7 @@ import { launchRequestedBrowsers } from './launch-requested-browsers.mjs';
 import { openObscuraSession } from '../../obscura-engine/open-obscura-session.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
 import { activeBrowsers } from '../sessions.mjs';
-import { maxAliveBrowsers } from '../../runtime/constants/max-alive-browsers.mjs';
+import { maxAliveBrowsers, normalizeRequestedBrowserCount } from '../../runtime/constants/max-alive-browsers.mjs';
 import { saveAutoRefillSettings } from '../../refill/actions/save-auto-refill-settings.mjs';
 import { applyRunMode } from '../../runtime/constants/run-mode-state.mjs';
 
@@ -20,14 +20,19 @@ import { applyRunMode } from '../../runtime/constants/run-mode-state.mjs';
  */
 export async function launchObscuraBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = typeof requestBody === 'string' ? JSON.parse(requestBody) : requestBody;
+  const countValue = body.requestedCount !== undefined ? body.requestedCount : body.concurrency;
+  if (!isAutomaticRefill && autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
+  const requestedCount = countValue === undefined ? 1 : normalizeRequestedBrowserCount(countValue);
   if (!isAutomaticRefill) {
-    if (autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
+    if (countValue !== undefined) {
+      body.requestedCount = String(requestedCount);
+      body.concurrency = requestedCount;
+    }
     applyRunMode(body.runMode);
     invalidateRefillJobs();
     autoRefill.stopRequested = false;
     autoRefill.enabled = true;
     autoRefill.settings = { ...body, browserMode: 'Obscura', useObscura: true, useGoLogin: false };
-    const requestedCount = Number(body.requestedCount || body.concurrency) || 1;
     autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(1, requestedCount));
     await saveAutoRefillSettings();
   }

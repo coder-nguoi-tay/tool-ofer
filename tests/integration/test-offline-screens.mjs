@@ -47,19 +47,17 @@ function serveSamples(port) {
  * Chạy bộ test offline trên toàn bộ file mẫu, mỗi file dùng 1 page riêng.
  *
  * @return {Promise<void>} In kết quả pass/fail từng màn.
+ * @throws {Error} Khi không mở được máy chủ thử nghiệm hoặc Chromium.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function main() {
-  const PORT = 3287;
-  const server = await serveSamples(PORT);
+  const server = await serveSamples(0);
+  const sampleOrigin = `http://127.0.0.1:${server.address().port}`;
   const files = readdirSync(SAMPLE_DIR).filter((f) => f.endsWith('.html') && f !== 'index.html').sort();
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
-  // Chặn mọi request ngoài server mẫu: engine alpha-intent gọi API thật sẽ đôi khi
-  // rate limit (429) rồi XOÁ DOM câu hỏi → test flake.Offline thật về network vẫn có
-  // DOM snapshot nguyên vẹn, đủ để test handler.
-  await context.route(/^(?!.*127\.0\.0\.1:3287)/, (route) => route.abort().catch(() => {}));
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await context.route(url => url.origin !== sampleOrigin, route => route.abort().catch(() => {}));
   const results = [];
 
   for (const file of files) {
@@ -67,7 +65,7 @@ async function main() {
     const logs = [];
     const onLog = (e) => logs.push(`${e.type}: ${(e.detail || '').slice(0, 90)}`);
     try {
-      await page.goto(`http://127.0.0.1:${PORT}/${encodeURIComponent(file)}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.goto(`${sampleOrigin}/${encodeURIComponent(file)}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
       // Chờ engine alpha-intent init/interstitial (đối chiếu data-object-interstitial-timeout-seconds=3)
       const frame = page.mainFrame();
       await page.waitForTimeout(3600).catch(() => {});

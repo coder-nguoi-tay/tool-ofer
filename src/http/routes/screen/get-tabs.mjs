@@ -1,6 +1,7 @@
 import { activeBrowsers } from '../../../browser/sessions.mjs';
 import { formatBytes } from '../../../monitoring/bandwidth.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
+import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 
 const tabTitles = new WeakMap();
 
@@ -10,6 +11,7 @@ const tabTitles = new WeakMap();
  * @param {import('playwright').Page} page Tab đang mở.
  * @param {string} url Địa chỉ ứng với tiêu đề đang đọc.
  * @return {Promise<string>} Tiêu đề hoặc chuỗi rỗng để giao diện dùng nhãn dự phòng.
+ * @throws {Error} Khi không thể đọc thông tin trang hoặc quản lý tiêu đề.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -41,6 +43,7 @@ async function readTabTitle(page, url) {
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
+ * @throws {Error} Khi không thể đọc tab hoặc ghi phản hồi HTTP.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -59,6 +62,12 @@ export async function handleGetScreenTabs(request, response) {
       const url = page.url();
       return {
         index, url, title: await readTabTitle(page, url),
+        manualDialog: page._manualFormDialog ? {
+          id: page._manualFormDialog.id,
+          type: page._manualFormDialog.dialog.type(),
+          message: page._manualFormDialog.dialog.message().slice(0, 500),
+          defaultValue: page._manualFormDialog.dialog.type() === 'prompt' ? page._manualFormDialog.dialog.defaultValue() : undefined,
+        } : undefined,
         manualCaptchaPending: page._manualCaptchaPending === true,
         manualCaptchaRequestId: page._manualCaptchaPending === true ? page._manualCaptchaRequestId : undefined,
         bandwidthBytes: page._bandwidthBytes || 0,
@@ -68,8 +77,12 @@ export async function handleGetScreenTabs(request, response) {
         requestCount: page._requestCount || 0
       };
     }));
+    const stream = screencastSessions.get(slot);
+    const activePage = (stream?.page || stream?.cdpClient)
+      ? stream.page
+      : (pages.includes(session.mainPage) ? session.mainPage : pages[0]);
     respondWithJson(response, 200, {
-      tabs,
+      tabs: tabs.map(tab => ({ ...tab, active: pages[tab.index] === activePage })),
       bandwidthBytes: session.bandwidthBytes || 0,
       bandwidthFormatted: formatBytes(session.bandwidthBytes || 0),
       bytesSent: session.bytesSent || 0,

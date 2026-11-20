@@ -11,11 +11,12 @@ import { parseDobComponents } from './parse-dob-components.mjs';
 export function getDobString(record) {
   if (!record) return '';
   const full = record.dob || record.dateofbirth || record.birthdate || record.ngaythangnamsinh || record.birth || record.bday;
-  if (full) return String(full);
-  if (parseDobComponents(record.namsinh)) return String(record.namsinh);
   const day = record.birthday || record.dobday || record.ngaysinh;
-  if (day && !/^\d{1,2}$/.test(String(day))) return String(day);
   const month = record.birthmonth || record.dobmonth;
   const year = record.birthyear || record.dobyear || record.namsinh;
-  return day && month && year ? `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}` : '';
+  const legacyDate = [record.namsinh, day, year].find(value => value && /[./-]/.test(value));
+  const candidate = full || legacyDate;
+  if (candidate) return parseDobComponents(candidate)?.isoDob ? String(candidate) : '';
+  if (!/^\d{1,2}$/.test(day) || !/^\d{1,2}$/.test(month) || !/^\d{4}$/.test(year)) return '';
+  return parseDobComponents(`${year}-${month}-${day}`)?.usDob || '';
 }

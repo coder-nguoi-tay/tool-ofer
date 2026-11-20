@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { getTunnelUrl, startTunnel, stopTunnel } from "../tunnel.mjs";
 import { BOT_COMMANDS } from "../tgbot.mjs";
+import { captureManualTextField, useFocusedManualTextField } from '../src/browser/screen/manual-text-field.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const projectDirectory = dirname(dirname(__filename));
@@ -29,8 +30,7 @@ test('Telegram Mini App & Remote Control Test Suite', async (t) => {
     // 3. Touch to Click & Drag to Scroll
     assert.match(content, /touchstart/, 'Phải bắt touchstart');
     assert.match(content, /touchend/, 'Phải bắt touchend');
-    assert.match(content, /mousedown/, 'Phải gửi mousedown để click');
-    assert.match(content, /mouseup/, 'Phải gửi mouseup để click');
+    assert.match(content, /type: 'click'/, 'Phải gửi trọn cú bấm tới tab đang xem');
     assert.match(content, /wheel/, 'Phải gửi wheel để cuộn trang');
 
     // 4. Typing & Virtual Input
@@ -116,12 +116,13 @@ test('Mini mở đúng danh sách từ cú bấm tay và chỉ báo thành công
   await page.setContent('<button id="viewport">Màn hình</button><div id="selectModal" style="display:none"><div id="selectModalOptions"></div></div><p id="notice"></p>');
   await page.addScriptTag({ content: `
     const viewport = document.getElementById('viewport');
+    const canvas = { dataset: { screenSourceId: 'fixture-source' } };
     const touchStartTime = 0, canvasNaturalWidth = 300, canvasNaturalHeight = 200;
     const getCanvasPoint = () => ({ x: 10, y: 20 }), showTouchRipple = () => {};
     const showToast = (message) => { document.getElementById('notice').textContent = message; };
     window.sent = [];
     window.sendInput = async (body) => {
-      if (body.type === 'mousedown') return { select: { uid: 'test-select', selectedIndex: 0,
+      if (body.type === 'click') return { select: { uid: 'test-select', selectedIndex: 0,
         options: [{ label: 'Đang chọn' }, { label: 'Mục khóa', disabled: true }, { label: 'A < B & C' }] } };
       window.sent.push(body);
       return window.sent.length === 1 ? { error: 'select không còn' } : { ok: true };
@@ -141,8 +142,58 @@ test('Mini mở đúng danh sách từ cú bấm tay và chỉ báo thành công
   await option.click();
   assert.equal(await page.locator('#notice').textContent(), 'Đã chọn mục');
   assert.deepEqual(await page.evaluate(() => window.sent), [
-    { type: 'select', index: 2, uid: 'test-select' }, { type: 'select', index: 2, uid: 'test-select' },
+    { type: 'select', index: 2, uid: 'test-select', screenSourceId: 'fixture-source' }, { type: 'select', index: 2, uid: 'test-select', screenSourceId: 'fixture-source' },
   ]);
+});
+
+test('Mini chỉ cho trả lời hộp thoại trên tab đang xem của slot', {
+  skip: !existsSync(chromium.executablePath()),
+}, async (t) => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<div id="browserTabsBar"></div>');
+  await page.addScriptTag({ content: `
+    let currentSlot = 1, currentSlotTabs = [];
+    let activeTabIndex = 0;
+    const replies = [];
+    const browserTabsBar = document.getElementById('browserTabsBar');
+    window.prompt = (_, defaultValue) => defaultValue;
+    window.fetch = async (url, options) => {
+      if (options) replies.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ tabs: [
+        { index: 0, active: activeTabIndex === 0, title: 'A <b>B</b> & C' },
+        { index: 1, active: activeTabIndex === 1, title: 'Tab sau',
+          manualDialog: { id: 'fixture-dialog', type: 'prompt', message: 'Ghi chú', defaultValue: 'Giá trị đã nhập' } }
+      ] }) };
+    };
+  ` });
+  await page.addScriptTag({ path: join(projectDirectory, 'ui/mini/functions/poll-slot-tabs.js') });
+  await page.evaluate(() => pollSlotTabs(1));
+  assert.equal(await page.locator('.browser-tab-chip.active span').first().textContent(), '🌐 A <b>B</b> & C');
+  const reply = page.getByRole('button', { name: /Trả lời hộp thoại/ });
+  assert.equal(await reply.count(), 0);
+  await page.evaluate(async () => {
+    activeTabIndex = 1;
+    await pollSlotTabs(1);
+  });
+  await reply.click();
+  assert.deepEqual(await page.evaluate(() => replies), [{
+    type: 'dialog', dialogId: 'fixture-dialog', accept: true, promptText: 'Giá trị đã nhập',
+  }]);
+  // Phản hồi poll của slot cũ đến muộn sau khi người dùng đã chọn slot khác.
+  await page.evaluate(async () => {
+    const originalFetch = window.fetch;
+    let finishOldPoll;
+    window.fetch = () => new Promise(resolve => { finishOldPoll = resolve; });
+    const oldPoll = pollSlotTabs(1);
+    currentSlot = 2;
+    window.fetch = originalFetch;
+    await pollSlotTabs(2);
+    finishOldPoll({ ok: false });
+    await oldPoll;
+  });
+  assert.equal(await reply.isVisible(), true);
 });
 
 test('Mini quy đổi đúng điểm chạm trên frame portrait mobile/tablet', {
@@ -164,4 +215,172 @@ test('Mini quy đổi đúng điểm chạm trên frame portrait mobile/tablet',
   });
   assert.ok(point.x >= 190 && point.x <= 202, `X phải theo frame portrait, nhận ${point.x}`);
   assert.ok(point.y >= 320 && point.y <= 338, `Y phải theo frame portrait, nhận ${point.y}`);
+});
+
+test('Mini giữ bản nháp khi đổi ô cùng tab và chỉ xử lý phản hồi của lần mở hiện tại', {
+  skip: !existsSync(chromium.executablePath()),
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<div id="typeModal" style="display:none"><input id="modalTextInput"><button id="btnModalSendText" onclick="submitModalText()">Gửi</button><div id="modalTextActions"><button onclick="modalTextInput.value=\'\'">Xóa</button></div></div><p id="notice"></p>');
+  await page.addScriptTag({ content: `
+    const canvas = { dataset: { screenSourceId: 'cung-tab' } };
+    const notice = document.getElementById('notice');
+    const showToast = message => { notice.textContent = message; };
+    const sent = [];
+    const sendInput = body => new Promise(resolve => sent.push({ body, resolve }));
+  ` });
+  for (const file of ['window-open-type-modal-modal', 'window-close-type-modal-modal', 'window-submit-modal-text-input']) {
+    await page.addScriptTag({ path: join(projectDirectory, 'ui/mini/setup', file + '.js') });
+  }
+  const draft = page.locator('#modalTextInput');
+
+  await page.evaluate(() => openTypeModal({ name: 'Thiếu mã ô' }));
+  assert.equal(await draft.isVisible(), false);
+  await page.evaluate(() => openTypeModal({ fieldId: 'field-A', name: 'Tên' }));
+  await draft.fill('Bản nháp');
+  await page.evaluate(() => { window.pendingA = submitModalText(); closeTypeModal(); openTypeModal({ fieldId: 'field-B', name: 'Phố' }); });
+  await draft.fill('Bản nháp');
+  await page.evaluate(async () => {
+    window.pendingB = submitModalText();
+    sent[0].resolve({ ok: true });
+    await pendingA;
+  });
+  assert.equal(await draft.isVisible(), true, 'Phản hồi gửi ở ô A không được đóng hộp của ô B');
+  assert.equal(await draft.inputValue(), 'Bản nháp');
+  assert.equal(await draft.isEditable(), false, 'Lần gửi trước không được mở khóa bản nháp đang gửi ở ô mới');
+  assert.equal(await page.getByRole('button', { name: 'Gửi' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: 'Xóa' }).isDisabled(), true);
+  await draft.press('End');
+  await draft.pressSequentially('h');
+  await page.evaluate(async () => { await submitModalText(); await pressModalKey('Tab'); });
+  assert.equal(await draft.inputValue(), 'Bản nháp', 'Không gộp phần đã gửi vào lần nhập kế trong khi chờ mạng');
+  assert.deepEqual(await page.evaluate(() => sent.map(r => r.body.fieldId)), ['field-A', 'field-B']);
+
+  await page.evaluate(async () => {
+    sent[1].resolve({ error: 'Ô đã đổi focus' });
+    await pendingB;
+    const key = pressModalKey('Enter');
+    sent[2].resolve({ error: 'Ô đã đổi focus' });
+    await key;
+  });
+  assert.equal(await draft.inputValue(), 'Bản nháp');
+  assert.equal(await draft.isEditable(), true);
+  assert.equal(await page.getByRole('button', { name: 'Gửi' }).isEnabled(), true);
+  assert.deepEqual(await page.evaluate(() => sent[2].body), {
+    type: 'press', key: 'Enter', fieldId: 'field-B', screenSourceId: 'cung-tab',
+  });
+  await page.evaluate(() => { closeTypeModal(); openTypeModal(); });
+  await draft.fill('Chèn tại con trỏ');
+  await page.evaluate(async () => {
+    const submission = submitModalText();
+    sent[3].resolve({ ok: true });
+    await submission;
+  });
+  assert.deepEqual(await page.evaluate(() => sent[3].body), {
+    type: 'insertText', text: 'Chèn tại con trỏ', screenSourceId: 'cung-tab',
+  });
+});
+
+test('Mini xác nhận đủ nội dung sau khi form xử lý input và giữ vị trí chỉnh sửa do trình duyệt đặt', {
+  skip: !existsSync(chromium.executablePath()),
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<input id="plain" value="abc"><input id="telephone" type="tel"><div id="rich" contenteditable>ab<span>cd</span>ef</div>');
+  const plain = page.locator('#plain'), rich = page.locator('#rich'), telephone = page.locator('#telephone');
+  const insert = text => page.evaluate(useFocusedManualTextField, { fieldId: 'fixture', text });
+  await plain.evaluate(captureManualTextField, 'fixture');
+  await plain.focus();
+  for (const fallback of [false, true]) {
+    await plain.evaluate((field, fallback) => {
+      if (fallback) document.queryCommandSupported = () => false;
+      field.value = 'abc';
+      field.setSelectionRange(3, 3);
+      field.oninput = () => { field.value = field.value.slice(0, 4); };
+    }, fallback);
+    assert.equal(await insert('XYZ'), false);
+    assert.equal(await plain.inputValue(), 'abcX');
+    await plain.evaluate(field => {
+      field.value = 'abc';
+      field.setSelectionRange(1, 2);
+      field.oninput = () => { field.value = field.value.toUpperCase(); };
+    });
+    assert.equal(await insert('mn'), true);
+    assert.equal(await plain.inputValue(), 'AMNC');
+  }
+  await page.evaluate(() => { delete document.queryCommandSupported; });
+  await plain.evaluate(field => {
+    field.select();
+    field.oninput = () => document.getElementById('telephone').focus();
+  });
+  assert.equal(await insert('abc'), true, 'Form giữ dữ liệu và chuyển focus sang ô kế tiếp sau khi nhập');
+  assert.equal(await plain.inputValue(), 'abc');
+  await plain.focus();
+  await plain.evaluate(field => {
+    field.select();
+    field.oninput = () => queueMicrotask(() => {
+      const replacement = field.cloneNode();
+      replacement.value = 'abc';
+      field.replaceWith(replacement);
+    });
+  });
+  assert.equal(await insert('RST'), false, 'Node cũ còn giữ RST trong bộ nhớ nhưng form đã thay ô và khôi phục abc');
+  assert.equal(await plain.inputValue(), 'abc');
+  await telephone.evaluate(captureManualTextField, 'fixture');
+  await telephone.focus();
+  await telephone.evaluate(field => { field.oninput = () => { field.value = field.value.replace(/^(\d{3})(\d{3})(\d{4})$/, '($1) $2-$3'); }; });
+  assert.equal(await insert('1234567890'), true);
+  assert.equal(await telephone.inputValue(), '(123) 456-7890');
+
+  await rich.evaluate(captureManualTextField, 'fixture');
+  await rich.focus();
+  await rich.evaluate(field => {
+    const range = document.createRange();
+    range.selectNodeContents(field.querySelector('span'));
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  assert.equal(await insert('XYZ'), true);
+  assert.equal(await rich.innerText(), 'abXYZef');
+  assert.equal(await insert('!'), true, 'Lần sau chèn ngay sau phần thay thế, trước ef');
+  assert.equal(await rich.innerText(), 'abXYZ!ef');
+  await rich.evaluate(field => { field.oninput = () => { field.textContent = 'abXYZ!ef'; }; });
+  assert.equal(await insert('RST'), false);
+  assert.equal(await rich.innerText(), 'abXYZ!ef');
+  await rich.evaluate(field => { field.oninput = () => queueMicrotask(() => { field.textContent = 'abXYZ!ef'; }); });
+  assert.equal(await insert('RST'), false, 'Form đã xếp cập nhật trong microtask của sự kiện input');
+});
+
+test('Mini đợi vẽ ảnh tab mới khi ảnh tab cũ đang giải mã trên cùng kết nối', async () => {
+  const { createContext, runInContext } = await import('node:vm');
+  const viewer = createContext({
+    canvas: { dataset: {}, width: 300, height: 200 }, canvasMsg: { style: {} }, urlDisplay: {}, ipDisplay: {},
+    activeSessions: [], currentInteractionMode: 'touch', isRendering: false, _imgDecoding: false, fpsCount: 0,
+    pendingFrame: null, eventSource: null, reconnectTimer: null, currentSlot: 1,
+    canvasNaturalWidth: 0, canvasNaturalHeight: 0,
+    Image: class {}, EventSource: class {}, _streamBufferImg: { naturalWidth: 300, naturalHeight: 200 },
+    ctx: { drawImage() {} }, document: { getElementById: () => null }, _scheduleMiniRender: render => render(),
+    renderSlotPills() {}, pollSlotTabs() {}, updateSmartAutofillChips() {}, resetZoom() {},
+  });
+  for (const file of ['functions/start-stream', 'functions/render-next-frame', 'setup/stream-buffer-img-onload-img-decoding']) {
+    runInContext(readFileSync(join(projectDirectory, 'ui/mini', file + '.js'), 'utf8'), viewer);
+  }
+  viewer.startStream(1);
+  const frame = source => viewer.eventSource.onmessage({ data: 'fixture', lastEventId: source });
+  frame('trước');
+  viewer._streamBufferImg.onload();
+  assert.equal(viewer.canvas.dataset.screenSourceId, 'trước');
+  frame('trước');
+  frame('sau');
+  assert.equal(viewer.canvas.dataset.screenSourceId, undefined);
+  viewer._streamBufferImg.onload();
+  assert.equal(viewer.fpsCount, 1, 'Không vẽ ảnh còn đang giải mã của tab trước');
+  assert.equal(viewer.canvas.dataset.screenSourceId, undefined);
+  viewer._streamBufferImg.onload();
+  assert.equal(viewer.canvas.dataset.screenSourceId, 'sau');
+  assert.equal(viewer.fpsCount, 2);
 });

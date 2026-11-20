@@ -1,7 +1,7 @@
 import { resolveContactField } from '../resolve-contact-field.mjs';
 import { getAddressString } from '../get-address-string.mjs';
 import { getDobString } from '../get-dob-string.mjs';
-import { resolveRecordName } from './resolve-record-name.mjs';
+import { getRecordNameKind, resolveRecordName } from './resolve-record-name.mjs';
 import { resolveRecordPhone } from './resolve-record-phone.mjs';
 import { matchFieldValue } from '../match-field-value.mjs';
 import { resolveRecordCity } from './resolve-record-city.mjs';
@@ -18,7 +18,7 @@ import { resolveRecordCity } from './resolve-record-city.mjs';
  */
 export function resolveProvidedFieldValue(metadata, record = {}, session = {}) {
   const contact = resolveContactField(metadata);
-  if (contact === 'conflict') return null;
+  if (contact === 'conflict' || contact.startsWith('ssn')) return null;
   if (contact === 'address2') return record.address2 || record.apt || record.suite || null;
   if (/^phone/.test(contact)) return resolveRecordPhone(record, contact, metadata);
   const names = contact ? [contact] : [...(metadata.names || []), metadata.name, metadata.id, metadata.placeholder, metadata.label, metadata.type].filter(Boolean);
@@ -30,9 +30,8 @@ export function resolveProvidedFieldValue(metadata, record = {}, session = {}) {
   if (/city|town|address-level2/.test(identity)) return resolveRecordCity(record) || null;
   if (/zip|postal|postcode/.test(identity)) return String(record.zipcode || record.zip || record.postalcode || record.postcode || '') || null;
   if (/address|street|\baddr\b/.test(identity) && !/address2|street2|suite|unit|apt/.test(identity)) return getAddressString(record) || null;
-  if (/first|given|\bfname\b|\bfn\b/.test(identity)) return resolveRecordName('firstname', record);
-  if (/last|family|surname|\blname\b|\bln\b/.test(identity)) return resolveRecordName('lastname', record);
-  if (/full.?name|\bname\b/.test(identity) && !/user|company|bank|card|street|city|state/.test(identity)) return resolveRecordName('fullname', record);
+  const nameKind = getRecordNameKind(contact, metadata, metadata.names);
+  if (nameKind) return resolveRecordName(nameKind, record, metadata.maxLength);
   if (/phone|telephone|mobile|cell|\btel\b/.test(identity) && !/headphone|microphone/.test(identity)) {
     return resolveRecordPhone(record, 'phone', metadata);
   }

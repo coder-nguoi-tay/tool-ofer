@@ -7,7 +7,7 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 
 /**
- * Đóng tab qua Screen View; tab cuối dùng chung chính sách đóng slot và báo lỗi nếu native chưa dừng.
+ * Đóng tab theo nguồn hình của phím tắt hoặc vị trí của nút đóng. Đóng tab cuối áp dụng chính sách đóng slot.
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
@@ -27,7 +27,13 @@ export async function handlePostScreenTabsClose(request, response) {
     try {
       const body = JSON.parse(await readRequestBody(request));
       const pages = session.browser.pages().filter(p => !p.isClosed());
-      const targetIndex = body.index ?? 0;
+      const sc = screencastSessions.get(slot);
+      const closeViewedPage = Object.hasOwn(body, 'screenSourceId');
+      const targetIndex = closeViewedPage ? pages.indexOf(sc?.page) : body.index ?? 0;
+      if (closeViewedPage && (!body.screenSourceId || sc?.screenSourceId !== body.screenSourceId || sc.cleaned || targetIndex < 0)) {
+        respondWithJson(response, 409, { error: 'Nguồn hình đã thay đổi. Hãy kiểm tra tab đang xem.' });
+        return true;
+      }
       const targetPage = pages[targetIndex];
       if (!targetPage) {
         respondWithJson(response, 400, {
@@ -37,13 +43,12 @@ export async function handlePostScreenTabsClose(request, response) {
       }
 
       // Gỡ listener tự khôi phục trước khi đóng tab: tránh tranh nhau gắn lại với đoạn chuyển tab bên dưới.
-      const sc = screencastSessions.get(slot);
       const selection = Symbol();
       if (sc) sc.viewSelection = selection;
       sc?.unbindListeners?.();
       targetPage._uxClosedByApp = 'screen_view_manual';
       await targetPage.close();
-      let remainingPages = session.browser.pages().filter(p => !p.isClosed());
+      const remainingPages = session.browser.pages().filter(p => !p.isClosed());
       if (remainingPages.length === 0) {
         const refill = prepareManualBrowserClose(session);
         if (session.isGoLogin && session.closeGoLoginSession) {
@@ -59,6 +64,10 @@ export async function handlePostScreenTabsClose(request, response) {
           closedSession: true,
           remaining: 0
         });
+        return true;
+      }
+      if (screencastSessions.get(slot) !== sc || (sc && (sc.cleaned || sc.viewSelection !== selection))) {
+        respondWithJson(response, 200, { ok: true, remaining: remainingPages.length });
         return true;
       }
       const newActiveIndex = Math.max(0, Math.min(targetIndex > 0 ? targetIndex - 1 : 0, remainingPages.length - 1));

@@ -1,28 +1,43 @@
-// Typing Modal Handlers
-    window.openTypeModal = () => {
-      const modal = document.getElementById('typeModal');
-      const input = document.getElementById('modalTextInput');
-      if (modal) modal.style.display = 'flex';
-      if (input) {
-        input.value = '';
-        input.placeholder = 'Nhập văn bản cần gõ...';
-        setTimeout(() => input.focus(), 80);
-      }
-      try { tg?.HapticFeedback?.selectionChanged(); } catch {}
-    };
+let miniTextDialog = {};
 
-    window.openTypeModalWithInput = (info) => {
-      const modal = document.getElementById('typeModal');
-      const input = document.getElementById('modalTextInput');
-      if (modal) modal.style.display = 'flex';
-      if (input) {
-        input.value = info?.value || '';
-        input.placeholder = info?.placeholder || info?.name || 'Gõ văn bản vào ô...';
-        setTimeout(() => {
-          input.focus();
-          if (input.value) input.select?.();
-        }, 100);
-      }
-      showToast(`⌨️ Mở bàn phím gõ vào: ${info?.placeholder || info?.name || 'ô văn bản'}`);
-      try { tg?.HapticFeedback?.impactOccurred('light'); } catch {}
-    };
+/**
+ * Khóa bản nháp và các nút có thể sửa nội dung hoặc dịch con trỏ khi tab đang nhận chữ.
+ * @param {HTMLInputElement} input Ô nhập của Mini đang hiển thị.
+ * @param {boolean} submitting Tab đang xử lý lần gửi hiện tại.
+ * @return {void}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+function setMiniDraftSubmitting(input, submitting) {
+  miniTextDialog.submitting = submitting;
+  input.readOnly = submitting;
+  for (const button of document.querySelectorAll('#btnModalSendText, #modalTextActions button')) button.disabled = submitting;
+}
+
+/**
+ * Mở ô nhập nội dung muốn chèn tại vị trí con trỏ trong tab đang xem.
+ * @param {{fieldId: string, type?: string, placeholder?: string, name?: string}} [info] Ô vừa chạm. Nút Mở rộng gửi tới con trỏ hiện tại.
+ * @return {void}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+window.openTypeModal = (info) => {
+  const modal = document.getElementById('typeModal');
+  const input = document.getElementById('modalTextInput');
+  const screenSourceId = canvas.dataset.screenSourceId;
+  if (!screenSourceId || !modal || !input) return;
+  const target = { screenSourceId };
+  if (info) {
+    if (!info.fieldId) { showToast('Chưa xác định được ô nhập. Hãy chạm lại vào ô.'); return; }
+    target.fieldId = info.fieldId;
+  }
+  miniTextDialog = { target };
+  setMiniDraftSubmitting(input, false);
+  input.type = info?.type === 'password' ? 'password' : 'text';
+  input.value = '';
+  const fieldName = info?.placeholder || info?.name;
+  input.placeholder = fieldName ? `Nội dung cần chèn vào ${fieldName}` : 'Nội dung cần chèn tại con trỏ';
+  modal.style.display = 'flex';
+  input.focus();
+  try { tg?.HapticFeedback?.selectionChanged(); } catch {}
+};

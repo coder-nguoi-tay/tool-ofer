@@ -115,16 +115,11 @@ const semanticCategories = [
   }
 }, {
   type: 'ssn3',
-  patterns: [/^ssn3$/, /ssn.*last4/, /last4.*ssn/, /^last4$/, /^ssn4$/, /ssn_last_4/, /last_4/],
+  patterns: [/^ssn3$/, /^ssnlast4$/, /^last4digitsofssn$/, /^ssn4$/],
   resolve: r => {
     const ssn = (r.ssn || '').replace(/\D/g, '');
     if (ssn.length >= 9) return ssn.slice(5, 9);
-    if (r.ssn_last4) return String(r.ssn_last4).slice(-4);
-    // Fallback: lấy 4 số cuối của số điện thoại có sẵn trong dữ liệu (không dùng số tự sinh)
-    const rawDigits = String(r.phonenumber || r.phone || r.cellphone || r.homephone || r.workphone || '').replace(/\D/g, '');
-    if (rawDigits.length < 7) return null;
-    const digits = getNormalizedPhone(r).replace(/\D/g, '');
-    return digits.length >= 10 ? digits.slice(6, 10) : null;
+    return /^\d{4}$/.test(r.ssn_last4) ? String(r.ssn_last4) : null;
   }
 },
 // 4. Các trường họ tên
@@ -214,7 +209,7 @@ const semanticCategories = [
 // 8. SSN gộp
 {
   type: 'ssn',
-  patterns: [/ssn/, /socialsecurity/, /^social$/],
+  patterns: [/^ssn$/, /^socialsecurity(?:number)?$/],
   resolve: r => {
     // Chỉ dùng SSN có trong dữ liệu, không tự ghép từ số điện thoại.
     return r.ssn || r.socialsecurity || null;

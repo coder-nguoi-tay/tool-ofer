@@ -2,6 +2,7 @@
  * Mở Screen View cho một slot và chuyển thao tác trên khung hình tới tab đang xem.
  * @param {number} slot Số slot cần xem và điều khiển.
  * @return {void} Kết nối luồng ảnh và đăng ký thao tác của người dùng.
+ * @throws {Error} Khi canvas hoặc kết nối stream không thể được khởi tạo.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -65,6 +66,7 @@ function _startScreenStream(slot) {
       es.addEventListener?.('screen-source', () => {
         if (es !== _screenEventSource) return;
         sourceVersion++;
+        delete canvas.dataset.screenSourceId;
         _pendingFrameData = null;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         canvas.inert = true;
@@ -73,6 +75,7 @@ function _startScreenStream(slot) {
       let _isRenderingFrame = false;
       let _pendingFrameData = null;
       let _streamScheduleTimeout = null;
+      let latestSourceId = '';
 
       const _scheduleStreamFrame = (fn) => {
         let executed = false;
@@ -97,14 +100,19 @@ function _startScreenStream(slot) {
         _streamScheduleTimeout = setTimeout(runner, 20);
       };
 
+      /**
+       * Giải mã khung hình và bỏ ảnh tải muộn từ nguồn đã đổi tab.
+       * @return {Promise<void>} Vẽ khung hình còn đúng nguồn và lên lịch cho khung hình mới nhất.
+       * @author ductv <ductv@getflycrm.com>
+       * @since 2026-11-20
+       */
       const _renderStreamFrame = async () => {
         if (!_pendingFrameData) {
           _isRenderingFrame = false;
           return;
         }
-        _isRenderingFrame = true;
         const version = sourceVersion;
-        const raw = _pendingFrameData;
+        const { raw, screenSourceId } = _pendingFrameData;
         _pendingFrameData = null;
 
         try {
@@ -113,13 +121,14 @@ function _startScreenStream(slot) {
           const resp = await fetch(`data:image/jpeg;base64,${cleanData}`);
           const blob = await resp.blob();
           const bmp = await createImageBitmap(blob);
-          if (version !== sourceVersion || es !== _screenEventSource) { bmp.close(); return; }
+          if (version !== sourceVersion || _screenEventSource !== es || screenSourceId !== latestSourceId) { bmp.close(); return; }
           if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
             canvas.width = bmp.width;
             canvas.height = bmp.height;
           }
           ctx.drawImage(bmp, 0, 0);
           canvas.inert = false;
+          canvas.dataset.screenSourceId = screenSourceId;
           bmp.close();
           _screenFpsCounter++;
           _lastFrameTime = Date.now();
@@ -127,31 +136,44 @@ function _startScreenStream(slot) {
           try {
             const cleanData = raw.includes('\n') ? raw.replace(/[\r\n]/g, '') : raw;
             const img = new Image();
-            img.onload = () => {
-              if (version !== sourceVersion || es !== _screenEventSource) return;
-              if (canvas.width !== img.width || canvas.height !== img.height) {
-                canvas.width = img.width;
-                canvas.height = img.height;
-              }
-              ctx.drawImage(img, 0, 0);
-              canvas.inert = false;
-              _screenFpsCounter++;
-              _lastFrameTime = Date.now();
-            };
             img.src = `data:image/jpeg;base64,${cleanData}`;
+            await img.decode();
+            if (version !== sourceVersion || _screenEventSource !== es || screenSourceId !== latestSourceId) return;
+            if (canvas.width !== img.width || canvas.height !== img.height) {
+              canvas.width = img.width;
+              canvas.height = img.height;
+            }
+            ctx.drawImage(img, 0, 0);
+            canvas.inert = false;
+            canvas.dataset.screenSourceId = screenSourceId;
+            _screenFpsCounter++;
+            _lastFrameTime = Date.now();
           } catch { }
         } finally {
-          _isRenderingFrame = false;
-          if (_pendingFrameData) {
-            _scheduleStreamFrame(_renderStreamFrame);
-          }
+          if (_pendingFrameData && _screenEventSource === es) _scheduleStreamFrame(_renderStreamFrame);
+          else _isRenderingFrame = false;
         }
       };
 
+      /**
+       * Khóa điều khiển ảnh cũ ngay khi stream báo đổi tab và giữ khung hình mới nhất để vẽ.
+       * @param {MessageEvent} e Dữ liệu ảnh và mã nguồn do Screen View gửi.
+       * @return {void}
+       * @author ductv <ductv@getflycrm.com>
+       * @since 2026-11-20
+       */
       es.onmessage = (e) => {
-        if (es !== _screenEventSource || !e.data || e.data === 'error') return;
-        _pendingFrameData = e.data;
+        if (!e.data || e.data === 'error') return;
+        if (_screenEventSource !== es) return;
+        const screenSourceId = e.lastEventId || '';
+        if (screenSourceId !== latestSourceId) {
+          latestSourceId = screenSourceId;
+          delete canvas.dataset.screenSourceId;
+          _closeSelectPicker();
+        }
+        _pendingFrameData = { raw: e.data, screenSourceId };
         if (!_isRenderingFrame) {
+          _isRenderingFrame = true;
           _scheduleStreamFrame(_renderStreamFrame);
         }
       };
@@ -179,9 +201,25 @@ function _startScreenStream(slot) {
       _wheelTimer = null;
       let _wheelLastX = 0;
       let _wheelLastY = 0;
+      let wheelSourceId;
 
+      /**
+       * Gom các nhịp cuộn trên cùng nguồn ảnh mà người dùng đang xem.
+       * @param {WheelEvent} e Sự kiện lăn chuột trên canvas.
+       * @return {void}
+       * @author ductv <ductv@getflycrm.com>
+       * @since 2026-11-20
+       */
       function _handleCanvasWheel(e) {
         e.preventDefault();
+        const source = canvas.dataset.screenSourceId;
+        if (!source) return;
+        if (source !== wheelSourceId) {
+          clearTimeout(_wheelTimer);
+          _wheelTimer = null;
+          _wheelAccumX = _wheelAccumY = 0;
+          wheelSourceId = source;
+        }
         let dy = e.deltaY;
         let dx = e.deltaX || 0;
         if (e.deltaMode === 1) { // DOM_DELTA_LINE (con lăn chuột thông thường)
@@ -203,8 +241,10 @@ function _startScreenStream(slot) {
             _wheelAccumX = 0;
             _wheelAccumY = 0;
             _wheelTimer = null;
+            if (wheelSourceId !== canvas.dataset.screenSourceId) return;
             _sendInput(slot, {
               type: 'wheel',
+              screenSourceId: wheelSourceId,
               x: _wheelLastX,
               y: _wheelLastY,
               deltaX: sendDx,
@@ -220,16 +260,24 @@ function _startScreenStream(slot) {
       // Mouse move throttle
       _mouseMoveTimer = null;
       let _lastMouseMoveEvent = null;
+      let pressedSourceId;
 
+      /**
+       * Giữ thao tác kéo trên nguồn ảnh nhận lần nhấn chuột ban đầu.
+       * @param {MouseEvent} e Sự kiện kéo trên canvas.
+       * @return {void}
+       * @author ductv <ductv@getflycrm.com>
+       * @since 2026-11-20
+       */
       function _handleCanvasMouseMove(e) {
-        if (!e.buttons) return;
+        if (!e.buttons || !pressedSourceId || pressedSourceId !== canvas.dataset.screenSourceId) return;
         _lastMouseMoveEvent = e;
         if (!_mouseMoveTimer) {
           _mouseMoveTimer = setTimeout(() => {
-            if (_lastMouseMoveEvent) {
-              _sendInput(slot, _buildMouseEvent('mousemove', _lastMouseMoveEvent, canvas));
-              _lastMouseMoveEvent = null;
+            if (_lastMouseMoveEvent && pressedSourceId === canvas.dataset.screenSourceId) {
+              _sendInput(slot, { ..._buildMouseEvent('mousemove', _lastMouseMoveEvent, canvas), screenSourceId: pressedSourceId });
             }
+            _lastMouseMoveEvent = null;
             _mouseMoveTimer = null;
           }, 25); // 25ms batching (~40fps) - loại bỏ nghẽn mạng do drag chuột
         }
@@ -247,22 +295,36 @@ function _startScreenStream(slot) {
       }
       let latestMouseDown = 0;
       canvas.onmousedown = async (e) => {
+        const source = canvas.dataset.screenSourceId;
+        pressedSourceId = source;
+        if (!source) return;
         const clickNumber = ++latestMouseDown;
         const tabIndex = _screenActiveTabIndex;
         _closeSelectPicker();
         const result = await api(`/screen/input/${slot}`, {
-          method: 'POST', body: JSON.stringify(_buildMouseEvent('mousedown', e, canvas))
+          method: 'POST', body: JSON.stringify({ ..._buildMouseEvent('mousedown', e, canvas), screenSourceId: source })
         });
-        if (clickNumber !== latestMouseDown || es !== _screenEventSource || tabIndex !== _screenActiveTabIndex) return;
+        if (clickNumber !== latestMouseDown || es !== _screenEventSource || tabIndex !== _screenActiveTabIndex || source !== canvas.dataset.screenSourceId) return;
         if (result?.select) _openSelectPicker(slot, result.select, e.clientX, e.clientY);
         else if (result?.error) showToast(result.error, 'error');
       };
       canvas.onmouseup = (e) => {
         if (_mouseMoveTimer) { clearTimeout(_mouseMoveTimer); _mouseMoveTimer = null; }
-        _sendInput(slot, _buildMouseEvent('mouseup', e, canvas));
+        const source = pressedSourceId;
+        pressedSourceId = null;
+        if (source && source === canvas.dataset.screenSourceId) {
+          _sendInput(slot, { ..._buildMouseEvent('mouseup', e, canvas), screenSourceId: source });
+        }
       };
       canvas.onmousemove = _handleCanvasMouseMove;
       canvas.onwheel = _handleCanvasWheel;
+      /**
+       * Chuyển phím người dùng sang tab đang xem, đóng đúng nguồn hình khi nhấn Ctrl/Cmd+W.
+       * @param {KeyboardEvent} e Phím nhấn trên canvas.
+       * @return {void} Gửi thao tác điều khiển khi nguồn phù hợp.
+       * @author ductv <ductv@getflycrm.com>
+       * @since 2026-11-20
+       */
       canvas.onkeydown = (e) => {
         // Phím tắt hệ thống: Cmd/Ctrl + A/X/C/V → gửi shortcut để trình duyệt thực hiện copy/cut/paste/select-all
         // tự nhiên thay vì gửi phím thường (tránh double-action hoặc bị preventDefault làm mất paste).
@@ -285,7 +347,8 @@ function _startScreenStream(slot) {
         }
         if ((e.ctrlKey || e.metaKey) && (e.key === 'w' || e.key === 'W')) {
           e.preventDefault();
-          _closeTab(slot, _screenActiveTabIndex);
+          const screenSourceId = canvas.dataset.screenSourceId;
+          if (screenSourceId && !e.repeat) _closeTab(slot, undefined, screenSourceId);
           return;
         }
         e.preventDefault();

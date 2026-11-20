@@ -29,6 +29,7 @@ function createViewerHub() {
       get: () => viewers.size > 0 && [...viewers].every(res => !isOpen(res) || res.writableNeedDrain)
     }
   });
+  hub.resetFrame = () => { lastFrame = null; };
   hub.add = res => {
     viewers.add(res);
     res.on('drain', () => hub.emit('drain'));
@@ -42,7 +43,7 @@ function createViewerHub() {
     hub.write(sourceEvent);
   };
   hub.write = chunk => {
-    const isFrame = chunk.startsWith('data: ');
+    const isFrame = chunk.startsWith('data: ') || chunk.startsWith('id: ');
     if (isFrame) lastFrame = chunk;
     let flowing = false;
     for (const res of viewers) {

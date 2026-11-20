@@ -23,6 +23,10 @@ pub fn compute_style(tag: &str, inline_css: Option<&str>) -> LayoutStyle {
 
 /// Built-in UA defaults. Inline elements currently map to block layout; real
 /// inline/text layout arrives with the text/paint phase.
+/// @param tag Local element name used to select browser defaults.
+/// @return Default layout style before author declarations are applied.
+/// @author ductv <ductv@getflycrm.com>
+/// @since 2026-11-20
 pub fn ua_style(tag: &str) -> LayoutStyle {
     let mut style = LayoutStyle::default();
     if tag == "b" || tag == "strong" {
@@ -67,8 +71,7 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         || tag == "template"
         || tag == "desc"
         || tag == "metadata"
-        || tag == "option"
-        || tag == "optgroup"
+        || tag == "datalist"
         || tag == "source"
         || tag == "track"
         || tag == "param"
@@ -80,8 +83,7 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         // `template` content is inert and never rendered. svg `title`/`desc`/
         // `metadata` are AX/tooltip metadata, never rendered in flow (an inline
         // <svg> we cannot rasterize would otherwise leak its `<desc>` text).
-        // `option`/`optgroup` render only inside the native select popup, so a
-        // closed <select> must not paint every option label stacked.
+        // A datalist supplies suggestions without generating a box.
         // `source`/`track`/`param`/`area` are metadata-only children of
         // picture/video/object/map; a `<picture><source width= height=>` must
         // not lay out as a real box (news CDNs put dimensions on `<source>`,
@@ -189,9 +191,9 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         };
     } else if tag == "select" {
         // A closed native select is an atomic inline control. Its option
-        // children belong to the popup (and remain display:none in our frame
-        // tree); the select itself gets intrinsic geometry and paints the
-        // selected label.
+        // children belong to the popup. The layout builds the select as a
+        // leaf, so option/optgroup retain their computed CSS display while
+        // only the selected label is painted in the closed control.
         style.display = Display::Inline;
         style.is_inline_block = true;
         style.font_size = Some(13.333_333);

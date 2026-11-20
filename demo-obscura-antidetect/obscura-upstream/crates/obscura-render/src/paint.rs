@@ -6985,30 +6985,19 @@ fn list_marker_text(
     }
 }
 
+/// Resolve the label of the same current option exposed through the DOM.
+/// @param tree DOM containing the owner and its live form state.
+/// @param select HTML select being painted.
+/// @return Authored label or option text when an option is selected.
+/// @author ductv <ductv@getflycrm.com>
+/// @since 2026-11-20
 fn selected_option_label(tree: &DomTree, select: obscura_dom::tree::NodeId) -> Option<String> {
-    let mut first = None;
-    for option_id in tree.descendants(select) {
-        let Some(option) = tree.get_node(option_id) else {
-            continue;
-        };
-        if option
-            .as_element()
-            .map_or(true, |name| name.local.as_ref() != "option")
-        {
-            continue;
-        }
-        let label = option
-            .get_attribute("label")
-            .map(str::to_owned)
-            .unwrap_or_else(|| tree.text_content(option_id).trim().to_string());
-        if first.is_none() {
-            first = Some(label.clone());
-        }
-        if option.get_attribute("selected").is_some() {
-            return Some(label);
-        }
-    }
-    first
+    let options = tree.select_options(select)?;
+    let selected = tree.selected_option_indexes(select, &options, false);
+    let option_id = options[*selected.first()?];
+    let option = tree.get_node(option_id)?;
+    Some(option.get_attribute("label").map(str::to_owned)
+        .unwrap_or_else(|| tree.text_content(option_id).trim().to_string()))
 }
 
 /// Render `tree` at `viewport` to PNG bytes (RGBA 8-bit). Returns None if the

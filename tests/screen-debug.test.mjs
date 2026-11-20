@@ -53,6 +53,43 @@ test('Screen View mở đúng select trong Shadow DOM và iframe lồng, giữ t
   }
 });
 
+/**
+ * Verify Screen View maps a rendered click into the iframe viewport after a CSS scale transform.
+ * @param {import('node:test').TestContext} t Test lifecycle context for cleanup.
+ * @return {Promise<void>} Resolves after the scaled iframe select is found in its owning frame.
+ * @throws {Error} When the browser fixture fails to load or the select hit-test is incorrect.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+async function verifyCssScaledIframeSelectHitTest(t) {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+  await page.route('https://scaled-select.fixture.test/**', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<select id="scaled-select" style="width:140px;height:36px"><option>A</option><option>B</option></select>'
+  }));
+  await page.setContent(`
+    <iframe id="scaled-frame" src="https://scaled-select.fixture.test/"
+      style="position:absolute;left:120px;top:90px;width:240px;height:180px;border:8px solid #333;transform:scale(1.75);transform-origin:top left"></iframe>
+  `);
+  const frame = page.frames().find(candidate => candidate.url().startsWith('https://scaled-select.fixture.test/'));
+  assert.ok(frame, 'Iframe fixture phải được tải');
+  const box = await frame.locator('#scaled-select').boundingBox();
+  assert.ok(box, 'Select trong iframe phải có bounding box');
+
+  const pick = await findSelectAtPoint(page, box.x + box.width / 2, box.y + box.height / 2);
+  assert.ok(pick, 'Hit-test phải tìm được select sau khi quy đổi CSS scale');
+  assert.equal(pick.frame, frame, 'Kết quả phải thuộc iframe đã được bấm');
+  assert.deepEqual(pick.options, [
+    { label: 'A', disabled: false },
+    { label: 'B', disabled: false },
+  ]);
+}
+test('Screen View quy đổi chính xác hit-test select trong iframe CSS-scale', {
+  skip: !existsSync(chromium.executablePath())
+}, verifyCssScaledIframeSelectHitTest);
+
 test('Screen View giữ mouseup cho control thường khi không nhận diện được select theo điểm bấm', {
   skip: !existsSync(chromium.executablePath())
 }, async t => {

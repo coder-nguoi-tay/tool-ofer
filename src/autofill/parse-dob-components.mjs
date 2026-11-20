@@ -4,8 +4,9 @@
  *
  * @param {string} dobStr Chuỗi ngày sinh từ dữ liệu người dùng.
  * @return {object|null} Đối tượng chứa các định dạng ngày/tháng/năm hoặc null.
+ * @throws {never} Ngày không tồn tại trong lịch trả về null.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 function parseDobComponents(dobStr) {
   const str = String(dobStr ?? '').trim();
@@ -38,7 +39,7 @@ function parseDobComponents(dobStr) {
       }
     } else {
       // 3. Chỉ có năm 4 chữ số
-      match = str.match(/(\d{4})/);
+      match = str.match(/^(\d{4})$/);
       if (match) {
         year = match[1];
       }
@@ -47,6 +48,11 @@ function parseDobComponents(dobStr) {
   if (!year && !month && !day) return null;
   const monthNum = month ? Number(month) : null;
   const dayNum = day ? Number(day) : null;
+  if (month && day) {
+    const date = new Date(0);
+    date.setUTCFullYear(Number(year), monthNum - 1, dayNum);
+    if (date.getUTCMonth() !== monthNum - 1 || date.getUTCDate() !== dayNum) return null;
+  }
   const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const shortMonthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const monthStr = monthNum ? String(monthNum) : '';

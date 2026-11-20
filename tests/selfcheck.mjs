@@ -1692,16 +1692,16 @@ assert.ok(DEVICE_PROFILES.ios.ua('151.0.7922.174').includes('CriOS/151.0.7922.17
 assert.ok(DEVICE_PROFILES.ipad.ua('152.0.7977.83').includes('CriOS/152.0.7977.83'), 'iPad UA phải chứa CriOS/152');
 
 // 11. Kiểm tra các cơ chế được huấn luyện từ log HTML thực tế
-// 11.1 Tự động nhận diện và sinh ssn_last4 / last4 / ssn4
+// 11.1 Chỉ lấy bốn số cuối từ dữ liệu SSN của hồ sơ
 assert.equal(
   matchFieldValue(['ssn_last4', 'last4'], { ssn: '123-45-6789' }),
   '6789',
   'Khi có ssn đầy đủ, ssn_last4 phải lấy 4 số cuối của SSN'
 );
 assert.equal(
-  matchFieldValue(['ssn_last4', 'ssn4'], { phone: '8149143396' }),
-  '3396',
-  'Khi thiếu ssn, ssn_last4 phải fallback lấy 4 số cuối của số điện thoại'
+  matchFieldValue(['ssn_last4', 'ssn4'], { phone: '2025550147' }),
+  null,
+  'Khi thiếu SSN, trường bốn số cuối phải để trống'
 );
 const fallbackSsn4 = matchFieldValue(['ssn_last4'], {});
 assert.equal(fallbackSsn4, null, 'Khi record rỗng và không có số điện thoại, ssn_last4 không bịa giá trị');

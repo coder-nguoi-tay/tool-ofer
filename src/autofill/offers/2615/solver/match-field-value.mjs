@@ -1,5 +1,6 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/match-field-value.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
 import { resolveRecordName } from '../../../record-values/resolve-record-name.mjs';
+import { validateSsnMatch } from '../../../record-values/restrict-profile-field.mjs';
 import { resolveRecordPhone } from '../../../record-values/resolve-record-phone.mjs';
 import { resolveContactField } from '../../../resolve-contact-field.mjs';
 import { formatMatchedValue } from './format-matched-value.mjs';
@@ -23,8 +24,12 @@ import { semanticCategories } from './state/semantic-categories.mjs';
  * @since 2026-11-20
  */
 function matchFieldValue(candidateNames, record, metadata = {}) {
-  const contact = resolveContactField(metadata);
+  const contact = resolveContactField(metadata, candidateNames);
   if (contact === 'conflict') return null;
+  if (contact.startsWith('ssn')) {
+    const matched = matchIdentifiedValue(candidateNames, record, metadata);
+    return validateSsnMatch(contact, matched, record, metadata.maxLength);
+  }
   if (contact === 'address') return getAddressString(record) || null;
   if (contact === 'address2') return record.address2 || record.apt || record.suite || null;
   if (['firstname', 'lastname', 'fullname'].includes(contact)) return formatMatchedValue(resolveRecordName(contact, record), { maxLength: metadata.maxLength });
@@ -228,6 +233,7 @@ function matchIdentifiedValue(candidateNames, record, metadata) {
 
   // 3. Khớp mờ: nếu tên trường trong record nằm trong candidate hoặc ngược lại (với độ dài >= 4)
   for (const [key, value] of Object.entries(record)) {
+    if (/ssn|socialsecurity/.test(normalizeFieldName(key))) continue;
     if (!value) continue;
     for (const candidate of normalizedCandidates) {
       if (key.length >= 4 && candidate.includes(key)) return formatMatchedValue(value, metadata);

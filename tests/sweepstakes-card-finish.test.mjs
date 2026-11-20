@@ -182,3 +182,17 @@ test('không ném lỗi ra bộ canh phiên dù browser.pages() trả Promise ho
   const throwing = { browser: { pages: () => { throw new Error('CDP mất kết nối'); } } };
   assert.equal(await finishSweepstakesCardSession(throwing, async () => {}, 0), false);
 });
+
+test('tab con mở trong lúc lưu kết quả cuối giữ phiên cho người dùng', async () => {
+  const { session, closeSession, closes } = fakeSession(0);
+  await finishSweepstakesCardSession(session, closeSession, 0, noPending);
+  const before = session.browser.pages;
+  const child = fakeTab('https://fixture.invalid/form');
+  child._manualCaptchaPending = true;
+  const result = await finishSweepstakesCardSession(session, closeSession, FINISH_STABLE_MS, {
+    ...noPending,
+    persistOutcome: async () => { session.browser.pages = () => [...before(), child]; },
+  });
+  assert.equal(result, false);
+  assert.equal(closes.length, 0);
+});

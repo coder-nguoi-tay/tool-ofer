@@ -296,6 +296,8 @@ pub struct ExternalStylesheet {
 pub struct FormControlState {
     pub value: Option<String>,
     pub checked: Option<bool>,
+    pub selected: Option<bool>,
+    pub selection_dirty: bool,
     pub indeterminate: bool,
 }
 
@@ -1487,6 +1489,18 @@ impl DomTree {
             .map(|name| name.local.as_ref())
     }
 
+    /// Apply the control's disabled attribute and an HTML option's parent optgroup.
+    /// @param control The node used for selection or CSS matching.
+    /// @return Whether the control or its owning option group disables it.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    pub(crate) fn control_or_optgroup_disabled(&self, control: &Node) -> bool {
+        control.get_attribute("disabled").is_some() || Self::html_tag(control) == Some("option")
+            && control.parent.is_some_and(|parent| self.with_node(parent, |group|
+                Self::html_tag(group) == Some("optgroup") && group.get_attribute("disabled").is_some()
+            ) == Some(true))
+    }
+
     fn is_listed_control(node: &Node) -> bool {
         matches!(Self::html_tag(node), Some("button" | "fieldset" | "input" | "object" | "output" | "select" | "textarea"))
     }
@@ -1633,26 +1647,154 @@ impl DomTree {
         Some(options)
     }
 
-    pub fn option_index(&self, option: NodeId) -> Option<usize> {
-        if self.html_element_local_name(option).as_ref().map(|name| name.as_ref()) != Some("option") {
-            return None;
-        }
+    /// Locate the select that owns an option across ordinary wrapper elements.
+    /// @param option Option whose parent chain is inspected.
+    /// @return Owning HTML select, if any.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    fn option_owner_select(&self, option: NodeId) -> Result<Option<NodeId>, ()> {
         let mut parent = self.with_node(option, |node| node.parent).flatten();
         let mut remaining = self.node_slot_count();
         while let Some(node) = parent {
             if remaining == 0 {
                 eprintln!("obscura: option-index traversal cap hit - tree has a cycle");
-                return None;
+                return Err(());
             }
             remaining -= 1;
             match self.html_element_local_name(node).as_ref().map(|name| name.as_ref()) {
-                Some("select") => return self.select_options(node)
-                    .map(|options| options.iter().position(|id| *id == option).unwrap_or(0)),
-                Some("datalist" | "option") => return Some(0),
+                Some("select") => return Ok(Some(node)),
+                Some("datalist" | "option") => return Ok(None),
                 _ => parent = self.with_node(node, |node| node.parent).flatten(),
             }
         }
-        Some(0)
+        Ok(None)
+    }
+
+    /// Read the position of the option in its owner's current option list.
+    /// @param option Node representing an HTML option.
+    /// @return Its position, zero for detached options, or None for invalid nodes.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    pub fn option_index(&self, option: NodeId) -> Option<usize> {
+        if self.html_element_local_name(option).as_deref() != Some("option") { return None; }
+        let Some(select) = self.option_owner_select(option).ok()? else { return Some(0) };
+        self.select_options(select).map(|options| options.iter().position(|id| *id == option).unwrap_or(0))
+    }
+
+    /// Resolve live selected options in tree order, including the default of a closed single-select.
+    /// @param select Owner of the supplied options.
+    /// @param options Ordered list from select_options.
+    /// @param reselect_default Whether removing the current selection should reselect the first enabled option.
+    /// @return Selected positions for DOM reads, submission and paint.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    pub fn selected_option_indexes(&self, select: NodeId, options: &[NodeId], reselect_default: bool) -> Vec<usize> {
+        let inner = self.inner.borrow();
+        let Some(control) = inner.nodes.get(select.index()).and_then(Option::as_ref) else { return vec![] };
+        let multiple = control.get_attribute("multiple").is_some();
+        let size = control.get_attribute("size").unwrap_or("").trim_start().trim_start_matches('+')
+            .split(|c: char| !c.is_ascii_digit()).next().unwrap_or("").parse::<u32>().unwrap_or(0);
+        let mut chosen = Vec::new();
+        let mut has_live_state = false;
+        let mut first_enabled = None;
+        for (index, id) in options.iter().enumerate() {
+            let Some(option) = inner.nodes.get(id.index()).and_then(Option::as_ref) else { continue };
+            let live = inner.form_controls.get(id).and_then(|state| state.selected);
+            has_live_state |= live.is_some();
+            if live.unwrap_or_else(|| option.get_attribute("selected").is_some()) {
+                if !multiple { chosen.clear(); }
+                chosen.push(index);
+            }
+            if first_enabled.is_none() && !self.control_or_optgroup_disabled(option) {
+                first_enabled = Some(index);
+            }
+        }
+        if chosen.is_empty() && !multiple && size <= 1 && (!has_live_state || reselect_default) {
+            chosen.extend(first_enabled);
+        }
+        chosen
+    }
+
+    /// Return selectedness for an attached option or its standalone state.
+    /// @param option Node whose selectedness is requested.
+    /// @return Current selectedness.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    pub fn option_selected(&self, option: NodeId) -> bool {
+        let marked = {
+            let inner = self.inner.borrow();
+            let Some(node) = inner.nodes.get(option.index()).and_then(Option::as_ref) else { return false };
+            let live = inner.form_controls.get(&option).and_then(|state| state.selected);
+            if live == Some(false) { return false; }
+            let marked = live.unwrap_or_else(|| node.get_attribute("selected").is_some());
+            if !marked {
+                if self.control_or_optgroup_disabled(node) { return false; }
+                // An unmarked option can only be the first enabled option. An earlier enabled
+                // HTML option with the same parent rules that out, even in a detached select.
+                let mut previous = node.prev_sibling;
+                for _ in 0..inner.nodes.len() {
+                    let Some(sibling) = previous.and_then(|id| inner.nodes.get(id.index())?.as_ref()) else { break };
+                    if Self::html_tag(sibling) == Some("option") && sibling.get_attribute("disabled").is_none() {
+                        return false;
+                    }
+                    previous = sibling.prev_sibling;
+                }
+            }
+            marked
+        };
+        if let Ok(Some(select)) = self.option_owner_select(option) {
+            if let Some(options) = self.select_options(select) {
+                return self.selected_option_indexes(select, &options, false).iter().any(|&index| options[index] == option);
+            }
+        }
+        marked
+    }
+
+    /// Apply selection from an option's IDL setter while preserving the authored default.
+    /// @param option Option assigned by the caller.
+    /// @param selected New selectedness.
+    /// @param by_script Whether an IDL write marks the option independent of later default changes.
+    /// @return Updates native control state.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    pub fn set_option_selected(&self, option: NodeId, selected: bool, by_script: bool) {
+        let single_select = self.option_owner_select(option).ok().flatten().filter(|&owner| {
+            self.with_node(owner, |s| s.get_attribute("multiple").is_none()) == Some(true)
+        });
+        let options = single_select.and_then(|owner| self.select_options(owner)).unwrap_or_default();
+        let previous_choice = if selected { None } else {
+            single_select.and_then(|owner| self.selected_option_indexes(owner, &options, false)
+                .first().map(|&index| options[index]))
+        };
+        self.update_form_control_state(option, |control| {
+            control.selected = Some(selected);
+            control.selection_dirty |= by_script;
+        });
+        let Some(owner) = single_select else { return; };
+        if selected {
+            for peer in options {
+                if peer != option { self.update_form_control_state(peer, |s| s.selected = Some(false)); }
+            }
+        } else if let Some(previous) = previous_choice {
+            let current = if previous != option { Some(previous) } else {
+                self.selected_option_indexes(owner, &options, true).first().map(|&index| options[index])
+            };
+            if let Some(current) = current { self.update_form_control_state(current, |s| s.selected = Some(true)); }
+        }
+    }
+
+    /// Apply a change in presence of the selected attribute to an option that still follows its default.
+    /// @param option Element about to gain or lose the attribute.
+    /// @param present Attribute presence after mutation.
+    /// @return Updates live selectedness before the content attribute is changed.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    pub fn sync_option_selection_default(&self, option: NodeId, present: bool) {
+        if self.with_node(option, |n| Self::html_tag(n) == Some("option")
+            && n.get_attribute("selected").is_some() != present) != Some(true) { return; }
+        if !self.form_control_state(option).is_some_and(|state| state.selection_dirty) {
+            self.set_option_selected(option, present, false);
+        }
     }
 
     /// Snapshot the direct children of `host`'s shadow root. Ordinary
@@ -2634,6 +2776,50 @@ mod tests {
         assert_eq!(tree.select_options(select), None);
         tree.with_node_mut(container, |node| node.parent = Some(container));
         assert_eq!(tree.option_index(option), None);
+    }
+
+    /// Exercise the initial selectedness scan of a long, whitespace-separated detached select.
+    /// @return Verifies the first enabled HTML option and precedence of later authored selections.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    #[test]
+    fn option_selected_respects_earlier_enabled_html_options_and_late_defaults() {
+        let tree = DomTree::new();
+        let select = element(&tree, "select");
+        let disabled_group = element(&tree, "optgroup");
+        let grouped = element(&tree, "option");
+        tree.with_node_mut(disabled_group, |node| node.set_attribute("disabled", String::new()));
+        tree.append_child(select, disabled_group);
+        tree.append_child(disabled_group, grouped);
+        let disabled = element(&tree, "option");
+        tree.with_node_mut(disabled, |node| node.set_attribute("disabled", String::new()));
+        tree.append_child(select, disabled);
+        let foreign = tree.new_node(NodeData::Element {
+            name: QualName::new(None, Namespace::from("urn:foreign"), LocalName::from("option")),
+            attrs: vec![], template_contents: None, mathml_annotation_xml_integration_point: false,
+        });
+        tree.append_child(select, foreign);
+        let options: Vec<_> = (0..1000).map(|_| {
+            tree.append_text(select, "\n  ");
+            let option = element(&tree, "option");
+            tree.append_child(select, option);
+            option
+        }).collect();
+        assert!(!tree.option_selected(grouped));
+        assert!(!tree.option_selected(disabled));
+        assert!(!tree.option_selected(foreign));
+        let selected: Vec<_> = options.iter().copied().filter(|&option| tree.option_selected(option)).collect();
+        assert_eq!(selected, [options[0]]);
+
+        for index in [1, 999] {
+            tree.with_node_mut(options[index], |node| node.set_attribute("selected", String::new()));
+        }
+        assert!(!tree.option_selected(options[0]));
+        assert!(!tree.option_selected(options[1]));
+        assert!(tree.option_selected(options[999]));
+        tree.detach(options[999]);
+        assert!(tree.option_selected(options[1]));
+        assert!(tree.option_selected(options[999]));
     }
 
     #[test]

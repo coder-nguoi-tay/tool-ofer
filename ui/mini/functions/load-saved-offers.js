@@ -1,5 +1,6 @@
 /**
  * Load saved offers.
+ * @param {void} Không có tham số.
  * @return {Promise<void>} Kết quả xử lý load saved offers.
  * @throws {never} Lỗi đọc danh sách offer được bỏ qua để Mini vẫn có thể sử dụng.
  * @author ductv <ductv@getflycrm.com>

@@ -1,12 +1,17 @@
 /**
- * Start stream.
- * @param {number} slot slot.
- * @return {void} Kết quả xử lý start stream.
+ * Mở luồng ảnh của slot và chỉ cho phép điều khiển nguồn đang hiển thị.
+ * @param {number} slot Phiên đang được mở trong Mini.
+ * @return {void}
+ * @throws {Error} Khi canvas hoặc kết nối EventSource không thể được khởi tạo.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
 function startStream(slot) {
       currentSlot = slot;
+      delete canvas.dataset.screenSourceId;
+      pendingFrame = null;
+      const streamRevision = {};
+      canvas._screenStreamRevision = streamRevision;
       // Không dùng kích thước của slot/tab trước khi stream mới phát frame đầu tiên.
       canvasNaturalWidth = 0;
       canvasNaturalHeight = 0;
@@ -22,6 +27,7 @@ function startStream(slot) {
       // Pre-load snapshot ngay lập tức để canvas có hình 0ms
       const preImg = new Image();
       preImg.onload = () => {
+        if (canvas._screenStreamRevision !== streamRevision || streamRevision.screenSourceId !== undefined) return;
         canvasNaturalWidth = preImg.width;
         canvasNaturalHeight = preImg.height;
         if (!isRendering) {
@@ -49,7 +55,13 @@ function startStream(slot) {
       eventSource = new EventSource(streamUrl);
 
       eventSource.onmessage = (event) => {
+        if (canvas._screenStreamRevision !== streamRevision) return;
         if (!event.data || event.data === 'error') return;
+        const screenSourceId = event.lastEventId || '';
+        if (streamRevision.screenSourceId !== screenSourceId) {
+          streamRevision.screenSourceId = screenSourceId;
+          delete canvas.dataset.screenSourceId;
+        }
         let frameData = event.data;
         if (frameData.startsWith('{')) {
           try {
@@ -62,7 +74,7 @@ function startStream(slot) {
           } catch {}
         }
         canvasMsg.style.display = 'none';
-        pendingFrame = frameData;
+        pendingFrame = { raw: frameData, screenSourceId, streamRevision };
         if (!isRendering) _scheduleMiniRender(renderNextFrame);
       };
 

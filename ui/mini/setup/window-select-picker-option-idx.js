@@ -2,13 +2,15 @@
  * Gửi lựa chọn thủ công về đúng ô đã mở và hiển thị kết quả xác nhận từ tab.
  * @param {number} index Vị trí của mục đã chọn.
  * @param {string} uid Mã của lần mở danh sách.
+ * @param {string} screenSourceId Mã nguồn ảnh đang hiển thị khi mở danh sách.
  * @return {Promise<void>}
+ * @throws {Error} Khi yêu cầu chọn hoặc cập nhật giao diện Mini thất bại.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
-window.selectPickerOption = async (index, uid) => {
+window.selectPickerOption = async (index, uid, screenSourceId) => {
   closeSelectModal();
-  const result = await sendInput({ type: 'select', index, uid });
+  const result = await sendInput({ type: 'select', index, uid, screenSourceId });
   showToast(result?.ok ? 'Đã chọn mục' : 'Chưa chọn được mục. Hãy mở lại danh sách.');
 };
 

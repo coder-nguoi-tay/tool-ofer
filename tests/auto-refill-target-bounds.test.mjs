@@ -53,20 +53,30 @@ test('countLiveBrowsers và getLiveBrowsers chỉ đếm các session còn sốn
     isObscuraProcessAlive: () => true,
   };
 
+  // Orbita đang chạy vẫn chiếm slot dù CDP đã ngắt kết nối.
+  const disconnectedGoLoginSession = {
+    isClosed: false,
+    isGoLogin: true,
+    isGoLoginProcessAlive: () => true,
+    browser: { isClosed: () => false, isConnected: () => false },
+  };
+
   activeBrowsers.add(liveSession);
   activeBrowsers.add(closedSession);
   activeBrowsers.add(deadBrowserSession);
   activeBrowsers.add(disconnectedSession);
   activeBrowsers.add(obscuraLiveSession);
   activeBrowsers.add(obscuraClosedSession);
+  activeBrowsers.add(disconnectedGoLoginSession);
 
-  assert.equal(activeBrowsers.size, 6);
-  assert.equal(countLiveBrowsers(), 2);
+  assert.equal(activeBrowsers.size, 7);
+  assert.equal(countLiveBrowsers(), 3);
 
   const liveList = getLiveBrowsers();
-  assert.equal(liveList.length, 2);
+  assert.equal(liveList.length, 3);
   assert.ok(liveList.includes(liveSession));
   assert.ok(liveList.includes(obscuraLiveSession));
+  assert.ok(liveList.includes(disconnectedGoLoginSession));
 });
 
 test('getAutoRefillStatus dùng countLiveBrowsers thay vì activeBrowsers.size', t => {

@@ -27,6 +27,14 @@ function parseRequestedThreadCount(value) {
  * @since 2026-11-20
  */
 function normalizeRequestedThreadCount(value) {
+  const raw = String(value ?? '').trim();
+  if (/^\d+$/.test(raw)) {
+    const digits = raw.replace(/^0+(?=\d)/, '');
+    const maximum = String(MAX_REQUESTED_THREAD_COUNT);
+    if (digits !== '0' && (digits.length > maximum.length || digits.length === maximum.length && digits > maximum)) {
+      return maximum;
+    }
+  }
   return parseRequestedThreadCount(value) || '1';
 }
 

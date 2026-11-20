@@ -35,7 +35,7 @@ export async function handlePostAutoRefillSequential(request, response) {
         }
       }
       const isDual = Boolean(url1 && url2 && url1 !== url2);
-      requestedCount = normalizeRequestedBrowserCount(s.requestedCount ?? s.concurrency, isDual ? 2 : 1);
+      requestedCount = normalizeRequestedBrowserCount(s.requestedCount !== undefined ? s.requestedCount : s.concurrency, isDual ? 2 : 1);
       sequentialSettings = {
         ...s,
         requestedCount: String(requestedCount),

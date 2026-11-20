@@ -1,4 +1,5 @@
-import { resolveRecordName } from './record-values/resolve-record-name.mjs';
+import { getRecordNameKind, resolveRecordName } from './record-values/resolve-record-name.mjs';
+import { validateSsnMatch } from './record-values/restrict-profile-field.mjs';
 import { resolveRecordPhone } from './record-values/resolve-record-phone.mjs';
 import { resolveContactField } from './resolve-contact-field.mjs';
 import { formatMatchedValue } from './format-matched-value.mjs';
@@ -21,12 +22,17 @@ import { semanticCategories } from './state/semantic-categories.mjs';
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
-function matchFieldValue(candidateNames, record, metadata = {}) {
-  const contact = resolveContactField(metadata);
+function matchFieldValue(candidateNames, record, metadata = { names: candidateNames }) {
+  const contact = resolveContactField(metadata, candidateNames);
   if (contact === 'conflict') return null;
+  if (contact.startsWith('ssn')) {
+    const matched = matchIdentifiedValue(candidateNames, record, metadata);
+    return validateSsnMatch(contact, matched, record, metadata.maxLength);
+  }
   if (contact === 'address') return getAddressString(record) || null;
   if (contact === 'address2') return record.address2 || record.apt || record.suite || null;
-  if (['firstname', 'lastname', 'fullname'].includes(contact)) return formatMatchedValue(resolveRecordName(contact, record), { maxLength: metadata.maxLength });
+  const nameKind = getRecordNameKind(contact, metadata, candidateNames);
+  if (nameKind) return resolveRecordName(nameKind, record, metadata.maxLength);
   if (/^phone/.test(contact)) return resolveRecordPhone(record, contact, metadata);
   if (contact) {
     return matchIdentifiedValue([contact], record, { type: contact === 'email' ? 'email' : 'text',
@@ -188,14 +194,16 @@ function matchIdentifiedValue(candidateNames, record, metadata) {
       if (/^(namsinh|ngaysinh|ngaythangnamsinh|dob|birthdate|dateofbirth|birthday|bday)$/.test(candidate)) {
         // Record dạng tách (birthmonth/birthday/birthyear): "birthday" chỉ là NGÀY trong tháng ("13").
         // Ô ngày sinh đầy đủ phải nhận MM/DD/YYYY ghép từ getDobString; ô 2 ký tự mới là ô ngày riêng.
-        const parsed = parseDobComponents(record[candidate]) || (metadata.maxLength === 2 ? null : parseDobComponents(getDobString(record)));
+        if (metadata.maxLength === 2 && /^\d{1,2}$/.test(record[candidate])) return formatMatchedValue(record[candidate], metadata);
+        const parsed = parseDobComponents(getDobString(record)) || parseDobComponents(record[candidate]);
         if (parsed) {
-          if (metadata.type === 'date') return parsed.isoDob;
+          if (metadata.type === 'date') return parsed.isoDob || null;
           if (metadata.maxLength === 4 || metadata.kind === 'select' && !metadata.names?.some(n => /month|day/i.test(n))) {
             return parsed.year;
           }
-          return formatMatchedValue(parsed.usDob, metadata);
+          return parsed.isoDob ? formatMatchedValue(parsed.usDob, metadata) : null;
         }
+        return null;
       }
       return formatMatchedValue(record[candidate], metadata);
     }
@@ -227,7 +235,8 @@ function matchIdentifiedValue(candidateNames, record, metadata) {
 
   // 3. Khớp mờ: nếu tên trường trong record nằm trong candidate hoặc ngược lại (với độ dài >= 4)
   for (const [key, value] of Object.entries(record)) {
-    if (!value) continue;
+    if (/ssn|socialsecurity/.test(normalizeFieldName(key))) continue;
+    if (!value || getRecordNameKind(key, {})) continue;
     for (const candidate of normalizedCandidates) {
       if (key.length >= 4 && candidate.includes(key)) return formatMatchedValue(value, metadata);
       if (candidate.length >= 4 && key.includes(candidate)) return formatMatchedValue(value, metadata);
@@ -256,33 +265,6 @@ function matchIdentifiedValue(candidateNames, record, metadata) {
     // Chỉ dùng dữ liệu đã cung cấp, không tự bịa địa chỉ ngoài record.
     if (addr) return formatMatchedValue(addr, metadata);
     return null;
-  }
-
-  // 6b. Fallback cho ô họ tên có id/name/label lạ (contactName, applicantFullName...): không để rơi xuống giá trị 'Yes'
-  const nameCandidate = normalizedCandidates.find(c => /name|^fn$|^ln$/.test(c) && !/(user|company|business|file|bank|card|street|city|state|nick|domain|host|display|school|pet|product)/.test(c));
-  if (nameCandidate) {
-    const fullNameVal = record.fullname || `${record.firstname || ''} ${record.lastname || ''}`.trim();
-    let nameVal = null;
-    if (/first|given|fore|fname|^fn$/.test(nameCandidate)) {
-      nameVal = record.firstname || record.fname || (fullNameVal ? fullNameVal.split(/\s+/)[0] : null);
-      if (!nameVal) {
-        const email = record.email || record.emailaddress || '';
-        const parts = email.split('@')[0]?.split(/[._\d-]+/).filter(Boolean) || [];
-        nameVal = parts[0] ? parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase() : null;
-      }
-    } else if (/last|sur|family|lname|^ln$/.test(nameCandidate)) {
-      nameVal = record.lastname || record.lname || (fullNameVal ? fullNameVal.split(/\s+/).slice(1).join(' ') || fullNameVal : null);
-      if (!nameVal) {
-        const email = record.email || record.emailaddress || '';
-        const parts = email.split('@')[0]?.split(/[._\d-]+/).filter(Boolean) || [];
-        nameVal = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase() : null;
-      }
-    } else if (/middle|mname/.test(nameCandidate)) {
-      nameVal = record.middlename || record.middleinitial || record.mname || null;
-    } else {
-      nameVal = fullNameVal || null;
-    }
-    if (nameVal) return formatMatchedValue(nameVal, metadata);
   }
 
   // 7. Universal Smart Fallback cho các ô BẮT BUỘC (required): không để ô bắt buộc bị trống khiến form bị nghẽn

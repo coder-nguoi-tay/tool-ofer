@@ -23,7 +23,13 @@ const browserLaunchReservations = new Set();
  * @since 2026-11-20
  */
 function normalizeRequestedBrowserCount(value, fallback = 1) {
-  if (value === undefined || value === null) {
+  if (value === undefined) {
+    if (!Number.isSafeInteger(fallback) || fallback < 1) {
+      throw new Error('Số trình duyệt cần mở phải là số nguyên dương.');
+    }
+    if (fallback > maxAliveBrowsers) {
+      throw new Error(`Chỉ được mở tối đa ${maxAliveBrowsers} phiên trình duyệt cùng lúc.`);
+    }
     return fallback;
   }
   const raw = typeof value === 'string' ? value.trim() : Number.isSafeInteger(value) ? String(value) : '';

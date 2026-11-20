@@ -6599,6 +6599,55 @@ mod tests {
         );
     }
 
+    /// Compare DOM selection, defaults and painted pixels across manual selection, clearing and reset.
+    /// @return Verifies the displayed label tracks the current choice.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    #[cfg(feature = "render")]
+    #[test]
+    fn select_index_repaints_without_overwriting_default_selection() {
+        let mut rt = setup_runtime(
+            "<html><body><form><select><option value=a selected>A</option><option value=b>Different label</option></select></form></body></html>",
+        );
+        rt.set_viewport(320.0, 120.0);
+        rt.evaluate_script("const select=document.querySelector('select'), options=select.options, initial=select.outerHTML").unwrap();
+        let base = Some("http://example.com/test");
+        let before = rt.screenshot_prepared((320.0, 120.0), base).unwrap();
+        assert_eq!(rt.evaluate_script("select.selectedIndex='1'; [select.value, select.selectedIndex, options[0].selected, options[0].defaultSelected, options[1].matches(':checked'), select.outerHTML===initial]").unwrap(),
+            serde_json::json!(["b", 1, false, true, true, true]));
+        let changed = rt.screenshot_prepared((320.0, 120.0), base).unwrap();
+        assert_ne!(before, changed);
+        assert_eq!(rt.evaluate_script("select.selectedIndex=-1; [select.value, select.selectedIndex, select.querySelector(':checked')]").unwrap(), serde_json::json!(["",-1,null]));
+        assert_ne!(changed, rt.screenshot_prepared((320.0, 120.0), base).unwrap());
+        assert_eq!(rt.evaluate_script("select.form.reset(); [select.value, select.selectedIndex, select.outerHTML===initial]").unwrap(), serde_json::json!(["a", 0, true]));
+        assert_eq!(before, rt.screenshot_prepared((320.0, 120.0), base).unwrap());
+        assert_eq!(rt.evaluate_script(r#"
+            options[0].selected = false;
+            const implicitDefault = select.value;
+            options[1].selected = true;
+            options[1].selected = false;
+            const afterDeselectingCurrent = select.value;
+            select.form.reset();
+            select.selectedIndex = 1;
+            options[1].defaultSelected = true;
+            options[1].defaultSelected = false;
+            const afterChangingChosenDefault = select.value;
+            options[0].removeAttribute('selected');
+            options[0].setAttribute('selected', '');
+            [implicitDefault, afterDeselectingCurrent, afterChangingChosenDefault, select.value, options[1].selected]
+        "#).unwrap(), serde_json::json!(["a", "a", "b", "a", false]));
+        assert_eq!(before, rt.screenshot_prepared((320.0, 120.0), base).unwrap());
+        assert_eq!(rt.evaluate_script(r#"
+            options[0].removeAttribute('selected');
+            select.form.reset();
+            options[1].selected = false;
+            const stillImplicit = select.value;
+            select.selectedIndex = -1;
+            options[1].selected = false;
+            [stillImplicit, select.selectedIndex]
+        "#).unwrap(), serde_json::json!(["a", -1]));
+    }
+
     #[test]
     fn cloned_controls_keep_current_value_and_checked_state() {
         let mut rt = setup_runtime(
@@ -19593,7 +19642,7 @@ mod tests {
             value["html"]
             .as_str()
             .unwrap()
-                .contains(r#"<option value="en" selected="">English</option>"#)
+                .contains(r#"<option value="en">English</option>"#)
         );
     }
 

@@ -454,6 +454,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             completionHandler(response == .alertFirstButtonReturn)
         }
     }
+
+    /// Cho phép người vận hành trả lời prompt của Screen View trên giao diện local.
+    /// - Parameters:
+    ///   - webView: Web view của ứng dụng.
+    ///   - prompt: Nội dung câu hỏi hiển thị cho người dùng.
+    ///   - defaultText: Câu trả lời mặc định, nếu có.
+    ///   - frame: Frame đã mở prompt.
+    ///   - completionHandler: Nhận văn bản đã xác nhận, hoặc nil khi hủy.
+    /// - Author: ductv <ductv@getflycrm.com>
+    /// - Since: 2026-11-20
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let origin = frame.securityOrigin
+        guard frame.isMainFrame, origin.protocol == "http",
+              ["127.0.0.1", "localhost"].contains(origin.host), origin.port == port,
+              let window = webView.window else {
+            completionHandler(nil)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = appTitle
+        alert.informativeText = prompt
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Gửi")
+        alert.addButton(withTitle: "Hủy").keyEquivalent = "\u{1b}"
+        let answer = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        answer.stringValue = defaultText ?? ""
+        alert.accessoryView = answer
+        alert.window.initialFirstResponder = answer
+        alert.beginSheetModal(for: window) { response in
+            completionHandler(response == .alertFirstButtonReturn ? answer.stringValue : nil)
+        }
+    }
 }
 
 @main

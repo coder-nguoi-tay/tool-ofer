@@ -1,9 +1,9 @@
 /**
- * Mở Screen View của slot và hủy HTML cũ để không nhầm dữ liệu giữa các IP.
- * @param {number} slot slot.
- * @return {void} Kết quả xử lý open screen modal.
+ * Mở Screen View của slot và xóa nội dung HTML cùng hình ảnh của slot trước.
+ * @param {number} slot Slot cần xem.
+ * @return {void} Hiển thị ảnh thu nhỏ hiện có trong khi kết nối với slot.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 function openScreenModal(slot) {
       _screenActiveSlot = slot;
@@ -31,10 +31,10 @@ function openScreenModal(slot) {
         }
       }
 
-      // Vẽ ngay lập tức thumbnail đã có lên canvas để modal mở ra là có hình ngay lập tức, 0ms độ trễ
       const canvas = document.getElementById('screenCanvas');
       if (canvas) {
         const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         const tileImg = document.querySelector(`.screen-tile-card[data-slot="${slot}"] img`);
         if (tileImg && tileImg.complete && tileImg.naturalWidth > 0) {
           if (canvas.width !== tileImg.naturalWidth || canvas.height !== tileImg.naturalHeight) {

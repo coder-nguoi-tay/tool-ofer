@@ -2,10 +2,12 @@
  * Hiển thị các lựa chọn của ô đang được người dùng bấm trong Screen View.
  * @param {{uid: string, selectedIndex: number, options: Array<{label: string, disabled: boolean}>}} select Ô chọn do tab đang xem trả về.
  * @return {void}
+ * @throws {Error} Khi không thể dựng danh sách lựa chọn trong giao diện Mini.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
 function openSelectPicker(select) {
+  const screenSourceId = canvas.dataset.screenSourceId;
   const buttons = select.options.map((option, index) => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -19,7 +21,7 @@ function openSelectPicker(select) {
       checkMark.textContent = '✓';
       button.append(checkMark);
     }
-    button.onclick = () => selectPickerOption(index, select.uid);
+    button.onclick = () => selectPickerOption(index, select.uid, screenSourceId);
     return button;
   });
   selectModalOptions.replaceChildren(...buttons);

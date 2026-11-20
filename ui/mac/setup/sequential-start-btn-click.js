@@ -21,6 +21,7 @@ function getMacSequentialRequestedCount(value) {
 // ── Chế độ tuần tự ────────────────────────────────────────────────────
 /**
  * Send the Mac sequential-start request with the count preserved as decimal text.
+ * @param {void} Không có tham số.
  * @return {Promise<void>} Completes after displaying the server response.
  * @throws {Error} When form access or request processing fails.
  * @author coder-nguoi-tay <101690746+coder-nguoi-tay@users.noreply.github.com>

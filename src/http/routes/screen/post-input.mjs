@@ -1,26 +1,35 @@
 import { activeBrowsers } from '../../../browser/sessions.mjs';
 import { copyHtmlToClipboard } from '../../../autofill/copy-html-to-clipboard.mjs';
 import { executeFile } from '../../../runtime/constants/execute-file.mjs';
-import { findSelectAtPoint, interactWithScreenSelect } from '../../../browser/screen/find-select-at-point.mjs';
+import { findScreenControlAtPoint, interactWithScreenSelect } from '../../../browser/screen/find-select-at-point.mjs';
+import { sendBoundManualFieldInput, useFocusedManualTextField } from '../../../browser/screen/manual-text-field.mjs';
 import { readRequestBody } from '../../actions/read-request-body.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 import { renderBrowserMousePointer } from '../../../autofill/interaction/render-browser-mouse-pointer.mjs';
 
 // Cùng một tab có thể chuyển từ stream sang ảnh dự phòng giữa lúc mở và chọn.
-const pendingSelectByPage = new WeakMap();
+const pendingControlByPage = new WeakMap();
 
 /**
  * Chuyển thao tác tay tới tab đang xem và kiểm tra mã lượt chờ khi người dùng báo đã xác minh.
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
+ * @throws {Error} Khi thao tác trình duyệt hoặc ghi phản hồi HTTP thất bại ngoài các lỗi đã xử lý.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
 export async function handlePostScreenInput(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/screen/input/')) {
     const slot = parseInt(request.url.split('/').pop(), 10);
+    let commandJson;
+    try {
+      commandJson = await readRequestBody(request);
+    } catch {
+      respondWithJson(response, 400, { error: 'Thao tác Screen View không hợp lệ.' });
+      return true;
+    }
     let sc = screencastSessions.get(slot);
     let fallbackBrowser = null;
     let fallbackCdp = null;
@@ -43,10 +52,35 @@ export async function handlePostScreenInput(request, response) {
       fallbackBrowser = liveSession.browser;
       sc = { page: fallbackPage };
     }
+    let body;
+    try {
+      body = JSON.parse(commandJson);
+      if (!body || typeof body.type !== 'string') throw new Error();
+    } catch {
+      respondWithJson(response, 400, { error: 'Thao tác Screen View không hợp lệ.' });
+      return true;
+    }
     let finishPointerPress;
     let picked = null;
     try {
-      const body = JSON.parse(await readRequestBody(request));
+      if (body.type === 'dialog') {
+        const dialogPage = sc.page;
+        const pending = dialogPage?._manualFormDialog;
+        if (!pending || pending.answering || body.dialogId !== pending.id || typeof body.accept !== 'boolean') {
+          respondWithJson(response, 409, { error: 'Hộp thoại đã thay đổi.' });
+          return true;
+        }
+        pending.answering = true;
+        try {
+          if (body.accept) await pending.dialog.accept(String(body.promptText ?? ''));
+          else await pending.dialog.dismiss();
+          if (dialogPage._manualFormDialog === pending) delete dialogPage._manualFormDialog;
+        } finally {
+          delete pending.answering;
+        }
+        respondWithJson(response, 200, { ok: true });
+        return true;
+      }
       if (body.type === 'confirmManualCaptcha') {
         const page = sc.page;
         const requestId = body.manualCaptchaRequestId;
@@ -63,11 +97,17 @@ export async function handlePostScreenInput(request, response) {
         respondWithJson(response, 409, { error: 'Chưa xác nhận được CAPTCHA đã hoàn tất. Tab vẫn tạm dừng.' });
         return true;
       }
+      if ((sc.screenSourceId || body.screenSourceId) && body.screenSourceId !== sc.screenSourceId) {
+        respondWithJson(response, 409, { error: 'Ảnh đang xem thuộc tab cũ. Đợi khung hình mới rồi thao tác lại.' });
+        return true;
+      }
+      // Giữ đúng cặp tab/CDP đã kiểm tra khi người xem khác chuyển nguồn trong lúc await.
+      sc = { ...sc };
       // mouseup phải chờ mousedown trên cùng tab, kể cả khi mở CDP dự phòng chậm.
       let pendingPress;
       if (sc.page && (body.type === 'mousedown' || body.type === 'click')) {
         pendingPress = new Promise(resolve => { finishPointerPress = resolve; });
-        pendingSelectByPage.set(sc.page, pendingPress);
+        pendingControlByPage.set(sc.page, pendingPress);
       }
       if (fallbackBrowser) {
         fallbackCdp = await fallbackBrowser.newCDPSession(sc.page).catch(() => null);
@@ -109,9 +149,9 @@ export async function handlePostScreenInput(request, response) {
           void renderBrowserMousePointer(sc.page, targetX, targetY, body.type === 'mousedown' || body.type === 'click');
         }
         if (pendingPress && (body.button || 'left') === 'left' && !sc.page.isClosed()) {
-          picked = await findSelectAtPoint(sc.page, targetX, targetY).catch(() => null);
-          if (picked) {
-            if (pendingPress !== pendingSelectByPage.get(sc.page)) {
+          picked = await findScreenControlAtPoint(sc.page, targetX, targetY, body.type === 'click').catch(() => null);
+          if (picked?.options) {
+            if (pendingPress !== pendingControlByPage.get(sc.page)) {
               picked = null;
               respondWithJson(response, 409, { error: 'Ô chọn đã thay đổi' });
               return true;
@@ -128,25 +168,6 @@ export async function handlePostScreenInput(request, response) {
           }
         }
         if (body.type === 'click') {
-          let inputInfo = null;
-          if (sc.page && !sc.page.isClosed()) {
-            inputInfo = await sc.page.evaluate(([cx, cy]) => {
-              const el = document.elementFromPoint(cx, cy);
-              if (!el) return null;
-              const inp = el.closest('input, textarea, [contenteditable="true"]');
-              if (!inp) return null;
-              const tag = inp.tagName.toLowerCase();
-              const type = (inp.getAttribute('type') || (tag === 'textarea' ? 'textarea' : 'text')).toLowerCase();
-              return {
-                tag,
-                type,
-                value: inp.value || inp.innerText || '',
-                placeholder: inp.getAttribute('placeholder') || inp.getAttribute('aria-label') || inp.name || '',
-                name: inp.name || inp.id || '',
-                isTextLike: /^(text|email|tel|number|password|search|url|textarea)$/.test(type) || inp.isContentEditable
-              };
-            }, [targetX, targetY]).catch(() => null);
-          }
           await cdpClient.send('Input.dispatchMouseEvent', {
             type: 'mousePressed',
             x: targetX,
@@ -170,9 +191,13 @@ export async function handlePostScreenInput(request, response) {
             source: 'manual', x: targetX, y: targetY,
             detail: `Click tay qua Screen View (${body.button || 'left'}) tại (${targetX}, ${targetY})`
           }, sc.page);
+          const input = picked?.input;
+          const fieldFocused = input && await picked.frame.evaluate(useFocusedManualTextField, {
+            fieldId: input.fieldId, probe: true,
+          }).catch(() => false);
           respondWithJson(response, 200, {
             ok: true,
-            input: inputInfo
+            input: fieldFocused && pendingControlByPage.get(sc.page) === pendingPress ? input : null
           });
           return true;
         } else if (body.type === 'mousedown') {
@@ -185,9 +210,9 @@ export async function handlePostScreenInput(request, response) {
             modifiers: body.modifiers || 0
           });
         } else if (body.type === 'mouseup') {
-          const pendingSelect = pendingSelectByPage.get(sc.page);
+          const pendingSelect = pendingControlByPage.get(sc.page);
           const selectedControl = pendingSelect ? await pendingSelect : null;
-          if (selectedControl) {
+          if (selectedControl?.options) {
             respondWithJson(response, 200, {
               ok: true
             });
@@ -226,15 +251,14 @@ export async function handlePostScreenInput(request, response) {
               deltaY,
               modifiers: body.modifiers || 0
             });
-          } catch (e) {
-            if (sc.page && !sc.page.isClosed()) {
-              await sc.page.evaluate((dy, dx) => {
-                window.scrollBy({
-                  top: dy,
-                  left: dx,
-                  behavior: 'auto'
-                });
-              }, deltaY, deltaX).catch(() => {});
+          } catch {
+            const scrolled = !body.modifiers && sc.page && !sc.page.isClosed() && await sc.page.evaluate(offset => {
+              window.scrollBy(offset);
+              return true;
+            }, { top: deltaY, left: deltaX, behavior: 'auto' }).catch(() => false);
+            if (!scrolled) {
+              respondWithJson(response, 502, { error: 'Trình duyệt chưa nhận được thao tác cuộn.' });
+              return true;
             }
           }
         }
@@ -280,9 +304,9 @@ export async function handlePostScreenInput(request, response) {
         }
       } else if (body.type === 'select') {
         // Người dùng chọn một dòng trong danh sách select Screen View vừa hiện.
-        const pendingSelect = pendingSelectByPage.get(sc.page);
+        const pendingSelect = pendingControlByPage.get(sc.page);
         const pick = await pendingSelect;
-        if (!pick || pick.consumed || pendingSelect !== pendingSelectByPage.get(sc.page) || body.uid !== pick.uid) {
+        if (!pick?.options || pick.consumed || pendingSelect !== pendingControlByPage.get(sc.page) || body.uid !== pick.uid) {
           respondWithJson(response, 409, {
             error: 'select không còn'
           });
@@ -301,8 +325,8 @@ export async function handlePostScreenInput(request, response) {
           return true;
         }
         pick.consumed = true;
-        if (pendingSelectByPage.get(sc.page) === pendingSelect) {
-          pendingSelectByPage.delete(sc.page);
+        if (pendingControlByPage.get(sc.page) === pendingSelect) {
+          pendingControlByPage.delete(sc.page);
         }
         const clickedSession = [...activeBrowsers].find(item => (item.slot ?? (item.tileIndex ?? -1) + 1) === slot);
         clickedSession?.addBrowserLog?.({
@@ -451,14 +475,37 @@ export async function handlePostScreenInput(request, response) {
           respondWithJson(response, 200, result);
           return true;
         }
-      } else if (body.type === 'press') {
-        // Gõ phím đơn lẻ (Enter, Tab, Backspace...) không bị duplicate down + up
-        if (sc.page && !sc.page.isClosed() && body.key) {
-          await sc.page.keyboard.press(body.key).catch(() => {});
+      } else if (body.type === 'press' || body.type === 'insertText') {
+        const typing = body.type === 'insertText';
+        const value = typing ? body.text : body.key;
+        if (typeof value !== 'string' || !value) {
+          respondWithJson(response, 400, { error: typing ? 'Cần nhập văn bản.' : 'Cần chọn phím để gửi.' });
+          return true;
         }
-        respondWithJson(response, 200, { ok: true });
-        return true;
-      } else if (body.type === 'key' || body.type === 'keydown' || body.type === 'char' || body.type === 'insertText') {
+        if (sc.page?.isClosed() || (!sc.page && (!typing || !cdpClient))) {
+          respondWithJson(response, 409, { error: 'Tab chưa sẵn sàng nhận dữ liệu.' });
+          return true;
+        }
+        try {
+          if (Object.hasOwn(body, 'fieldId')) {
+            const pending = pendingControlByPage.get(sc.page);
+            const control = await pending;
+            const accepted = pending === pendingControlByPage.get(sc.page)
+              ? await sendBoundManualFieldInput(control, body) : null;
+            if (accepted !== true) {
+              respondWithJson(response, accepted === null ? 409 : 422, {
+                error: accepted === null ? 'Ô nhập đã thay đổi. Hãy mở lại ô.' : 'Ô nhập từ chối thao tác.',
+              });
+              return true;
+            }
+          } else if (!typing) await sc.page.keyboard.press(value);
+          else if (sc.page) await sc.page.keyboard.insertText(value);
+          else await cdpClient.send('Input.insertText', { text: value });
+        } catch {
+          respondWithJson(response, 502, { error: 'Trình duyệt chưa xác nhận thao tác nhập liệu.' });
+          return true;
+        }
+      } else if (body.type === 'key' || body.type === 'keydown' || body.type === 'char') {
         // Xử lý sự kiện bàn phím thông minh qua Playwright page.keyboard (trực tiếp và không nghẽn CDP)
         if (sc.page && !sc.page.isClosed()) {
           if (body.text) {

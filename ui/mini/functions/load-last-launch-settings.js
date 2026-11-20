@@ -27,17 +27,45 @@ function parseMiniRequestedThreadCount(value) {
  * @since 2026-11-20
  */
 function normalizeMiniRequestedThreadCount(value) {
+  const raw = String(value ?? '').trim();
+  if (/^\d+$/.test(raw)) {
+    const digits = raw.replace(/^0+(?=\d)/, '');
+    const maximum = String(MINI_REQUESTED_COUNT_CAP);
+    if (digits !== '0' && (digits.length > maximum.length || digits.length === maximum.length && digits > maximum)) {
+      return maximum;
+    }
+  }
   return parseMiniRequestedThreadCount(value) || '1';
 }
 
 /**
+ * Normalize the live Mini count field before save handlers read it.
+ * @param {Event} event Input/change event from the Mini count field.
+ * @return {void} The field contains canonical bounded decimal text.
+ * @throws {never} Invalid input is normalized and does not throw.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+function normalizeMiniRequestedThreadField(event) {
+  const field = event?.currentTarget;
+  if (field) field.value = normalizeMiniRequestedThreadCount(field.value);
+}
+
+/**
  * Load last launch settings.
+ * @param {void} Không có tham số.
  * @return {Promise<void>} Kết quả xử lý load last launch settings.
  * @throws {never} Lỗi tải cấu hình được bỏ qua để Mini vẫn có thể sử dụng.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-10
  */
 async function loadLastLaunchSettings() {
+      const threadField = typeof inputThreadCount !== 'undefined' ? inputThreadCount : document.getElementById('inputThreadCount');
+      if (threadField && !threadField._countValidationListener) {
+        threadField._countValidationListener = true;
+        threadField.addEventListener('input', normalizeMiniRequestedThreadField);
+        threadField.addEventListener('change', normalizeMiniRequestedThreadField);
+      }
       try {
         const res = await fetch('/launch-settings');
         if (!res.ok) return;

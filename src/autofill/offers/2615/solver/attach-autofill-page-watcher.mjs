@@ -361,6 +361,10 @@ export function attachAutofillPageWatcher(page, {
   if (typeof page.on === 'function') {
     page.on('dialog', async dialog => {
       try {
+        if (page._manualCaptchaPending) {
+          page._manualFormDialog = { dialog, id: Date.now().toString(36) + Math.random().toString(36).slice(2) };
+          return;
+        }
         recordPageDialog(page, dialog); // đồng bộ trước accept: submit kiểm tra alert lỗi nhập liệu
         const msg = dialog.message()?.slice(0, 80) || '';
         console.log(`[Playwright] Tự động xác nhận dialog (${dialog.type()}): "${msg}"`);

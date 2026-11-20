@@ -1,6 +1,7 @@
 import { getRecordPhoneMask } from './record-values/resolve-record-phone.mjs';
 import { markValidFormValue } from './mark-valid-form-value.mjs';
 import { resolveContactField } from './resolve-contact-field.mjs';
+import { validateSsnMatch } from './record-values/restrict-profile-field.mjs';
 import { reportSelectMismatch } from './report-select-mismatch.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
 import { buildSelectCandidates } from './select/build-select-candidates.mjs';
@@ -37,6 +38,8 @@ export async function fillSelectOrTextField({
   record
 }) {
   if (page?._manualCaptchaPending || shouldStopAfterLead(session || page?._autofillSession)) return true;
+  const contact = resolveContactField(metadata);
+  if (contact === 'conflict' || contact.startsWith('ssn') && !validateSsnMatch(contact, valueToFill, record, metadata.maxLength)) return true;
   if (metadata.kind === 'select') {
     const candidates = buildSelectCandidates(valueToFill, metadata);
     const result = await selectOptionWithHumanInteraction({ page, field, candidates }).catch(() => ({ matched: false, verified: false, reason: 'select_unavailable' }));
@@ -49,16 +52,18 @@ export async function fillSelectOrTextField({
     }
     return result;
   } else if (metadata.type === 'date') {
+    const isoDate = parseDobComponents(valueToFill)?.isoDob;
+    if (!isoDate) return true;
+    const acceptsDate = await field.evaluate((input, candidate) => {
+      const probe = input.cloneNode(false);
+      probe.value = candidate;
+      return probe.value === candidate && probe.validity.valid;
+    }, isoDate).catch(() => false);
+    if (!acceptsDate) return true;
     if (page?.mouse && !await humanClick(page, field)) return true;
     // <input type="date"> KHÔNG gõ từng ký tự được (keyboard gõ ISO sẽ bị
     // segment theo locale nuốt sai thứ tự MM/DD/YYYY). Phải set chuỗi ISO
     // trực tiếp qua fill() hoặc native value setter rồi bắn sự kiện.
-    const isoDate = (() => {
-      const raw = String(valueToFill).trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-      const parsed = parseDobComponents(raw);
-      return parsed?.isoDob || raw;
-    })(); // matchFieldValue đã ưu tiên trả ISO khi metadata.type === 'date'
     options.onLog?.({
       type: 'date_fill_attempt',
       field: metadata.names?.[0] || metadata.id || 'date',
@@ -120,8 +125,8 @@ export async function fillSelectOrTextField({
     unmatchedFieldNames.add(`${metadata.names?.[0] ?? 'date'} (date fill failed)`);
     return true;
   } else {
-    const contact = resolveContactField(metadata);
-    if (contact === 'conflict') return true;
+    if ((/^phone/.test(contact) || contact === 'zipcode') && metadata.maxLength > 0
+        && String(valueToFill).replace(/\D/g, '').length > metadata.maxLength) return true;
     const isAddressField = contact ? contact === 'address' : metadata.names.some(n => /address|street|diachi/i.test(n) && !/email/i.test(n));
     const requestedAddress = String(valueToFill);
     if (isAddressField) {
@@ -150,16 +155,12 @@ export async function fillSelectOrTextField({
     // "Email address invalid" trên form defaultform/My Resource Helper).
     // Nếu giá trị không còn khớp: gõ lại tối đa 2 lần; lần cuối dùng fill() khẩn.
     {
-      let expectVal = String(valueToFill);
-      const exactPhoneFormat = contact === 'phone' && Boolean(getRecordPhoneMask(metadata.pattern));
-      // Ô số điện thoại/zip: chỉ giữ chữ số, đúng maxlength nếu trang giới hạn
-      if (!exactPhoneFormat && (/^phone/.test(contact) || contact === 'zipcode' || !contact && metadata.type === 'tel' && /^[\d ()+.\-]+$/.test(expectVal))) {
-        const maxLen = Number(metadata.maxLength) > 0 ? metadata.maxLength : expectVal.length;
-        expectVal = expectVal.replace(/\D/g, '').slice(0, maxLen);
-      }
-      // Ô có mask (814-362-6091, (814) 362-6091) hiển thị khác chuỗi đã gõ: ô số thì so theo chữ số.
-      const digitsOnly = !exactPhoneFormat && (/^phone/.test(contact) || /^\d+$/.test(expectVal));
-      const sameValue = current => current.trim() === expectVal.trim() || (digitsOnly && current.replace(/\D/g, '') === expectVal.replace(/\D/g, ''));
+      const expectVal = String(valueToFill);
+      // Mặt nạ có thể đổi dấu phân cách. Giá trị bị mất chữ số vẫn phải báo chưa điền.
+      const numericDisplay = !(contact === 'phone' && getRecordPhoneMask(metadata.pattern)) && (/^phone/.test(contact) || contact === 'zipcode' || /^\d+$/.test(expectVal))
+        && /^[+\d ().-]+$/.test(expectVal);
+      const sameValue = current => current.trim() === expectVal.trim()
+        || (numericDisplay && /^[+\d ().-]+$/.test(current) && current.replace(/\D/g, '') === expectVal.replace(/\D/g, ''));
       let okTyped = false;
       // 3 lần gõ lại + 1 lần kiểm tra cuối: trước đây lần fill() thứ 3 không được kiểm tra lại, nên ô đã đúng
       // vẫn bị báo "không giữ được giá trị", bỏ cờ filled và vòng quét sau gõ đè email lần nữa.
@@ -198,12 +199,6 @@ export async function fillSelectOrTextField({
           detail: `[Verify] Ô không giữ được giá trị sau 3 lần thử — hiện "${String(finalVal).slice(0, 40)}" (mong đợi "${String(expectVal).slice(0, 40)}"). KHÔNG đánh dấu filled để vòng quét sau điền lại.`
         }, page);
         await field.evaluate?.(el => el.removeAttribute('data-ux-filled')).catch(() => {});
-        await field.evaluate?.(el => {
-          const parent = el.closest('.field-group, .form-group, .defaultform__form-group, .input-group');
-          if (parent && parent.classList.contains('valid')) {
-            parent.classList.remove('valid', 'non-empty');
-          }
-        }).catch(() => {});
         return true; // bỏ qua, không cộng filledInThisPass — vòng quét sau thử lại
       }
     }
@@ -254,32 +249,14 @@ export async function fillSelectOrTextField({
 
       } catch {}
 
-      // Đảm bảo sau khi xử lý autocomplete, ô địa chỉ không bị widget xóa trắng
+      // Widget có thể xóa địa chỉ vừa nhập khi xác minh thất bại.
       const postAddressVal = await field.inputValue().catch(() => '');
       const retainedAfterPick = isAddressField && await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
       if (retainedAfterPick?.retained) return false;
       if (retainedAfterPick?.pending || retainedAfterPick?.requiresSelection) return true;
       if (page?._manualCaptchaPending) return true;
       if (!selectedSuggestion && (!postAddressVal || postAddressVal.trim() === '')) {
-        await field.evaluate((el, val) => {
-          const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
-          const desc = Object.getOwnPropertyDescriptor(proto, 'value');
-          if (desc?.set) desc.set.call(el, val);else el.value = val;
-          el.classList.remove('error');
-          el.classList.add('has-value');
-          const parent = el.closest('.input-group, .loco-group, .form-group');
-          if (parent) {
-            parent.classList.remove('error');
-            const helper = parent.querySelector('.helper-text, .error');
-            if (helper) helper.classList.remove('visible');
-          }
-          el.dispatchEvent(new Event('input', {
-            bubbles: true
-          }));
-          el.dispatchEvent(new Event('change', {
-            bubbles: true
-          }));
-        }, String(valueToFill)).catch(() => {});
+        return true;
       }
     } else if (isCityOrStateField) {
       // Với ô city/state/job/school thông thường (không phải ô autocomplete chuyên biệt):

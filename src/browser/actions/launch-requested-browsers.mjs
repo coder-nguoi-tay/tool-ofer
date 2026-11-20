@@ -67,8 +67,15 @@ export async function launchRequestedBrowsers(requestBody, {
   isAutomaticRefill = false
 } = {}) {
   const body = JSON.parse(requestBody);
-  const countParam = body.requestedCount ?? body.concurrency;
-  const boundedRequestedCount = countParam !== undefined ? normalizeRequestedBrowserCount(countParam) : null;
+  const countParam = body.requestedCount !== undefined ? body.requestedCount : body.concurrency;
+  let boundedRequestedCount = null;
+  try {
+    boundedRequestedCount = countParam !== undefined ? normalizeRequestedBrowserCount(countParam) : null;
+  } catch (error) {
+    // Obscura sets its target before delegating here; never leave a fractional/unsafe target behind on rejection.
+    if (browserEngine === 'obscura' && !Number.isSafeInteger(autoRefill.targetCount)) autoRefill.targetCount = 1;
+    throw error;
+  }
   const isObscura = browserEngine === 'obscura';
   const launchGeneration = autoRefill.launchGeneration;
   /**
@@ -258,7 +265,7 @@ export async function launchRequestedBrowsers(requestBody, {
 
   // Dọn các phiên đã đóng hoặc mất kết nối khỏi activeBrowsers trước khi tính toán slot
   for (const session of [...activeBrowsers]) {
-      if (session.isObscuraProcessAlive?.()) continue;
+      if (session.isObscuraProcessAlive?.() || session.isGoLoginProcessAlive?.()) continue;
     const isDead = session.isClosed ||
       (session.browser && typeof session.browser.isClosed === 'function' && session.browser.isClosed()) ||
       (session.browser && typeof session.browser.isConnected === 'function' && !session.browser.isConnected()) ||
@@ -268,7 +275,7 @@ export async function launchRequestedBrowsers(requestBody, {
       activeBrowsers.delete(session);
     }
   }
-  const liveBrowsers = [...activeBrowsers].filter(s => s.isObscuraProcessAlive?.() || (!s.isClosed && !(s.browser?.isClosed?.())));
+  const liveBrowsers = [...activeBrowsers].filter(s => s.isObscuraProcessAlive?.() || s.isGoLoginProcessAlive?.() || (!s.isClosed && !(s.browser?.isClosed?.())));
   const alreadyAlive = liveBrowsers.length;
   if (alreadyAlive + browserLaunchReservations.size + targetSuccessCount > maxAliveBrowsers) {
     const room = Math.max(0, maxAliveBrowsers - alreadyAlive - browserLaunchReservations.size);
@@ -369,6 +376,10 @@ export async function launchRequestedBrowsers(requestBody, {
       reservation = reserveBrowserLaunchSlot(activeBrowsers.size);
     } catch (error) {
       warnings.push(error.message);
+      return;
+    }
+    if (!reservation) {
+      warnings.push(`Đã đạt giới hạn tối đa ${maxAliveBrowsers} phiên trình duyệt đồng thời; dừng worker ${workerIndex + 1}.`);
       return;
     }
     try {

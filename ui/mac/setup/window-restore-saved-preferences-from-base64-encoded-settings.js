@@ -15,9 +15,9 @@ const MAC_REQUESTED_COUNT_CAP = 256;
       const digits = raw.replace(/^0+(?=\d)/, '');
       if (digits === '0') return '6';
       const maximum = String(MAC_REQUESTED_COUNT_CAP);
-      return digits.length > maximum.length || digits.length === maximum.length && digits > maximum
-        ? '6'
-        : digits;
+       return digits.length > maximum.length || digits.length === maximum.length && digits > maximum
+         ? maximum
+         : digits;
     }
 
     /**
@@ -45,6 +45,9 @@ const MAC_REQUESTED_COUNT_CAP = 256;
         }
       }
       const countField = form.elements.namedItem('requestedCount');
-      countField.value = normalizeMacRequestedCount(countField.value);
-      saveStatus.textContent = Object.keys(preferences).length ? 'Đã tải cấu hình đã lưu.' : 'Chưa có cấu hình đã lưu.';
+      const savedCount = String(countField.value ?? '');
+      countField.value = normalizeMacRequestedCount(savedCount);
+      saveStatus.textContent = savedCount !== countField.value
+         ? 'Số cửa sổ đã lưu không hợp lệ hoặc vượt 256; đã chuẩn hóa về giới hạn an toàn.'
+        : Object.keys(preferences).length ? 'Đã tải cấu hình đã lưu.' : 'Chưa có cấu hình đã lưu.';
     };

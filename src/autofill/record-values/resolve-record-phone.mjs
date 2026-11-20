@@ -1,5 +1,6 @@
 import { getNormalizedPhone } from '../get-normalized-phone.mjs';
 import { getPhoneAreaCode } from '../get-phone-area-code.mjs';
+import { normalizeFieldName } from '../normalize-field-name.mjs';
 
 const nationalPhoneMasks = new Map([
   [String.raw`\(\d{3}\) \d{3}-\d{4}`, '(###) ###-####'],
@@ -31,11 +32,18 @@ export function getRecordPhoneMask(pattern = '') {
  * @since 2026-11-20
  */
 export function resolveRecordPhone(record, contact, metadata) {
+  const label = metadata.accessibleName || metadata.ariaLabelledByText || metadata.ariaLabel || metadata.label;
+  const phoneLabel = normalizeFieldName(label || metadata.name || metadata.id || metadata.names?.[0]);
+  const purpose = /^(home|work)(?:(?:telephone|phone|tel)(?:number)?|number)$/.exec(phoneLabel)?.[1];
+  const autocompletePurpose = (metadata.autocomplete || '').toLowerCase().split(/\s+/).find(token => token === 'home' || token === 'work');
+  if (purpose && autocompletePurpose && purpose !== autocompletePurpose) return null;
+  const phonePurpose = purpose || autocompletePurpose;
+  const source = phonePurpose ? { phone: record[phonePurpose + 'phone'] } : record;
   if (contact === 'phone1') {
-    const areaCode = getPhoneAreaCode(record);
+    const areaCode = getPhoneAreaCode(source);
     return metadata.maxLength > 0 && areaCode.length > metadata.maxLength ? null : areaCode || null;
   }
-  const raw = getNormalizedPhone(record);
+  const raw = getNormalizedPhone(source);
   const digits = raw.replace(/\D/g, '');
   if (!/^[+\d\s().-]+$/.test(raw) || digits.length < 7) return null;
   const isInternational = raw.startsWith('+') && !digits.startsWith('1');

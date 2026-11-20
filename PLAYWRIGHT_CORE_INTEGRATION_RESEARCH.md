@@ -1,6 +1,8 @@
 
 ## 17) Phân loại và xử lý câu hỏi về độ tuổi, sở thích, phương tiện xe đang đi
 
+Dữ liệu ngày sinh trong form chỉ dùng các thành phần do hồ sơ cung cấp. Hồ sơ chỉ có tháng và năm giữ ô ngày trống, không mặc định ngày 01. Kiểm tra HTML validity sau khi nhập và sau change/blur trước khi ghi nhận hoàn tất.
+
 ### 17.1. Vấn đề thực tế
 
 Các câu hỏi kiểu:

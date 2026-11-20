@@ -138,12 +138,33 @@ test('hai context chạy autofill song song giữ info riêng khi tải lại tr
     sessions.push(session);
     attachAutofill(context, structuredClone(records), 'https://fixture.test', session, { autoSubmit: false, enableLeadCheck: false });
   }
-  await Promise.all(sessions.map(session => session.mainPage.waitForFunction(() => document.querySelector('[name=phone]').getAttribute('data-ux-filled') === '1' && document.querySelector('[name=firstname]').getAttribute('data-ux-filled') === '1' && document.querySelector('[name=lastname]').getAttribute('data-ux-filled') === '1', null, { timeout: 12000 })));
-  const firstNames = await Promise.all(sessions.map(session => session.mainPage.locator('[name=firstname]').inputValue()));
-  assert.equal(new Set(firstNames).size, 2, JSON.stringify({ firstNames, records: sessions.map(session => session.currentRecord) }));
+  /**
+   * Chờ và đọc chính ba giá trị đã xác nhận của fixture, kể cả khi tab chạy nền.
+   * @param {object} session Phiên Chromium cô lập của lượt kiểm thử.
+   * @return {Promise<object>} Tên, họ và số điện thoại thật đang hiện trên form mẫu.
+   * @throws {Error} Khi các ô còn thiếu sau thời gian chờ của lượt kiểm tra.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-20
+   */
+  async function readConfirmedFixtureRecord(session) {
+    const fields = ['firstname', 'lastname', 'phone'];
+    const formValues = await session.mainPage.waitForFunction(names => {
+      const values = {};
+      for (const name of names) {
+        const field = document.getElementsByName(name)[0];
+        if (field?.dataset.uxFilled !== '1') return false;
+        values[name] = field.value;
+      }
+      return values;
+    }, fields, { polling: 100, timeout: 20000 });
+    try { return await formValues.jsonValue(); }
+    finally { await formValues.dispose(); }
+  }
+  const beforeReload = await Promise.all(sessions.map(readConfirmedFixtureRecord));
+  const sourceRecords = beforeReload.map(record => ({ ...record, phone: record.phone.replace(/[() -]/g, '') }));
+  assert.deepEqual(sourceRecords.sort((a, b) => a.phone.localeCompare(b.phone)), records);
   await Promise.all(sessions.map(session => session.mainPage.reload()));
-  await Promise.all(sessions.map(session => session.mainPage.waitForFunction(() => document.querySelector('[name=phone]').getAttribute('data-ux-filled') === '1' && document.querySelector('[name=firstname]').getAttribute('data-ux-filled') === '1' && document.querySelector('[name=lastname]').getAttribute('data-ux-filled') === '1', null, { timeout: 12000 })));
-  assert.deepEqual(await Promise.all(sessions.map(session => session.mainPage.locator('[name=firstname]').inputValue())), firstNames);
+  assert.deepEqual(await Promise.all(sessions.map(readConfirmedFixtureRecord)), beforeReload);
 });
 
 test('đổi info bị form từ chối không lấy record của phiên đang chạy song song', async () => {

@@ -2,19 +2,24 @@
  * Hiển thị các tab của slot đang xem và đánh dấu tab cần người dùng xác minh CAPTCHA.
  * @param {number} slot Slot đang mở trong Screen View.
  * @return {Promise<void>} Hoàn tất cập nhật thanh tab.
+ * @throws {Error} Khi không thể dựng thanh tab từ trạng thái trình duyệt.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
 async function _fetchAndRenderTabs(slot) {
+      const bar = document.getElementById('screenTabBar');
+      if (!bar || slot !== _screenActiveSlot) return;
+      const request = {};
+      bar._latestTabRequest = request;
       try {
         const res = await fetch(`/screen/tabs/${slot}`);
         if (!res.ok) return;
         const { tabs } = await res.json();
-        const bar = document.getElementById('screenTabBar');
-        if (!bar || slot !== _screenActiveSlot) return;
+        if (bar._latestTabRequest !== request || slot !== _screenActiveSlot) return;
 
         // Cập nhật ô địa chỉ URL
-        const activeTab = tabs?.find(t => t.index === _screenActiveTabIndex) || tabs?.[0];
+        const activeTab = tabs?.find(tab => tab.active);
+        _screenActiveTabIndex = activeTab?.index ?? -1;
         const urlInput = document.getElementById('screenUrlInput');
         if (urlInput && activeTab && document.activeElement !== urlInput) {
           urlInput.value = activeTab.url || '';
@@ -57,6 +62,39 @@ async function _fetchAndRenderTabs(slot) {
           chip.appendChild(closeBtn);
 
           bar.appendChild(chip);
+          if (isActive && tab.manualDialog) {
+            const pending = tab.manualDialog;
+            const answerButton = document.createElement('button');
+            answerButton.type = 'button';
+            answerButton.textContent = 'Trả lời hộp thoại';
+            /**
+             * Gửi câu trả lời của người dùng cho đúng lượt hộp thoại đang hiển thị.
+             * @param {void} Không có tham số.
+             * @return {Promise<void>} Cập nhật thanh tab sau phản hồi của trình duyệt.
+             * @throws {Error} Khi không thể gửi câu trả lời hoặc nạp lại danh sách tab.
+             * @author ductv <ductv@getflycrm.com>
+             * @since 2026-11-20
+             */
+            answerButton.onclick = async () => {
+              answerButton.disabled = true;
+              let promptText = '';
+              let accept;
+              if (pending.type === 'prompt') {
+                promptText = window.prompt(pending.message, pending.defaultValue ?? '');
+                accept = promptText !== null;
+              } else accept = window.confirm(pending.message);
+              try {
+                const result = await api('/screen/input/' + slot, {
+                  method: 'POST', body: JSON.stringify({ type: 'dialog', dialogId: pending.id, accept, promptText }),
+                });
+                if (slot === _screenActiveSlot && !result?.ok) showToast(result?.error || 'Chưa gửi được câu trả lời.', 'error');
+              } finally {
+                answerButton.disabled = false;
+                if (slot === _screenActiveSlot) await _fetchAndRenderTabs(slot);
+              }
+            };
+            bar.appendChild(answerButton);
+          }
           if (isActive && tab.manualCaptchaPending && tab.manualCaptchaRequestId) {
             const confirmButton = document.createElement('button');
             confirmButton.type = 'button';
@@ -65,7 +103,9 @@ async function _fetchAndRenderTabs(slot) {
             confirmButton.title = 'Kiểm tra lại CAPTCHA và tiếp tục điền form trên tab đang xem';
             /**
              * Yêu cầu kiểm tra lại đúng lượt xác minh mà người dùng vừa hoàn thành.
+             * @param {void} Không có tham số.
              * @return {Promise<void>} Cập nhật danh sách tab sau khi server trả lời.
+             * @throws {Error} Khi không thể gửi yêu cầu xác minh hoặc nạp lại danh sách tab.
              * @author ductv <ductv@getflycrm.com>
              * @since 2026-11-20
              */
