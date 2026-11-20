@@ -1,26 +1,30 @@
 import { activeBrowsers } from '../../../browser/sessions.mjs';
 import { copyHtmlToClipboard } from '../../../autofill/copy-html-to-clipboard.mjs';
 import { executeFile } from '../../../runtime/constants/execute-file.mjs';
-import { findSelectAtPoint } from "../../../browser/screen/find-select-at-point.mjs";
+import { findSelectAtPoint, interactWithScreenSelect } from '../../../browser/screen/find-select-at-point.mjs';
 import { readRequestBody } from '../../actions/read-request-body.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 import { renderBrowserMousePointer } from '../../../autofill/interaction/render-browser-mouse-pointer.mjs';
 
+// Cùng một tab có thể chuyển từ stream sang ảnh dự phòng giữa lúc mở và chọn.
+const pendingSelectByPage = new WeakMap();
+
 /**
- * Xử lý API screen-input.
+ * Chuyển thao tác tay tới tab đang xem và kiểm tra mã lượt chờ khi người dùng báo đã xác minh.
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 export async function handlePostScreenInput(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/screen/input/')) {
     const slot = parseInt(request.url.split('/').pop(), 10);
     let sc = screencastSessions.get(slot);
+    let fallbackBrowser = null;
     let fallbackCdp = null;
-    if (!sc) {
+    if (!sc || (!sc.page && !sc.cdpClient)) {
       const liveSession = [...activeBrowsers].find(s => !s.isClosed && (s.slot ?? s.tileIndex + 1) === slot);
       if (!liveSession || !liveSession.browser) {
         respondWithJson(response, 404, {
@@ -36,17 +40,43 @@ export async function handlePostScreenInput(request, response) {
         });
         return true;
       }
-      fallbackCdp = await liveSession.browser.newCDPSession(fallbackPage).catch(() => null);
-      if (!fallbackCdp) {
-        respondWithJson(response, 500, {
-          error: 'cannot open cdp session'
-        });
-        return true;
-      }
-      sc = { cdpClient: fallbackCdp, page: fallbackPage, isFallback: true };
+      fallbackBrowser = liveSession.browser;
+      sc = { page: fallbackPage };
     }
+    let finishPointerPress;
+    let picked = null;
     try {
       const body = JSON.parse(await readRequestBody(request));
+      if (body.type === 'confirmManualCaptcha') {
+        const page = sc.page;
+        const requestId = body.manualCaptchaRequestId;
+        if (!requestId || page?._manualCaptchaPending !== true || page._manualCaptchaRequestId !== requestId || page.isClosed()) {
+          respondWithJson(response, 409, { error: 'Tab hoặc lượt xác minh CAPTCHA đã thay đổi.' });
+          return true;
+        }
+        try {
+          if (await page.confirmManualCaptcha?.(requestId) === true) {
+            respondWithJson(response, 200, { ok: true });
+            return true;
+          }
+        } catch { /* Tab có thể chuyển trang khi kiểm tra lại widget. */ }
+        respondWithJson(response, 409, { error: 'Chưa xác nhận được CAPTCHA đã hoàn tất. Tab vẫn tạm dừng.' });
+        return true;
+      }
+      // mouseup phải chờ mousedown trên cùng tab, kể cả khi mở CDP dự phòng chậm.
+      let pendingPress;
+      if (sc.page && (body.type === 'mousedown' || body.type === 'click')) {
+        pendingPress = new Promise(resolve => { finishPointerPress = resolve; });
+        pendingSelectByPage.set(sc.page, pendingPress);
+      }
+      if (fallbackBrowser) {
+        fallbackCdp = await fallbackBrowser.newCDPSession(sc.page).catch(() => null);
+        if (!fallbackCdp) {
+          respondWithJson(response, 500, { error: 'cannot open cdp session' });
+          return true;
+        }
+        sc.cdpClient = fallbackCdp;
+      }
       // Người dùng đang thao tác tay trong Screen View: tính là hoạt động, không để F5 tự động đè lên.
       if (sc.page && body.type !== 'mousemove') sc.page._uxManualInputAt = Date.now();
       const {
@@ -55,8 +85,18 @@ export async function handlePostScreenInput(request, response) {
 
       // Xử lý sự kiện chuột & cuộn bánh xe (scale toạ độ theo viewport)
       if (body.type === 'click' || body.type === 'mousedown' || body.type === 'mouseup' || body.type === 'mousemove' || body.type === 'wheel') {
-        const devW = sc.deviceWidth || (typeof sc.page?.viewportSize === 'function' ? sc.page.viewportSize()?.width : 0) || 1280;
-        const devH = sc.deviceHeight || (typeof sc.page?.viewportSize === 'function' ? sc.page.viewportSize()?.height : 0) || 800;
+        const liveViewport = sc.page && !sc.page.isClosed()
+          ? await sc.page.evaluate(() => ({
+            width: Math.round(window.visualViewport?.width || window.innerWidth || 0),
+            height: Math.round(window.visualViewport?.height || window.innerHeight || 0)
+          })).catch(() => null)
+          : null;
+        const pageViewport = typeof sc.page?.viewportSize === 'function' ? sc.page.viewportSize() : null;
+        // Metadata của screencast có thể còn thuộc tab trước trong khoảng thời gian tab mới
+        // chưa phát frame đầu tiên. Viewport hiện tại của page mới là hệ quy chiếu đúng cho
+        // elementFromPoint, đặc biệt với Obscura khi mỗi profile có kích thước thiết bị riêng.
+        const devW = liveViewport?.width || sc.deviceWidth || pageViewport?.width || 1280;
+        const devH = liveViewport?.height || sc.deviceHeight || pageViewport?.height || 800;
         let targetX = body.x ?? 0;
         let targetY = body.y ?? 0;
         if (body.clientWidth && devW) {
@@ -68,21 +108,26 @@ export async function handlePostScreenInput(request, response) {
         if (sc.page && !sc.page.isClosed()) {
           void renderBrowserMousePointer(sc.page, targetX, targetY, body.type === 'mousedown' || body.type === 'click');
         }
-        if (body.type === 'click') {
-          // Thao tác click nguyên tử: kiểm tra dropdown <select>, kiểm tra input, và nhấn/nhả chuột
-          sc.selectPick = null;
-          const picked = (body.button || 'left') === 'left' && sc.page && !sc.page.isClosed() ? await findSelectAtPoint(sc.page, targetX, targetY).catch(() => null) : null;
+        if (pendingPress && (body.button || 'left') === 'left' && !sc.page.isClosed()) {
+          picked = await findSelectAtPoint(sc.page, targetX, targetY).catch(() => null);
           if (picked) {
-            sc.selectPick = picked;
+            if (pendingPress !== pendingSelectByPage.get(sc.page)) {
+              picked = null;
+              respondWithJson(response, 409, { error: 'Ô chọn đã thay đổi' });
+              return true;
+            }
             respondWithJson(response, 200, {
               ok: true,
               select: {
+                uid: picked.uid,
                 options: picked.options,
                 selectedIndex: picked.selectedIndex
               }
             });
             return true;
           }
+        }
+        if (body.type === 'click') {
           let inputInfo = null;
           if (sc.page && !sc.page.isClosed()) {
             inputInfo = await sc.page.evaluate(([cx, cy]) => {
@@ -131,22 +176,6 @@ export async function handlePostScreenInput(request, response) {
           });
           return true;
         } else if (body.type === 'mousedown') {
-          // Click vào ô select: không gửi click (popup native không hiện trong screencast) mà trả danh sách
-          // lựa chọn để Screen View tự vẽ. mouseup chờ bước này xong để giữ đúng thứ tự nhấn/nhả.
-          sc.selectPick = null;
-          sc.pointerCheck = (body.button || 'left') === 'left' && sc.page && !sc.page.isClosed() ? findSelectAtPoint(sc.page, targetX, targetY).catch(() => null) : Promise.resolve(null);
-          const picked = await sc.pointerCheck;
-          if (picked) {
-            sc.selectPick = picked;
-            respondWithJson(response, 200, {
-              ok: true,
-              select: {
-                options: picked.options,
-                selectedIndex: picked.selectedIndex
-              }
-            });
-            return true;
-          }
           await cdpClient.send('Input.dispatchMouseEvent', {
             type: 'mousePressed',
             x: targetX,
@@ -156,7 +185,9 @@ export async function handlePostScreenInput(request, response) {
             modifiers: body.modifiers || 0
           });
         } else if (body.type === 'mouseup') {
-          if (await sc.pointerCheck) {
+          const pendingSelect = pendingSelectByPage.get(sc.page);
+          const selectedControl = pendingSelect ? await pendingSelect : null;
+          if (selectedControl) {
             respondWithJson(response, 200, {
               ok: true
             });
@@ -249,18 +280,30 @@ export async function handlePostScreenInput(request, response) {
         }
       } else if (body.type === 'select') {
         // Người dùng chọn một dòng trong danh sách select Screen View vừa hiện.
-        const pick = sc.selectPick;
-        if (!pick) {
+        const pendingSelect = pendingSelectByPage.get(sc.page);
+        const pick = await pendingSelect;
+        if (!pick || pick.consumed || pendingSelect !== pendingSelectByPage.get(sc.page) || body.uid !== pick.uid) {
           respondWithJson(response, 409, {
             error: 'select không còn'
           });
           return true;
         }
-        await pick.frame.locator(`select[data-ux-screen-select="${pick.uid}"]`).selectOption({
-          index: Number(body.index)
-        }, {
-          timeout: 3000
-        });
+        const index = typeof body.index === 'string' && body.index.trim() !== '' ? Number(body.index) : body.index;
+        const choice = pick.options[index];
+        if (!Number.isInteger(index) || !choice || choice.disabled) {
+          respondWithJson(response, 400, { error: 'Mục đã chọn không khả dụng' });
+          return true;
+        }
+        const selectControl = pick.frame.locator(`select[data-ux-screen-select="${pick.uid}"]`);
+        const applied = await selectControl.evaluate(interactWithScreenSelect, { uid: pick.uid, index }, { timeout: 1000 }).catch(() => false);
+        if (applied !== true) {
+          respondWithJson(response, 409, { error: 'Danh sách đã thay đổi, hãy mở lại ô chọn' });
+          return true;
+        }
+        pick.consumed = true;
+        if (pendingSelectByPage.get(sc.page) === pendingSelect) {
+          pendingSelectByPage.delete(sc.page);
+        }
         const clickedSession = [...activeBrowsers].find(item => (item.slot ?? (item.tileIndex ?? -1) + 1) === slot);
         clickedSession?.addBrowserLog?.({
           type: 'click',
@@ -481,6 +524,7 @@ export async function handlePostScreenInput(request, response) {
         error: err.message
       });
     } finally {
+      finishPointerPress?.(picked);
       if (fallbackCdp) await fallbackCdp.detach().catch(() => {});
     }
     return true;

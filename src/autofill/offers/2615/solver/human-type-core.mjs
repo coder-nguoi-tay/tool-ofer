@@ -15,15 +15,15 @@ import { recordInputFillHtml } from '../../../../logging/record-input-fill-html.
  * @return {Promise<void>} Hoàn tất điền hoặc trả về khi giá trị rỗng.
  * @throws {never} Lỗi nhập được xử lý trong từng nhánh; lỗi ghi HTML không chặn autofill.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function humanTypeCore(field, text, page = null, options = {}) {
   const str = String(text ?? '');
   if (!str) return;
   const activePage = page || (typeof field?.page === 'function' ? field.page() : null);
-  if (shouldStopAfterLead(activePage?._autofillSession)) return;
+  if (activePage?._manualCaptchaPending || shouldStopAfterLead(activePage?._autofillSession)) return;
   if (activePage?._autofillMouseSlot > 1 && await tryFastTextInput(field, str, activePage)) return;
-  if (!await retainsInputFocus(field, true)) return;
+  if (!await retainsInputFocus(field, true, activePage)) return;
   const keyTarget = field.ownerFrame && typeof field.type === 'function' ? field : activePage?.keyboard;
   const isRealBrowser = Boolean(activePage?.mouse && typeof activePage.mouse.move === 'function');
   const enableTypo = options.simulateTypo !== undefined ? Boolean(options.simulateTypo) : isRealBrowser;
@@ -33,6 +33,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
         timeout: 600
       }).catch(() => {});
     }
+    if (activePage?._manualCaptchaPending) return;
     if (activePage?.mouse && typeof field.boundingBox === 'function') {
       if (!await humanClick(activePage, field).catch(() => false)) return;
     } else {
@@ -41,11 +42,12 @@ async function humanTypeCore(field, text, page = null, options = {}) {
           timeout: 600
         }).catch(() => {});
       }
+      if (activePage?._manualCaptchaPending) return;
       if (typeof field.click === 'function') {
         if (!await field.click({ timeout: 1500 }).then(() => true, () => false)) return;
       }
     }
-    if (!await retainsInputFocus(field, true)) return;
+    if (!await retainsInputFocus(field, true, activePage)) return;
     if (typeof field.focus === 'function' && !(activePage?.mouse && field.ownerFrame)) {
       await field.focus().catch(() => {});
     }
@@ -58,28 +60,29 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   }
 
   // Xóa nội dung cũ tự nhiên qua tổ hợp phím (Select All + Backspace) nếu trường đã có chữ
-  if (shouldStopAfterLead(activePage?._autofillSession)) return;
-  if (!await retainsInputFocus(field)) return;
+  if (activePage?._manualCaptchaPending || shouldStopAfterLead(activePage?._autofillSession)) return;
+  if (!await retainsInputFocus(field, false, activePage)) return;
   await recordInputFillHtml(field, activePage);
-  if (!await retainsInputFocus(field)) return;
+  if (!await retainsInputFocus(field, false, activePage)) return;
   const initialValue = typeof field.inputValue === 'function' ? await field.inputValue({ timeout: 500 }).catch(() => null) : null;
+  if (activePage?._manualCaptchaPending) return;
   if (initialValue !== '') {
     try {
       const isMac = process.platform === 'darwin';
       const selectAllKey = isMac ? 'Meta+A' : 'Control+A';
       if (typeof field.press === 'function') {
         await field.press(selectAllKey).catch(() => {});
-        if (!await retainsInputFocus(field)) return;
+        if (!await retainsInputFocus(field, false, activePage)) return;
         await field.press('Backspace').catch(() => {});
       } else if (activePage?.keyboard) {
         await activePage.keyboard.press(selectAllKey).catch(() => {});
-        if (!await retainsInputFocus(field)) return;
+        if (!await retainsInputFocus(field, false, activePage)) return;
         await activePage.keyboard.press('Backspace').catch(() => {});
       }
     } catch {}
   }
 
-  if (!await retainsInputFocus(field)) return;
+  if (!await retainsInputFocus(field, false, activePage)) return;
   // Đảm bảo không còn ký tự cũ sót lại để tránh ghép nối chuỗi không mong muốn
   if (typeof field.evaluate === 'function') {
     await field.evaluate(el => {
@@ -104,7 +107,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
     try {
       let typoDone = false;
       for (let i = 0; i < str.length; i++) {
-        if (shouldStopAfterLead(activePage?._autofillSession) || !await retainsInputFocus(field)) return;
+        if (shouldStopAfterLead(activePage?._autofillSession) || !await retainsInputFocus(field, false, activePage)) return;
         const char = str[i];
         // Nhịp gõ người thật nhanh và mượt mà: 45-85ms/ký tự, có biến động tự nhiên
         let charDelay = isNameOrEmail ? Math.floor(Math.random() * 35) + 45 : isDigitsOnly ? Math.floor(Math.random() * 30) + 50 : Math.floor(Math.random() * 35) + 45;
@@ -133,11 +136,11 @@ async function humanTypeCore(field, text, page = null, options = {}) {
           }).catch(() => {});
           const hesitate = Math.floor(Math.random() * 100) + 110;
           await new Promise(r => setTimeout(r, hesitate));
-          if (!await retainsInputFocus(field)) return;
+          if (!await retainsInputFocus(field, false, activePage)) return;
           await keyTarget.press('Backspace').catch(() => {});
           const fixPause = Math.floor(Math.random() * 35) + 40;
           await new Promise(r => setTimeout(r, fixPause));
-          if (!await retainsInputFocus(field)) return;
+          if (!await retainsInputFocus(field, false, activePage)) return;
         }
         await keyTarget.type(char, {
           delay: charDelay
@@ -151,7 +154,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
     try {
       let typoDone = false;
       for (let i = 0; i < str.length; i++) {
-        if (shouldStopAfterLead(activePage?._autofillSession) || !await retainsInputFocus(field)) return;
+        if (shouldStopAfterLead(activePage?._autofillSession) || !await retainsInputFocus(field, false, activePage)) return;
         const char = str[i];
         // Nhịp gõ người thật (bản pressSequentially): đồng bộ với nhánh keyboard.type
         let charDelay = isNameOrEmail ? Math.floor(Math.random() * 80) + 110 : isDigitsOnly ? Math.floor(Math.random() * 70) + 130 : Math.floor(Math.random() * 80) + 115;
@@ -175,13 +178,13 @@ async function humanTypeCore(field, text, page = null, options = {}) {
           }).catch(() => {});
           const hesitate = Math.floor(Math.random() * 100) + 110;
           await new Promise(r => setTimeout(r, hesitate));
-          if (!await retainsInputFocus(field)) return;
+          if (!await retainsInputFocus(field, false, activePage)) return;
           if (typeof field.press === 'function') {
             await field.press('Backspace').catch(() => {});
           }
           const fixPause = Math.floor(Math.random() * 35) + 40;
           await new Promise(r => setTimeout(r, fixPause));
-          if (!await retainsInputFocus(field)) return;
+          if (!await retainsInputFocus(field, false, activePage)) return;
         }
         await field.pressSequentially(char, {
           delay: charDelay
@@ -194,8 +197,8 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   }
 
   // Fallback an toàn nếu chưa gõ được qua keyboard/pressSequentially
-  if (shouldStopAfterLead(activePage?._autofillSession)) return;
-  if (!await retainsInputFocus(field) || (!typedOk && field.ownerFrame)) return;
+  if (activePage?._manualCaptchaPending || shouldStopAfterLead(activePage?._autofillSession)) return;
+  if (!await retainsInputFocus(field, false, activePage) || (!typedOk && field.ownerFrame)) return;
   if (!typedOk && typeof field.pressSequentially === 'function') {
     try {
       await field.pressSequentially(str, {
@@ -204,6 +207,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
       typedOk = true;
     } catch {}
   }
+  if (activePage?._manualCaptchaPending) return;
   if (!typedOk && typeof field.fill === 'function') {
     try {
       await field.fill(str, {
@@ -219,6 +223,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
   if (typeof field.inputValue === 'function') {
     postVal = await field.inputValue().catch(() => '');
   }
+  if (activePage?._manualCaptchaPending) return;
   if ((!postVal || postVal.trim() === '') && typeof field.evaluate === 'function') {
     await field.evaluate((el, val) => {
       const proto = (typeof HTMLInputElement !== 'undefined' && el instanceof HTMLInputElement) ? HTMLInputElement.prototype : ((typeof HTMLTextAreaElement !== 'undefined' && el instanceof HTMLTextAreaElement) ? HTMLTextAreaElement.prototype : Object.getPrototypeOf(el || {}));
@@ -240,6 +245,7 @@ async function humanTypeCore(field, text, page = null, options = {}) {
     }, str).catch(() => {});
   }
 
+  if (activePage?._manualCaptchaPending) return;
   // Đảm bảo kích hoạt đầy đủ input, change, blur để các framework cập nhật validation và enable nút submit
   if (typeof field.evaluate === 'function') {
     await field.evaluate(el => {
@@ -263,9 +269,10 @@ async function humanTypeCore(field, text, page = null, options = {}) {
       } catch {}
     }).catch(() => {});
   }
+  if (activePage?._manualCaptchaPending) return;
   if (typeof field.blur === 'function') {
     await field.blur().catch(() => {});
-  } else if (field.ownerFrame && await retainsInputFocus(field)) {
+  } else if (field.ownerFrame && await retainsInputFocus(field, false, activePage)) {
     await field.evaluate(element => element.blur()).catch(() => {});
   }
 

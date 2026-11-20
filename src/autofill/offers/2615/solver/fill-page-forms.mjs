@@ -49,7 +49,7 @@ export async function fillPageForms(page, {
 }) {
   configurePageMousePolicy(page, session);
   protectConfirmedLeadSession(session);
-  if (page.isClosed() || page._leadRecoveryInProgress || ['manual','skip'].includes(session.offerMode)) return;
+  if (page._manualCaptchaPending || page.isClosed() || page._leadRecoveryInProgress || ['manual','skip'].includes(session.offerMode)) return;
   const frames = await selectPageFormFrames(page);
   const iframeOnly = isSecondaryOfferTab(page, session);
   if (iframeOnly && !frames.length) return;
@@ -82,6 +82,7 @@ export async function fillPageForms(page, {
           return /consent|terms|privacy|agree|tcpa|disclosure|policy/i.test(`${el.name || ''} ${el.id || ''} ${label?.textContent || ''}`);
         }).catch(() => false);
         if (consent && (await box.isVisible().catch(() => false)) && !(await box.isChecked().catch(() => true))) {
+          if (page._manualCaptchaPending) return;
           await box.check({
             timeout: 1500
           }).catch(() => {});
@@ -90,7 +91,7 @@ export async function fillPageForms(page, {
     }
     return;
   }
-  if (shouldPauseForLead(session, options)) return;
+  if (page._manualCaptchaPending || shouldPauseForLead(session, options)) return;
   // Điều phối các bước tiền quét đặc thù theo từng Offer (ví dụ Offer 2615 paththankyou)
   if (!iframeOnly && await dispatchOfferCustomPreScan(page, { session, sessionRecord, options, triggerLeadCheckAfterEmail })) return;
   // Đánh dấu link kiểu footer (giới thiệu/policy/contact...) trước mọi nhánh bấm; giới hạn 1.5s để trang đang chuyển không giữ lượt quét.
@@ -166,7 +167,7 @@ export async function fillPageForms(page, {
     visibleFieldCount: 0
   };
   for (const frame of frames) {
-    if (shouldPauseForLead(session, options)) return;
+    if (page._manualCaptchaPending || shouldPauseForLead(session, options)) return;
 
     // Frame không phản hồi (iframe quảng cáo đang tải dở, bị chặn hoặc đứng) làm frame.evaluate chờ vô hạn,
     // kéo theo cả lượt quét kẹt và tab không bao giờ được điền tiếp. Hỏi thăm có giới hạn, không trả lời thì bỏ qua.
@@ -181,7 +182,7 @@ export async function fillPageForms(page, {
       session.autofillStep = 'xử lý offerwall Addept';
       const openedTasks = await handleOfferwallTasks(page, frame, {
         onLog: options.onLog,
-        isCancelled: () => session.isClosed || page.isClosed() || shouldPauseForLead(session, options)
+        isCancelled: () => page._manualCaptchaPending || session.isClosed || page.isClosed() || shouldPauseForLead(session, options)
       }).catch(() => 0);
       if (openedTasks) addActionCount(session, openedTasks);
       continue;
@@ -203,6 +204,7 @@ export async function fillPageForms(page, {
       session,
       frameProgress
     });
+    if (page._manualCaptchaPending) return;
     if (frameProgress.widgetAdvanced) continue;
     let fields = [];
     try {

@@ -1,3 +1,6 @@
+import { getNormalizedPhone } from '../get-normalized-phone.mjs';
+import { getPhoneAreaCode } from '../get-phone-area-code.mjs';
+
 const nationalPhoneMasks = new Map([
   [String.raw`\(\d{3}\) \d{3}-\d{4}`, '(###) ###-####'],
   [String.raw`\d{3}-\d{3}-\d{4}`, '###-###-####'],
@@ -28,21 +31,25 @@ export function getRecordPhoneMask(pattern = '') {
  * @since 2026-11-20
  */
 export function resolveRecordPhone(record, contact, metadata) {
-  const raw = String(record.phonenumber || record.phone || record.cellphone || record.homephone || record.workphone || '').trim();
+  if (contact === 'phone1') return getPhoneAreaCode(record) || null;
+  const raw = getNormalizedPhone(record);
   const digits = raw.replace(/\D/g, '');
   if (!/^[+\d\s().-]+$/.test(raw) || digits.length < 7) return null;
+  const isInternational = raw.startsWith('+') && !digits.startsWith('1');
   const national = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
   let display = raw;
   const mask = getRecordPhoneMask(metadata.pattern);
   if (contact !== 'phone') {
-    if (national.length !== 10) return null;
-    const segments = { phone1: national.slice(0, 3), phone2: national.slice(3, 6), phone3: national.slice(6) };
+    if (isInternational || national.length !== 10) return null;
+    const segments = { phone2: national.slice(3, 6), phone3: national.slice(6) };
     display = segments[contact];
     if (!display) return null;
   } else if (mask) {
-    if (national.length !== 10) return null;
+    if (isInternational || national.length !== 10) return null;
     let position = 0;
     display = mask.replace(/#/g, () => national[position++]);
+  } else if ([String.raw`\d{10,11}`, String.raw`\d{11}`].includes((metadata.pattern || '').replace(/^\^|\$$/g, '').replaceAll('[0-9]', String.raw`\d`))) {
+    display = digits;
   } else if (metadata.maxLength > 0 && raw.length > metadata.maxLength) {
     display = digits.length === 11 && metadata.maxLength === 10 ? national : digits;
   }

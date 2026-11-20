@@ -106,6 +106,47 @@ test('địa chỉ: kiểm tra gợi ý trong Chromium cục bộ', { skip: !exi
     assert.equal((await input.evaluate(readAddressSelection, '10 North Oak Street')).retained, false);
   });
 
+  await t.test('giữ chữ sửa tay và chặn gửi khi địa chỉ hiển thị khác mục đã chọn', async () => {
+    const { getAddressWaitReason } = await import('../src/autofill/has-unconfirmed-address.mjs');
+    const { fillSelectOrTextField } = await import('../src/autofill/fill-select-or-text-field.mjs');
+    const record = { address: '10 Oak St' };
+    await page.setContent(`<form><label>Street address<input name="address" value="10 Oak St" aria-controls="choices"></label>
+      <select id="choices" onchange="this.form.dataset.changes=Number(this.form.dataset.changes||0)+1">
+        <option value="">Choose</option><option value="a">10 Oak St, Unit A</option><option value="b">10 Oak St, Unit B</option>
+      </select><input type="hidden" name="place_id" value="a"></form>`);
+    const scope = await resolveActiveFormScope(page);
+    const input = page.locator('[name=address]');
+    await input.evaluate((field, address) => { field._autoleadAddressQuery = address; }, record.address);
+    await page.locator('#choices').selectOption('a');
+    assert.equal(await getAddressWaitReason(page, scope, record.address), '');
+    for (const edited of ['77 Hill Rd', '10 Oak Street, Unit B']) {
+      await input.fill(edited);
+      assert.ok(await getAddressWaitReason(page, scope, record.address));
+      const choice = await handleAddressSelectDropdown(page, record, input);
+      assert.equal(choice.success, false);
+      await fillSelectOrTextField({ field: input, page, frame: page, record, valueToFill: record.address,
+        metadata: { kind: 'input', type: 'text', names: ['address'] }, options: {}, session: {},
+        frameProgress: {}, unmatchedFieldNames: new Set() });
+      assert.equal(await input.inputValue(), edited);
+      assert.equal(await page.locator('#choices').inputValue(), 'a');
+      assert.equal(await page.locator('form').getAttribute('data-changes'), '1');
+    }
+    await page.locator('#choices').selectOption('b');
+    await page.locator('[name=place_id]').evaluate(token => { token.value = 'b'; });
+    assert.equal(await getAddressWaitReason(page, scope, record.address), '');
+    await page.locator('#choices').evaluate(select => {
+      const listbox = document.createElement('div');
+      listbox.id = select.id;
+      listbox.setAttribute('role', 'listbox');
+      listbox.innerHTML = '<div role="option" aria-selected="true">10 Oak St, Unit B</div>';
+      select.replaceWith(listbox);
+    });
+    await input.evaluate(field => { field.setAttribute('aria-expanded', 'false'); });
+    assert.equal(await getAddressWaitReason(page, scope, record.address), '');
+    await input.fill('10 Oak St, Unit A');
+    assert.ok(await getAddressWaitReason(page, scope, record.address));
+  });
+
   await t.test('từ chối link hoặc khi tâm mục gợi ý bị phần tử khác che', async () => {
     await page.setContent('<form>' + field + '</form><div id="results" role="listbox"><a role="option" href="/elsewhere">10 Oak St</a></div>');
     await resolveActiveFormScope(page);

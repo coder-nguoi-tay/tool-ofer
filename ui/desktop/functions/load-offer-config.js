@@ -1,8 +1,9 @@
 /**
- * Load offer config.
- * @return {Promise<void>} Kết quả xử lý load offer config.
+ * Khôi phục offer đã lưu và ghi nhớ lựa chọn khi người dùng chỉnh giao diện.
+ * @return {Promise<void>} Hoàn tất khi đã nạp cấu hình và gắn các sự kiện.
+ * @throws {Error} Khi yêu cầu đọc cấu hình offer thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-20
  */
 async function loadOfferConfig() {
   let restoredRunOptions = {};
@@ -58,9 +59,6 @@ async function loadOfferConfig() {
     }
     if (data.delayStart && document.getElementById('nudDelayStart')) document.getElementById('nudDelayStart').value = data.delayStart;
     if (data.delayStop && document.getElementById('nudDelayStop')) document.getElementById('nudDelayStop').value = data.delayStop;
-    if (data.Thread && document.getElementById('nudThread')) {
-      document.getElementById('nudThread').value = Math.min(30, Math.max(1, parseInt(data.Thread) || 1));
-    }
     if (data.LimitRun !== undefined && document.getElementById('nudLimitRun')) {
       document.getElementById('nudLimitRun').value = Math.max(0, parseInt(data.LimitRun) || 0);
     }
@@ -241,22 +239,15 @@ async function loadOfferConfig() {
       });
     }
 
-    // Khôi phục và ràng buộc tự chuẩn hoá số luồng (nudThread)
-    const nudTh = document.getElementById('nudThread');
+    const threadInput = document.getElementById('nudThread');
     const cachedThread = readCachedRunOption('autoleadpc_thread_count');
-    if (nudTh) {
-      if (cachedThread) {
-        nudTh.value = Math.min(30, Math.max(1, parseInt(cachedThread) || 1));
-      restoredRunOptions.Thread = nudTh.value;
-      }
-      if (!nudTh._hasValidationListener) {
-        nudTh._hasValidationListener = true;
-        nudTh.addEventListener('change', (e) => {
-          const val = Math.min(30, Math.max(1, parseInt(e.target.value) || 1));
-          e.target.value = val;
-          try { localStorage.setItem('autoleadpc_thread_count', String(val)); } catch { }
-        });
-      }
+    if (cachedThread !== null) restoredRunOptions.Thread = cachedThread;
+    if (threadInput && !threadInput._hasValidationListener) {
+      threadInput._hasValidationListener = true;
+      threadInput.addEventListener('change', () => {
+        threadInput.value = normalizeRequestedThreadCount(threadInput.value);
+        try { localStorage.setItem('autoleadpc_thread_count', threadInput.value); } catch { }
+      });
     }
 
     // Khôi phục và ràng buộc giới hạn chạy (nudLimitRun)

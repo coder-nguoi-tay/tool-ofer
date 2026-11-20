@@ -1,17 +1,18 @@
 /**
- * Trích xuất chuỗi ngày sinh từ bất kỳ tên cột nào trong record.
- * @param {*} r r.
- * @return {*} Kết quả xử lý get dob string.
+ * Lấy ngày sinh gộp trong hồ sơ hoặc ghép từ ba thành phần đã cung cấp.
+ * @param {object} record Bản ghi chứa cột ngày sinh đầy đủ hoặc các cột tách biệt.
+ * @return {string} Ngày sinh gốc hoặc chuỗi rỗng khi thiếu thành phần.
+ * @throws {never} Hồ sơ trống trả về chuỗi rỗng.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
-function getDobString(r) {
-  if (!r || typeof r !== 'object') return '';
-  if (r.birthyear && r.birthmonth) {
-    const mm = String(r.birthmonth).padStart(2, '0');
-    const dd = String(r.birthday || '01').padStart(2, '0');
-    return `${mm}/${dd}/${r.birthyear}`;
-  }
-  return r.namsinh || r.ngaysinh || r.ngaythangnamsinh || r.dob || r.birthdate || r.dateofbirth || r.birthday || r.bday || r.birth || '';
+export function getDobString(record) {
+  if (!record) return '';
+  const full = record.dob || record.dateofbirth || record.birthdate || record.ngaythangnamsinh || record.birth || record.bday;
+  if (full) return String(full);
+  const day = record.birthday || record.dobday || record.ngaysinh;
+  if (day && !/^\d{1,2}$/.test(String(day))) return String(day);
+  const month = record.birthmonth || record.dobmonth;
+  const year = record.birthyear || record.dobyear || record.namsinh;
+  return day && month && year ? `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}` : '';
 }
-export { getDobString };

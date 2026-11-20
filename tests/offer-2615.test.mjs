@@ -219,6 +219,22 @@ test('verifyOffer2615Landing: tải đúng blog.financialhelpfinder.com thì h�
   assert.equal(mockSession._offer2615LandingVerified, true, 'Đã xác thực landing thành công');
 });
 
+test('giữ phiên 2615 nếu CAPTCHA xuất hiện trong lúc chờ chuyển hướng', async () => {
+  const session = { offerSolver: '2615' };
+  const page = {
+    url: () => 'https://offer.test/verification',
+    async waitForURL() { this._manualCaptchaPending = true; }
+  };
+  let closed = false;
+  const handled = await verifyOffer2615Landing(page, session, {
+    closeSession: () => { closed = true; }
+  });
+  assert.equal(handled, true);
+  assert.equal(closed, false);
+  assert.equal(session.isClosed, undefined);
+  assert.equal(session._offer2615InvalidLandingTriggered, undefined);
+});
+
 test('verifyOffer2615Landing: tải link mở ra KHÔNG PHẢI blog.financialhelpfinder.com thì dừng phiên và bù phiên mới', async () => {
   let sessionClosed = false;
   let refillCalled = false;

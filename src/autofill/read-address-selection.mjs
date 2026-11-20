@@ -1,5 +1,5 @@
 /**
- * Đọc lựa chọn của widget từ chính ô địa chỉ. Dùng được trong evaluate của Chromium và Obscura.
+ * Đối chiếu địa chỉ đang hiển thị với lựa chọn của widget để giữ phần người dùng sửa và chặn gửi sai địa chỉ.
  * @param {HTMLInputElement} input Ô nhập đang kiểm tra.
  * @param {string} query Địa chỉ nguồn của lượt điền.
  * @return {{display:string,retained:boolean,pending:boolean,attempted?:boolean,requiresSelection:boolean}} Chữ hiện tại và trạng thái để tránh phát lại sự kiện nhập.
@@ -75,29 +75,37 @@ export function readAddressSelection(input, query) {
   result.pending = waitingForWidget;
   const matchesQuery = (' ' + current + ' ').includes(' ' + expected + ' ');
   const supportsQuery = priorQuery === query || matchesQuery;
-  for (const id of references) {
-    const list = input.ownerDocument.getElementById(id);
-    const listForm = list?.form || list?.closest('form');
-    if (!list || listForm && listForm !== input.form || list.closest('footer, header, nav, aside, [role=navigation], [role=contentinfo]')) continue;
-    if ([...(input.form?.elements || [])].some(other => other !== input &&
-      ['aria-controls', 'aria-owns', 'list'].some(attr => (other.getAttribute(attr) || '').split(/\s+/).includes(id)))) continue;
-    if (list.getAttribute('role') === 'listbox' && input.getAttribute('aria-expanded') === 'false') {
-      const selected = list.querySelectorAll('[role="option"][aria-selected="true"]');
-      if (selected.length === 1) {
-        const label = normalized(selected[0].getAttribute('aria-label') || selected[0].textContent);
-        if ((' ' + label + ' ').includes(' ' + expected + ' ') && (matchesQuery || current === label)) result.retained = true;
-      }
-    }
+  const selectedMenu = choice?.form === input.form && choice.item?.isConnected && choice.item.closest('select');
+  const ownedMenus = !references.length && selectedMenu ? [selectedMenu] : menus;
+  for (const list of ownedMenus) {
+    const listForm = list.form || list.closest('form');
+    if (listForm && listForm !== input.form || list.closest('footer, header, nav, aside, [role=navigation], [role=contentinfo]')) continue;
+    if (list.id && [...(input.form?.elements || [])].some(other => other !== input &&
+      ['aria-controls', 'aria-owns', 'list'].some(attr => (other.getAttribute(attr) || '').split(/\s+/).includes(list.id)))) continue;
+    let selected;
     if (list.localName === 'select' && !list.hasAttribute('multiple')) {
-      const selected = list.options[list.selectedIndex];
+      selected = list.options[list.selectedIndex];
       if (!selected || !list.value || selected.disabled || selected.closest('optgroup[disabled]')) continue;
       const initial = [...list.options].filter(option => option.defaultSelected).at(-1) ||
         [...list.options].find(option => !option.disabled && !option.closest('optgroup[disabled]'));
       if (selected !== choice?.item && selected === initial) continue;
       result.pending = false;
-      const label = normalized(selected?.textContent || selected?.value);
-      if ((' ' + label + ' ').includes(' ' + expected + ' ') && (supportsQuery || current === label)) result.retained = true;
+    } else if (list.getAttribute('role') === 'listbox' && input.getAttribute('aria-expanded') === 'false') {
+      const activeOptions = list.querySelectorAll('[role="option"][aria-selected="true"]');
+      if (activeOptions.length === 1) selected = activeOptions[0];
     }
+    if (!selected) continue;
+    const label = normalized(selected.getAttribute('label') || selected.getAttribute('aria-label') || selected.textContent || selected.value);
+    const labelMatchesQuery = (' ' + label + ' ').includes(' ' + expected + ' ');
+    const displayMatchesSelection = current === expected || current === label || (matchesQuery && label.startsWith(current + ' ')) ||
+      (choice?.form === input.form && selected === choice.item && display === choice.display && Boolean(current));
+    if (current && (!labelMatchesQuery || !displayMatchesSelection)) {
+      // Một mã ẩn hoặc truy vấn trước đó không xác nhận chữ người dùng vừa sửa.
+      result.retained = false;
+      result.pending = true;
+      return result;
+    }
+    if (labelMatchesQuery && displayMatchesSelection) result.retained = true;
   }
   if (current && choice?.item && choice.form === input.form) {
     const nativeSelect = choice.item.closest('select');

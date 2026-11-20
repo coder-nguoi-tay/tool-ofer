@@ -51,6 +51,13 @@ test('giữ browser khi còn form/câu hỏi, popup đang mở, AI chạy hoặc
   assert.equal(await canCompleteFinancialhelpSession(session), false);
   setOfferContent(other);
   assert.equal(await canCompleteFinancialhelpSession(session), true);
+  other._manualCaptchaPending = true;
+  assert.equal(await canCompleteFinancialhelpSession(session), false);
+  now += 60_000;
+  other._manualCaptchaPending = false;
+  assert.equal(await canCompleteFinancialhelpSession(session), false, 'cần đợi lại sau khi xác minh');
+  now += 3000;
+  assert.equal(await canCompleteFinancialhelpSession(session), true);
 });
 
 test('FinancialHelpFinder thankyou hết offer đóng cả browser có lead nhưng không hạ cờ lead', async t => {

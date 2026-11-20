@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -104,4 +105,63 @@ test('Telegram Mini App & Remote Control Test Suite', async (t) => {
     assert.match(appContent, /\/tunnel/, 'app.mjs phải có route /tunnel');
     assert.match(appContent, /startTunnel/, 'app.mjs phải gọi startTunnel');
   });
+});
+
+test('Mini mở đúng danh sách từ cú bấm tay và chỉ báo thành công khi tab đã nhận lựa chọn', {
+  skip: !existsSync(chromium.executablePath()),
+}, async (t) => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<button id="viewport">Màn hình</button><div id="selectModal" style="display:none"><div id="selectModalOptions"></div></div><p id="notice"></p>');
+  await page.addScriptTag({ content: `
+    const viewport = document.getElementById('viewport');
+    const touchStartTime = 0, canvasNaturalWidth = 300, canvasNaturalHeight = 200;
+    const getCanvasPoint = () => ({ x: 10, y: 20 }), showTouchRipple = () => {};
+    const showToast = (message) => { document.getElementById('notice').textContent = message; };
+    window.sent = [];
+    window.sendInput = async (body) => {
+      if (body.type === 'mousedown') return { select: { uid: 'test-select', selectedIndex: 0,
+        options: [{ label: 'Đang chọn' }, { label: 'Mục khóa', disabled: true }, { label: 'A < B & C' }] } };
+      window.sent.push(body);
+      return window.sent.length === 1 ? { error: 'select không còn' } : { ok: true };
+    };
+  ` });
+  for (const file of ['setup/select-modal.js', 'setup/select-modal-options.js', 'setup/window-close-select-modal-select-modal.js',
+    'functions/open-select-picker.js', 'setup/window-select-picker-option-idx.js', 'setup/click-mousedown.js']) {
+    await page.addScriptTag({ path: join(projectDirectory, 'ui/mini', file) });
+  }
+  const screen = page.getByRole('button', { name: 'Màn hình' });
+  await screen.click();
+  assert.equal(await page.getByRole('button', { name: 'Mục khóa' }).isDisabled(), true);
+  const option = page.getByRole('button', { name: 'A < B & C', exact: true });
+  await option.click();
+  assert.match(await page.locator('#notice').textContent(), /Chưa chọn được mục/);
+  await screen.click();
+  await option.click();
+  assert.equal(await page.locator('#notice').textContent(), 'Đã chọn mục');
+  assert.deepEqual(await page.evaluate(() => window.sent), [
+    { type: 'select', index: 2, uid: 'test-select' }, { type: 'select', index: 2, uid: 'test-select' },
+  ]);
+});
+
+test('Mini quy đổi đúng điểm chạm trên frame portrait mobile/tablet', {
+  skip: !existsSync(chromium.executablePath()),
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<div id="viewport" style="width:300px;height:500px"><canvas id="streamCanvas"></canvas></div>');
+  for (const file of ['setup/canvas-natural-width.js', 'setup/canvas-natural-height.js', 'setup/zoom-scale.js',
+    'setup/zoom-pan-x.js', 'setup/viewport.js', 'functions/get-canvas-point.js']) {
+    await page.addScriptTag({ path: join(projectDirectory, 'ui/mini', file) });
+  }
+  assert.equal(await page.evaluate(() => getCanvasPoint(150, 250)), null, 'Chưa có frame thì không được gửi điểm chạm mặc định');
+  await page.addScriptTag({ content: 'canvasNaturalWidth = 393; canvasNaturalHeight = 659;' });
+  const point = await page.evaluate(() => {
+    const rect = viewport.getBoundingClientRect();
+    return getCanvasPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  });
+  assert.ok(point.x >= 190 && point.x <= 202, `X phải theo frame portrait, nhận ${point.x}`);
+  assert.ok(point.y >= 320 && point.y <= 338, `Y phải theo frame portrait, nhận ${point.y}`);
 });

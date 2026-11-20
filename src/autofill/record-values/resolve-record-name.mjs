@@ -3,6 +3,7 @@
  * @param {string} contact Loại tên của ô đang điền.
  * @param {object} record Hồ sơ được gán cho form.
  * @return {string|null} Phần tên có trong hồ sơ hoặc null khi thiếu dữ liệu.
+ * @throws {never} Tên thiếu trả về null.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */

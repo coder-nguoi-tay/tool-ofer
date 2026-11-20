@@ -33,6 +33,10 @@ export async function handlePostScreenTabs(request, response) {
         });
         return true;
       }
+      if (body.manualCaptchaRequestId && (targetPage._manualCaptchaPending !== true || targetPage._manualCaptchaRequestId !== body.manualCaptchaRequestId)) {
+        respondWithJson(response, 409, { error: 'Tab hoặc lượt xác minh CAPTCHA đã thay đổi.' });
+        return true;
+      }
       // Obscura headless chọn tab bằng nguồn CDP của stream, không có cửa sổ native để đưa lên trước.
       if (!session.isObscura && session.engine !== 'obscura') await targetPage.bringToFront();
       const sc = screencastSessions.get(slot);

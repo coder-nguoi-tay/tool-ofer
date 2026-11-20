@@ -59,6 +59,20 @@ test('tab con mở sau tính giờ riêng: mỗi tab đủ 5 phút kể từ lú
   assert.equal(late.closed, true);
 });
 
+test('tab chờ xác minh thủ công được giữ và tính lại thời gian dọn riêng sau khi người dùng hoàn tất', async () => {
+  const { session, subs, closeSession } = fakeSession(2);
+  await finishSweepstakesCardSession(session, closeSession, 0, noPending);
+  subs[0]._manualCaptchaPending = true;
+  await finishSweepstakesCardSession(session, closeSession, SUB_TAB_MAX_MS, noPending);
+  assert.equal(subs[0].closed, false);
+  assert.equal(subs[1].closed, true);
+  subs[0]._manualCaptchaPending = false;
+  await finishSweepstakesCardSession(session, closeSession, SUB_TAB_MAX_MS + 1, noPending);
+  assert.equal(subs[0].closed, false);
+  await finishSweepstakesCardSession(session, closeSession, 2 * SUB_TAB_MAX_MS + 1, noPending);
+  assert.equal(subs[0].closed, true);
+});
+
 test('hết tab con và hết thẻ chưa mở, ổn định 5 giây thì đóng trình duyệt để nhường slot', async () => {
   const { session, logs, closes, closeSession } = fakeSession(1);
   await finishSweepstakesCardSession(session, closeSession, 0, noPending);
@@ -79,6 +93,7 @@ test('còn thẻ chưa mở, đang giữ chỗ mở tab, hoặc chưa tới màn
     ['chưa phải màn card', ctx => { ctx.root._uxSweepstakesCardPageUrl = null; return noPending; }],
     ['đang kiểm lead', ctx => { ctx.session.leadCheckStatus = 'checking'; return noPending; }],
     ['AI đang giữ tab', ctx => { ctx.root._aiAssistRunning = true; return noPending; }],
+    ['đang xác minh CAPTCHA', ctx => { ctx.root._manualCaptchaPending = true; return noPending; }],
   ]) {
     const ctx = fakeSession(0);
     const settings = setup(ctx);

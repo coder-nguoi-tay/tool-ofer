@@ -10,11 +10,13 @@ import { humanTypeCore } from './human-type-core.mjs';
  * @return {Promise<void|false>} Hoàn tất hoặc dừng nếu ô đã bị thay thế.
  * @throws {Error} Khi thao tác nhập thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function humanTypeMarked(field, text, page = null, options = {}) {
   const owner = page || field?.page?.();
+  if (owner?._manualCaptchaPending) return false;
   return withPinnedInput(field, async input => {
+    if (owner?._manualCaptchaPending) return false;
     let marked = false;
     try {
       await input?.evaluate?.(el => {

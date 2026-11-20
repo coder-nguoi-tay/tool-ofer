@@ -6,7 +6,13 @@ import { startGoLoginSessionRecording, recordGoLoginStartupFailure } from '../go
 import { activeBrowsers } from '../sessions.mjs';
 import { applicationState } from '../../runtime/application-state.mjs';
 import { autoRefill } from '../../runtime/constants/auto-refill.mjs';
-import { maxAliveBrowsers } from '../../runtime/constants/max-alive-browsers.mjs';
+import {
+  browserLaunchReservations,
+  maxAliveBrowsers,
+  normalizeRequestedBrowserCount,
+  releaseBrowserLaunchSlot,
+  reserveBrowserLaunchSlot
+} from '../../runtime/constants/max-alive-browsers.mjs';
 import { activeExitIpLocks } from '../../runtime/constants/active-exit-ip-locks.mjs';
 import { proxyQueue } from '../../runtime/constants/proxy-queue.mjs';
 import { getGoLoginDeviceSettings } from '../../gologin-profile/get-device-settings.mjs';
@@ -67,18 +73,24 @@ export const proxyGatewayCooldown = { until: 0, detail: '' };
  */
 export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
+  const requestedCount = normalizeRequestedBrowserCount(body.requestedCount ?? body.concurrency, 1);
+  body.requestedCount = String(requestedCount);
+  body.concurrency = requestedCount;
+  const usedBeforeLaunch = countLiveBrowsers() + browserLaunchReservations.size;
+  if (usedBeforeLaunch + requestedCount > maxAliveBrowsers) {
+    throw new Error(`Máy này chỉ còn chỗ cho ${Math.max(0, maxAliveBrowsers - usedBeforeLaunch)} phiên trình duyệt (giới hạn ${maxAliveBrowsers}, đang dùng ${usedBeforeLaunch}).`);
+  }
   const config = await readGoLoginConfig();
   const selectedDevices = selectGoLoginDevices(body, config);
   const apiToken = body.gologinToken || config.token;
   if (!apiToken) throw new Error('Chưa cấu hình GoLogin API Token.');
-  if (body.gologinToken) await saveGoLoginConfig({ token: apiToken });
-  delete body.gologinToken;
   const offerUrls = (body.offerUrls?.length ? body.offerUrls : [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4]).filter(Boolean);
   if (!offerUrls.length) throw new Error('Chưa nhập URL offer cho GoLogin.');
   for (const url of offerUrls) {
     if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error('URL offer phải dùng HTTP/HTTPS.');
   }
-  const requestedCount = Math.min(maxAliveBrowsers, Math.max(1, Math.floor(Number(body.requestedCount ?? body.concurrency) || 1)));
+  if (body.gologinToken) await saveGoLoginConfig({ token: apiToken });
+  delete body.gologinToken;
   if (!isAutomaticRefill) {
     if (autoRefill.isStopping) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
     invalidateRefillJobs();
@@ -112,7 +124,6 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
   const launchOne = async index => {
     if (autoRefill.stopRequested || isAutomaticRefill && autoRefill.noSlotRefill) return 'stop';
     if (Date.now() < proxyGatewayCooldown.until) { warnings.push(proxyGatewayCooldown.detail); return 'stop'; }
-    if (activeBrowsers.size + reservedSlots.size >= maxAliveBrowsers) return 'stop';
     if (applicationState.limitRunMax > 0 && applicationState.limitRunCount >= applicationState.limitRunMax) {
       warnings.push(`Đã đạt giới hạn ${applicationState.limitRunMax} phiên hoàn tất; dừng mở thêm.`);
       return 'stop';
@@ -123,10 +134,24 @@ export async function launchGoLoginBrowsers(requestBody, isAutomaticRefill = fal
     const offer = assignedStreamRoles?.[index] ?? index % offerUrls.length + 1;
     const websiteUrl = offerUrls[offer - 1];
     if (!websiteUrl) { warnings.push(`Slot ${slot}: Offer ${offer} không có URL.`); return; }
+    let reservation;
+    try {
+      reservation = reserveBrowserLaunchSlot(countLiveBrowsers());
+    } catch (error) {
+      warnings.push(error.message);
+      return 'stop';
+    }
+    if (!reservation) {
+      warnings.push(`Đã đạt giới hạn tối đa ${maxAliveBrowsers} phiên trình duyệt đồng thời; không mở slot ${slot}.`);
+      return 'stop';
+    }
     reservedSlots.add(slot);
     // Slot giữ chỗ tới khi lượt mở thật sự kết thúc, kể cả khi đã bị bỏ vì quá hạn.
     const attempt = { abandoned: false, startupSession: null };
-    const work = launchInSlot(slot, offer, websiteUrl, attempt).finally(() => reservedSlots.delete(slot));
+    const work = launchInSlot(slot, offer, websiteUrl, attempt).finally(() => {
+      reservedSlots.delete(slot);
+      releaseBrowserLaunchSlot(reservation);
+    });
     let timer;
     const expired = new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), GOLOGIN_SLOT_LAUNCH_TIMEOUT_MS); });
     const outcome = await Promise.race([work, expired]);

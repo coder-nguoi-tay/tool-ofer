@@ -49,14 +49,14 @@ function dueForDomCheck(page, key) {
 }
 
 /**
- * Theo dõi lỗi/tự bù phiên chưa có lead; chỉ đóng thêm trang trắng/một dòng sau thời gian chờ.
+ * Theo dõi lỗi và tự bù phiên chưa có lead. Giữ tab chờ xác minh thủ công khi xét hết offer.
  * Không phân loại non-offer nói chung. Phiên có lead quay lại trang trước khi lỗi và tiếp tục form.
  *
  * @param {object} session Phiên Chrome đã mở thành công.
  * @return {void} Gắn lịch kiểm tra vào các tab của phiên.
  * @throws {Error} Khi phiên không cho đăng ký bộ canh.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export function watchTrafficBlockedPage(session) {
   if (!session || session.trafficWatcherAttached) return;
@@ -157,7 +157,12 @@ export function watchTrafficBlockedPage(session) {
   };
 
   /**
-   * Dọn trang hoàn tất thankyou.php và chuyển proxy mới để chạy liên tục.
+   * Dọn trang thankyou.php sau khi đã hết việc và hết yêu cầu xác minh thủ công.
+   * @param {object} p Tab chứa trang hoàn tất.
+   * @param {string} u URL được kiểm tra.
+   * @return {Promise<void>} Hoàn tất kiểm tra hoặc yêu cầu đóng.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-20
    */
   const handleThankYouClose = async (p, u) => {
     try {
@@ -167,7 +172,7 @@ export function watchTrafficBlockedPage(session) {
       const label = sessionLabel(session);
       const allPages = typeof session.browser?.pages === 'function' ? await session.browser.pages() : [];
       const otherTabs = allPages.filter(other => other !== p && !other.isClosed?.());
-      if (p === session.mainPage && otherTabs.length > 0) return;
+      if (p._manualCaptchaPending || p === session.mainPage && otherTabs.length > 0) return;
       p._uxThankYouHandled = true;
       // Tab đầu chỉ được người dùng tắt tay: tab đầu tới thankyou thì hoàn tất cả phiên (nhánh dưới), không đóng riêng.
       if (otherTabs.length > 0 && p !== session.mainPage) {
@@ -187,6 +192,7 @@ export function watchTrafficBlockedPage(session) {
       // Nếu là tab duy nhất hoặc toàn bộ tab đã hoàn thành: đóng browser và hoàn thành phiên
       console.log(`[ThankYou] ${label} [Slot ${slotNum}|IP: ${session.exitIp || 'chưa rõ'}]: Phát hiện trang hoàn tất thankyou.php (${u}). Tự động đóng trình duyệt và chuyển proxy mới.`);
       if (await recordProxyOutcome(session, 'completed', 'Hoàn tất trang thankyou.php')) return;
+      if (p._manualCaptchaPending) { p._uxThankYouHandled = false; return; }
       // Qua addBrowserLog: có id/sequence, được gộp và theo chính sách chụp bằng chứng của recorder.
       session.addBrowserLog?.({
         offer: session.offerNumber ?? session.streamRole ?? 1,
@@ -257,12 +263,12 @@ export function watchTrafficBlockedPage(session) {
   /**
    * Đóng các tab offer phụ (không phải tab đầu/tab gốc) đang ở trang hết offer / chờ xác minh email / lifepointspanel,
    * hoặc khi iframe trong vùng nội dung đã hết form/câu hỏi liên tục 30 giây.
-   * Chỉ đóng tab, không đóng trình duyệt; tab đầu không bao giờ bị đóng ở đây.
+   * Chỉ đóng tab phụ. Các yêu cầu CAPTCHA tạm dừng việc dọn theo nội dung.
    * @param {object} session Phiên trình duyệt.
    * @param {object[]} pages Các tab đang mở.
    * @return {Promise<void>}
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-19
+   * @since 2026-11-20
    */
   const closeFinishedSubOfferTabs = async (session, pages) => {
     for (const page of pages) {
@@ -273,12 +279,15 @@ export function watchTrafficBlockedPage(session) {
       if (!tracker) { tracker = { since: Date.now() }; emptyPageTrackers.set(page, tracker); }
       const currentUrl = page.url?.() || '';
       const revision = page._uxHealthRevision;
-      let subOfferReason = matchSubOfferCloseReason({ url: currentUrl });
+      const urlCloseReason = matchSubOfferCloseReason({ url: currentUrl });
+      let subOfferReason = urlCloseReason;
       if (!subOfferReason) {
+        if (page._manualCaptchaPending) { tracker.since = undefined; continue; }
         if (!dueForDomCheck(page, '_uxSubOfferDomCheckAt')) continue;
         subOfferReason = await getEmptyOfferPageReason(page, tracker, { subTab: true });
       }
       if (!subOfferReason || page.isClosed?.() || currentUrl !== page.url?.() || revision !== page._uxHealthRevision) continue;
+      if (!urlCloseReason && page._manualCaptchaPending) { tracker.since = undefined; continue; }
       if (!isSecondaryOfferTab(page, session) || !pages.some(other => other !== page && !other.isClosed?.())) continue;
       const displayUrl = currentUrl.split(/[?#]/)[0];
       console.log(`[SubOffer] Đóng tab ${displayUrl}: ${subOfferReason}.`);
@@ -323,6 +332,8 @@ export function watchTrafficBlockedPage(session) {
 
           // Kiểm tra nếu tab đã tới trang thankyou.php (hoàn tất luồng)
           const currentUrl = typeof page.url === 'function' ? page.url() : '';
+          const isAdtrapper = /adtrapper|adswapper/i.test(currentUrl);
+          const isDisabledLanding = isAdtrapper && /\/disabled(\.html)?(\?|\/|$)/i.test(currentUrl);
           if (isFinancialhelpThankyouUrl(currentUrl)) continue;
           if (isThankYouUrl(currentUrl)) {
             if (!usesOffer2615CloseRules(session)) await handleThankYouClose(page, currentUrl);
@@ -342,6 +353,12 @@ export function watchTrafficBlockedPage(session) {
             deadReason = await getEmptyOfferPageReason(page, tracker);
           }
           if (protectConfirmedLeadSession(session)) return;
+          if (page._manualCaptchaPending && !/Toffers Duplicate IP|Traffic Blocked/i.test(deadReason || '')
+              && !/^(?:chrome-error:|about:neterror)/i.test(currentUrl) && !isDisabledLanding) {
+            redirectTracker.delete(page);
+            emptyPageTrackers.delete(page);
+            continue;
+          }
 
           if (deadReason) {
             if (protectConfirmedLeadSession(session)) {
@@ -366,6 +383,7 @@ export function watchTrafficBlockedPage(session) {
               continue;
             }
 
+            if (!isToffersDup && !/Traffic Blocked/i.test(deadReason) && pages.some(other => !other.isClosed?.() && other._manualCaptchaPending)) continue;
             // Phiên đã thao tác offer mà trang lỗi mạng: form có thể đã gửi, đóng lúc này sinh lead lỗi
             // (2026-11-15 IP 173.19.184.178 lead về 28s sau khi đóng). F5/Back tối đa 3 lượt rồi mới đóng.
             if (!isToffersDup && !/Traffic Blocked/i.test(deadReason) && hasOfferProgress(session) && !page._uxErrorRecoveryExhausted) {
@@ -390,9 +408,7 @@ export function watchTrafficBlockedPage(session) {
           }
 
           // 2. Kiểm tra nếu web đứng ở adtrapper mãi không nhảy tab
-          const isAdtrapper = /adtrapper|adswapper/i.test(currentUrl);
           if (isAdtrapper) {
-            const isDisabledLanding = /\/disabled(\.html)?(\?|\/|$)/i.test(currentUrl);
             if (isDisabledLanding) {
               if (protectConfirmedLeadSession(session)) {
                 await recoverConfirmedLeadErrorPage(session, page);

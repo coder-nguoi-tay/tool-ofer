@@ -8,6 +8,7 @@
      * @param {object} [options] executeSchedule=true khi tới giờ hẹn (bỏ qua bước đặt hẹn giờ); offerIndex = offer
      *   được hẹn (1-4), khi đó chỉ chạy đúng link của offer đó thay vì mọi link.
      * @return {Promise<void>}
+     * @throws {never} Lỗi validation/API được hiển thị trong UI và không thoát khỏi handler.
      * @author ductv <ductv@getflycrm.com>
      * @since 2026-11-14
      */
@@ -33,13 +34,19 @@
         alert('Vui lòng nhập Link Offer / Website!');
         return;
       }
+      const requestedCountText = parseMiniRequestedThreadCount(inputThreadCount.value);
+      if (!requestedCountText) {
+        showToast('⚠️ Số luồng phải là số nguyên từ 1 đến 256.');
+        return;
+      }
+      inputThreadCount.value = requestedCountText;
+      const concurrency = Number(requestedCountText);
       const schedules = miniRunGetSchedules().filter(item => item.enabled);
       if (!options.executeSchedule && schedules.length > 0 && miniRunStartScheduler(schedules, item => miniRunStart({ executeSchedule: true, offerIndex: item.offerIndex }))) {
         showToast('⏰ Đã hẹn giờ chạy; để mini mở tới giờ hẹn.');
         return;
       }
 
-      const concurrency = parseInt(inputThreadCount.value, 10) || 1;
       const limitRun = parseInt(document.getElementById('inputLimitRun').value, 10) || 0;
       // Chờ tối đa (phút): phiên chạy quá thời gian này thì tự tắt và bù slot; 0 = không giới hạn.
       const maxRunMinutes = Math.max(0, parseFloat(document.getElementById('inputTimeLimit').value) || 0);
@@ -87,7 +94,6 @@
         if (proxyList) {
           await fetch('/proxy-queue/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxyList, proxyType }) });
         }
-        const streamCount = Math.max(concurrency, offerUrls.length >= 2 ? offerUrls.length : 1);
         const settings = {
           browserMode,
           useObscura,
@@ -99,8 +105,8 @@
           websiteUrl4,
           offerUrls,
           offerList: offerUrls,
-          requestedCount: sequential ? streamCount : concurrency,
-          concurrency: sequential ? streamCount : concurrency,
+          requestedCount: requestedCountText,
+          concurrency,
           proxyList,
           proxyType,
           limitRun,

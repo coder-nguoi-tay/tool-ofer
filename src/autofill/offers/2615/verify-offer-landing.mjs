@@ -34,9 +34,9 @@ export function isBlogFinancialHelpFinderUrl(url) {
  * @param {object} page Tab trình duyệt hoặc object có url().
  * @param {object} session Phiên hiện tại.
  * @param {object} [options={}] Cấu hình bổ sung ({ closeActiveBrowsers, landingTimeoutMs, onLog, ... }).
- * @return {Promise<boolean>} True nếu phát hiện link sai và đã yêu cầu tắt toàn bộ trình duyệt.
+ * @return {Promise<boolean>} True khi tab đang chờ xác minh CAPTCHA hoặc đã xử lý landing sai.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-20
  */
 export async function verifyOffer2615Landing(page, session = {}, options = {}) {
   // 1. Chỉ áp dụng cho phiên được cấu hình chạy Offer 2615
@@ -110,6 +110,8 @@ export async function verifyOffer2615Landing(page, session = {}, options = {}) {
       return false;
     }
 
+    // Widget có thể xuất hiện trong lúc chờ redirect. Giữ nguyên lượt kiểm tra cho sau khi xác minh.
+    if (page?._manualCaptchaPending) return true;
     // 7. KHÔNG PHẢI blog.financialhelpfinder.com sau khi tải topoffer -> DỪNG PHIÊN VÀ BÙ PHIÊN MỚI!
     session._offer2615InvalidLandingTriggered = true;
     const detail = `Link offer 2615 mở ra không phải blog.financialhelpfinder.com sau khi tải topoffer (URL hiện tại: ${currentUrl || 'không rõ'}). Dừng phiên và bù phiên mới.`;

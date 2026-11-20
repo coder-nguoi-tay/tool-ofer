@@ -258,8 +258,9 @@
                 <span class="form-label" style="min-width:75px;">Số luồng:</span>
                 <div class="settings-inline-cluster">
                   <div class="input-inline-unit">
-                    <input type="number" id="nudThread" class="win-input" value="1" min="1" max="30" style="width:58px;"
-                      title="Số trình duyệt mở đồng thời (1-30)">
+                    <input type="text" inputmode="numeric" pattern="[0-9]+" id="nudThread" class="win-input" value="1" style="width:58px;"
+                      aria-label="Số luồng" aria-describedby="threadCapacityHint">
+                    <small id="threadCapacityHint">Theo số proxy và tài nguyên máy</small>
                   </div>
                   <div class="input-inline-unit" style="margin-left:6px;">
                     <span class="inline-unit-label">Giới hạn:</span>

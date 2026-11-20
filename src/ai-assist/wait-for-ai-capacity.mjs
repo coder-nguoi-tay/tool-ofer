@@ -15,7 +15,7 @@ import { protectConfirmedLeadSession } from '../leads/actions/protect-confirmed-
  * @param {AbortSignal} [signal] Hủy vé khi tab trả quyền điều khiển.
  * @return {Promise<string>} acquired, page_changed, queue_timeout hoặc closed.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function waitForAiCapacity(page, session, signature, maxWaitMs = 15000, onQueued = null, signal) {
   const ticket = { page, session, deadline: Date.now() + maxWaitMs };
@@ -33,7 +33,7 @@ export async function waitForAiCapacity(page, session, signature, maxWaitMs = 15
     while (!page.isClosed() && !session.isClosed) {
       if (signal?.aborted) return 'aborted';
       if (shouldStopAfterLead(session)) return 'page_changed';
-      if (page._leadRecoveryInProgress) return 'page_changed';
+      if (page._manualCaptchaPending || page._leadRecoveryInProgress) return 'page_changed';
       if (Date.now() >= ticket.deadline) return 'queue_timeout';
       const queue = ordered();
       if (moduleState.agtRunningCount < MAX_CONCURRENT_AGT && queue[0] === ticket) {

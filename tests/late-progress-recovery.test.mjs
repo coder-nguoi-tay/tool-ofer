@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { getLateProgressRecoveryAction } from '../src/autofill/late-progress/get-recovery-action.mjs';
 import { recoverEmptyProgress } from '../src/autofill/late-progress/recover-empty-progress.mjs';
+import { recoverEmptyProgress as recoverOffer2615EmptyProgress } from '../src/autofill/offers/2615/solver/late-progress/recover-empty-progress.mjs';
 import { createFormScopeFixture } from './helpers/form-scope-browser-fixture.mjs';
 
 test('mỗi phút trống F5 tối đa hai lượt rồi AI một lần; reload cùng URL không reset lượt', () => {
@@ -25,6 +26,23 @@ test('frame không đọc được không coi là trống liên tục; tab khác
   assert.equal(getLateProgressRecoveryAction(page,url,{empty:true},60000).action,'waiting');
   assert.equal(getLateProgressRecoveryAction(other,url,{empty:true},120000).action,'waiting');
   assert.equal(getLateProgressRecoveryAction(page,url,{empty:true},120000).reloads,1);
+});
+
+test('không tải lại màn 95% khi CAPTCHA vừa xuất hiện trong lúc đọc tiến độ', async t => {
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  for (const recover of [recoverEmptyProgress, recoverOffer2615EmptyProgress]) {
+    const page = { url: () => 'https://offer.test/step', isClosed: () => false, reload: t.mock.fn() };
+    page.evaluate = async () => ({ progress: 95, readyState: 'complete', hasWork: false });
+    await recover(page, {});
+    now += 61_000;
+    page.evaluate = async () => {
+      page._manualCaptchaPending = true;
+      return { progress: 95, readyState: 'complete', hasWork: false };
+    };
+    assert.equal(await recover(page, {}), true);
+    assert.equal(page.reload.mock.callCount(), 0);
+  }
 });
 
 test('trang 95% trống: reload hai lần, sau đó báo AI disabled; không mất cờ lead', { skip: !existsSync(chromium.executablePath()) }, async t => {

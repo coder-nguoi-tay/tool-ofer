@@ -1,55 +1,99 @@
+import { randomUUID } from 'node:crypto';
+
 /**
- * Tìm ô <select> dạng dropdown tại toạ độ click của Screen View. Popup native của select không có
- * trong ảnh screencast (nhất là khi chạy headless), nên Screen View tự hiện danh sách lựa chọn.
- * Select tìm thấy được gắn `data-ux-screen-select` để bước chọn sau tìm lại.
+ * Mở danh sách hiển thị hoặc áp dụng mục người dùng chọn trong cùng một lượt xử lý DOM.
+ * @param {Element} node Phần tử tại điểm bấm hoặc chính ô chọn đã mở.
+ * @param {{uid: string, index?: number}} selection Mã lượt mở và vị trí trong danh sách hiển thị.
+ * @return {object|boolean|null} Thông tin frame/danh sách khi mở, trạng thái thành công khi chọn.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+export function interactWithScreenSelect(node, { uid, index }) {
+  if (node.tagName === 'IFRAME' || node.tagName === 'FRAME') {
+    const rect = node.getBoundingClientRect();
+    return { iframe: true, left: rect.left + node.clientLeft, top: rect.top + node.clientTop };
+  }
+  const select = node.closest('select');
+  if (!select || select.matches(':disabled') || select.multiple || select.size > 1) return null;
+  if (index === undefined) select.focus();
+  if (!select.isConnected || !select.getClientRects().length || getComputedStyle(select).visibility !== 'visible'
+      || select.closest('[inert], [hidden]')) return null;
+
+  const snapshotKey = Symbol.for('autoleadpc.screenSelect');
+  const options = [];
+  for (const option of select.options) {
+    const group = option.closest('optgroup');
+    if (option.hidden || group?.hidden || getComputedStyle(option).display === 'none'
+        || getComputedStyle(option).visibility !== 'visible' || (group && getComputedStyle(group).display === 'none')) continue;
+    options.push({ option, value: option.value, label: (option.label || option.text || option.value).trim(), disabled: option.matches(':disabled') });
+  }
+  if (index === undefined) {
+    select.setAttribute('data-ux-screen-select', uid);
+    document[snapshotKey] = { uid, select, options };
+    return {
+      selectedIndex: options.findIndex(entry => entry.option.selected),
+      options: options.map(({ label, disabled }) => ({ label, disabled }))
+    };
+  }
+
+  const opened = document[snapshotKey];
+  if (opened?.uid !== uid || opened.select !== select || !options[index] || options[index].disabled
+      || opened.options.length !== options.length) return false;
+  const unchanged = options.every((current, position) => {
+    const original = opened.options[position];
+    return original.option === current.option && original.value === current.value
+      && original.label === current.label && original.disabled === current.disabled;
+  });
+  if (!unchanged) return false;
+
+  delete document[snapshotKey];
+  const choice = options[index].option;
+  if (!choice.selected) {
+    select.selectedIndex = choice.index;
+    select.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  return select.options[select.selectedIndex] === choice && choice.value === options[index].value;
+}
+
+/**
+ * Tìm dropdown HTML tại điểm người dùng bấm trong Screen View, kể cả trong iframe hoặc
+ * Shadow DOM mở. Đánh dấu ô bằng mã riêng để khi chọn mục có thể kiểm tra đúng ô đã mở.
  *
  * @param {object} page Tab Playwright đang xem.
  * @param {number} x Toạ độ X (CSS px trong viewport).
  * @param {number} y Toạ độ Y (CSS px trong viewport).
- * @return {Promise<{frame: object, selectedIndex: number, options: {label: string, disabled: boolean}[]}|null>} Select tại điểm click, hoặc null.
+ * @return {Promise<{frame: object, uid: string, selectedIndex: number, options: {label: string, disabled: boolean}[]}|null>} Dropdown có thể chọn hoặc null.
+ * @throws {Error} Khi tab hoặc frame đóng hay chuyển trang trong lúc xác định ô.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 export async function findSelectAtPoint(page, x, y) {
   let frame = page.mainFrame();
-  let px = x;
-  let py = y;
-  // Đi xuống tối đa 3 tầng iframe: elementFromPoint ở frame cha chỉ trả về thẻ IFRAME.
-  for (let depth = 0; depth < 3; depth++) {
-    const el = (await frame.evaluateHandle(([cx, cy]) => document.elementFromPoint(cx, cy), [px, py])).asElement();
-    if (!el) return null;
-    const uid = String(Date.now());
-    const info = await el.evaluate((node, selUid) => {
-      if (node.tagName === 'IFRAME' || node.tagName === 'FRAME') {
-        const r = node.getBoundingClientRect();
-        return {
-          iframe: true,
-          left: r.left + node.clientLeft,
-          top: r.top + node.clientTop
-        };
+  let frameX = x;
+  let frameY = y;
+  const uid = randomUUID();
+  while (frame) {
+    const hitHandle = await frame.evaluateHandle(([clientX, clientY]) => {
+      let hit = document.elementFromPoint(clientX, clientY);
+      while (hit?.shadowRoot) {
+        const innerHit = hit.shadowRoot.elementFromPoint?.(clientX, clientY);
+        if (!innerHit || innerHit === hit) break;
+        hit = innerHit;
       }
-      const sel = node.closest('select');
-      // Select dạng list (size > 1 / multiple) hiện ngay trong trang nên click thường vẫn chạy.
-      if (!sel || sel.disabled || sel.multiple || sel.size > 1) return null;
-      sel.setAttribute('data-ux-screen-select', selUid);
-      sel.focus();
-      return {
-        selectedIndex: sel.selectedIndex,
-        options: [...sel.options].map(o => ({
-          label: (o.label || o.text || o.value).trim(),
-          disabled: o.disabled
-        }))
-      };
-    }, uid);
-    if (!info?.iframe) return info ? {
-      ...info,
-      uid,
-      frame
-    } : null;
-    frame = await el.contentFrame();
-    if (!frame) return null;
-    px -= info.left;
-    py -= info.top;
+      return hit;
+    }, [frameX, frameY]);
+    try {
+      const element = hitHandle.asElement();
+      if (!element) return null;
+      const info = await element.evaluate(interactWithScreenSelect, { uid });
+      if (!info?.iframe) return info ? { ...info, uid, frame } : null;
+      frame = await element.contentFrame();
+      frameX -= info.left;
+      frameY -= info.top;
+    } finally {
+      await hitHandle.dispose();
+    }
   }
   return null;
 }

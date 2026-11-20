@@ -1,5 +1,5 @@
 import { invalidateRefillJobs } from '../../../refill/actions/invalidate-refill-jobs.mjs';
-import { maxAliveBrowsers } from '../../../runtime/constants/max-alive-browsers.mjs';
+import { normalizeRequestedBrowserCount } from '../../../runtime/constants/max-alive-browsers.mjs';
 import { applyRunMode } from '../../../runtime/constants/run-mode-state.mjs';
 import { autoRefill } from '../../../runtime/constants/auto-refill.mjs';
 import { normalizeUrl } from '../../../proxy/configuration.mjs';
@@ -12,6 +12,7 @@ import { respondWithJson } from '../../actions/respond-with-json.mjs';
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
+ * @throws {Error} Khi payload hoặc số phiên tuần tự không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-18
  */
@@ -19,12 +20,10 @@ export async function handlePostAutoRefillSequential(request, response) {
   if (request.method === 'POST' && request.url === '/auto-refill/sequential') {
     const body = JSON.parse(await readRequestBody(request));
     if (autoRefill.isStopping && body.enabled !== false) throw new Error('App đang dừng trình duyệt; vui lòng chờ hoàn tất rồi Start lại.');
-    autoRefill.sequential = body.enabled !== false;
-    if (autoRefill.sequential) {
-      invalidateRefillJobs();
-      autoRefill.stopRequested = false;
-      applyRunMode('auto'); // Tuần tự là chế độ tự động: bỏ cờ thủ công của lần Start trước
-      autoRefill.enabled = true;
+    const enableSequential = body.enabled !== false;
+    let sequentialSettings = null;
+    let requestedCount = autoRefill.targetCount;
+    if (enableSequential) {
       const s = body.settings ?? autoRefill.settings ?? {};
       let url1 = s.websiteUrl ? normalizeUrl(s.websiteUrl) : '';
       let url2 = s.websiteUrl2 ? normalizeUrl(s.websiteUrl2) : '';
@@ -36,14 +35,24 @@ export async function handlePostAutoRefillSequential(request, response) {
         }
       }
       const isDual = Boolean(url1 && url2 && url1 !== url2);
-      const requestedCount = Number(s.requestedCount ?? s.concurrency ?? (isDual ? 2 : 1));
-      autoRefill.targetCount = Math.min(maxAliveBrowsers, Math.max(1, Math.trunc(requestedCount) || 1));
-      autoRefill.settings = {
+      requestedCount = normalizeRequestedBrowserCount(s.requestedCount ?? s.concurrency, isDual ? 2 : 1);
+      sequentialSettings = {
         ...s,
+        requestedCount: String(requestedCount),
+        concurrency: requestedCount,
         websiteUrl: url1 || s.websiteUrl,
         websiteUrl2: url2 || s.websiteUrl2,
         checkDuplicate: s.checkDuplicate !== false
       };
+    }
+    autoRefill.sequential = enableSequential;
+    if (enableSequential) {
+      invalidateRefillJobs();
+      autoRefill.stopRequested = false;
+      applyRunMode('auto'); // Tuần tự là chế độ tự động: bỏ cờ thủ công của lần Start trước
+      autoRefill.enabled = true;
+      autoRefill.targetCount = requestedCount;
+      autoRefill.settings = sequentialSettings;
       autoRefill.message = `Chế độ tuần tự đã bật: mục tiêu ${autoRefill.targetCount} phiên, delay 5s giữa các phiên.`;
       if (body.settings) queueAutomaticRefill(0);
     } else {

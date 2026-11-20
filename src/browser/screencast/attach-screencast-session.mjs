@@ -29,6 +29,10 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   scObj.page = targetPage;
   scObj.slot = slot;
   scObj.session = session;
+  // Không dùng kích thước của tab cũ cho lần bấm đầu tiên trên tab mới.
+  // Frame đầu tiên của tab mới sẽ cập nhật lại hai giá trị này.
+  scObj.deviceWidth = null;
+  scObj.deviceHeight = null;
   scObj.lastFrameTime = Date.now();
 
   let attached = true;

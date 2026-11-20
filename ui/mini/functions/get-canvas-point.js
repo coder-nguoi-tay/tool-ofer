@@ -4,15 +4,16 @@
  * @param {*} clientY client y.
  * @return {*} Kết quả xử lý get canvas point.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 function getCanvasPoint(clientX, clientY) {
       if (!viewport) return null;
       const vpRect = viewport.getBoundingClientRect();
       if (!vpRect.width || !vpRect.height) return null;
 
-      const natW = canvasNaturalWidth || 1280;
-      const natH = canvasNaturalHeight || 800;
+      const natW = canvasNaturalWidth;
+      const natH = canvasNaturalHeight;
+      if (!natW || !natH) return null;
       const canvasAspect = natW / natH;
       const vpAspect = vpRect.width / vpRect.height;
 

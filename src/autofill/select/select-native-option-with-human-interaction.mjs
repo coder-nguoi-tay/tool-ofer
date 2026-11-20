@@ -9,9 +9,10 @@ import { inspectInteractionReadiness } from '../../browser/locators/inspect-inte
  * @return {Promise<object>} Kết quả xác minh hoặc lý do giữ nguyên trường.
  * @throws {never} Lỗi điều hướng được phân biệt với lỗi giữ giá trị.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-20
  */
 export async function selectNativeOptionWithHumanInteraction({ page, field, target }) {
+  if (page?._manualCaptchaPending) return { ...target, verified: false, reason: 'manual_captcha_pending' };
   if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
   if (!await humanClick(page, field)) return { ...target, verified: false, reason: 'click_failed' };
   await waitForInputPacing(page);
@@ -19,7 +20,9 @@ export async function selectNativeOptionWithHumanInteraction({ page, field, targ
   const readiness = await field.evaluate(inspectInteractionReadiness, null).catch(() => ({ ready: false }));
   if (!readiness.ready) return { ...target, verified: false, reason: 'select_unavailable' };
   // Đóng popup native trước khi chọn qua CDP để menu không giữ input của ô tiếp theo.
+  if (page?._manualCaptchaPending) return { ...target, verified: false, reason: 'manual_captcha_pending' };
   await page?.keyboard?.press('Escape').catch(() => {});
+  if (page?._manualCaptchaPending) return { ...target, verified: false, reason: 'manual_captcha_pending' };
   if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
   // selectOption phát đúng một cặp input/change. Không gửi phím qua các đáp án trung gian.
   await field.selectOption({ value: target.value }, { timeout: 2000 }).catch(() => {});

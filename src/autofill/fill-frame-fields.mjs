@@ -1,3 +1,4 @@
+import { markValidFormValue } from './mark-valid-form-value.mjs';
 import { getAddressString } from './get-address-string.mjs';
 import { readAddressSelection } from './read-address-selection.mjs';
 import { needsRecordFieldCorrection, resolveContactField } from './resolve-contact-field.mjs';
@@ -33,7 +34,7 @@ export async function fillFrameFields({
 }) {
   for (const field of fields) {
     if (typeof field.count === 'function' && !await field.count().catch(() => 0)) continue;
-    if (shouldPauseForLead(session, options)) return true;
+    if (page?._manualCaptchaPending || shouldPauseForLead(session, options)) return true;
     try {
       if (frameProgress.formScope && !await field.evaluate(isControlInActiveForm, frameProgress.formScope).catch(() => false)) continue;
       const isEnabled = await field.isEnabled().catch(() => true);
@@ -149,7 +150,7 @@ export async function fillFrameFields({
 
         // Nếu đã fill nhưng giá trị hiện tại bị rỗng hoặc đang bị báo lỗi hoặc là checkbox chưa được tích -> xóa mark để điền lại
         const address = contact === 'address' && await field.evaluate(readAddressSelection, getAddressString(record) || undefined);
-        if (address?.requiresSelection && !address.retained || currentVal !== null && currentVal.trim() === '' || hasError || isUncheckedBox || needsCorrection) {
+        if (address?.requiresSelection && !address.retained || currentVal !== null && currentVal.trim() === '' || metadata.invalid || hasError || isUncheckedBox || needsCorrection) {
           await field.evaluate(el => el.removeAttribute('data-ux-filled')).catch(() => {});
         } else {
           continue;
@@ -172,6 +173,7 @@ export async function fillFrameFields({
       // nhóm multi-select chưa ai chọn, trừ "None of the above").
       // Câu hỏi multi-select dùng checkbox tôn trọng lựa chọn có chủ đích
       // của solveSurveyCheckboxes — không tick nốt phần còn lại.
+      if (page?._manualCaptchaPending) return true;
       if (await handleCheckboxField({
         metadata,
         scanProgress,
@@ -206,6 +208,7 @@ export async function fillFrameFields({
         valueToFill,
         field
       })) continue;
+      if (page?._manualCaptchaPending) return true;
       const fillResult = await fillSelectOrTextField({
         metadata,
         field,
@@ -218,39 +221,16 @@ export async function fillFrameFields({
         frame,
         record
       });
+      if (page?._manualCaptchaPending) return true;
       if (fillResult === true || fillResult?.verified === false) continue;
 
-      // Kiểm tra chắc chắn trường đã có giá trị thực tế trước khi đánh dấu thành công
-      let finalVal = '';
-      if (metadata.kind === 'select') {
-        finalVal = await field.evaluate(el => el.value || '').catch(() => '');
-        if (!fillResult?.verified || finalVal !== fillResult.value) continue;
-        if (metadata.id || metadata.name) {
-          frameProgress.verifiedSelections ??= [];
-          frameProgress.verifiedSelections.push({ id: metadata.id, name: metadata.name, value: finalVal });
-        }
-      } else {
-        finalVal = await field.inputValue().catch(() => '');
+      const finalVal = metadata.kind === 'select' ? fillResult?.value : await field.inputValue().catch(() => '');
+      if (metadata.kind === 'select' && !fillResult?.verified) continue;
+      if (!await field.evaluate(markValidFormValue, finalVal).catch(() => false)) continue;
+      if (metadata.kind === 'select' && (metadata.id || metadata.name)) {
+        frameProgress.verifiedSelections ??= [];
+        frameProgress.verifiedSelections.push({ id: metadata.id, name: metadata.name, value: finalVal });
       }
-      if (!finalVal || finalVal.trim() === '') {
-        // Trường vẫn rỗng, không đánh dấu và không tính là đã điền
-        continue;
-      }
-      await field.evaluate(element => {
-        element.dataset.uxFilled = '1';
-        element.classList.remove('error', 'invalid');
-        element.classList.add('has-value', 'valid');
-        const parent = element.closest('.input-group, .loco-group, .form-group, .field, .field-item, .reg-fields');
-        if (parent) {
-          parent.classList.remove('error', 'invalid');
-          parent.classList.add('valid', 'non-empty');
-          const helper = parent.querySelector('.helper-text, .error, .error-entry');
-          if (helper) {
-            helper.classList.remove('visible');
-            helper.style.display = 'none';
-          }
-        }
-      }).catch(() => {});
       addVerifiedFieldCount(session, 1);
       session.lastActionTime = Date.now();
       session.autofillError = null;

@@ -10,9 +10,10 @@ import { selectNativeOptionWithHumanInteraction } from './select-native-option-w
  * @param {object} context Page, field và các candidate đã được so khớp theo record.
  * @return {Promise<object>} Kết quả chọn và xác minh giá trị giữ được sau thao tác.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-13
+ * @since 2026-11-20
  */
 export async function selectOptionWithHumanInteraction({ page, field, candidates }) {
+  if (page?._manualCaptchaPending) return { matched: false, verified: false, reason: 'manual_captcha_pending' };
   if (shouldStopAfterLead(page?._autofillSession)) return { matched: false, verified: false, reason: 'lead_confirmed_paused' };
   const target = await field.evaluate(findMatchingSelectOption, candidates);
   if (!target.matched) return target;
@@ -24,6 +25,7 @@ export async function selectOptionWithHumanInteraction({ page, field, candidates
   if (state.currentValue === target.value) return { ...target, verified: true, reason: 'option_verified' };
 
   // Select dạng danh sách không có popup; giữ cách chọn tương thích cho multiple/size > 1.
+  if (page?._manualCaptchaPending) return { ...target, verified: false, reason: 'manual_captcha_pending' };
   if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
   if (state.multiple || state.size > 1) return field.evaluate(selectMatchingOption, candidates);
 

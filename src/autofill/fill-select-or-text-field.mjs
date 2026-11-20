@@ -1,4 +1,5 @@
 import { getRecordPhoneMask } from './record-values/resolve-record-phone.mjs';
+import { markValidFormValue } from './mark-valid-form-value.mjs';
 import { resolveContactField } from './resolve-contact-field.mjs';
 import { reportSelectMismatch } from './report-select-mismatch.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
@@ -35,11 +36,12 @@ export async function fillSelectOrTextField({
   frame,
   record
 }) {
-  if (shouldStopAfterLead(session || page?._autofillSession)) return true;
+  if (page?._manualCaptchaPending || shouldStopAfterLead(session || page?._autofillSession)) return true;
   if (metadata.kind === 'select') {
     const candidates = buildSelectCandidates(valueToFill, metadata);
     const result = await selectOptionWithHumanInteraction({ page, field, candidates }).catch(() => ({ matched: false, verified: false, reason: 'select_unavailable' }));
     // navigated: trang đã chuyển ngay khi chọn — không coi là ô chưa khớp.
+    if (page?._manualCaptchaPending) return true;
     if (!result.verified && result.reason !== 'navigated') {
       const identity = metadata.id || metadata.name || metadata.names?.[0] || 'select';
       unmatchedFieldNames?.add(identity);
@@ -64,6 +66,7 @@ export async function fillSelectOrTextField({
     });
     try {
       await recordInputFillHtml(field, page);
+      if (page?._manualCaptchaPending) return true;
       await field.fill(isoDate, {
         force: true,
         timeout: 2000
@@ -71,6 +74,7 @@ export async function fillSelectOrTextField({
     } catch {}
     // Xác minh: nếu fill không ăn (validator trang xóa), set bằng native setter
     const dateVal = await field.inputValue().catch(() => '');
+    if (page?._manualCaptchaPending) return true;
     if (dateVal.trim() !== isoDate) {
       await field.evaluate((el, val) => {
         const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
@@ -89,7 +93,11 @@ export async function fillSelectOrTextField({
     }
     // Xác minh lần cuối trước khi đánh dấu đã điền
     const finalDateVal = await field.inputValue().catch(() => '');
+    if (page?._manualCaptchaPending) return true;
     if (finalDateVal && finalDateVal.trim() === isoDate) {
+      await field.dispatchEvent('change').catch(() => {});
+      await field.dispatchEvent('blur').catch(() => {});
+      if (page?._manualCaptchaPending || !await field.evaluate(markValidFormValue, finalDateVal).catch(() => false)) return true;
       options.onLog?.({
         type: 'field_filled',
         tag: 'INPUT',
@@ -98,24 +106,6 @@ export async function fillSelectOrTextField({
         text: metadata.names?.[0] || 'date',
         detail: `Đã điền ô ngày [${metadata.id || metadata.name}]: ${finalDateVal}`
       }, page);
-      await field.evaluate(el => {
-        el.dataset.uxFilled = '1';
-        el.classList.remove('invalid', 'error');
-        el.classList.add('valid', 'has-value');
-        const parent = el.closest('.field-item, .form-group, .input-group, .loco-group');
-        if (parent) {
-          parent.classList.remove('invalid', 'error');
-          parent.classList.add('valid', 'non-empty');
-          const err = parent.querySelector('.error-entry, .error');
-          if (err) err.style.display = 'none';
-        }
-        el.dispatchEvent(new Event('change', {
-          bubbles: true
-        }));
-        el.dispatchEvent(new Event('blur', {
-          bubbles: true
-        }));
-      }).catch(() => {});
       addVerifiedFieldCount(session, 1);
       frameProgress.filledInThisPass += 1;
       session.lastActionTime = Date.now();
@@ -137,6 +127,7 @@ export async function fillSelectOrTextField({
     if (isAddressField) {
       const choice = await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
       if (choice?.retained || choice?.pending) return true;
+      if (page?._manualCaptchaPending) return true;
       await field.evaluate((input, query) => {
         if (input._autoleadAddressChoice?.query !== query) delete input._autoleadAddressChoice;
         input._autoleadAddressQuery = query;
@@ -148,6 +139,7 @@ export async function fillSelectOrTextField({
     }
     // Nhập từ từ mô phỏng nhịp gõ phím của người thật (chống bị phát hiện bot autofill)
     await humanType(field, valueToFill, page, { address: isAddressField });
+    if (page?._manualCaptchaPending) return true;
     const afterTyping = isAddressField && await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
     if (afterTyping?.retained) return false;
     if (afterTyping?.pending) return true;
@@ -172,7 +164,7 @@ export async function fillSelectOrTextField({
       // 3 lần gõ lại + 1 lần kiểm tra cuối: trước đây lần fill() thứ 3 không được kiểm tra lại, nên ô đã đúng
       // vẫn bị báo "không giữ được giá trị", bỏ cờ filled và vòng quét sau gõ đè email lần nữa.
       for (let retry = 0; retry <= 3; retry++) {
-        if (shouldStopAfterLead(session || page?._autofillSession)) return true;
+        if (page?._manualCaptchaPending || shouldStopAfterLead(session || page?._autofillSession)) return true;
         const current = await field.inputValue().catch(() => '');
         if (sameValue(current)) {
           okTyped = true;
@@ -186,6 +178,7 @@ export async function fillSelectOrTextField({
         if (retry === 3) break;
         if (retry === 2 && typeof field.fill === 'function') {
           await recordInputFillHtml(field, page);
+          if (page?._manualCaptchaPending) return true;
           await field.fill(expectVal, {
             force: true,
             timeout: 2000
@@ -196,6 +189,7 @@ export async function fillSelectOrTextField({
           });
         }
       }
+      if (page?._manualCaptchaPending) return true;
       if (!okTyped) {
         const finalVal = await field.inputValue().catch(() => '');
         options.onLog?.({
@@ -221,6 +215,7 @@ export async function fillSelectOrTextField({
     if (isAddressField || isComboboxOrAutocomplete) {
       try {
         // 1. Kích hoạt trigger API gợi ý: focus và dispatch input
+        if (page?._manualCaptchaPending) return true;
         if (!afterTyping?.requiresSelection) await field.evaluate(el => {
           el.focus();
           el.dispatchEvent(new Event('input', {
@@ -236,6 +231,7 @@ export async function fillSelectOrTextField({
           } else {
             await new Promise(r => setTimeout(r, waitMs));
           }
+          if (page?._manualCaptchaPending) return true;
           const hasOpen = await hasActiveAddressSuggestions(page, frame, field);
           if (hasOpen) {
             selectedSuggestion = await selectFirstAddressSuggestion(page, frame, field, options);
@@ -244,6 +240,7 @@ export async function fillSelectOrTextField({
 
           // Kiểm tra xem trang có trả về thẻ <select> địa chỉ đi kèm không (ô vừa input vừa select)
           if (!isAddressField) continue;
+          if (page?._manualCaptchaPending) return true;
           const selectRes = await handleAddressSelectDropdown(frame, record, field);
           if (selectRes && selectRes.success) {
             selectedSuggestion = true;
@@ -262,6 +259,7 @@ export async function fillSelectOrTextField({
       const retainedAfterPick = isAddressField && await field.evaluate(readAddressSelection, requestedAddress).catch(() => null);
       if (retainedAfterPick?.retained) return false;
       if (retainedAfterPick?.pending || retainedAfterPick?.requiresSelection) return true;
+      if (page?._manualCaptchaPending) return true;
       if (!selectedSuggestion && (!postAddressVal || postAddressVal.trim() === '')) {
         await field.evaluate((el, val) => {
           const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
@@ -287,6 +285,7 @@ export async function fillSelectOrTextField({
       // Với ô city/state/job/school thông thường (không phải ô autocomplete chuyên biệt):
       // Kiểm tra nhanh trong < 1ms xem có dropdown đang mở hay không, nếu không mở thì đi tiếp ngay
       try {
+        if (page?._manualCaptchaPending) return true;
         const hasOpen = await hasActiveAddressSuggestions(page, frame, field);
         if (hasOpen) {
           selectedSuggestion = await selectFirstAddressSuggestion(page, frame, field, options);
@@ -297,6 +296,7 @@ export async function fillSelectOrTextField({
     // CHỈ dispatch thêm input/change/blur/keyup NẾU CHƯA CHỌN GỢI Ý.
     // Nếu ĐÃ CHỌN GỢI Ý TỪ API HOẶC SELECT THÀNH CÔNG, TUYỆT ĐỐI KHÔNG dispatch lại blur
     // vì sẽ làm widget địa chỉ (Google Places/Loqate/AlphaIntent) hủy bỏ place_id đã chọn hoặc ẩn dropdown!
+    if (page?._manualCaptchaPending) return true;
     if (!selectedSuggestion) {
       await field.evaluate(el => {
         el.dispatchEvent(new Event('input', {
@@ -312,15 +312,10 @@ export async function fillSelectOrTextField({
           bubbles: true
         }));
       }).catch(() => {});
-      await field.dispatchEvent('input').catch(() => {});
-      await field.dispatchEvent('change').catch(() => {});
-      await field.dispatchEvent('blur').catch(() => {});
-    } else {
-      await field.evaluate(el => {
-        el.dataset.uxFilled = '1';
-        el.classList.add('valid-address', 'has-value');
-        el.classList.remove('error');
-      }).catch(() => {});
+      for (const eventType of ['input', 'change', 'blur']) {
+        if (page?._manualCaptchaPending) return true;
+        await field.dispatchEvent(eventType).catch(() => {});
+      }
     }
   }
   return false;

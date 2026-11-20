@@ -47,7 +47,7 @@ export function inspectBlankFrameDocument(expected) {
 }
 
 /**
- * Kiểm tra thẻ nhúng, request và tài liệu con trước khi cho phép tải lại iframe.
+ * Kiểm tra thẻ nhúng và tài liệu con. Giữ nguyên iframe nếu tab bước vào xác minh thủ công.
  * @param {object} page Tab chứa iframe.
  * @param {object|null} frame Tài liệu đích.
  * @param {object} observation Nguồn thẻ, mã tài liệu cha, URL và mã tài liệu con đã quan sát.
@@ -55,18 +55,18 @@ export function inspectBlankFrameDocument(expected) {
  * @return {Promise<boolean>} True khi đã yêu cầu tải lại tài liệu còn trống.
  * @throws {never} Giữ nguyên frame khi việc xác minh không hoàn tất.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function reloadObservedIframe(page, frame, observation, settledAt) {
   const { source, documentId, childUrl, childDocumentId } = observation;
-  if (!frame || !source || source === 'about:blank' || !childUrl || childDocumentId == null || hasPendingFrameRequests(page, frame)) return false;
+  if (page._manualCaptchaPending || !frame || !source || source === 'about:blank' || !childUrl || childDocumentId == null || hasPendingFrameRequests(page, frame)) return false;
   let owner;
   try {
     owner = await frame.frameElement();
     const absoluteSource = await owner.evaluate((iframe, expected) =>
       iframe.isConnected && performance.timeOrigin === expected.documentId && !iframe.hasAttribute('srcdoc') &&
       iframe.getAttribute('src') === expected.source ? iframe.src : null, { source, documentId });
-    if (!absoluteSource || hasPendingFrameRequests(page, frame) || hasPendingFrameRequests(page, page.mainFrame?.()) ||
+    if (page._manualCaptchaPending || !absoluteSource || hasPendingFrameRequests(page, frame) || hasPendingFrameRequests(page, page.mainFrame?.()) ||
       lastIframeContentRequestSettledAt(page, frame) !== settledAt) return false;
     return await frame.evaluate(inspectBlankFrameDocument, { source, documentId, absoluteSource, childUrl, childDocumentId }) === true;
   } catch { return false; }

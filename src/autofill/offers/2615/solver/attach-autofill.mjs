@@ -5,7 +5,6 @@ import { configurePageMousePolicy } from './interaction/configure-page-mouse-pol
 import { protectConfirmedLeadSession } from '../../../../leads/actions/protect-confirmed-lead-session.mjs';
 import { attachAutofillPageWatcher } from './attach-autofill-page-watcher.mjs';
 import { fillPageForms } from './fill-page-forms.mjs';
-import { startContinuousAgent } from '../../../../continuous-agent/index.mjs';
 import { runModeState } from '../../../../runtime/constants/run-mode-state.mjs';
 import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
 
@@ -18,7 +17,7 @@ import { pageHasVisibleFilledEmail } from './page-has-visible-filled-email.mjs';
  * @param {object} options options.
  * @return {void} Kết quả xử lý attach autofill.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-20
  */
 function attachAutofill(context, records, allowedOrigin, session = {}, options = {}) {
   protectConfirmedLeadSession(session);
@@ -115,10 +114,10 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
    * @param {object} page Tab vừa qua màn email.
    * @return {void}
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-12
+   * @since 2026-11-20
    */
   function triggerLeadCheckAfterEmail(page) {
-    if (!isLeadWaitEnabled(session, options) || protectConfirmedLeadSession(session) || session.leadCheckTriggered || session.screen5LeadCheckTriggered) return;
+    if (page._manualCaptchaPending || !isLeadWaitEnabled(session, options) || protectConfirmedLeadSession(session) || session.leadCheckTriggered || session.screen5LeadCheckTriggered) return;
     session.screen5LeadCheckTriggered = true;
     session.leadCheckTriggered = true;
     session.leadCheckStatus = 'checking';
@@ -143,10 +142,10 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
    * @param {object} page Tab cần kiểm tra.
    * @return {Promise<void>}
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-12
+   * @since 2026-11-20
    */
   async function checkLeadAfterEmailOnPage(page) {
-    if (protectConfirmedLeadSession(session) || !isLeadWaitEnabled(session, options) || session.screen5LeadVerified || page._uxLeadChecking || page.isClosed()) return;
+    if (page._manualCaptchaPending || protectConfirmedLeadSession(session) || !isLeadWaitEnabled(session, options) || session.screen5LeadVerified || page._uxLeadChecking || page.isClosed()) return;
     if (session.leadCheckTriggered || session.screen5LeadCheckTriggered || session.leadCheckStatus) return;
     page._uxLeadChecking = true;
     try {
@@ -163,7 +162,7 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
         anyValue: true
       })) return;
       await new Promise(r => setTimeout(r, 700));
-      if (page.isClosed() || (await pageHasVisibleFilledEmail(page, {
+      if (page._manualCaptchaPending || page.isClosed() || (await pageHasVisibleFilledEmail(page, {
         anyValue: true
       }))) return;
       session.emailFilled = true;
@@ -203,11 +202,10 @@ function attachAutofill(context, records, allowedOrigin, session = {}, options =
    * @param {object} page Tab Chrome cần theo dõi.
    * @return {void} Đăng ký bộ hẹn giờ và dọn khi tab đóng.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-19
+   * @since 2026-11-20
    */
   function watchPage(page) {
-    // Đăng ký agent khi mở tab; watcher đồng bộ các lần đổi chế độ tiếp theo.
-    startContinuousAgent(page, () => page._assignedRecord || session.currentRecord || record, session, { ...options, allowedOrigin });
+    // Watcher kiểm tra CAPTCHA trước khi khởi động agent cho tab.
     return attachAutofillPageWatcher(page, {
       trackedPages,
       options: { ...options, allowedOrigin },

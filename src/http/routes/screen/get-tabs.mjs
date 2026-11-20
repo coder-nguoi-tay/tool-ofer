@@ -59,6 +59,8 @@ export async function handleGetScreenTabs(request, response) {
       const url = page.url();
       return {
         index, url, title: await readTabTitle(page, url),
+        manualCaptchaPending: page._manualCaptchaPending === true,
+        manualCaptchaRequestId: page._manualCaptchaPending === true ? page._manualCaptchaRequestId : undefined,
         bandwidthBytes: page._bandwidthBytes || 0,
         bandwidthFormatted: formatBytes(page._bandwidthBytes || 0),
         bytesSent: page._bytesSent || 0,

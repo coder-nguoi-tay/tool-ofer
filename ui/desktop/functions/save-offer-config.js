@@ -1,9 +1,10 @@
 /**
- * Save offer config.
- * @param {boolean} silent silent.
- * @return {Promise<*>} Kết quả xử lý save offer config.
+ * Lưu cấu hình offer và số luồng đã nhập để khôi phục ở lần mở sau.
+ * @param {boolean} [silent=false] Ẩn thông báo lỗi trên giao diện.
+ * @return {Promise<object|undefined>} Phản hồi lưu cấu hình nếu đã nhập link offer.
+ * @throws {Error} Khi yêu cầu lưu cấu hình thất bại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-20
  */
 async function saveOfferConfig(silent = false) {
   const name = document.getElementById('txtNameOffer')?.value.trim() || '';
@@ -34,7 +35,7 @@ async function saveOfferConfig(silent = false) {
     Complete: document.getElementById('txtTextComplete')?.value || '',
     delayStart: document.getElementById('nudDelayStart')?.value || '1',
     delayStop: document.getElementById('nudDelayStop')?.value || '1',
-    Thread: document.getElementById('nudThread')?.value || '1',
+    Thread: normalizeRequestedThreadCount(document.getElementById('nudThread')?.value),
     LimitRun: document.getElementById('nudLimitRun')?.value || '0',
     CheckDuplicate: document.getElementById('cbxCheckDuplicateIP')?.checked ?? true,
     HideUntilTarget: document.getElementById('cbxHideUntilTarget')?.checked ?? false,

@@ -26,10 +26,10 @@ import { waitForAiCapacity } from './wait-for-ai-capacity.mjs';
  * @return {Promise<void>}
  * @throws {Error} Nếu thao tác Playwright ngoài các nhánh fallback phát sinh lỗi.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function runAiAssist(page, record, session = {}, options = {}) {
-  if (shouldStopAfterLead(session)) return;
+  if (page?._manualCaptchaPending || shouldStopAfterLead(session)) return;
   if (['manual','skip','consent_only'].includes(session.offerMode) && !options.forceRetry) return;
   const cfg = {
     ...globalAiConfig,
@@ -82,7 +82,7 @@ async function runAiAssist(page, record, session = {}, options = {}) {
   try {
     if (await isNoSurveyFrame(page._activeAutofillFrame)) return;
     for (let round = 1; round <= maxRounds; round++) {
-      if (shouldStopAfterLead(session)) break;
+      if (page._manualCaptchaPending || shouldStopAfterLead(session)) break;
       if (page.isClosed() || session.isClosed) break;
 
       const visibleState = await readVisiblePageState(page);
@@ -206,7 +206,7 @@ async function runAiAssist(page, record, session = {}, options = {}) {
         }
       }
       for (const act of actions) {
-        if (!globalAiConfig.enabled || ['disabled', 'form_agent'].includes(globalAiConfig.mode) || shouldStopAfterLead(session)) break;
+        if (page._manualCaptchaPending || !globalAiConfig.enabled || ['disabled', 'form_agent'].includes(globalAiConfig.mode) || shouldStopAfterLead(session)) break;
         if (page.isClosed() || session.isClosed) break;
         try {
           updateBadge(`🌐 <strong>IP:</strong> ${ip} | <span style="color:#818cf8;font-weight:600;">🤖 AI: ${act.action} ${act.selector || ''}</span>`);

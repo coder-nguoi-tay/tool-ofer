@@ -8,6 +8,16 @@ import { attachFrameRequestTracking } from '../src/browser/frames/pending-frame-
 
 const skip = !existsSync(chromium.executablePath());
 
+test('giữ nguyên tài liệu con khi CAPTCHA xuất hiện trong lúc kiểm tra thẻ iframe', async t => {
+  const page = {};
+  const observation = { source: '/survey', documentId: 1, childUrl: 'https://offer.test/survey', childDocumentId: 2 };
+  const owner = { evaluate: async () => { page._manualCaptchaPending = true; return observation.childUrl; }, dispose: t.mock.fn(async () => {}) };
+  const frame = { frameElement: async () => owner, evaluate: t.mock.fn(async () => true) };
+  assert.equal(await reloadObservedIframe(page, frame, observation, 0), false);
+  assert.equal(frame.evaluate.mock.callCount(), 0);
+  assert.equal(owner.dispose.mock.callCount(), 1);
+});
+
 test('iframe đã tải xong nhưng vẫn trắng được nạp lại tối đa hai lần', { skip }, async t => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());

@@ -18,7 +18,13 @@ import { initMultiOfferCursors } from '../../leads/actions/init-multi-offer-curs
 import { isProxyUsedByAllOffers } from '../../proxy/actions/is-proxy-used-by-all-offers.mjs';
 import { listInstalledChromeChannels } from '../chrome-installations.mjs';
 import { loadScript } from '../../../script.mjs';
-import { maxAliveBrowsers } from '../../runtime/constants/max-alive-browsers.mjs';
+import {
+  browserLaunchReservations,
+  maxAliveBrowsers,
+  normalizeRequestedBrowserCount,
+  releaseBrowserLaunchSlot,
+  reserveBrowserLaunchSlot
+} from '../../runtime/constants/max-alive-browsers.mjs';
 import { maxConcurrentProfiles } from '../../runtime/constants/max-concurrent-profiles.mjs';
 import { multiOfferState } from '../../runtime/constants/multi-offer-state.mjs';
 import { normalizeUrl } from '../../proxy/configuration.mjs';
@@ -61,6 +67,8 @@ export async function launchRequestedBrowsers(requestBody, {
   isAutomaticRefill = false
 } = {}) {
   const body = JSON.parse(requestBody);
+  const countParam = body.requestedCount ?? body.concurrency;
+  const boundedRequestedCount = countParam !== undefined ? normalizeRequestedBrowserCount(countParam) : null;
   const isObscura = browserEngine === 'obscura';
   const launchGeneration = autoRefill.launchGeneration;
   /**
@@ -233,17 +241,12 @@ export async function launchRequestedBrowsers(requestBody, {
     }
     syncDualStreamState(offerCount);
   }
-  const countParam = body.requestedCount !== undefined && body.requestedCount !== '' ? body.requestedCount : body.concurrency;
-  let requestedCount = countParam !== undefined && countParam !== '' ? Number(countParam) : isDualStream ? 2 : Math.min(maxAliveBrowsers, availableProxies.length || 1);
-  if (!Number.isInteger(requestedCount) || requestedCount < 1) {
-    throw new Error('Số trình duyệt cần mở phải là số nguyên lớn hơn 0.');
-  }
+  let requestedCount = boundedRequestedCount ?? (isDualStream ? 2 : Math.min(maxAliveBrowsers, availableProxies.length || 1));
   if (isDualStream && requestedCount < 2 && !isAutomaticRefill) {
     requestedCount = 2; // Chạy 2 luồng yêu cầu tối thiểu 2 cửa sổ
   }
-  if (requestedCount > maxAliveBrowsers) {
-    throw new Error('Chỉ được mở tối đa ' + maxAliveBrowsers + ' cửa sổ trình duyệt cùng lúc.');
-  }
+  body.requestedCount = String(requestedCount);
+  body.concurrency = requestedCount;
   const targetSuccessCount = Math.min(requestedCount, isDualStream ? Math.max(availableProxies.length, requestedCount) : availableProxies.length);
   if (targetSuccessCount === 0 || availableProxies.length === 0) {
     return {
@@ -267,12 +270,15 @@ export async function launchRequestedBrowsers(requestBody, {
   }
   const liveBrowsers = [...activeBrowsers].filter(s => s.isObscuraProcessAlive?.() || (!s.isClosed && !(s.browser?.isClosed?.())));
   const alreadyAlive = liveBrowsers.length;
-  if (alreadyAlive + targetSuccessCount > maxAliveBrowsers) {
-    const room = Math.max(0, maxAliveBrowsers - alreadyAlive);
+  if (alreadyAlive + browserLaunchReservations.size + targetSuccessCount > maxAliveBrowsers) {
+    const room = Math.max(0, maxAliveBrowsers - alreadyAlive - browserLaunchReservations.size);
     throw new Error('Máy này chỉ nên mở tối đa ' + maxAliveBrowsers + ' trình duyệt cùng lúc để không bị treo' + (alreadyAlive ? ' (đang mở ' + alreadyAlive + ', còn chỗ cho ' + room + ')' : '') + '. Bạn yêu cầu ' + targetSuccessCount + '. Hãy giảm số cửa sổ (hoặc bấm Đóng tất cả trước), ' + 'hoặc đóng bớt cửa sổ đang mở.');
   }
   const screen = await readScreenSize();
-  const layoutCount = layoutTarget ?? Math.min(maxAliveBrowsers, alreadyAlive + targetSuccessCount);
+  const requestedLayoutCount = Number.isSafeInteger(layoutTarget) && layoutTarget > 0
+    ? layoutTarget
+    : alreadyAlive + targetSuccessCount;
+  const layoutCount = Math.min(maxAliveBrowsers, requestedLayoutCount);
   const occupiedTileIndexes = new Set(liveBrowsers.map(session => session.tileIndex));
   const availableTileIndexes = Array.from({
     length: layoutCount
@@ -299,6 +305,8 @@ export async function launchRequestedBrowsers(requestBody, {
   if (!isObscura) warnings.push('Các phiên bản Google Chrome thường của lượt này: ' + availableChromeBuilds.slice(0, targetSuccessCount).map(build => build.version).join(', ') + '.');
   if (!autoRefill.settings) {
     autoRefill.settings = {
+      requestedCount: String(requestedCount),
+      concurrency: requestedCount,
       proxyList: body.proxyList,
       proxyType: proxyType,
       websiteUrl: body.websiteUrl,
@@ -356,6 +364,14 @@ export async function launchRequestedBrowsers(requestBody, {
    * @since 2026-11-17
    */
   const attemptProxy = async workerIndex => {
+    let reservation;
+    try {
+      reservation = reserveBrowserLaunchSlot(activeBrowsers.size);
+    } catch (error) {
+      warnings.push(error.message);
+      return;
+    }
+    try {
     // Giãn cách khởi động giữa các worker (staggered launch) để tránh giật lag CPU và nghẽn mạng
     if (workerIndex > 0) {
       await new Promise(r => setTimeout(r, Math.min(workerIndex * 800, 4000)));
@@ -545,10 +561,12 @@ export async function launchRequestedBrowsers(requestBody, {
         results.push('Proxy ' + proxy.server + ': loại bỏ IP ' + (exitIp ?? 'chưa xác định') + ' — ' + failureReason + '; đóng trình duyệt và thử proxy khác.');
       }
     }
+    } finally {
+      releaseBrowserLaunchSlot(reservation);
+    }
   };
-  await Promise.all(Array.from({
-    length: Math.min(maxConcurrentProfiles, targetSuccessCount)
-  }, (_, workerIndex) => attemptProxy(workerIndex)));
+  const workerCount = Math.min(maxConcurrentProfiles, targetSuccessCount);
+  await Promise.all(Array.from({ length: workerCount }, (_, workerIndex) => attemptProxy(workerIndex)));
   if (successfulBrowsers < targetSuccessCount) {
     warnings.push('Chỉ mở được ' + successfulBrowsers + '/' + targetSuccessCount + ' trình duyệt; các proxy còn lại đã hết hoặc không tải đúng trang đích.');
   }

@@ -18,7 +18,7 @@ const OBSERVATION_GAP_MS = 15_000;
 const states = new WeakMap();
 
 /**
- * Luồng đang chạy hoặc trang có logic xử lý riêng: không được F5.
+ * Giữ nguyên trang khi có người đang xác minh CAPTCHA hoặc luồng khác đang xử lý.
  * @param {object} page Tab.
  * @param {object} session Phiên.
  * @param {object} options Tuỳ chọn autofill (chính sách chờ lead).
@@ -29,7 +29,7 @@ const states = new WeakMap();
 function isBusyOrHandledElsewhere(page, session, options) {
   const url = page.url();
   return !/^https?:/i.test(url) || session.isClosed || page.isClosed()
-    || page._autofillWaitReason || page._aiAssistRunning || page._aiFormFixing || page._continuousAgent || page._leadRecoveryInProgress || page._lateProgressRecoveryActive
+    || page._manualCaptchaPending || page._autofillWaitReason || page._aiAssistRunning || page._aiFormFixing || page._continuousAgent || page._leadRecoveryInProgress || page._lateProgressRecoveryActive
     || session.leadCheckStatus === 'checking' || shouldPauseForLead(session, options)
     || ['manual', 'skip', 'consent_only'].includes(session.offerMode)
     || isThankYouUrl(url) || isFinancialhelpThankyouUrl(url) || isFinancialhelpPathThankyouUrl(url)
