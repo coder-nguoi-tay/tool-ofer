@@ -42,7 +42,7 @@ test('Uplevel Rewards (#reg-container): matchFieldValue correctly matches all sc
   assert.equal(tlMatch, '8145551234');
 });
 
-test('Uplevel Rewards (#reg-container): Name fallback from email when firstname/lastname are missing', () => {
+test('Uplevel Rewards giữ trống họ tên khi hồ sơ chỉ có email chứa dấu chấm', () => {
   const recordWithoutNames = {
     address: '1100 S Ocean Blvd',
     city: 'Palm Beach',
@@ -52,21 +52,20 @@ test('Uplevel Rewards (#reg-container): Name fallback from email when firstname/
     email: 'sarah.lopez1416@gmail.com',
   };
 
-  // Trích xuất tự động từ email sarah.lopez1416@gmail.com
   const fnMatch = matchFieldValue(['First Name', 'firstname', 'fn'], recordWithoutNames, { type: 'text', name: 'firstname', id: 'fn' });
-  assert.equal(fnMatch, 'Sarah', 'Thiếu firstname thì phải tự động trích xuất từ email ra Sarah');
+  assert.equal(fnMatch, null);
 
   const lnMatch = matchFieldValue(['Last Name', 'lastname', 'ln'], recordWithoutNames, { type: 'text', name: 'lastname', id: 'ln' });
-  assert.equal(lnMatch, 'Lopez', 'Thiếu lastname thì phải tự động trích xuất từ email ra Lopez');
+  assert.equal(lnMatch, null);
 });
 
-test('Uplevel Rewards (#reg-container): Name fallback when email has no separators', () => {
+test('Uplevel Rewards giữ trống họ tên khi email chỉ có tên tài khoản', () => {
   const emptyRecord = {
     email: 'user1234@gmail.com',
   };
 
   const fnMatch = matchFieldValue(['First Name', 'firstname', 'fn'], emptyRecord, { type: 'text', name: 'firstname', id: 'fn' });
-  assert.equal(fnMatch, 'User', 'Tự động trích xuất First Name từ username');
+  assert.equal(fnMatch, null);
 
   const lnMatch = matchFieldValue(['Last Name', 'lastname', 'ln'], emptyRecord, { type: 'text', name: 'lastname', id: 'ln' });
   assert.equal(lnMatch, null, 'Không tự tạo họ mẫu khi không suy ra được từ dữ liệu');
