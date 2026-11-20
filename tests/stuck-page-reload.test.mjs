@@ -204,3 +204,31 @@ test('trước F5 chỉ ghi trạng thái địa chỉ, nhóm trường lỗi v�
   assert.match(detail, /nút gửi HTML đang khóa/);
   assert.doesNotMatch(detail, /private|email/);
 });
+
+/**
+ * Kiểm tra trạng thái trước khi tải lại chỉ mô tả nút của form đang chọn.
+ * @param {import('node:test').TestContext} t Quản lý trình duyệt fixture.
+ * @return {Promise<void>} Hoàn tất kiểm tra các dấu thao tác và phạm vi dữ liệu.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+test('watchdog phân biệt nút mới chuẩn bị gửi với click đã ghi nhận trên form không có địa chỉ', {
+  skip: !existsSync(chromium.executablePath()),
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent(`<form id="current">
+    <select required><option>Form riêng</option></select>
+    <input value="private-fixture">
+    <button data-ux-scoped-submit="x" data-ux-last-submit-time="1">Continue</button>
+  </form>
+  <form><input name="phone" required></form>`);
+  const { describeAddressForm } = await import('../src/autofill/stuck-page/describe-address-form.mjs');
+  const prepared = await page.evaluate(describeAddressForm, '#current');
+  assert.match(prepared, /đã chuẩn bị gửi.*chưa ghi nhận click/);
+  assert.doesNotMatch(prepared, /private-fixture|điện thoại|Địa chỉ|Form riêng/);
+  await page.locator('#current button').evaluate(button => { button.dataset.uxSubmitted = '1'; });
+  assert.match(await page.evaluate(describeAddressForm, '#current'), /đã ghi nhận click/);
+  assert.equal(await page.evaluate(describeAddressForm, null), '');
+});

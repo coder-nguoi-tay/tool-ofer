@@ -87,3 +87,127 @@ test('Obscura khớp Chromium về classic/defer/async, callback lỗi và DOMCo
     assert.deepEqual(results[1], results[0], `Khác Chromium tại fixture ${path}`);
   }
 });
+
+/**
+ * Kiểm tra handler do HTML khai báo khi một form cục bộ bọc, gỡ và thay callback.
+ * @param {import('node:test').TestContext} t Quản lý hai trình duyệt dùng cho fixture.
+ * @return {Promise<void>} Cả hai engine cập nhật ô phụ và giữ quyết định từ chối gửi.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+test('handler của form giữ cập nhật và validation khi trang bọc callback đã khai báo', {
+  skip: !existsSync(chromium.executablePath()), timeout: 15000,
+}, async t => {
+  const chrome = await chromium.launch();
+  t.after(() => chrome.close());
+  const obscura = await openObscuraBrowser({ slot: 984, port: 0, registerSession: false });
+  t.after(() => obscura.close());
+  for (const [engine, page] of [['Chromium', await chrome.newPage()], ['Obscura', obscura.page]]) {
+    await page.setContent(`<form onsubmit="return false">
+      <select onchange="this.form.elements.namedItem('summary').value = this.value">
+        <option value="">Choose</option><option value="2">February</option>
+      </select>
+      <input type="hidden" name="summary">
+    </form>`);
+    const result = await page.evaluate(() => {
+      const form = document.querySelector('form');
+      const select = form.querySelector('select');
+      const previousChange = select.onchange;
+      const previousSubmit = form.onsubmit;
+      select.onchange = function (event) { previousChange?.call(this, event); };
+      form.onsubmit = function (event) { return previousSubmit?.call(this, event); };
+      select.value = '2';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const allowed = form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      return { summary: form.elements.namedItem('summary').value, allowed };
+    });
+    assert.deepEqual(result, { summary: '2', allowed: false }, engine);
+
+    const mutations = await page.evaluate(() => {
+      const input = document.createElement('input');
+      const changes = { listener: 0, property: 0 };
+      input.addEventListener('input', () => changes.listener++);
+      input.oninput = () => changes.property++;
+      input.removeAttribute('oninput');
+      input.dispatchEvent(new Event('input'));
+      const source = "this.setAttribute('data-edited', 'yes')";
+      input.setAttribute('oninput', source);
+      const stable = input.oninput === input.oninput && typeof input.oninput === 'function';
+      input.oninput = null;
+      input.dispatchEvent(new Event('input'));
+      const cleared = !input.hasAttribute('data-edited');
+      input.setAttributeNS(null, 'oninput', source);
+      input.dispatchEvent(new Event('input'));
+      const restored = input.getAttribute('data-edited');
+      input.removeAttributeNS(null, 'oninput');
+      return { changes, stable, cleared, restored, removed: input.oninput === null };
+    });
+    assert.deepEqual(mutations, {
+      changes: { listener: 3, property: 1 },
+      stable: true, cleared: true, restored: 'yes', removed: true,
+    }, engine);
+  }
+});
+
+/**
+ * Đối chiếu constraint validation của select bắt buộc trên form cục bộ.
+ * @param {import('node:test').TestContext} t Quản lý trình duyệt kiểm thử.
+ * @return {Promise<void>} Hoàn tất đối chiếu placeholder, lựa chọn và sự kiện invalid.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-21
+ */
+test('select bắt buộc chặn submit khi còn placeholder và cập nhật validity theo lựa chọn', {
+  skip: !existsSync(chromium.executablePath()), timeout: 20000,
+}, async t => {
+  const chrome = await chromium.launch();
+  t.after(() => chrome.close());
+  const obscura = await openObscuraBrowser({ slot: 986, port: 0, registerSession: false });
+  t.after(() => obscura.close());
+  for (const [engine, page] of [['Chromium', await chrome.newPage()], ['Obscura', obscura.page]]) {
+    await page.setContent(`<form id="choice"><button>Save</button></form>
+      <fieldset><select form="choice" required>
+        <option value="" hidden>Month</option><option value="2">February</option><option value="">Other</option>
+      </select></fieldset>`);
+    const result = await page.evaluate(() => {
+      const form = document.querySelector('form');
+      const select = document.querySelector('select');
+      const state = select.validity;
+      let invalid = 0;
+      let submits = 0;
+      select.addEventListener('invalid', event => { if (event.cancelable && !event.bubbles) invalid++; });
+      form.addEventListener('submit', event => { submits++; event.preventDefault(); });
+      form.requestSubmit();
+      const initial = [state.valueMissing, state.valid, form.reportValidity(), invalid, submits];
+      select.parentElement.disabled = true;
+      const disabled = [select.willValidate, form.checkValidity()];
+      select.parentElement.disabled = false;
+      select.value = '2';
+      form.requestSubmit();
+      const selected = [state.valueMissing, form.checkValidity(), submits];
+      select.setCustomValidity('Invalid choice');
+      const custom = form.checkValidity();
+      select.setCustomValidity('');
+      select.selectedIndex = 2;
+      const otherEmpty = state.valid;
+      select.selectedIndex = -1;
+      const unselected = state.valueMissing;
+      select.setAttribute('size', '2');
+      select.selectedIndex = 0;
+      const listBox = state.valueMissing;
+      select.removeAttribute('size');
+      select.setAttribute('multiple', '');
+      const multiple = state.valueMissing;
+      select.removeAttribute('multiple');
+      select.innerHTML = '<optgroup label="Group"><option value="" selected>Empty</option></optgroup>';
+      const grouped = state.valueMissing;
+      const wrapper = document.createElement('span');
+      wrapper.appendChild(select.querySelector('option'));
+      select.replaceChildren(wrapper);
+      return { initial, disabled, selected, custom, otherEmpty, unselected, listBox, multiple, grouped, wrapped: state.valueMissing };
+    });
+    assert.deepEqual(result, {
+      initial: [true, false, false, 2, 0], disabled: [false, true], selected: [false, true, 1],
+      custom: false, otherEmpty: true, unselected: true, listBox: false, multiple: false, grouped: false, wrapped: true,
+    }, engine);
+  }
+});

@@ -3696,6 +3696,17 @@ Object.assign(Node.prototype, {
   DOCUMENT_POSITION_CONTAINED_BY: 16, DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: 32,
 });
 
+/**
+ * Identify form callbacks shared between HTML attributes and event handler properties.
+ * @param {string} name Normalized null-namespace attribute name.
+ * @return {boolean} Whether this event has a reflected form callback.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+function _isFormEventHandler(name) {
+  return name === 'oninput' || name === 'onchange' || name === 'onsubmit';
+}
+
 // HTML elements ASCII-lowercase attribute names (setAttribute('accessKey') is
 // stored as 'accesskey'). The toLowerCase is gated behind a cheap uppercase
 // charCode scan so the all-lowercase common case (href, class, id, data-*)
@@ -4621,6 +4632,7 @@ class Element extends Node {
     const customOldValue = _customElementObserves(this, n) ? this.getAttribute(n) : undefined;
     const value = String(v);
     _dom("set_attribute", this._nid, n + "\0" + value);
+    if (this.__inlineHandlerCache && _isFormEventHandler(n)) delete this.__inlineHandlerCache[n];
     if (detailsWasOpen !== null) _queueDetailsToggle(this, detailsWasOpen);
     if (n === "src" && this.localName === "iframe" && !this.hasAttribute('srcdoc')) {
       this._loadIframeSrc(value || 'about:blank', undefined, true);
@@ -4681,6 +4693,7 @@ class Element extends Node {
     const observedOldValue = _attributeOldValuesWanted() ? this.getAttributeNS(ns, localName) : null;
     const customOldValue = _customElementObserves(this, localName) ? this.getAttributeNS(ns, localName) : undefined;
     _dom("set_attribute_ns", this._nid, ns + "\0" + n + "\0" + value);
+    if (ns === '' && this.__inlineHandlerCache && _isFormEventHandler(n)) delete this.__inlineHandlerCache[n];
     if (detailsWasOpen !== null) _queueDetailsToggle(this, detailsWasOpen);
     if (_hasMutationObservers()) _queueAttributeMutationRecord(this, localName, ns || null, observedOldValue);
     // Namespace-aware writes can replace an attribute by namespace/local name
@@ -4713,6 +4726,7 @@ class Element extends Node {
       : null;
     const observedOldValue = _hasMutationObservers() ? this.getAttribute(n) : null;
     const customOldValue = _customElementObserves(this, n) ? this.getAttribute(n) : null;
+    if (this.__inlineHandlerCache && _isFormEventHandler(n) && this.getAttributeNS(null, n) !== null) delete this.__inlineHandlerCache[n];
     _dom("remove_attribute", this._nid, n);
     if (detailsWasOpen !== null) _queueDetailsToggle(this, detailsWasOpen);
     if (observedOldValue !== null) _queueAttributeMutationRecord(this, n, null, observedOldValue);
@@ -4761,6 +4775,7 @@ class Element extends Node {
     if (ns === '' && (n === 'srcdoc' || n === 'src') && this.localName === 'iframe' && this.getAttributeNS(ns, n) === null) return;
     const observedOldValue = _hasMutationObservers() ? this.getAttributeNS(ns, n) : null;
     const customOldValue = _customElementObserves(this, n) ? this.getAttributeNS(ns, n) : null;
+    if (ns === '' && this.__inlineHandlerCache && _isFormEventHandler(n) && this.getAttributeNS(null, n) !== null) delete this.__inlineHandlerCache[n];
     _dom("remove_attribute_ns", this._nid, ns + "\0" + n);
     if (detailsWasOpen !== null) _queueDetailsToggle(this, detailsWasOpen);
     if (observedOldValue !== null) _queueAttributeMutationRecord(this, n, ns || null, observedOldValue);
@@ -4899,6 +4914,13 @@ class Element extends Node {
   dispatchEvent(event) {
     return _domEventDispatch(this, event);
   }
+  /**
+   * Read the effective event handler and lazily compile authored inline code.
+   * @param {string} name Event handler attribute such as onchange.
+   * @return {Function|object|null} The assigned callback, compiled handler, or null.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-20
+   */
   _resolveInlineHandler(name) {
     if (!_scriptingEnabled) return null;
     // name = 'onclick' / 'onsubmit' / etc. Compile the content attribute
@@ -4906,7 +4928,7 @@ class Element extends Node {
     const cache = this.__inlineHandlerCache || (this.__inlineHandlerCache = {});
     if (Object.prototype.hasOwnProperty.call(cache, name)) return cache[name];
     const src = this.getAttribute && this.getAttribute(name);
-    if (!src) { cache[name] = null; return null; }
+    if (src == null || (src === '' && !_isFormEventHandler(name))) { cache[name] = null; return null; }
     try {
       cache[name] = new Function('event', src);
     } catch (e) {
@@ -5779,6 +5801,7 @@ class Element extends Node {
   submit(submitter) {
     this._navigateSubmit(submitter);
   }
+  /** Run interactive form validation before dispatching submit. @param {Element|null} submitter Optional submit button. @return {void} @throws {Error} Invalid submit button or ownership. @author ductv <ductv@getflycrm.com> @since 2026-11-21 */
   requestSubmit(submitter) {
     // Per spec, a given submitter must be a submit button owned by this form;
     // both checks run before the submit event fires. A missing/null submitter
@@ -5796,6 +5819,7 @@ class Element extends Node {
         );
       }
     }
+    if (!this.hasAttribute('novalidate') && !submitter?.hasAttribute('formnovalidate') && !_checkControlConstraints(this)) return;
     const cancelled = !this.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     if (cancelled) return;
     this._navigateSubmit(submitter);
@@ -8385,7 +8409,19 @@ for (const _ev of [
   const _on = "on" + _ev;
   if (!(_on in globalThis)) globalThis[_on] = null;
   for (const _proto of [Document.prototype, Element.prototype]) {
-    if (!(_on in _proto)) {
+    if (_on in _proto) continue;
+    if (_proto === Element.prototype && _isFormEventHandler(_on)) {
+      Object.defineProperty(_proto, _on, {
+        /** Read the callback used by dispatch. @return {Function|object|null} Current handler. @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
+        get() { return this._resolveInlineHandler(_on); },
+        /** Replace or clear the callback. @param {*} callback IDL value. @return {void} @author ductv <ductv@getflycrm.com> @since 2026-11-20 */
+        set(callback) {
+          const cache = this.__inlineHandlerCache || (this.__inlineHandlerCache = {});
+          cache[_on] = typeof callback === 'function' || typeof callback === 'object' ? callback : null;
+        },
+        configurable: true,
+      });
+    } else {
       Object.defineProperty(_proto, _on, { value: null, writable: true, configurable: true, enumerable: false });
     }
   }
@@ -21142,6 +21178,42 @@ if (!Element.prototype.removeAttributeNode) {
 
 // ---- form control validity and text selection ----
 
+const _validitySelect = new WeakMap();
+
+/**
+ * Check the required select against its native selectedness and placeholder.
+ * @param {Element} select Owning HTML select.
+ * @return {boolean} Whether a selection required by this control is missing.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-21
+ */
+function _selectValueMissing(select) {
+  if (!select.hasAttribute('required')) return false;
+  const index = select.selectedIndex;
+  if (index < 0) return true;
+  if (index !== 0 || select.hasAttribute('multiple') || parseInt(select.getAttribute('size'), 10) > 1) return false;
+  const first = select.options[0];
+  return !!first && first.value === '' && first.closest('optgroup, select') === select;
+}
+
+/**
+ * Validate the select or the selected form's owned controls, notifying each invalid select.
+ * @param {Element} element Control or form being validated.
+ * @return {boolean} Whether all participating controls pass their implemented constraints.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-21
+ */
+function _checkControlConstraints(element) {
+  const controls = element.localName === 'form' ? _formControls(element) : [element];
+  let valid = true;
+  for (const control of controls) {
+    if (control.localName !== 'select' || !control.willValidate || control.validity.valid) continue;
+    valid = false;
+    control.dispatchEvent(new Event('invalid', { cancelable: true }));
+  }
+  return valid;
+}
+
 // ValidityState class for form validation state reporting
 if (typeof ValidityState === 'undefined') {
   globalThis.ValidityState = class ValidityState {
@@ -21155,9 +21227,14 @@ if (typeof ValidityState === 'undefined') {
       this.tooLong = false;
       this.tooShort = false;
       this.typeMismatch = false;
-      this.valueMissing = false;
-      this.valid = true;
     }
+    /** Read live required state. @return {boolean} Whether the selection is missing. @author ductv <ductv@getflycrm.com> @since 2026-11-21 */
+    get valueMissing() {
+      const select = _validitySelect.get(this);
+      return select ? _selectValueMissing(select) : false;
+    }
+    /** Read combined constraints. @return {boolean} Whether the control is valid. @author ductv <ductv@getflycrm.com> @since 2026-11-21 */
+    get valid() { return !this.customError && !this.valueMissing; }
   };
 }
 
@@ -21170,7 +21247,9 @@ if (!Element.prototype.validity) {
   Object.defineProperty(Element.prototype, 'validity', {
     get: function() {
       if (!_ns_validityCache.has(this)) {
-        _ns_validityCache.set(this, new ValidityState());
+        const state = new ValidityState();
+        if (this.localName === 'select') _validitySelect.set(state, this);
+        _ns_validityCache.set(this, state);
       }
       return _ns_validityCache.get(this);
     },
@@ -21183,7 +21262,7 @@ if (!Element.prototype.validity) {
 if (!Element.prototype.willValidate) {
   Object.defineProperty(Element.prototype, 'willValidate', {
     get: function() {
-      return true;
+      return this.localName !== 'select' || (!_isActuallyDisabled(this) && !this.closest('datalist'));
     },
     enumerable: true,
     configurable: true
@@ -21194,25 +21273,28 @@ if (!Element.prototype.willValidate) {
 if (!Element.prototype.validationMessage) {
   Object.defineProperty(Element.prototype, 'validationMessage', {
     get: function() {
-      return _ns_customValidityMsg.get(this) || '';
+      if (this.localName === 'select' && !this.willValidate) return '';
+      return _ns_customValidityMsg.get(this) || (this.localName === 'select' && this.validity.valueMissing ? 'Please select an item in the list.' : '');
     },
     enumerable: true,
     configurable: true
   });
 }
 
-// Element.prototype.checkValidity - stub returns true
+// Validate all owned selects, including controls associated through the form attribute.
 if (!Element.prototype.checkValidity) {
+  /** Validate constraints and fire invalid events. @return {boolean} Validation result. @author ductv <ductv@getflycrm.com> @since 2026-11-21 */
   Element.prototype.checkValidity = function checkValidity() {
-    return true;
+    return _checkControlConstraints(this);
   };
   _markNative(Element.prototype.checkValidity);
 }
 
-// Element.prototype.reportValidity - stub returns true
+// Validate all owned selects, including controls associated through the form attribute.
 if (!Element.prototype.reportValidity) {
+  /** Validate constraints and fire invalid events. @return {boolean} Validation result. @author ductv <ductv@getflycrm.com> @since 2026-11-21 */
   Element.prototype.reportValidity = function reportValidity() {
-    return true;
+    return _checkControlConstraints(this);
   };
   _markNative(Element.prototype.reportValidity);
 }
@@ -21224,11 +21306,9 @@ if (!Element.prototype.setCustomValidity) {
     if (msg && msg.length > 0) {
       _ns_customValidityMsg.set(this, msg);
       validity.customError = true;
-      validity.valid = false;
     } else {
       _ns_customValidityMsg.delete(this);
       validity.customError = false;
-      validity.valid = true;
     }
   };
   _markNative(Element.prototype.setCustomValidity);
