@@ -2178,11 +2178,11 @@ impl Page {
         self.fetch_stylesheets_until(tokio::time::Instant::now() + std::time::Duration::from_secs(30)).await
     }
 
-    /// Giu CSS da tai khi request khac qua han; khong ap dung body cua HTTP loi.
+    /// Giữ các stylesheet tải thành công và phân biệt request bị giới hạn, bị chặn và hết hạn.
     /// @param deadline Han chung cho tat ca cac tang import.
     /// @return Cac stylesheet thanh cong, giu nguyen thu tu cascade.
     /// @author ductv <ductv@getflycrm.com>
-    /// @since 2026-11-19
+    /// @since 2026-11-20
     async fn fetch_stylesheets_until(&mut self, deadline: tokio::time::Instant) -> Vec<(AuthorStylesheetTarget, String, bool, String)> {
         let (all_links, inline_imports) = match &self.js {
             Some(js) => js
@@ -2214,54 +2214,29 @@ impl Page {
         let mut roots = Vec::new();
         let mut scheduled = std::collections::HashSet::new();
         let mut pending = Vec::new();
-        for (link_index, href) in all_links {
-            let Ok(resolved) = document_base.join(&href) else {
-                continue;
-            };
+        let mut completed_requests = std::collections::HashSet::new();
+        let linked = all_links.into_iter().map(|(index, href)| (AuthorStylesheetTarget::Linked(index), href, None, 0u8));
+        let inline = inline_imports.into_iter().map(|(index, import)| (AuthorStylesheetTarget::InlineImport(index), import.url, import.media, 1u8));
+        for (target, href, media, depth) in linked.chain(inline) {
+            let Ok(resolved) = document_base.join(&href) else { continue };
             let (key, resolved) = canonical_stylesheet_url(resolved);
-            if !subresource_allowed(Some(&document_url), resolved.as_str()) {
-                tracing::warn!(
-                    "blocking cross-scheme <link rel=stylesheet href>: page={} href={}",
-                    self.url_string(),
-                    resolved,
-                );
+            if !subresource_allowed(Some(&document_url), resolved.as_str()) || self.should_block_url(resolved.as_str()) {
+                self.record_subresource_failure(&key, "Stylesheet", "Stylesheet request blocked");
                 continue;
             }
-            if self.should_block_url(resolved.as_str()) {
-                tracing::info!("Blocked stylesheet by interception: {}", resolved);
-                continue;
-            }
-            roots.push((AuthorStylesheetTarget::Linked(link_index), key.clone(), None));
+            roots.push((target, key.clone(), media));
             if scheduled.insert(key.clone()) {
                 if scheduled.len() <= MAX_STYLESHEET_RESOURCES {
-                    pending.push((key, resolved, 0u8));
+                    pending.push((key, resolved, depth));
+                } else {
+                    self.record_subresource_failure(&key, "Stylesheet", "Stylesheet resource limit reached");
+                    completed_requests.insert(key);
                 }
-            }
-        }
-        for (style_index, import) in inline_imports {
-            let Ok(resolved) = document_base.join(&import.url) else {
-                continue;
-            };
-            let (key, resolved) = canonical_stylesheet_url(resolved);
-            if !subresource_allowed(Some(&document_url), resolved.as_str())
-                || self.should_block_url(resolved.as_str())
-            {
-                tracing::info!("Blocked inline stylesheet import: {}", resolved);
-                continue;
-            }
-            roots.push((
-                AuthorStylesheetTarget::InlineImport(style_index),
-                key.clone(),
-                import.media,
-            ));
-            if scheduled.insert(key.clone()) && scheduled.len() <= MAX_STYLESHEET_RESOURCES {
-                pending.push((key, resolved, 1u8));
             }
         }
 
         let mut sheets = std::collections::HashMap::new();
         let mut aliases = std::collections::HashMap::new();
-        let mut completed_requests = std::collections::HashSet::new();
         while !pending.is_empty() && tokio::time::Instant::now() < deadline {
             let batch = std::mem::take(&mut pending);
             let client = self.http_client.clone();

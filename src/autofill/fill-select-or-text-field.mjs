@@ -1,3 +1,4 @@
+import { getRecordPhoneMask } from './record-values/resolve-record-phone.mjs';
 import { resolveContactField } from './resolve-contact-field.mjs';
 import { reportSelectMismatch } from './report-select-mismatch.mjs';
 import { shouldStopAfterLead } from './should-stop-after-lead.mjs';
@@ -158,13 +159,14 @@ export async function fillSelectOrTextField({
     // Nếu giá trị không còn khớp: gõ lại tối đa 2 lần; lần cuối dùng fill() khẩn.
     {
       let expectVal = String(valueToFill);
+      const exactPhoneFormat = contact === 'phone' && Boolean(getRecordPhoneMask(metadata.pattern));
       // Ô số điện thoại/zip: chỉ giữ chữ số, đúng maxlength nếu trang giới hạn
-      if (/^phone/.test(contact) || contact === 'zipcode' || !contact && metadata.type === 'tel' && /^[\d ()+.\-]+$/.test(expectVal)) {
+      if (!exactPhoneFormat && (/^phone/.test(contact) || contact === 'zipcode' || !contact && metadata.type === 'tel' && /^[\d ()+.\-]+$/.test(expectVal))) {
         const maxLen = Number(metadata.maxLength) > 0 ? metadata.maxLength : expectVal.length;
         expectVal = expectVal.replace(/\D/g, '').slice(0, maxLen);
       }
       // Ô có mask (814-362-6091, (814) 362-6091) hiển thị khác chuỗi đã gõ: ô số thì so theo chữ số.
-      const digitsOnly = /^phone/.test(contact) || /^\d+$/.test(expectVal);
+      const digitsOnly = !exactPhoneFormat && (/^phone/.test(contact) || /^\d+$/.test(expectVal));
       const sameValue = current => current.trim() === expectVal.trim() || (digitsOnly && current.replace(/\D/g, '') === expectVal.replace(/\D/g, ''));
       let okTyped = false;
       // 3 lần gõ lại + 1 lần kiểm tra cuối: trước đây lần fill() thứ 3 không được kiểm tra lại, nên ô đã đúng

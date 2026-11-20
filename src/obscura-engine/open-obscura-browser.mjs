@@ -1,6 +1,7 @@
 import { pendingObscuraSessions } from './sessions.mjs';
 import { chromium } from 'playwright';
 import { createFreshObscuraProfile } from './create-fresh-profile.mjs';
+import { attachStylesheetDiagnostics } from './attach-stylesheet-diagnostics.mjs';
 import { startObscuraSession } from './start-obscura-session.mjs';
 import { stopObscuraSession } from './stop-obscura-session.mjs';
 import { findFreePort } from './find-free-port.mjs';
@@ -132,7 +133,7 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
        */
       updateBadge(text) { session.badgeText = text; },
       /**
-       * Gắn thiết bị và listener vào mỗi context đúng một lần, kể cả sau reconnect.
+       * Gắn thiết bị, listener và chẩn đoán CSS tùy chọn vào mỗi context, kể cả sau reconnect.
        * @param {object} currentContext BrowserContext đang điều khiển.
        * @return {Promise<void>} Context đã có script và header trước điều hướng.
        * @throws {Error} Khi CDP không áp được cấu hình thiết bị.
@@ -173,6 +174,7 @@ export async function openObscuraBrowser({ slot = 1, port = null, seed = null, o
           if (!closing && session._cdpBrowser.isConnected()) void session.close();
         }, 0); });
         configuredContexts.add(currentContext);
+        attachStylesheetDiagnostics(currentContext, slot);
       },
       /**
        * Đóng process thật trước khi nhả IP/proxy; mọi caller chờ cùng một lần dọn.

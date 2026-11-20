@@ -79,6 +79,7 @@ export function collectFieldMetadata(element) {
     ariaLabelledByText,
     placeholder,
     ariaLabel,
+    pattern: element.getAttribute('pattern') || '',
     autocomplete: element.getAttribute('autocomplete') || '',
     classes: `${element.className || ''} ${container ? container.className || '' : ''}`,
     dataAttributes,

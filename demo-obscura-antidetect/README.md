@@ -135,3 +135,11 @@ tail -F /tmp/autoleadpc-2.log | rg --line-buffered -F '[ObscuraInput]'
 Ghép hai dòng `begin` và `end` bằng cùng `pid` và `seq`. Dòng đầu ghi slot, tab và lệnh trước khi dispatcher đợi khóa V8. Dòng cuối ghi frame, kết quả xử lý, thời gian đợi vào handler (`wait_ms`) và thời gian chạy handler (`run_ms`). `checked` và `unchecked` cho biết trạng thái của ô native vừa được bấm trực tiếp. `cancelled` nghĩa là trang đã hủy sự kiện click. `label_activated` ghi nhận việc chuyển kích hoạt qua nhãn. `touch_unhandled` cho biết engine đã nhận lệnh chạm nhưng chưa phát sự kiện DOM. Việc trang đổi câu hỏi hoặc nhận dữ liệu trên server cần bằng chứng riêng.
 
 Mỗi engine ghi tối đa 60 lệnh nhấn/thả trong mỗi cửa sổ 60 giây và báo `rate_limited` một lần khi vượt ngưỡng. Log chỉ chứa mã số, trạng thái và thời gian. Có thể tắt cho các engine mở sau bằng `AUTOLEADPC_OBSCURA_INPUT_LOG=0` trong môi trường launcher. Khi chạy binary độc lập, đặt biến này bằng `1` để bật.
+
+## Chẩn đoán stylesheet trên Obscura
+
+Đặt `AUTOLEADPC_CSS_DEBUG=1` khi khởi động AutoLeadPC để theo dõi các tab Obscura mở trong phiên đó. Với app macOS instance 2, đọc log bằng `tail -F /tmp/autoleadpc-2.log | grep -F '[CSS]'`.
+
+Mỗi dòng ghi slot và số tab. `event=response` ghi mã HTTP và nhóm MIME. `unexpected_mime` cho biết máy chủ trả kiểu khác `text/css`. `event=failed` ghi lý do request thất bại mà trình duyệt cung cấp. `asset` là mã băm của origin và đường dẫn, bỏ query và fragment. Đối chiếu mã này trong cùng phiên để theo dõi một tài nguyên.
+
+Sau khi trang tải hoặc khi có phản hồi CSS, `event=dom_snapshot` đếm các thẻ link có stylesheet, đang tắt hoặc không khớp media, và đang thiếu stylesheet tại thời điểm lấy mẫu. Một stylesheet có mặt vẫn có thể chứa selector không khớp phần tử. Các sự kiện sát nhau dùng chung một lượt đọc, tối đa 10 frame mỗi lượt và 60 dòng chi tiết mỗi phút cho mỗi tab, trong đó tối đa 10 phản hồi thành công thông thường.

@@ -670,8 +670,8 @@ assert.equal(matchFieldValue(['phone', 'tel'], fallbackAutofillRecord), fallback
 
 // Test matchFieldValue với record rỗng phải trả null (không bịa phone từ bên ngoài)
 const matchedEmptyPhone = matchFieldValue(['phone', 'tel'], {});
-assert.ok(/^(814|817)\d{7}$/.test(matchedEmptyPhone), 'matchFieldValue cho record rỗng phải trả về 10 số đầu 814/817');
-assert.ok(['814', '817'].includes(matchFieldValue(['areacode', 'phone1'], {})), 'matchFieldValue areacode cho record rỗng phải là 814 hoặc 817');
+assert.equal(matchedEmptyPhone, null, 'Chỉ điền điện thoại có trong hồ sơ được gán');
+assert.equal(matchFieldValue(['areacode', 'phone1'], {}), null, 'Hồ sơ thiếu số thì để trống ô mã vùng');
 
 // Test humanType mô phỏng gõ phím tuần tự có độ trễ từng ký tự (chống bị phát hiện bot autofill)
 const typedChars = [];
@@ -2147,7 +2147,7 @@ assert.equal(matchFieldValue(['height_inches'], {}), null, 'Height inches không
 assert.equal(matchFieldValue(['custom_unknown_number'], {}, { required: true, type: 'number' }), null, 'Thiếu dữ liệu của ô số bắt buộc phải giữ chưa hoàn tất');
 assert.equal(matchFieldValue(['custom_unknown_text'], {}, { required: true, type: 'text' }), null, 'Ô text bắt buộc không có trong dữ liệu -> để trống, không bịa giá trị');
 assert.equal(matchFieldValue(['custom_comments'], {}, { required: true, kind: 'textarea' }), null, 'Không tự viết nội dung mẫu vào textarea khi thiếu record');
-assert.ok(matchFieldValue(['required_tel_field'], {}, { required: true, type: 'tel' }).replace(/\D/g, '').length >= 10, 'Ô tel bắt buộc phải có số điện thoại');
+assert.equal(matchFieldValue(['required_tel_field'], {}, { required: true, type: 'tel' }), null, 'Ô tel bắt buộc chỉ nhận số từ hồ sơ');
 assert.equal(matchFieldValue(['required_email_field'], {}, { required: true, type: 'email' }), null, 'Ô email bắt buộc nhưng không có email trong danh sách: để trống, không tự sinh');
 
 // 15. Kiểm tra findSubmitButton nhận diện các biến thể nút submit mới (Check Eligibility, Complete)

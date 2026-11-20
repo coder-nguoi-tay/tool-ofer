@@ -630,6 +630,14 @@ function _cssImportApplies(media) {
   return true;
 }
 
+/**
+ * Assemble a linked stylesheet and its available imports in cascade order.
+ * @param {string} url Requested sheet. @param {string} pageOrigin Origin of the document.
+ * @param {number} depth Import depth. @param {Set<string>} seen Ancestors on this import path.
+ * @return {Promise<object>} Materialized CSS, final URL, origin cleanliness and import error state.
+ * @throws {Error} When the requested sheet itself fails to load.
+ * @author ductv <ductv@getflycrm.com> @since 2026-11-20
+ */
 async function _fetchLinkedCss(url, pageOrigin, depth = 0, seen = new Set()) {
   if (depth > 4 || seen.has(url)) {
     return { css: "", responseUrl: url, originClean: true };
@@ -642,6 +650,8 @@ async function _fetchLinkedCss(url, pageOrigin, depth = 0, seen = new Set()) {
   if (parsed.blocked || parsed.status >= 400 || parsed.status === 0) {
     throw new Error("Stylesheet fetch failed: " + url);
   }
+  const responseUrl = parsed.url || url;
+  seen.add(responseUrl);
   let css = parsed.body || "";
   const imports = [];
   // @import is only valid before ordinary rules. Removing it here lets the
@@ -652,16 +662,17 @@ async function _fetchLinkedCss(url, pageOrigin, depth = 0, seen = new Set()) {
       const target = doubleQuoted || singleQuoted || bare || "";
       if (_cssImportApplies(media || "")) {
         try {
-          imports.push(new URL(target, url).href);
+          imports.push(new URL(target, responseUrl).href);
         } catch(e) {}
       }
       return "";
     }
   );
-  const imported = await Promise.all(imports.map(importUrl =>
+  const outcomes = await Promise.allSettled(imports.map(importUrl =>
     _fetchLinkedCss(importUrl, pageOrigin, depth + 1, new Set(seen))
   ));
-  const responseUrl = parsed.url || url;
+  const imported = outcomes.filter(outcome => outcome.status === 'fulfilled').map(outcome => outcome.value);
+  const importFailed = imported.length !== outcomes.length || imported.some(sheet => sheet.importFailed);
   const parts = imported.map(result => result.css).filter(Boolean);
   parts.push(_rebaseCssUrls(css, responseUrl));
   let ownOriginClean = false;
@@ -670,6 +681,7 @@ async function _fetchLinkedCss(url, pageOrigin, depth = 0, seen = new Set()) {
     css: parts.filter(Boolean).join("\n"),
     responseUrl,
     originClean: ownOriginClean && imported.every(result => result.originClean),
+    importFailed,
   };
 }
 
@@ -677,6 +689,12 @@ async function _fetchLinkedCss(url, pageOrigin, depth = 0, seen = new Set()) {
 // live cascade, and then fire load. Framework route chunks commonly await this
 // event before revealing their content; firing it while discarding the CSS
 // left the DOM loaded but unstyled. Issue #409.
+/**
+ * Install a dynamic stylesheet before notifying its owning link of the load outcome.
+ * @param {Element} c Owner link in this realm. @return {Promise<void>} Settles after registration.
+ * @throws {never} Network failures dispatch an error event on the link.
+ * @author ductv <ductv@getflycrm.com> @since 2026-11-20
+ */
 async function _loadLinkedStylesheet(c) {
   // Read rel from both attribute and property to handle dynamic element creation.
   const rel = (c.getAttribute('rel') || c.rel || '').toString().toLowerCase();
@@ -707,7 +725,7 @@ async function _loadLinkedStylesheet(c) {
     _registerLinkedStylesheet(c, loaded.responseUrl);
     c._obscura_loaded_url = fullUrl;
     delete c._obscura_loading_url;
-    try { c.dispatchEvent(new Event('load', { bubbles: true })); } catch(e) {}
+    try { c.dispatchEvent(new Event(loaded.importFailed ? 'error' : 'load', { bubbles: true })); } catch(e) {}
   } catch(e) {
     delete c._obscura_loading_url;
     try { c.dispatchEvent(new Event('error', { bubbles: true })); } catch(e) {}
