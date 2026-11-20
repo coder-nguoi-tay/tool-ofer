@@ -256,6 +256,7 @@ fn refuse_control_connection(mut stream: std::net::TcpStream, refusal: ControlRe
 use crate::types::CdpRequest;
 
 struct CdpMessage {
+    timing: Option<crate::screen_perf::CommandTiming>,
     text: String,
     reply_tx: mpsc::UnboundedSender<String>,
 }
@@ -1336,6 +1337,10 @@ fn websocket_authority(request_head: &str, port: u16) -> String {
 /// per-thread, so two connections' isolates can never collide. All processors
 /// own isolated `BrowserContext` (cookie jar and HTTP client). Cookie deltas are
 /// merged into the persistence template when the connection thread exits.
+/// @param rx Commands and their optional Screen View arrival times.
+/// @param default_context Initial browser context. @param shutdown_notify Worker shutdown signal.
+/// @return Completes after the connection stops.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 async fn cdp_processor(
     mut rx: mpsc::UnboundedReceiver<ServerMessage>,
     default_context: Arc<obscura_browser::BrowserContext>,
@@ -1535,6 +1540,12 @@ async fn cdp_processor(
                 // as soon as the nav settles.
                 let is_navigation = is_navigate_method(&cdp_msg.text);
 
+                let processing = cdp_msg.timing.map(|timing| {
+                    let start = std::time::Instant::now();
+                    crate::screen_perf::log!("[ObscuraPerf] begin op={} conn={} id={} queue_ms={} tabs={} deferred={}",
+                        timing.method, ctx.perf_connection, timing.id, (start - timing.received).as_millis(), ctx.pages.len(), deferred.len());
+                    (timing, start)
+                });
                 if is_navigation {
                     process_with_interception(
                         &cdp_msg.text, &mut ctx, &cdp_msg.reply_tx, &mut rx,
@@ -1551,6 +1562,10 @@ async fn cdp_processor(
                     if !fetch_was_resolved {
                         process_cdp_message_with_pending(&cdp_msg.text, &mut ctx, &cdp_msg.reply_tx, Some(&mut pending_runtime)).await;
                     }
+                }
+                if let Some((timing, start)) = processing {
+                    crate::screen_perf::log!("[ObscuraPerf] end op={} conn={} id={} run_ms={}",
+                        timing.method, ctx.perf_connection, timing.id, start.elapsed().as_millis());
                 }
             }
         }
@@ -2053,6 +2068,11 @@ fn handle_fetch_resolution(
     false
 }
 
+/// @param text Navigation envelope. @param ctx Connection state. @param reply_tx Event and reply transport.
+/// @param rx Incoming commands. @param intercept_rx Network events. @param intercepted_paused Pending requests.
+/// @param deferred Commands waiting for navigation. @param send_command_response Whether a client is awaiting a reply.
+/// @return Completes after the navigation result and its events are queued.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 async fn process_with_interception(
     text: &str,
     ctx: &mut CdpContext,
@@ -2107,6 +2127,7 @@ async fn process_with_interception(
     // therefore no longer needed and would strand concurrent pages.
 
     let is_reload = req.method == "Page.reload";
+    let nav_start = crate::screen_perf::enabled().then(std::time::Instant::now);
     let url_owned = if is_reload {
         page.url_string()
     } else {
@@ -2271,6 +2292,10 @@ async fn process_with_interception(
                             // it's processed sequentially with no nav task
                             // in flight.
                             if deferred.len() >= MAX_DEFERRED_MESSAGES {
+                                if let Some(timing) = msg.timing {
+                                    crate::screen_perf::log!("[ObscuraPerf] queue_full op={} conn={} id={} deferred={}",
+                                        timing.method, ctx.perf_connection, timing.id, deferred.len());
+                                }
                                 tracing::warn!("INTERCEPTION: deferred queue full ({}), returning error to client", MAX_DEFERRED_MESSAGES);
                                 if let Ok(req) = serde_json::from_str::<CdpRequest>(&msg.text) {
                                     let resp = crate::types::CdpResponse::error(
@@ -2285,6 +2310,10 @@ async fn process_with_interception(
                                 }
                             } else {
                                 tracing::info!("INTERCEPTION: deferring CDP message until nav completes");
+                                if let Some(timing) = msg.timing {
+                                    crate::screen_perf::log!("[ObscuraPerf] navigation_wait op={} conn={} id={} deferred={} loading_tab={}",
+                                        timing.method, ctx.perf_connection, timing.id, deferred.len() + 1, crate::screen_perf::tab(&page_id));
+                                }
                                 deferred.push_back(ServerMessage::Cdp(msg));
                             }
                         }
@@ -2321,6 +2350,15 @@ async fn process_with_interception(
         && !network_events.iter().any(|event| event.request_id == loader_id && event.resource_type == "Document") {
         Some(loader_id.clone())
     } else { None };
+    if let Some(start) = nav_start {
+        let status = network_events.iter().rev()
+            .find(|event| event.child_frame_id.is_none() && event.resource_type == "Document")
+            .map_or(0, |event| event.status);
+        crate::screen_perf::log!("[ObscuraPerf] navigation_end id={} conn={} tab={} elapsed_ms={} committed={} cancelled={} failed={} requested_post={} http_status={}",
+            req.id, ctx.perf_connection, crate::screen_perf::tab(&page_id), start.elapsed().as_millis(), u8::from(committed),
+            u8::from(cancelled), u8::from(navigate_result.is_err()),
+            u8::from(navigation_method.eq_ignore_ascii_case("post")), status);
+    }
     let navigation_error = navigate_result.as_ref().err().cloned();
     let page_url = page.url_string();
     loader_id = network_events.iter().rev().find(|event| event.resource_type == "Document" && event.url == page_url
@@ -2516,6 +2554,9 @@ fn fast_path_response(text: &str) -> Option<String> {
     }
 }
 
+/// @param stream Accepted connection. @param msg_tx Renderer command queue.
+/// @return Ends on WebSocket disconnect. @throws anyhow::Error on handshake failure.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 async fn handle_connection_ws(
     stream: TcpStream,
     msg_tx: mpsc::UnboundedSender<ServerMessage>,
@@ -2578,6 +2619,7 @@ async fn handle_connection_ws(
                     let _ = reply_tx.send(resp);
                 } else {
                     let _ = msg_tx.send(ServerMessage::Cdp(CdpMessage {
+                        timing: crate::screen_perf::command(&text),
                         text: text.to_string(),
                         reply_tx: reply_tx.clone(),
                     }));
@@ -3324,6 +3366,7 @@ mod tests {
                 let send = |value: serde_json::Value| {
                     server_tx
                         .send(super::ServerMessage::Cdp(super::CdpMessage {
+                            timing: None,
                             text: value.to_string(),
                             reply_tx: reply_tx.clone(),
                         }))
@@ -3460,6 +3503,7 @@ mod tests {
                 let send = |value: serde_json::Value| {
                     server_tx
                         .send(super::ServerMessage::Cdp(super::CdpMessage {
+                            timing: None,
                             text: value.to_string(),
                             reply_tx: reply_tx.clone(),
                         }))
@@ -3649,6 +3693,7 @@ mod tests {
             reply_rx.recv().await.unwrap();
             let send = |value: Value| {
                 server_tx.send(super::ServerMessage::Cdp(super::CdpMessage {
+                    timing: None,
                     text: value.to_string(), reply_tx: reply_tx.clone(),
                 })).unwrap();
             };
@@ -3744,6 +3789,7 @@ mod tests {
             reply_rx.recv().await.unwrap();
             let send = |value: Value| {
                 server_tx.send(ServerMessage::Cdp(CdpMessage {
+                    timing: None,
                     text: value.to_string(), reply_tx: reply_tx.clone(),
                 })).unwrap();
             };
@@ -3836,6 +3882,7 @@ mod tests {
             reply_rx.recv().await.unwrap();
             let send = |value: Value| {
                 server_tx.send(ServerMessage::Cdp(CdpMessage {
+                    timing: None,
                     text: value.to_string(), reply_tx: reply_tx.clone(),
                 })).unwrap();
             };
@@ -3928,6 +3975,7 @@ mod tests {
             reply_rx.recv().await.unwrap();
             let send = |value: Value| {
                 server_tx.send(super::ServerMessage::Cdp(super::CdpMessage {
+                    timing: None,
                     text: value.to_string(), reply_tx: reply_tx.clone(),
                 })).unwrap();
             };
@@ -4123,6 +4171,7 @@ mod tests {
             }
             let send = |value: serde_json::Value| {
                 server_tx.send(ServerMessage::Cdp(CdpMessage {
+                    timing: None,
                     text: value.to_string(), reply_tx: reply_tx.clone(),
                 })).unwrap();
             };
@@ -4260,6 +4309,7 @@ mod tests {
                 .await.expect("fixture request").unwrap();
             for (id, session) in [(2, "other-session"), (3, "raw-session")] {
                 server_tx.send(ServerMessage::Cdp(CdpMessage {
+                    timing: None,
                     text: json!({"id": id, "method": if id == 2 { "Page.stopLoading" } else { method },
                         "sessionId": session, "params": {"targetId": page_id}}).to_string(),
                     reply_tx: reply_tx.clone(),
@@ -4351,6 +4401,7 @@ mod tests {
                                     "<script>location.reload()</script>"
                                 } else { "<title>Finished</title>" };
                                 server_tx.send(super::ServerMessage::Cdp(super::CdpMessage {
+                                    timing: None,
                                     text: json!({"id": pauses + 1, "method": method, "sessionId": session,
                                         "params": {"requestId": request_id, "errorReason": "Aborted", "responseCode": 200,
                                             "responseHeaders": [{"name": "Content-Type", "value": "text/html"}],
@@ -4443,6 +4494,7 @@ mod tests {
                     if event["method"] == "Fetch.requestPaused" {
                         network_id = Some(event["params"]["networkId"].clone());
                         server_tx.send(super::ServerMessage::Cdp(super::CdpMessage {
+                            timing: None,
                             text: json!({"id": 2, "method": "Page.stopLoading", "sessionId": session}).to_string(),
                             reply_tx: reply_tx.clone(),
                         })).unwrap();

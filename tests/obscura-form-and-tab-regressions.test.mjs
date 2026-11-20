@@ -211,3 +211,54 @@ for (const logging of ['default', 'off']) {
     assert.equal(lines.some(line => /private-fixture|data:text|mouseMoved/.test(line)), false);
   });
 }
+
+test('log core cho biết lệnh gắn tab nào đang chờ điều hướng, chỉ chứa số đo', { skip: !available, timeout: 12000 }, async t => {
+  const previous = process.env.AUTOLEADPC_OBSCURA_PERF;
+  process.env.AUTOLEADPC_OBSCURA_PERF = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.AUTOLEADPC_OBSCURA_PERF;
+    else process.env.AUTOLEADPC_OBSCURA_PERF = previous;
+  });
+  const lines = [];
+  let notifyDeferred, notifySlowRequest;
+  const deferred = new Promise(resolve => { notifyDeferred = resolve; });
+  const slowRequest = new Promise(resolve => { notifySlowRequest = resolve; });
+  t.mock.method(console, 'info', line => {
+    if (!String(line).includes('[ObscuraPerf]')) return;
+    lines.push(line);
+    if (line.includes('navigation_wait op=attach')) notifyDeferred();
+  });
+  const server = http.createServer((request, response) => {
+    if (request.url.startsWith('/slow')) notifySlowRequest(response);
+    else response.end('<title>Local tab</title>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+  const session = await openObscuraBrowser({ slot: 984, port: 0, registerSession: false });
+  t.after(() => session.close());
+  const url = 'http://127.0.0.1:' + server.address().port;
+  await session.page.goto(url);
+  const child = await session.browser.newPage();
+  await child.goto(url);
+  const navigation = session.page.goto(url + '/slow?fixture-private-marker');
+  const slowResponse = await slowRequest;
+  const attach = session.browser.newCDPSession(child);
+  // Unblock the fixture even if the expected diagnostic regresses.
+  const timeout = setTimeout(() => slowResponse.end('fixture'), 1500);
+  try {
+    await Promise.race([deferred, navigation]);
+  } finally {
+    clearTimeout(timeout);
+    if (!slowResponse.writableEnded) { slowResponse.writeHead(422); slowResponse.end('fixture'); }
+  }
+  const cdp = await attach;
+  await navigation;
+  await cdp.send('Page.startScreencast', { format: 'jpeg' });
+  await cdp.send('Page.stopScreencast');
+  await cdp.detach();
+  await session.close();
+  assert.ok(lines.some(line => line.includes('navigation_wait op=attach')));
+  assert.ok(lines.some(line => line.includes('first_frame stream=')));
+  assert.ok(lines.some(line => line.includes('navigation_end id=') && line.includes('http_status=422')));
+  assert.ok(lines.every(line => !line.includes('fixture-private-marker') && !line.includes(url)));
+});

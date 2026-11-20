@@ -1,4 +1,5 @@
 pub mod server;
+mod screen_perf;
 pub mod dispatch;
 pub mod types;
 pub mod domains;

@@ -603,6 +603,10 @@ fn screencast_int32(params: &Value, name: &str) -> Result<Option<i64>, String> {
 }
 
 #[cfg(feature = "render")]
+/// Initialize a viewer's capture settings and acknowledgement window.
+/// @param params CDP options. @param session_id Engine-assigned stream number.
+/// @return New stream state. @throws String for invalid options.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 fn parse_screencast_state(params: &Value, session_id: i64) -> Result<ScreencastState, String> {
     if !params.is_object() {
         return Err("Invalid parameters: expected an object".into());
@@ -640,6 +644,8 @@ fn parse_screencast_state(params: &Value, session_id: i64) -> Result<ScreencastS
         command_frame_counter: 0,
         session_id,
         frames_in_flight: 0,
+        waiting_for_ack_since: None,
+        ack_stall_reported: false,
         observed_activity_generation: 0,
         autonomous_frame_pending: false,
     })
@@ -730,6 +736,9 @@ fn encode_screencast_frame(
 /// Queue a visible-viewport frame through normal CDP event transport. Initial
 /// frames are immediate; later damage is coalesced by the connection's 30 Hz
 /// compositor pump.
+/// @param ctx Engine connection. @param cdp_session_id Attached viewer. @param force Initial frame.
+/// @return Whether a frame was queued. @throws String on capture or encoding failure.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 #[cfg(feature = "render")]
 pub(crate) fn queue_screencast_frame(
     ctx: &mut CdpContext,
@@ -744,6 +753,13 @@ pub(crate) fn queue_screencast_frame(
             return Ok(false);
         };
         if state.frames_in_flight >= MAX_SCREENCAST_FRAMES_IN_FLIGHT {
+            if crate::screen_perf::enabled() && !state.ack_stall_reported {
+                let start = state.waiting_for_ack_since.get_or_insert_with(std::time::Instant::now);
+                if start.elapsed().as_millis() >= 250 {
+                    state.ack_stall_reported = true;
+                    crate::screen_perf::log!("[ObscuraPerf] ack_wait stream={} conn={}", state.session_id, ctx.perf_connection);
+                }
+            }
             return Ok(false);
         }
         if !force {
@@ -755,6 +771,7 @@ pub(crate) fn queue_screencast_frame(
         state.clone()
     };
     let attached_session = Some(cdp_session_id.to_string());
+    let started = (force && crate::screen_perf::enabled()).then(std::time::Instant::now);
     let (viewport, scroll, raster, activity_generation) = {
         let page = ctx
             .get_session_page_mut(&attached_session)
@@ -781,6 +798,7 @@ pub(crate) fn queue_screencast_frame(
             .unwrap_or(0);
         (viewport, scroll, raster, activity_generation)
     };
+    let rendered = started.map(|_| std::time::Instant::now());
     let encoded = encode_screencast_frame(&raster, &state)?;
     use base64::Engine as _;
     let data = base64::engine::general_purpose::STANDARD.encode(encoded);
@@ -793,20 +811,26 @@ pub(crate) fn queue_screencast_frame(
     live.frames_in_flight = live.frames_in_flight.saturating_add(1);
     live.observed_activity_generation = activity_generation;
     live.autonomous_frame_pending = false;
+    let mut params = json!({
+        "metadata": {
+            "offsetTop": 0.0, "pageScaleFactor": 1.0,
+            "deviceWidth": viewport.0, "deviceHeight": viewport.1,
+            "scrollOffsetX": scroll.0, "scrollOffsetY": scroll.1,
+            "timestamp": timestamp(),
+        },
+        "sessionId": state.session_id,
+    });
+    params["data"] = Value::String(data);
     ctx.pending_events.push(CdpEvent {
         method: "Page.screencastFrame".into(),
-        params: json!({
-            "data": data,
-            "metadata": {
-                "offsetTop": 0.0, "pageScaleFactor": 1.0,
-                "deviceWidth": viewport.0, "deviceHeight": viewport.1,
-                "scrollOffsetX": scroll.0, "scrollOffsetY": scroll.1,
-                "timestamp": timestamp(),
-            },
-            "sessionId": state.session_id,
-        }),
+        params,
         session_id: Some(cdp_session_id.to_string()),
     });
+    if let (Some(start), Some(rendered)) = (started, rendered) {
+        crate::screen_perf::log!("[ObscuraPerf] first_frame stream={} conn={} tab={} render_us={} encode_pack_us={}",
+            state.session_id, ctx.perf_connection, ctx.sessions.get(cdp_session_id).map_or(0, |id| crate::screen_perf::tab(id)),
+            (rendered - start).as_micros(), rendered.elapsed().as_micros());
+    }
     Ok(true)
 }
 
@@ -1511,6 +1535,11 @@ async fn do_navigate(
 /// @param method Page command. @param params Protocol arguments. @param ctx Browser connection state.
 /// @param session_id Target session. @return CDP response or an error when the command fails.
 /// @author ductv <ductv@getflycrm.com> @since 2026-11-19
+/// Dispatch a Page-domain request to its attached page or screencast.
+/// @param method Page command. @param params Command arguments.
+/// @param ctx Browser connection. @param session_id Target session.
+/// @return CDP result. @throws String when the command cannot be completed.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 pub async fn handle(
     method: &str,
     params: &Value,
@@ -2012,6 +2041,12 @@ pub async fn handle(
                         // Ignore delayed acknowledgements from a replaced stream.
                         if state.session_id == acknowledged {
                             state.frames_in_flight = state.frames_in_flight.saturating_sub(1);
+                            if let Some(start) = state.waiting_for_ack_since.take() {
+                                if state.ack_stall_reported || start.elapsed().as_millis() >= 250 {
+                                    crate::screen_perf::log!("[ObscuraPerf] ack_resume stream={} conn={} wait_ms={}", state.session_id, ctx.perf_connection, start.elapsed().as_millis());
+                                }
+                                state.ack_stall_reported = false;
+                            }
                         }
                     }
                 }

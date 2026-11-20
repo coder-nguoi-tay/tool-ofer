@@ -31,6 +31,8 @@ pub(crate) struct ScreencastState {
     pub command_frame_counter: u64,
     pub session_id: i64,
     pub frames_in_flight: u8,
+    pub waiting_for_ack_since: Option<std::time::Instant>,
+    pub ack_stall_reported: bool,
     /// Last connected-document generation observed by the frame producer.
     /// The autonomous pump uses this as a cheap compositor-damage signal, so
     /// an idle screencast does not continuously rasterize identical frames.
@@ -58,6 +60,7 @@ pub struct LoadingChildFrame {
 }
 
 pub struct CdpContext {
+    pub(crate) perf_connection: u64,
     pub(crate) auxiliary_windows: crate::windows::AuxiliaryWindows,
     pub pages: Vec<Page>,
     pub sessions: HashMap<String, String>, // session_id -> page_id
@@ -187,9 +190,14 @@ impl CdpContext {
     /// Build a CDP context around an already-constructed default browser
     /// context. The server passes a fresh isolated context per WebSocket; tests
     /// and embedders may construct their own.
+    /// @param default_context Browser context to associate with this connection.
+    /// @return Isolated CDP context with its own numeric diagnostic id.
+    /// @author ductv <ductv@getflycrm.com> @since 2026-11-20
     pub fn new_with_shared_context(default_context: Arc<BrowserContext>) -> Self {
+        static NEXT_CONNECTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let valid_context_ids = HashSet::new();
         CdpContext {
+            perf_connection: NEXT_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             auxiliary_windows: crate::windows::AuxiliaryWindows::default(),
             pages: Vec::new(),
             sessions: HashMap::new(),

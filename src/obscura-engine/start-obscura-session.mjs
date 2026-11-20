@@ -7,6 +7,8 @@ import { OBSCURA_DEFAULT_PORT, OBSCURA_CONNECT_TIMEOUT_MS, OBSCURA_READY_POLL_IN
 // Chỉ chuyển các bản ghi cố định của Rust vào log vận hành ở chế độ access.
 const inputTraceLine = /^\[ObscuraInput\] (?:ready|rate_limited|begin seq=\d+ tab=\d+ id=\d+ op=(?:down|up|touch_start|touch_end)|end seq=\d+ frame=\d+ result=(?:pressed|clicked|checked|unchecked|label_activated|cancelled|disabled|unmatched_press|no_target|no_tab|touch_unhandled|unknown) wait_ms=\d+ run_ms=\d+)$/;
 
+const performanceTraceLine = /^\[ObscuraPerf\] (?:begin|end|navigation_wait|queue_full|navigation_end|first_frame|ack_wait|ack_resume)(?: (?:op=(?:attach|detach|start_stream|stop_stream|navigate|reload)|(?:tab|loading_tab|conn|id|queue_ms|tabs|deferred|run_ms|stream|render_us|encode_pack_us|wait_ms|elapsed_ms|committed|cancelled|failed|requested_post|http_status)=\d+))+$/;
+
 /**
  * Kiểm tra xem cổng HTTP của Obscura CDP Server đã sẵn sàng nhận kết nối hay chưa.
  *
@@ -83,6 +85,7 @@ export async function startObscuraSession({ slot = 0, port = OBSCURA_DEFAULT_POR
     args.push(proxy);
   }
 
+  const performanceLogging = process.env.AUTOLEADPC_OBSCURA_PERF === '1';
   const inputLogging = (process.env.AUTOLEADPC_OBSCURA_INPUT_LOG ?? '1') === '1';
   const child = spawn(binary, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -99,6 +102,8 @@ export async function startObscuraSession({ slot = 0, port = OBSCURA_DEFAULT_POR
   createInterface({ input: child.stderr }).on('line', line => {
     if (inputLogging && inputTraceLine.test(line)) {
       console.info(`[Process] ${new Date().toISOString()} slot=${Number.isSafeInteger(slot) ? slot : 0} pid=${child.pid} ${line}`);
+    } else if (performanceLogging && performanceTraceLine.test(line)) {
+      console.info(`[Process] ${new Date().toISOString()} slot=${Number.isSafeInteger(slot) ? slot : 0} port=${port} pid=${child.pid} ${line}`);
     } else if (line) {
       console.debug(`[Obscura:${port}:stderr]`, line);
     }
