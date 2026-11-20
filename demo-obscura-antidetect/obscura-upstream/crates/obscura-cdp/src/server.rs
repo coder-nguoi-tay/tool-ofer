@@ -1929,7 +1929,7 @@ async fn pump_and_forward_screencast_frames(
     reply_tx: Option<&mpsc::UnboundedSender<String>>,
 ) {
     #[cfg(feature = "render")]
-    crate::domains::page::pump_screencast_frames(ctx).await;
+    crate::domains::page::pump_screencast_frames(ctx, true).await;
     #[cfg(not(feature = "render"))]
     let _ = ctx;
 
@@ -2068,6 +2068,55 @@ fn handle_fetch_resolution(
     false
 }
 
+/// Serve viewer bookkeeping and retained-surface painting while navigation owns the isolate.
+/// @param command Parsed envelope. @param msg Reply channel and timing. @param ctx Connection.
+/// @param loading_id Target owned by navigation. @param info Its last committed metadata.
+/// @return True when the command was answered here.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
+async fn serve_navigation_view(command: &CdpRequest, msg: &CdpMessage, ctx: &mut CdpContext,
+    loading_id: &str, info: &Value) -> bool {
+    use crate::domains::{page, target};
+    let session = &command.session_id;
+    let params = &command.params;
+    let started = msg.timing.map(|_| std::time::Instant::now());
+    let result = match command.method.as_str() {
+        "Target.attachToTarget" if params["targetId"].as_str() == Some(loading_id) =>
+            Ok(target::attach_page(ctx, loading_id, info.clone(), session)),
+        "Target.attachToBrowserTarget" | "Target.attachToTarget" | "Target.detachFromTarget" =>
+            target::handle(&command.method[7..], params, ctx, session).await,
+        // Playwright sends this bookkeeping command before it detaches a CDP session.
+        "Runtime.runIfWaitingForDebugger" => {
+            if let Some(target) = session.as_ref().and_then(|id| ctx.sessions.get(id)) {
+                ctx.auxiliary_windows.waiting.remove(target);
+            }
+            Ok(json!({}))
+        }
+        "Page.enable" | "Page.stopScreencast" | "Page.screencastFrameAck" =>
+            page::handle(&command.method[5..], params, ctx, session).await,
+        #[cfg(feature = "render")]
+        "Page.startScreencast" => {
+            let ready = ctx.get_session_page(session);
+            if ready.is_some() || session.as_ref().and_then(|id| ctx.sessions.get(id)).map(String::as_str) == Some(loading_id) {
+                page::start_view_stream(ctx, session, params, ready.is_some_and(|page| page.has_js()))
+            } else {
+                Err("No page for session".into())
+            }
+        }
+        _ => return false,
+    };
+    forward_pending_events(ctx, Some(&msg.reply_tx));
+    let response = match result {
+        Ok(value) => crate::types::CdpResponse::success(command.id, value, session.clone()),
+        Err(error) => crate::types::CdpResponse::error(command.id, -32000, error, session.clone()),
+    };
+    if let Ok(json) = serde_json::to_string(&response) { let _ = msg.reply_tx.send(json); }
+    if let (Some(timing), Some(start)) = (msg.timing, started) {
+        crate::screen_perf::log!("[ObscuraPerf] view_during_navigation op={} conn={} id={} queue_ms={} exec_ms={}",
+            timing.method, ctx.perf_connection, timing.id, (start - timing.received).as_millis(), start.elapsed().as_millis());
+    }
+    true
+}
+
 /// @param text Navigation envelope. @param ctx Connection state. @param reply_tx Event and reply transport.
 /// @param rx Incoming commands. @param intercept_rx Network events. @param intercepted_paused Pending requests.
 /// @param deferred Commands waiting for navigation. @param send_command_response Whether a client is awaiting a reply.
@@ -2166,6 +2215,7 @@ async fn process_with_interception(
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
     let mut cancel_tx = Some(cancel_tx);
     let (nav_done_tx, mut nav_done_rx) = mpsc::channel::<(obscura_browser::Page, Result<(), String>, bool)>(1);
+    let loading_info = crate::domains::target::attached_page_info(&page);
     let nav_v8_lock = ctx.v8_lock.clone();
 
     tokio::task::spawn_local(async move {
@@ -2219,10 +2269,17 @@ async fn process_with_interception(
     // outer `cdp_processor` loop processes them after this nav fully
     // completes (and its JsRuntime is no longer in flight on the
     // LocalSet).
+    let mut view_tick = tokio::time::interval(tokio::time::Duration::from_millis(33));
+    view_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         let has_irx = intercept_rx.is_some();
 
         tokio::select! {
+            _ = view_tick.tick(), if has_active_screencast(ctx) => {
+                #[cfg(feature = "render")]
+                crate::domains::page::pump_screencast_frames(ctx, false).await;
+                forward_pending_events(ctx, Some(reply_tx));
+            }
             Some((returned_page, result, was_cancelled)) = nav_done_rx.recv() => {
                 page_back = Some(returned_page);
                 navigate_result = result;
@@ -2260,6 +2317,9 @@ async fn process_with_interception(
                     }
                     ServerMessage::Cdp(msg) => {
                         if let Ok(command) = serde_json::from_str::<CdpRequest>(&msg.text) {
+                            if serve_navigation_view(&command, &msg, ctx, &page_id, &loading_info).await {
+                                continue;
+                            }
                             let same_page = command.session_id.as_ref()
                                 .and_then(|session| ctx.sessions.get(session)) == Some(&page_id);
                             let stop = command.method == "Page.stopLoading" && same_page;
@@ -2369,6 +2429,7 @@ async fn process_with_interception(
     let reached_network_idle = page.lifecycle.is_network_idle();
 
     ctx.pages.push(page);
+    ctx.refresh_runtime_event_collection(&page_id_for_events);
 
     let response = if cancelled {
         crate::types::CdpResponse::success(req.id,

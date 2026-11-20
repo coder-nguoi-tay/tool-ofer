@@ -7,12 +7,13 @@ import { EventEmitter } from 'node:events';
  *
  * @return {EventEmitter & {add: Function, remove: Function, write: Function, end: Function, size: number}}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 function createViewerHub() {
   const hub = new EventEmitter();
   const viewers = new Set();
   let lastFrame = null;
+  let sourceEvent = null;
   const isOpen = res => !res.writableEnded && !res.destroyed;
   Object.defineProperties(hub, {
     size: {
@@ -31,9 +32,15 @@ function createViewerHub() {
   hub.add = res => {
     viewers.add(res);
     res.on('drain', () => hub.emit('drain'));
+    if (sourceEvent) res.write(sourceEvent);
     if (lastFrame) res.write(lastFrame);
   };
   hub.remove = res => viewers.delete(res);
+  hub.beginSource = () => {
+    lastFrame = null;
+    sourceEvent = 'event: screen-source\ndata: changed\n\n';
+    hub.write(sourceEvent);
+  };
   hub.write = chunk => {
     const isFrame = chunk.startsWith('data: ');
     if (isFrame) lastFrame = chunk;

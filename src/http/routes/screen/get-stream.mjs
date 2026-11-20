@@ -10,7 +10,7 @@ import { screencastSessions } from '../../../runtime/constants/screencast-sessio
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 export async function handleGetScreenStream(request, response) {
   if (request.method === 'GET' && request.url.startsWith('/screen/stream/')) {
@@ -74,7 +74,7 @@ export async function handleGetScreenStream(request, response) {
       request.on('close', leave);
       response.on('close', leave);
       const cdpClient = await session.browser.newCDPSession(page);
-      if (scObj.cleaned) {
+      if (scObj.cleaned || scObj.cdpClient) {
         await cdpClient.detach().catch(() => {});
         return true;
       }

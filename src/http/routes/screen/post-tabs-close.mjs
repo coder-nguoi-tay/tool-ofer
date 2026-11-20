@@ -1,9 +1,8 @@
 import { activeBrowsers } from '../../../browser/sessions.mjs';
-import { attachScreencastSession } from '../../../browser/screencast.mjs';
+import { switchScreencastPage } from '../../../browser/screencast/switch-screencast-page.mjs';
 import { prepareManualBrowserClose } from '../../../browser/actions/prepare-manual-browser-close.mjs';
 import { queueAutomaticRefill } from '../../../refill/actions/queue-automatic-refill.mjs';
 import { readRequestBody } from '../../actions/read-request-body.mjs';
-import { releaseScreencast } from '../../../browser/screencast.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 
@@ -13,7 +12,7 @@ import { screencastSessions } from '../../../runtime/constants/screencast-sessio
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-17
+ * @since 2026-11-20
  */
 export async function handlePostScreenTabsClose(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/screen/tabs/close/')) {
@@ -38,7 +37,10 @@ export async function handlePostScreenTabsClose(request, response) {
       }
 
       // Gỡ listener tự khôi phục trước khi đóng tab: tránh tranh nhau gắn lại với đoạn chuyển tab bên dưới.
-      screencastSessions.get(slot)?.unbindListeners?.();
+      const sc = screencastSessions.get(slot);
+      const selection = Symbol();
+      if (sc) sc.viewSelection = selection;
+      sc?.unbindListeners?.();
       targetPage._uxClosedByApp = 'screen_view_manual';
       await targetPage.close();
       let remainingPages = session.browser.pages().filter(p => !p.isClosed());
@@ -61,13 +63,8 @@ export async function handlePostScreenTabsClose(request, response) {
       }
       const newActiveIndex = Math.max(0, Math.min(targetIndex > 0 ? targetIndex - 1 : 0, remainingPages.length - 1));
       const nextActivePage = remainingPages[newActiveIndex];
-      await nextActivePage.bringToFront().catch(() => {});
-      const sc = screencastSessions.get(slot);
-      if (sc) {
-        await releaseScreencast(sc);
-        const newCdp = await session.browser.newCDPSession(nextActivePage);
-        await attachScreencastSession(sc, newCdp, nextActivePage);
-      }
+      if (!session.isObscura && session.engine !== 'obscura') await nextActivePage.bringToFront().catch(() => {});
+      if (sc) await switchScreencastPage(sc, selection, session, nextActivePage, slot);
       respondWithJson(response, 200, {
         ok: true,
         activeIndex: newActiveIndex,

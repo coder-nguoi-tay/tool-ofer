@@ -733,6 +733,34 @@ fn encode_screencast_frame(
     )
 }
 
+/// Start a viewer on a committed surface or register its first frame for navigation completion.
+/// @param ctx Connection. @param session_id Attached viewer. @param params Capture settings.
+/// @param paint_now Whether the committed surface is available. @return CDP stream capabilities.
+/// @throws String for invalid settings, a detached viewer, or failed rendering.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
+#[cfg(feature = "render")]
+pub(crate) fn start_view_stream(ctx: &mut CdpContext, session_id: &Option<String>, params: &Value, paint_now: bool) -> Result<Value, String> {
+    let viewer = session_id.as_deref().ok_or("Page.startScreencast requires an attached target session")?;
+    let stream_id = ctx.next_screencast_session();
+    let mut state = parse_screencast_state(params, stream_id)?;
+    state.autonomous_frame_pending = !paint_now;
+    ctx.screencasts.insert(viewer.to_owned(), state);
+    let pending_before = ctx.pending_events.len();
+    ctx.pending_events.push(CdpEvent {
+        method: "Page.screencastVisibilityChanged".into(),
+        params: json!({"visible": true}),
+        session_id: session_id.clone(),
+    });
+    if paint_now {
+        if let Err(error) = queue_screencast_frame(ctx, session_id, true) {
+            ctx.pending_events.truncate(pending_before);
+            ctx.screencasts.remove(viewer);
+            return Err(error);
+        }
+    }
+    Ok(json!({"obscuraFrameSource": "activity-driven", "obscuraAutonomousFrames": true}))
+}
+
 /// Queue a visible-viewport frame through normal CDP event transport. Initial
 /// frames are immediate; later damage is coalesced by the connection's 30 Hz
 /// compositor pump.
@@ -774,7 +802,7 @@ pub(crate) fn queue_screencast_frame(
     let started = (force && crate::screen_perf::enabled()).then(std::time::Instant::now);
     let (viewport, scroll, raster, activity_generation) = {
         let page = ctx
-            .get_session_page_mut(&attached_session)
+            .get_session_page(&attached_session)
             .ok_or("No page for session")?;
         let animation_sample = page.live_animation_sample();
         let viewport = page.viewport;
@@ -840,10 +868,13 @@ pub(crate) fn queue_screencast_frame(
 /// is Obscura's single-threaded equivalent until it owns a real compositor.
 ///
 /// Generation tracking avoids full-page raster work while the page is idle.
+/// @param ctx Connection. @param resume_cold_pages Allow isolate creation outside navigation.
+/// @return Emits changed frames into the CDP event queue.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 /// A dirty generation is retained across `everyNthFrame` sampling and the
 /// acknowledgement window, ensuring neither mechanism loses the latest frame.
 #[cfg(feature = "render")]
-pub(crate) async fn pump_screencast_frames(ctx: &mut CdpContext) {
+pub(crate) async fn pump_screencast_frames(ctx: &mut CdpContext, resume_cold_pages: bool) {
     let sessions: Vec<String> = ctx.screencasts.keys().cloned().collect();
     for cdp_session_id in sessions {
         if !ctx.screencasts.contains_key(&cdp_session_id) {
@@ -851,7 +882,12 @@ pub(crate) async fn pump_screencast_frames(ctx: &mut CdpContext) {
         }
         let attached_session = Some(cdp_session_id.clone());
         let (activity_generation, css_animation_active) = {
-            let Some(page) = ctx.get_session_page_mut(&attached_session) else {
+            let page = if resume_cold_pages {
+                ctx.get_session_page_mut(&attached_session).map(|page| &*page)
+            } else {
+                ctx.get_session_page(&attached_session)
+            };
+            let Some(page) = page else {
                 continue;
             };
             let Some(js) = page.js.as_ref() else {
@@ -1989,33 +2025,12 @@ pub async fn handle(
         "startScreencast" => {
             #[cfg(feature = "render")]
             {
-                let cdp_session = session_id
-                    .as_ref()
-                    .ok_or("Page.startScreencast requires an attached target session")?
-                    .clone();
-                let page = ctx
-                    .get_session_page_mut(session_id)
-                    .ok_or("No page for session")?;
-                prepare_capture_resources_if_requested(page).await;
-                let stream_id = ctx.next_screencast_session();
-                let state = parse_screencast_state(params, stream_id)?;
-                ctx.screencasts.insert(cdp_session.clone(), state);
-                let pending_before = ctx.pending_events.len();
-                ctx.pending_events.push(CdpEvent {
-                    method: "Page.screencastVisibilityChanged".into(),
-                    params: json!({"visible": true}),
-                    session_id: session_id.clone(),
-                });
-                if let Err(error) = queue_screencast_frame(ctx, session_id, true) {
-                    ctx.pending_events.truncate(pending_before);
-                    ctx.screencasts.remove(&cdp_session);
-                    return Err(error);
+                if session_id.is_none() {
+                    return Err("Page.startScreencast requires an attached target session".into());
                 }
-                tracing::debug!(cdp_session, stream_id, "started activity-driven screencast");
-                Ok(json!({
-                    "obscuraFrameSource": "activity-driven",
-                    "obscuraAutonomousFrames": true,
-                }))
+                let page = ctx.get_session_page_mut(session_id).ok_or("No page for session")?;
+                prepare_capture_resources_if_requested(page).await;
+                start_view_stream(ctx, session_id, params, true)
             }
             #[cfg(not(feature = "render"))]
             Err("Page.startScreencast requires a build with the render feature".into())
@@ -3268,7 +3283,7 @@ mod tests {
         )
         .await;
         assert!(response.error.is_none(), "override response: {response:?}");
-        pump_screencast_frames(&mut ctx).await;
+        pump_screencast_frames(&mut ctx, true).await;
         let event = ctx
             .pending_events
             .iter()
@@ -3436,7 +3451,7 @@ mod tests {
 
         ctx.pending_events.clear();
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        pump_screencast_frames(&mut ctx).await;
+        pump_screencast_frames(&mut ctx, true).await;
         let (animated, frame_session_id) = {
             let event = ctx
                 .pending_events
@@ -3472,7 +3487,7 @@ mod tests {
         }
         ctx.pending_events.clear();
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        pump_screencast_frames(&mut ctx).await;
+        pump_screencast_frames(&mut ctx, true).await;
         assert!(
             ctx.pending_events
                 .iter()
@@ -3493,7 +3508,7 @@ mod tests {
         .await
         .expect("ack final frame");
         ctx.pending_events.clear();
-        pump_screencast_frames(&mut ctx).await;
+        pump_screencast_frames(&mut ctx, true).await;
         assert!(
             ctx.pending_events.is_empty(),
             "a completed finite animation must not keep rasterizing idle frames"

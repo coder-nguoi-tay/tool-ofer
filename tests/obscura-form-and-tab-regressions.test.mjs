@@ -148,6 +148,18 @@ test('giao diện chỉ đổi tab khi API thành công và thông báo khi chuy
   assert.equal(sandbox._screenActiveTabIndex, 1);
   assert.equal(panel.style.display, 'none');
   assert.equal(renders, 1);
+  let answerB;
+  sandbox.fetch = async (_url, options) => {
+    if (JSON.parse(options.body).index === 1) await new Promise(resolve => { answerB = resolve; });
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+  const b = sandbox._switchTab(1, 1);
+  await sandbox._switchTab(1, 2);
+  answerB();
+  await b;
+  assert.equal(sandbox._screenActiveTabIndex, 2);
+  assert.equal(renders, 2);
+
 });
 
 
@@ -212,25 +224,42 @@ for (const logging of ['default', 'off']) {
   });
 }
 
-test('log core cho biết lệnh gắn tab nào đang chờ điều hướng, chỉ chứa số đo', { skip: !available, timeout: 12000 }, async t => {
-  const previous = process.env.AUTOLEADPC_OBSCURA_PERF;
-  process.env.AUTOLEADPC_OBSCURA_PERF = '1';
-  t.after(() => {
-    if (previous === undefined) delete process.env.AUTOLEADPC_OBSCURA_PERF;
-    else process.env.AUTOLEADPC_OBSCURA_PERF = previous;
-  });
+test('Screen View nhận đúng ảnh tab con trong khi POST ở tab chính còn chờ', { skip: !available, timeout: 60000 }, async t => {
+  const holdMs = Number(process.env.SCREEN_TEST_HOLD_MS || 0);
   const lines = [];
-  let notifyDeferred, notifySlowRequest;
-  const deferred = new Promise(resolve => { notifyDeferred = resolve; });
-  const slowRequest = new Promise(resolve => { notifySlowRequest = resolve; });
   t.mock.method(console, 'info', line => {
-    if (!String(line).includes('[ObscuraPerf]')) return;
-    lines.push(line);
-    if (line.includes('navigation_wait op=attach')) notifyDeferred();
+    if (String(line).includes('[ObscuraPerf]')) lines.push(line);
   });
+  const oldPerf = process.env.AUTOLEADPC_OBSCURA_PERF;
+  const oldTimeout = process.env.OBSCURA_NAV_TIMEOUT_MS;
+  process.env.AUTOLEADPC_OBSCURA_PERF = '1';
+  process.env.OBSCURA_NAV_TIMEOUT_MS = '45000';
+  t.after(() => {
+    if (oldPerf === undefined) delete process.env.AUTOLEADPC_OBSCURA_PERF;
+    else process.env.AUTOLEADPC_OBSCURA_PERF = oldPerf;
+    if (oldTimeout === undefined) delete process.env.OBSCURA_NAV_TIMEOUT_MS;
+    else process.env.OBSCURA_NAV_TIMEOUT_MS = oldTimeout;
+  });
+  let announceRequest;
+  const incoming = new Promise(resolve => { announceRequest = resolve; });
+  let posts = 0, stylesheet, finished = false;
+  const endStylesheet = response => {
+    response.writeHead(200, { 'content-type': 'text/css' });
+    response.end('body{background:green}');
+  };
   const server = http.createServer((request, response) => {
-    if (request.url.startsWith('/slow')) notifySlowRequest(response);
-    else response.end('<title>Local tab</title>');
+    if (request.url.startsWith('/slow') && request.method === 'POST') {
+      posts++;
+      announceRequest(response);
+      return;
+    }
+    if (request.url === '/pending.css') {
+      stylesheet = response;
+      if (finished) endStylesheet(response);
+      return;
+    }
+    response.setHeader('content-type', 'text/html');
+    response.end(request.url === '/child' ? '<body style="background:blue">Child</body>' : '<body style="background:red">Parent</body>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
@@ -239,26 +268,71 @@ test('log core cho biết lệnh gắn tab nào đang chờ điều hướng, ch
   const url = 'http://127.0.0.1:' + server.address().port;
   await session.page.goto(url);
   const child = await session.browser.newPage();
-  await child.goto(url);
-  const navigation = session.page.goto(url + '/slow?fixture-private-marker');
-  const slowResponse = await slowRequest;
-  const attach = session.browser.newCDPSession(child);
-  // Unblock the fixture even if the expected diagnostic regresses.
-  const timeout = setTimeout(() => slowResponse.end('fixture'), 1500);
+  await child.goto(url + '/child');
+  const documentSession = await session.browser.newCDPSession(session.page);
+  const settings = { format: 'jpeg', quality: 58, maxWidth: 1280, maxHeight: 800, everyNthFrame: 2 };
+  const reference = await session.browser.newCDPSession(child);
+  const childReference = new Promise(resolve => reference.once('Page.screencastFrame', resolve));
+  await reference.send('Page.startScreencast', settings);
+  const expected = (await childReference).data;
+  await reference.detach();
+  const rootReference = new Promise(resolve => documentSession.once('Page.screencastFrame', resolve));
+  await documentSession.send('Page.startScreencast', settings);
+  assert.notEqual((await rootReference).data, expected);
+
+  const navigation = documentSession.send('Page.navigate', {
+    url: url + '/slow?fixture-private-marker', __method: 'POST', __body: 'fixture=1'
+  });
+  const slowResponse = await incoming;
+  const heldAt = performance.now();
+  const releaseDocument = () => {
+    if (!slowResponse.writableEnded) {
+      slowResponse.writeHead(422, { 'content-type': 'text/html' });
+      slowResponse.end('<link rel="stylesheet" href="/pending.css"><body>Complete</body>');
+    }
+  };
+  // Giữ tổng thời gian tải 30s qua hai phản hồi, mỗi request vẫn dưới timeout HTTP thật.
+  const documentTimer = holdMs ? setTimeout(releaseDocument, holdMs / 2) : null;
+  const release = () => {
+    finished = true;
+    releaseDocument();
+    if (stylesheet && !stylesheet.writableEnded) endStylesheet(stylesheet);
+  };
+  const safetyRelease = setTimeout(release, Math.max(holdMs, 3000) + 3000);
   try {
-    await Promise.race([deferred, navigation]);
+    const viewer = await session.browser.newCDPSession(child);
+    await viewer.send('Page.enable');
+    const first = new Promise(resolve => viewer.once('Page.screencastFrame', resolve));
+    await viewer.send('Page.startScreencast', settings);
+    const frame = await first;
+    const firstMs = performance.now() - heldAt;
+    assert.equal(frame.data, expected);
+    await viewer.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
+    await viewer.send('Page.stopScreencast');
+    await viewer.detach();
+    await documentSession.send('Page.stopScreencast');
+    const loadingViewer = await session.browser.newCDPSession(session.page);
+    const committedFrame = new Promise(resolve => loadingViewer.once('Page.screencastFrame', resolve));
+    await loadingViewer.send('Page.startScreencast', settings);
+    assert.equal(slowResponse.writableEnded, false, 'Hoàn tất đổi nguồn trước khi nhận phản hồi POST');
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, holdMs - (performance.now() - heldAt))));
+    assert.equal(finished, false, 'Đường thoát của fixture chưa kích hoạt');
+    if (holdMs) assert.ok(stylesheet && !stylesheet.writableEnded, 'Tab chính vẫn chờ CSS');
+    t.diagnostic(`Ảnh tab con sau ${firstMs.toFixed(1)} ms, điều hướng POST giữ ${(performance.now() - heldAt).toFixed(1)} ms`);
+    assert.ok(firstMs < (holdMs ? 500 : 2500), 'Tab con phải có hình trong ngưỡng đo');
+    release();
+    await navigation;
+    assert.notEqual((await committedFrame).data, expected);
+    await loadingViewer.detach();
   } finally {
-    clearTimeout(timeout);
-    if (!slowResponse.writableEnded) { slowResponse.writeHead(422); slowResponse.end('fixture'); }
+    clearTimeout(documentTimer);
+    clearTimeout(safetyRelease);
+    release();
+    await navigation;
   }
-  const cdp = await attach;
-  await navigation;
-  await cdp.send('Page.startScreencast', { format: 'jpeg' });
-  await cdp.send('Page.stopScreencast');
-  await cdp.detach();
   await session.close();
-  assert.ok(lines.some(line => line.includes('navigation_wait op=attach')));
-  assert.ok(lines.some(line => line.includes('first_frame stream=')));
+  assert.equal(posts, 1);
+  assert.ok(lines.some(line => line.includes('view_during_navigation op=attach')));
   assert.ok(lines.some(line => line.includes('navigation_end id=') && line.includes('http_status=422')));
   assert.ok(lines.every(line => !line.includes('fixture-private-marker') && !line.includes(url)));
 });

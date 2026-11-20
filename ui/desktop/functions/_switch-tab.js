@@ -8,6 +8,8 @@
  * @since 2026-11-20
  */
 async function _switchTab(slot, index, manualCaptchaRequestId) {
+      const requestId = Symbol();
+      _switchTab.latest = requestId;
       try {
         const response = await fetch(`/screen/tabs/${slot}`, {
           method: 'POST',
@@ -15,8 +17,10 @@ async function _switchTab(slot, index, manualCaptchaRequestId) {
           body: JSON.stringify({ index, manualCaptchaRequestId }),
         });
         const result = await response.json();
+        if (_switchTab.latest !== requestId || result.superseded) return;
         if (!response.ok || !result.ok) throw new Error(result.error || 'Chưa chuyển được tab đang xem.');
       } catch (error) {
+        if (_switchTab.latest !== requestId) return;
         showToast(error.message || 'Chưa chuyển được tab đang xem.', 'error');
         return;
       }

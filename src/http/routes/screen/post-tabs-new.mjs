@@ -1,6 +1,5 @@
 import { activeBrowsers } from '../../../browser/sessions.mjs';
-import { attachScreencastSession } from '../../../browser/screencast.mjs';
-import { releaseScreencast } from '../../../browser/screencast.mjs';
+import { switchScreencastPage } from '../../../browser/screencast/switch-screencast-page.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 
@@ -10,7 +9,7 @@ import { screencastSessions } from '../../../runtime/constants/screencast-sessio
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 export async function handlePostScreenTabsNew(request, response) {
   if (request.method === 'POST' && request.url.startsWith('/screen/tabs/new/')) {
@@ -23,17 +22,15 @@ export async function handlePostScreenTabsNew(request, response) {
       return true;
     }
     try {
+      const sc = screencastSessions.get(slot);
+      const selection = Symbol();
+      if (sc) sc.viewSelection = selection;
       const newPage = await session.browser.newPage();
       await newPage.goto('about:blank').catch(() => {});
       const pages = session.browser.pages().filter(p => !p.isClosed());
       const newIndex = pages.indexOf(newPage);
-      await newPage.bringToFront().catch(() => {});
-      const sc = screencastSessions.get(slot);
-      if (sc) {
-        await releaseScreencast(sc);
-        const newCdp = await session.browser.newCDPSession(newPage);
-        await attachScreencastSession(sc, newCdp, newPage);
-      }
+      if (!session.isObscura && session.engine !== 'obscura') await newPage.bringToFront().catch(() => {});
+      if (sc) await switchScreencastPage(sc, selection, session, newPage, slot);
       respondWithJson(response, 200, {
         ok: true,
         index: newIndex

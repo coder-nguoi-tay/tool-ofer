@@ -4,6 +4,33 @@ use crate::dispatch::CdpContext;
 use crate::types::CdpEvent;
 use crate::util::url_is_file_scheme;
 
+/// Metadata of the last committed document, readable while navigation owns the page.
+/// @param page Existing target. @return TargetInfo for an attached page.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
+pub(crate) fn attached_page_info(page: &obscura_browser::Page) -> Value {
+    json!({"targetId": page.id, "type": "page", "title": page.title, "url": page.url_string(),
+        "attached": true, "canAccessOpener": false, "browserContextId": page.context.id})
+}
+
+/// Register the viewer and announce the session to its parent before replying.
+/// @param ctx Connection. @param target_id Page id. @param info Committed metadata.
+/// @param parent Owning session. @return CDP session identifier.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
+pub(crate) fn attach_page(ctx: &mut CdpContext, target_id: &str, info: Value, parent: &Option<String>) -> Value {
+    let session = ctx.next_target_session(target_id);
+    ctx.sessions.insert(session.clone(), target_id.to_owned());
+    ctx.pending_events.push(CdpEvent {
+        method: "Target.attachedToTarget".into(),
+        params: json!({"sessionId": session, "targetInfo": info, "waitingForDebugger": false}),
+        session_id: parent.clone(),
+    });
+    json!({"sessionId": session})
+}
+
+/// Process a target-domain command.
+/// @param method Action. @param params Arguments. @param ctx Connection. @param parent_session_id Calling session.
+/// @return Protocol result. @throws String for an invalid or unsupported request.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-20
 pub async fn handle(
     method: &str,
     params: &Value,
@@ -179,39 +206,8 @@ pub async fn handle(
                 .get("targetId")
                 .and_then(|v| v.as_str())
                 .ok_or("targetId required")?;
-            if ctx.get_page(target_id).is_none() {
-                return Err("Target not found".to_string());
-            }
-            let session_id = ctx.next_target_session(target_id);
-            ctx.sessions
-                .insert(session_id.clone(), target_id.to_string());
-
-            if let Some(page) = ctx.get_page(target_id) {
-                let params = json!({
-                    "sessionId": session_id,
-                    "targetInfo": {
-                        "targetId": target_id,
-                        "type": "page",
-                        "title": page.title,
-                        "url": page.url_string(),
-                        "attached": true,
-                        "canAccessOpener": false,
-                        "browserContextId": page.context.id,
-                    },
-                    "waitingForDebugger": false,
-                });
-                let event = match parent_session_id {
-                    Some(parent_session_id) => CdpEvent::with_session(
-                        "Target.attachedToTarget",
-                        params,
-                        parent_session_id.clone(),
-                    ),
-                    None => CdpEvent::new("Target.attachedToTarget", params),
-                };
-                ctx.pending_events.push(event);
-            }
-
-            Ok(json!({ "sessionId": session_id }))
+            let info = attached_page_info(ctx.get_page(target_id).ok_or("Target not found")?);
+            Ok(attach_page(ctx, target_id, info, parent_session_id))
         }
         "closeTarget" => {
             let target_id = params

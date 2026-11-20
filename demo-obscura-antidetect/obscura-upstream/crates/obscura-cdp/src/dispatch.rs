@@ -1518,7 +1518,7 @@ mod tests {
         assert!(ctx.pending_events.is_empty(), "frame must not delay the command response");
         assert!(ctx.screencasts[&session_id].autonomous_frame_pending);
 
-        crate::domains::page::pump_screencast_frames(&mut ctx).await;
+        crate::domains::page::pump_screencast_frames(&mut ctx, true).await;
         assert!(ctx
             .pending_events
             .iter()

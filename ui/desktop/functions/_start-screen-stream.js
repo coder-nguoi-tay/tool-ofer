@@ -31,6 +31,10 @@ function _startScreenStream(slot) {
           curFpsEl.style.color = '#f87171';
           return;
         }
+        if (canvas.inert) {
+          curFpsEl.textContent = 'Đang chờ hình của tab…';
+          return;
+        }
         if (_screenFpsCounter > 0) {
           _fpsMovingAvg = _fpsMovingAvg === 0 ? _screenFpsCounter : Math.round(_fpsMovingAvg * 0.35 + _screenFpsCounter * 0.65);
           curFpsEl.textContent = `🟢 ${_fpsMovingAvg} fps`;
@@ -56,6 +60,16 @@ function _startScreenStream(slot) {
       es = new EventSource(`/screen/stream/${slot}`);
       _screenEventSource = es;
 
+      let sourceVersion = 0;
+      // SSE báo đổi nguồn trước khi gửi ảnh từ tab mới.
+      es.addEventListener?.('screen-source', () => {
+        if (es !== _screenEventSource) return;
+        sourceVersion++;
+        _pendingFrameData = null;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.inert = true;
+        if (fpsEl) fpsEl.textContent = 'Đang chờ hình của tab…';
+      });
       let _isRenderingFrame = false;
       let _pendingFrameData = null;
       let _streamScheduleTimeout = null;
@@ -89,6 +103,7 @@ function _startScreenStream(slot) {
           return;
         }
         _isRenderingFrame = true;
+        const version = sourceVersion;
         const raw = _pendingFrameData;
         _pendingFrameData = null;
 
@@ -98,11 +113,13 @@ function _startScreenStream(slot) {
           const resp = await fetch(`data:image/jpeg;base64,${cleanData}`);
           const blob = await resp.blob();
           const bmp = await createImageBitmap(blob);
+          if (version !== sourceVersion || es !== _screenEventSource) { bmp.close(); return; }
           if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
             canvas.width = bmp.width;
             canvas.height = bmp.height;
           }
           ctx.drawImage(bmp, 0, 0);
+          canvas.inert = false;
           bmp.close();
           _screenFpsCounter++;
           _lastFrameTime = Date.now();
@@ -111,11 +128,13 @@ function _startScreenStream(slot) {
             const cleanData = raw.includes('\n') ? raw.replace(/[\r\n]/g, '') : raw;
             const img = new Image();
             img.onload = () => {
+              if (version !== sourceVersion || es !== _screenEventSource) return;
               if (canvas.width !== img.width || canvas.height !== img.height) {
                 canvas.width = img.width;
                 canvas.height = img.height;
               }
               ctx.drawImage(img, 0, 0);
+              canvas.inert = false;
               _screenFpsCounter++;
               _lastFrameTime = Date.now();
             };
@@ -130,7 +149,7 @@ function _startScreenStream(slot) {
       };
 
       es.onmessage = (e) => {
-        if (!e.data || e.data === 'error') return;
+        if (es !== _screenEventSource || !e.data || e.data === 'error') return;
         _pendingFrameData = e.data;
         if (!_isRenderingFrame) {
           _scheduleStreamFrame(_renderStreamFrame);

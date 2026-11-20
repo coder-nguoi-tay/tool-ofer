@@ -1,7 +1,6 @@
 import { activeBrowsers } from '../../../browser/sessions.mjs';
-import { attachScreencastSession } from '../../../browser/screencast.mjs';
+import { switchScreencastPage } from '../../../browser/screencast/switch-screencast-page.mjs';
 import { readRequestBody } from '../../actions/read-request-body.mjs';
-import { releaseScreencast } from '../../../browser/screencast.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
 
@@ -37,13 +36,13 @@ export async function handlePostScreenTabs(request, response) {
         respondWithJson(response, 409, { error: 'Tab hoặc lượt xác minh CAPTCHA đã thay đổi.' });
         return true;
       }
-      // Obscura headless chọn tab bằng nguồn CDP của stream, không có cửa sổ native để đưa lên trước.
-      if (!session.isObscura && session.engine !== 'obscura') await targetPage.bringToFront();
       const sc = screencastSessions.get(slot);
-      if (sc) {
-        const newCdp = await session.browser.newCDPSession(targetPage);
-        await releaseScreencast(sc);
-        await attachScreencastSession(sc, newCdp, targetPage, slot, session);
+      const selection = Symbol();
+      if (sc) sc.viewSelection = selection;
+      if (!session.isObscura && session.engine !== 'obscura') await targetPage.bringToFront();
+      if (sc && !await switchScreencastPage(sc, selection, session, targetPage, slot)) {
+        respondWithJson(response, 409, { superseded: true, error: 'Lượt chuyển tab đã hết hiệu lực.' });
+        return true;
       }
       respondWithJson(response, 200, {
         ok: true

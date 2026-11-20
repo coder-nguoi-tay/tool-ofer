@@ -34,6 +34,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   scObj.deviceWidth = null;
   scObj.deviceHeight = null;
   scObj.lastFrameTime = Date.now();
+  scObj.sseResponse.beginSource?.();
 
   let attached = true;
   let receivedFrame = false;
@@ -112,7 +113,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   const vp = typeof targetPage?.viewportSize === 'function' ? targetPage.viewportSize() : null;
   const targetMaxWidth = Math.max(1280, vp?.width || 1280);
   const targetMaxHeight = Math.max(800, vp?.height || 800);
-  await cdpSession.send('Page.startScreencast', {
+  const stream = await cdpSession.send('Page.startScreencast', {
     format: 'jpeg',
     quality: 58,
     maxWidth: targetMaxWidth,
@@ -126,7 +127,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   // 4. Frame ban đầu chụp NỀN, không await, và KHÔNG chụp khi cửa sổ đang thu nhỏ (xem isWindowMinimized):
   // lệnh chụp treo sẽ chặn screencast của slot. Lúc đó screencast tự gửi frame đầu.
   // Bỏ fallback page.screenshot: nó cũng gọi captureScreenshot nên treo y như vậy.
-  if (!receivedFrame) void isWindowMinimized(cdpSession).then(minimized => minimized || !attached || receivedFrame ? null : cdpSession.send('Page.captureScreenshot', {
+  if (!stream?.obscuraAutonomousFrames && !receivedFrame) void isWindowMinimized(cdpSession).then(minimized => minimized || !attached || receivedFrame ? null : cdpSession.send('Page.captureScreenshot', {
     format: 'jpeg',
     quality: 58
   })).then(initShot => {
@@ -164,7 +165,7 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
     const idleTime = now - (scObj.lastFrameTime || 0);
 
     // Chỉ bù frame khi trang thực sự tĩnh quá 1,5 giây.
-    if (idleTime >= 1500) {
+    if (!stream?.obscuraAutonomousFrames && idleTime >= 1500) {
       if (captureInFlight) return;
       captureInFlight = true;
       try {

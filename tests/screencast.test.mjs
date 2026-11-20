@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import { handlePostScreenTabs } from '../src/http/routes/screen/post-tabs.mjs';
+import { screencastSessions } from '../src/runtime/constants/screencast-sessions.mjs';
 import { activeBrowsers } from '../src/browser/sessions.mjs';
 import { handleGetScreenTabs } from '../src/http/routes/screen/get-tabs.mjs';
 import { attachScreencastSession, createViewerHub, releaseScreencast } from "../app.mjs";
@@ -351,4 +354,58 @@ test('mục 5 - không còn tab để nối lại: đóng kết nối thay vì �
   await tick();
   assert.equal(ended, true);
   stop(scObj);
+});
+
+test('đổi A → B → C bỏ lượt đến muộn và không chờ CDP cũ dừng', { timeout: 3000 }, async t => {
+  const pages = [makePage(), makePage(), makePage()];
+  const session = makeSession(pages);
+  session.slot = 981;
+  session.isObscura = true;
+  const hub = createViewerHub();
+  hub.add(fakeResponse());
+  const stream = { sseResponse: hub };
+  const first = fakeCdp();
+  await attachScreencastSession(stream, first, pages[0], 981, session);
+  let stopOld;
+  first.send = () => new Promise(resolve => { stopOld = resolve; });
+  let resolveB, startedB, discarded = false;
+  const attachingB = new Promise(resolve => { startedB = resolve; });
+  const b = fakeCdp(), c = fakeCdp();
+  b.detach = async () => { discarded = true; };
+  session.browser.newCDPSession = async page => {
+    if (page === pages[2]) return c;
+    startedB();
+    return new Promise(resolve => { resolveB = resolve; });
+  };
+  activeBrowsers.add(session);
+  screencastSessions.set(981, stream);
+  t.after(async () => {
+    stopOld?.();
+    activeBrowsers.delete(session);
+    screencastSessions.delete(981);
+    await releaseScreencast(stream);
+  });
+  const select = async index => {
+    const request = Readable.from([JSON.stringify({ index })]);
+    Object.assign(request, { method: 'POST', url: '/screen/tabs/981' });
+    let status;
+    await handlePostScreenTabs(request, {
+      writeHead(code) { status = code; }, end() {}
+    });
+    return status;
+  };
+  const late = select(1);
+  await attachingB;
+  assert.equal(await select(2), 200);
+  assert.equal(typeof stopOld, 'function');
+  resolveB(b);
+  assert.equal(await late, 409);
+  assert.equal(discarded, true);
+  assert.equal(stream.page, pages[2]);
+  const newViewer = fakeResponse();
+  hub.add(newViewer);
+  assert.deepEqual(newViewer.writes, ['event: screen-source\ndata: changed\n\n']);
+  first.emit('Page.screencastFrame', { data: 'A', sessionId: 1 });
+  c.emit('Page.screencastFrame', { data: 'C', sessionId: 3 });
+  assert.deepEqual(newViewer.writes.slice(1), ['data: C\n\n']);
 });
