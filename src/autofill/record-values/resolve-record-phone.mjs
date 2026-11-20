@@ -31,7 +31,10 @@ export function getRecordPhoneMask(pattern = '') {
  * @since 2026-11-20
  */
 export function resolveRecordPhone(record, contact, metadata) {
-  if (contact === 'phone1') return getPhoneAreaCode(record) || null;
+  if (contact === 'phone1') {
+    const areaCode = getPhoneAreaCode(record);
+    return metadata.maxLength > 0 && areaCode.length > metadata.maxLength ? null : areaCode || null;
+  }
   const raw = getNormalizedPhone(record);
   const digits = raw.replace(/\D/g, '');
   if (!/^[+\d\s().-]+$/.test(raw) || digits.length < 7) return null;
