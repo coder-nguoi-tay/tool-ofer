@@ -37,7 +37,7 @@ function matchFieldValue(candidateNames, record, metadata = {}) {
 }
 
 /**
- * Áp dụng quy tắc hiện hành lên các định danh đã đối chiếu với nhãn.
+ * Đối chiếu nhãn với định danh, giữ thành phần tháng/ngày/năm khi dùng nhãn ngày sinh chung.
  * @param {string[]} candidateNames Tên trường dùng để khớp dữ liệu.
  * @param {object} record Record được gán cho form.
  * @param {object} metadata Thuộc tính định dạng của trường.
@@ -50,6 +50,14 @@ function matchIdentifiedValue(candidateNames, record, metadata) {
   if (accessibleName && accessibleName.length <= 60) {
     const normalizedAccessibleName = normalizeFieldName(accessibleName.replace(/đ/gi, 'd'));
     const category = semanticCategories.find(candidate => candidate.patterns.some(pattern => pattern.test(normalizedAccessibleName)));
+    // Nhãn ngày sinh chung không thay thế định danh của từng ô tháng/ngày/năm.
+    if (category?.type === 'dob') {
+      const identifiers = [metadata.name, metadata.id, metadata.autocomplete].filter(Boolean)
+        .map(name => normalizeFieldName(name).replace(/^bday(?=day|month|year)/, 'dob'));
+      const components = semanticCategories.filter(candidate => ['dob_month', 'dob_day', 'dob_year'].includes(candidate.type) &&
+        identifiers.some(identifier => candidate.patterns.some(pattern => pattern.test(identifier))));
+      if (components.length === 1) return formatMatchedValue(components[0].resolve(record, metadata), metadata);
+    }
     const splitPhoneField = category?.type === 'phone' && [metadata.name, metadata.id].some(name => /^(areacode|phone[123]|tel[123]|prefix|phoneprefix|linenumber|phoneline)$/i.test(name || ''));
     if (category && normalizedAccessibleName.length <= 40 && !splitPhoneField) {
       // Chạy lại bộ so khớp hiện có với tên nghiệp vụ đã xác minh, bỏ các định danh mâu thuẫn.
