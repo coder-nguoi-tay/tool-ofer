@@ -111,3 +111,11 @@ page.add_preload_script(&stealth_js);
 // Điều hướng trang web
 page.goto("https://bot.sannysoft.com").await?;
 ```
+
+## Chẩn đoán stylesheet trên Obscura
+
+Đặt `AUTOLEADPC_CSS_DEBUG=1` khi khởi động AutoLeadPC để theo dõi các tab Obscura mở trong phiên đó. Với app macOS instance 2, đọc log bằng `tail -F /tmp/autoleadpc-2.log | grep -F '[CSS]'`.
+
+Mỗi dòng ghi slot và số tab. `event=response` ghi mã HTTP và nhóm MIME. `unexpected_mime` cho biết máy chủ trả kiểu khác `text/css`. `event=failed` ghi lý do request thất bại mà trình duyệt cung cấp. `asset` là mã băm của origin và đường dẫn, bỏ query và fragment. Đối chiếu mã này trong cùng phiên để theo dõi một tài nguyên.
+
+Sau khi trang tải hoặc khi có phản hồi CSS, `event=dom_snapshot` đếm các thẻ link có stylesheet, đang tắt hoặc không khớp media, và đang thiếu stylesheet tại thời điểm lấy mẫu. Một stylesheet có mặt vẫn có thể chứa selector không khớp phần tử. Các sự kiện sát nhau dùng chung một lượt đọc, tối đa 10 frame mỗi lượt và 60 dòng chi tiết mỗi phút cho mỗi tab, trong đó tối đa 10 phản hồi thành công thông thường.
