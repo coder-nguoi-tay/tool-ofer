@@ -3,15 +3,15 @@ import { hasOfferWorkEvidence } from './has-offer-work-evidence.mjs';
 import { readEvidenceWithTimeout } from '../../logging/recorder/read-evidence-with-timeout.mjs';
 
 /**
- * Giữ trang còn form/câu hỏi, đang tải hoặc chưa đọc được DOM; xét cả iframe hiển thị.
+ * Giữ trang còn form, đang xác minh CAPTCHA, đang tải hoặc chưa đọc được DOM của các iframe hiển thị.
  * @param {object} page Tab cần kiểm tra trước khi đóng hoặc giữ lại khi trùng link.
  * @return {Promise<boolean>} True nếu còn việc hoặc chưa đủ bằng chứng để đóng trang.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-20
  */
 export async function hasUnfinishedOfferWork(page) {
   if (page.isClosed?.()) return false;
-  if (page._aiAssistRunning || page._aiFormFixing || page._leadRecoveryInProgress || page._lateProgressRecoveryActive) return true;
+  if (page._manualCaptchaPending || page._aiAssistRunning || page._aiFormFixing || page._leadRecoveryInProgress || page._lateProgressRecoveryActive) return true;
   try {
     const frames = page.frames?.() || [page];
     if (!frames.length) return true;
@@ -24,6 +24,6 @@ export async function hasUnfinishedOfferWork(page) {
       const content = await readEvidenceWithTimeout(frame, 'offer-work', () => frame.evaluate(detectOfferContentInPage));
       if (!content || content.loading || content.challenge || hasOfferWorkEvidence(content)) return true;
     }
-    return false;
+    return page._manualCaptchaPending === true;
   } catch { return true; }
 }

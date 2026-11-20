@@ -33,6 +33,7 @@ import { selectFirstAddressSuggestion } from './select-first-address-suggestion.
  * @since 2026-11-20
  */
 async function submitWithValidation(frame, formScope, session, options, page, frameProgress, address, dispatch) {
+  if (page?._manualCaptchaPending) return null;
   if (!formScope) return dispatch();
   const observation = await frame.evaluateHandle(observeFormValidation, formScope);
   try {
@@ -44,6 +45,7 @@ async function submitWithValidation(frame, formScope, session, options, page, fr
     }
     let eventType = 'submit_blocked_fields';
     if (!fields.length) {
+      if (page?._manualCaptchaPending) return null;
       const outcome = await dispatch();
       if (!outcome || !state.watching || outcome.method === 'none' || outcome.method === 'error') return outcome;
       // Dùng đồng hồ Node để chờ các validator bất đồng bộ của trang sau thao tác gửi.
@@ -83,10 +85,10 @@ export async function submitFrameForm({
   screenInfo,
   scanStartUrl
 }) {
-  if (shouldStopAfterLead(session)) return true;
+  if (page?._manualCaptchaPending || shouldStopAfterLead(session)) return true;
   if (options.autoSubmit !== false) {
     const formScope = frameProgress.formScope ?? await resolveActiveFormScope(frame);
-    if (!formScope?.active || formScope.unavailable) return false;
+    if (page?._manualCaptchaPending || !formScope?.active || formScope.unavailable) return false;
     const yesNo = await handleYesNoStep({ frame, page, options });
     if (yesNo.waitingForInput) return false;
     if (yesNo.handled) {
@@ -172,6 +174,7 @@ export async function submitFrameForm({
           });
 
           // Cuộn phần tử vào tầm nhìn
+          if (page?._manualCaptchaPending) return true;
           await scrollToFormControl(submitBtn);
 
           // Trên trình duyệt thật: di chuyển chuột Bézier tới nút và hover 140ms - 260ms trước khi nhấn
@@ -265,7 +268,8 @@ export async function submitFrameForm({
             page.off?.('popup', popupHandler);
 
             // 1. Tắt tab popup quảng cáo mở không đúng (nếu có)
-            if (openedPopup && !openedPopup.isClosed()) {
+            if (page?._manualCaptchaPending) return true;
+            if (openedPopup && !openedPopup._manualCaptchaPending && !openedPopup.isClosed()) {
               console.log(`[Autofill] Phát hiện tab mới bật lên (${openedPopup.url()}) sau submit lần 1. Đang tắt tab này...`);
               options.onLog?.({
                 type: 'first_submit_popup_closed',
@@ -310,6 +314,7 @@ export async function submitFrameForm({
             fieldType: 'email',
             fieldValue: session.assignedEmail || record?.email || 'email'
           } : submitError;
+          if (page?._manualCaptchaPending) return true;
           if (rejectInfo?.hasError && (await rotateRejectedFormData(frame, record, session, options, rejectInfo))) {
             session.hasSubmittedCurrentScreen = false;
             return true;

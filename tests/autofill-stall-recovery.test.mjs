@@ -4,11 +4,15 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { inspectAutofillChallenge } from '../src/autofill/watchdog/inspect-autofill-challenge.mjs';
+import { inspectPageManualCaptcha } from '../src/autofill/watchdog/inspect-page-manual-captcha.mjs';
 import { getAutofillScanDelay } from '../src/autofill/watchdog/get-autofill-scan-delay.mjs';
 import { attachAutofillPageWatcher } from '../src/autofill/attach-autofill-page-watcher.mjs';
 import { attachAutofillPageWatcher as attachOffer2615PageWatcher } from '../src/autofill/offers/2615/solver/attach-autofill-page-watcher.mjs';
 import { tryFastTextInput } from '../src/autofill/interaction/try-fast-text-input.mjs';
 import { humanType } from '../src/autofill/human-type.mjs';
+import { humanClick } from '../src/autofill/human-click.mjs';
+import { selectOptionWithHumanInteraction } from '../src/autofill/select/select-option-with-human-interaction.mjs';
+import { fillSelectOrTextField } from '../src/autofill/fill-select-or-text-field.mjs';
 import { configurePageMousePolicy } from '../src/autofill/interaction/configure-page-mouse-policy.mjs';
 import { blockAiForState } from '../src/ai-assist/retry/ai-state-gate.mjs';
 import { readVisiblePageState } from '../src/ai-assist/visible-state/read-visible-page-state.mjs';
@@ -47,6 +51,83 @@ test('slot sau dùng fill đã xác minh, không gõ từng ký tự; giá trị
 });
 
 const skip = !existsSync(chromium.executablePath()) && 'Chưa cài Chromium của Playwright';
+test('chỉ bàn giao CAPTCHA đang hiển thị, kể cả trong iframe lồng khác origin', { skip }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  const slider = '<div class="y-captcha" data-ycaptcha-initialized="true"><div class="ycaptcha-captcha-area"><div role="slider">Slide to continue</div></div></div>';
+  const form = '<form><input name="email"><div role="slider" tabindex="0">Điểm hài lòng</div></form>';
+  await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body:
+    route.request().url() === 'https://challenge.test/puzzle' ? slider : form }));
+  const page = await context.newPage();
+  await page.goto('https://form.test/');
+  await page.setContent(form + '<script type="application/json">{"widget":"ycaptcha"}</script>' +
+    '<div class="y-captcha"></div><div hidden>' + slider + '</div>');
+  assert.equal(await inspectPageManualCaptcha(page), false);
+  await page.setContent(form + slider);
+  assert.equal(await inspectPageManualCaptcha(page), true);
+  await page.locator('.y-captcha').evaluate(widget => widget.remove());
+  assert.equal(await inspectPageManualCaptcha(page), false);
+
+  await page.setContent(form + '<section style="opacity:0"><iframe srcdoc="&lt;iframe src=&quot;https://challenge.test/puzzle&quot;&gt;&lt;/iframe&gt;"></iframe></section>');
+  const child = page.frames().find(frame => frame.url() === 'https://challenge.test/puzzle');
+  const probe = t.mock.method(child, 'evaluate', async () => { throw new Error('Frame đang đổi document'); });
+  assert.equal(await inspectPageManualCaptcha(page), false);
+  assert.equal(probe.mock.callCount(), 0);
+  await page.locator('section').evaluate(section => section.style.removeProperty('opacity'));
+  assert.equal(await inspectPageManualCaptcha(page), false);
+  probe.mock.restore();
+  assert.equal(await inspectPageManualCaptcha(page), true);
+  const changingFrame = t.mock.method(child, 'evaluate', async () => { throw new Error('Frame đang đổi document'); });
+  await assert.rejects(inspectPageManualCaptcha(page), /Frame đang đổi document/);
+  changingFrame.mock.restore();
+  await page.locator('section').evaluate(section => section.remove());
+  assert.equal(await inspectPageManualCaptcha(page), false);
+
+  await page.setContent(form + '<div id="rc-imageselect-target"><button>Ảnh mẫu</button></div>');
+  assert.equal(await inspectPageManualCaptcha(page), true);
+  await page.setContent(form + '<iframe aria-hidden="true" src="https://challenge.test/recaptcha/api2/bframe"></iframe>');
+  assert.equal(await inspectPageManualCaptcha(page), false);
+  await page.locator('iframe').evaluate(frame => frame.removeAttribute('aria-hidden'));
+  assert.equal(await inspectPageManualCaptcha(page), true);
+  await page.locator('iframe').evaluate(frame => Object.assign(frame.style, { position: 'absolute', top: '-10000px' }));
+  assert.equal(await inspectPageManualCaptcha(page), false);
+});
+
+test('CAPTCHA tới giữa chuỗi gõ thì dừng ký tự tiếp theo và không chuyển sang fill dự phòng', async () => {
+  const characters = [];
+  const page = { waitForTimeout: async () => {}, keyboard: { type: async value => {
+    characters.push(value);
+    page._manualCaptchaPending = true;
+  } } };
+  const field = { focus: async () => {}, evaluate: async () => {}, inputValue: async () => '', fill: () => assert.fail('Tab đang chờ xác minh') };
+  await fillSelectOrTextField({ session: {}, page, field, metadata: { type: 'text', names: ['firstname'] }, valueToFill: 'Test', options: {}, frameProgress: {}, record: {} });
+  assert.deepEqual(characters, ['T']);
+});
+
+test('CAPTCHA tới trong lúc điền nhanh dừng cả gõ, chọn và click; thao tác thủ công vẫn hoạt động', { skip }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const { page } = await createFormScopeFixture(browser, '<form><input id="name"><input id="confirm" type="checkbox"><select><option>A</option><option>B</option></select></form>');
+  configurePageMousePolicy(page, { slot: 2 });
+  await page.locator('#name').evaluate(element => element.addEventListener('click', () => console.info('field-clicked'), { once: true }));
+  const clicked = page.waitForEvent('console', { predicate: entry => entry.text() === 'field-clicked', timeout: 3000 });
+  const filling = tryFastTextInput(page.locator('#name'), 'Test', page);
+  await clicked;
+  page._manualCaptchaPending = true;
+  assert.equal(await filling, false);
+  await humanType(page.locator('#name'), 'Test', page);
+  assert.equal(await page.locator('#name').inputValue(), '');
+  assert.equal(await humanClick(page, page.locator('#confirm')), false);
+  assert.equal(await page.locator('#confirm').isChecked(), false);
+  const select = page.locator('select');
+  const selection = await selectOptionWithHumanInteraction({ page, field: select, candidates: ['B'] });
+  assert.equal(selection.reason, 'manual_captcha_pending');
+  assert.equal(await select.inputValue(), 'A');
+  await page.locator('#confirm').click();
+  assert.equal(await page.locator('#confirm').isChecked(), true);
+});
+
 test('tab phụ hết iframe ở mức 98% nhả quyền phục hồi và không F5 trang cha', { skip }, async t => {
   const browser = await chromium.launch();
   t.after(() => browser.close());

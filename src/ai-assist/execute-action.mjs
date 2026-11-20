@@ -28,6 +28,7 @@ import { addVerifiedFieldCount } from '../autofill/add-verified-field-count.mjs'
  * @since 2026-11-20
  */
 async function executeAction(page, act, session = null, policy = {}) {
+  if (page?._manualCaptchaPending) return { ok: false, verified: false, reason: 'manual_captcha' };
   if (shouldStopAfterLead(session || page?._autofillSession)) return { ok: false, verified: false, reason: 'lead_confirmed_paused' };
   let {
     action,

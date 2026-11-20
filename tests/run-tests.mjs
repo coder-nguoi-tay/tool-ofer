@@ -97,6 +97,7 @@ const TEST_FILES = [
   'survey-verification.test.mjs',
   'first-slot-mouse.test.mjs',
   'autofill-stall-recovery.test.mjs',
+  'manual-captcha-handoff.test.mjs',
   'ai-queue-capacity.test.mjs',
   'data-saver-background.test.mjs',
   'manual-answer-regression.test.mjs',

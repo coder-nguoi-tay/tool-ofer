@@ -13,6 +13,7 @@ import { recoverEmptyProgress } from './late-progress/recover-empty-progress.mjs
 import { recoverAdsmithFrameLoading } from './adsmith/recover-frame-loading.mjs';
 import { recoverBlankOfferFrames } from '../../../frames/recover-blank-offer-frames.mjs';
 import { reloadStuckPage } from './stuck-page/reload-stuck-page.mjs';
+import { createManualCaptchaGate } from '../../../watchdog/create-manual-captcha-gate.mjs';
 import { inspectAutofillChallenge } from './watchdog/inspect-autofill-challenge.mjs';
 import { getAutofillScanDelay } from './watchdog/get-autofill-scan-delay.mjs';
 import { repairVisibleFieldsFromRecord } from './watchdog/repair-visible-fields-from-record.mjs';
@@ -46,6 +47,8 @@ export function attachAutofillPageWatcher(page, {
   if (trackedPages.has(page)) return;
   trackedPages.add(page);
   attachFrameRequestTracking(page);
+  const shouldWaitForManualCaptcha = createManualCaptchaGate(page, options.onLog);
+  let nextCaptchaCheckAt = 0;
   let navigationRevision = 0;
   let filling = false;
   let nextScanAt = 0;
@@ -59,24 +62,26 @@ export function attachAutofillPageWatcher(page, {
    * @param {boolean} force Bỏ thời gian chờ khi có sự kiện trang hoặc yêu cầu thử lại.
    * @return {Promise<void>} Hoàn tất lượt quét hoặc chuyển lỗi sang log.
    * @author ductv <ductv@getflycrm.com>
-   * @since 2026-11-19
+   * @since 2026-11-20
    */
-  // Khóa `filling` phải bật ngay khi kiểm tra, trước mọi `await`: trước đây bật sau lệnh kiểm tra Cloudflare
-  // (tối đa 4s), nên timer 250ms / load / triggerAutofillScan chen vào được và chạy nhiều lượt điền song song —
-  // hai lần keyboard.type cùng lúc trộn ký tự vào một ô (vd "addoanr1sh4d3@ognm1a4i3@l.gmcaoiml").
   const scan = async (force = false) => {
     if (page.isClosed() || session.isClosed || shouldStopAfterLead(session)) return;
-    const config = options.aiConfig || globalAiConfig;
-    if (config.enabled && config.mode === 'form_agent') {
-      if (!filling && !page._continuousAgent && !page._aiAssistRunning && !page._aiFormFixing) {
-        startContinuousAgent(page, () => page._assignedRecord || session.currentRecord || record, session, options);
-      }
-      return;
-    }
-    if (force !== true && Date.now() < nextScanAt) return;
-    if (filling || page._leadRecoveryInProgress || page.isClosed() || page._aiFormFixing || page._aiAssistRunning) return;
+    const revision = navigationRevision;
+    const scanDue = force === true || Date.now() >= nextScanAt;
+    // Theo dõi cả khi lượt điền hoặc AI trước còn chạy, kể cả CAPTCHA xuất hiện trên cùng URL.
+    const observingOnly = !scanDue || filling || page._aiAssistRunning || page._aiFormFixing || page._manualCaptchaPending;
+    if (observingOnly && force !== true && Date.now() < nextCaptchaCheckAt) return;
+    nextCaptchaCheckAt = Date.now() + 1000;
+    if (await shouldWaitForManualCaptcha() || revision !== navigationRevision) return;
+    if (page._manualCaptchaPending || page.isClosed() || session.isClosed || shouldStopAfterLead(session)) return;
+    if (!scanDue || filling || page._leadRecoveryInProgress || page._aiFormFixing || page._aiAssistRunning) return;
     filling = true;
     try {
+      const config = { ...globalAiConfig, ...options.aiConfig };
+      if (config.enabled && ['form_agent', 'continuous'].includes(config.mode) && !page._continuousAgent) {
+        startContinuousAgent(page, () => page._assignedRecord || session.currentRecord || record, session, options);
+      }
+      if (config.enabled && config.mode === 'form_agent') return;
       await scanOnce();
     } finally {
       filling = false;
@@ -126,6 +131,7 @@ export function attachAutofillPageWatcher(page, {
     } catch {
       // Trang có thể vừa điều hướng — cho phép lượt quét sau chạy tiếp.
     }
+    if (page._manualCaptchaPending) return;
     if (!iframeOnly && await recoverAdsmithFrameLoading(page, session, options)) {
       noProgressRounds = 0;
       scanDelayMs = 1500;
@@ -160,13 +166,14 @@ export function attachAutofillPageWatcher(page, {
     let outcome;
     try {
       outcome = await fillVisibleForms(page);
-      if (revision !== navigationRevision || page.url() !== u) return;
+      if (page._manualCaptchaPending || revision !== navigationRevision || page.url() !== u) return;
       page._autofillWaitReason = outcome?.waitReason || '';
     } catch {
       // Trang có thể điều hướng hoặc đóng giữa hai lần quét.
     } finally {
       clearTimeout(stuckTimer);
     }
+    if (page._manualCaptchaPending) return;
     if (outcome?.waitingForAddress) {
       scanDelayMs = getAutofillScanDelay(++noProgressRounds);
       return;
@@ -291,13 +298,13 @@ export function attachAutofillPageWatcher(page, {
   session._autofillTimer = timer;
   // Check lead sau màn email chạy độc lập với lượt quét (không bị AI / lượt kẹt chặn).
   const leadTimer = setInterval(() => {
-    void checkLeadAfterEmailOnPage(page);
+    if (!page._manualCaptchaPending) void checkLeadAfterEmailOnPage(page);
   }, 1000);
   leadTimer.unref?.();
   session._autofillTimers.add(leadTimer);
   if (typeof page.on === 'function') {
     page.on('framenavigated', navFrame => {
-      if (typeof page.mainFrame !== 'function' || navFrame === page.mainFrame()) void checkLeadAfterEmailOnPage(page);
+      if (!page._manualCaptchaPending && (typeof page.mainFrame !== 'function' || navFrame === page.mainFrame())) void checkLeadAfterEmailOnPage(page);
     });
     page.on('domcontentloaded', () => { void scan(true); });
     page.on('load', () => { void scan(true); });

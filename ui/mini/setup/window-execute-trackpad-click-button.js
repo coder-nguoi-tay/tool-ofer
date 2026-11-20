@@ -2,6 +2,13 @@
 
     // Cập nhật vị trí con trỏ chuột ảo trên viewport
 
+/**
+ * Nhấn tại vị trí con trỏ trackpad trong Screen View và mở danh sách khi nhấn ô chọn.
+ * @param {string} [button] Nút chuột được nhấn.
+ * @return {Promise<void>}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
     window.executeTrackpadClick = async (button = 'left') => {
       const pt = { x: trackpadCursorX, y: trackpadCursorY };
       const vpRect = viewport.getBoundingClientRect();
@@ -10,7 +17,7 @@
 
       const res = await sendInput({ type: 'mousedown', x: pt.x, y: pt.y, button, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });
       if (res?.select && Array.isArray(res.select.options)) {
-        openSelectPicker(res.select.options, res.select.selectedIndex);
+        openSelectPicker(res.select);
       } else {
         setTimeout(() => {
           sendInput({ type: 'mouseup', x: pt.x, y: pt.y, button, clientWidth: canvasNaturalWidth, clientHeight: canvasNaturalHeight });

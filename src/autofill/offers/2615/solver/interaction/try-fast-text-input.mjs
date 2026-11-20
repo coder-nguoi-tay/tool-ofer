@@ -17,17 +17,21 @@ import { recordInputFillHtml } from '../../../../../logging/record-input-fill-ht
  * @since 2026-11-20
  */
 export async function tryFastTextInput(field, value, page = null, address = false) {
+  const owner = page ?? field?.page?.();
+  if (owner?._manualCaptchaPending) return false;
   return withPinnedInput(field, async input => {
     if (typeof input.fill !== 'function' || typeof input.inputValue !== 'function') return false;
     try {
       if (page?.mouse && !await humanClick(page, input)) return false;
       await waitForInputPacing(page);
+      if (owner?._manualCaptchaPending) return false;
       await recordInputFillHtml(input, page);
-      if (page?.mouse && !await retainsInputFocus(input)) return false;
+      if (page?.mouse && !await retainsInputFocus(input, false, owner)) return false;
       if (address) {
         const selection = await input.evaluate(readAddressSelection, value);
         if (selection.retained || selection.pending) return true;
       }
+      if (owner?._manualCaptchaPending) return false;
       await input.fill(value, { timeout: 1500 });
       if (address) {
         const choice = await input.evaluate(readAddressSelection, value);
@@ -36,7 +40,7 @@ export async function tryFastTextInput(field, value, page = null, address = fals
           return true;
         }
       }
-      if (typeof input.press === 'function' && await retainsInputFocus(input)) await input.press('Tab', { timeout: 500 }).catch(() => {});
+      if (typeof input.press === 'function' && await retainsInputFocus(input, false, owner)) await input.press('Tab', { timeout: 500 }).catch(() => {});
       await waitForInputPacing(page);
       const actual = await input.inputValue({ timeout: 500 });
       if (actual.trim().toLowerCase() === value.trim().toLowerCase()) return true;

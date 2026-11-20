@@ -59,6 +59,22 @@ test('phiên 2615 đã xác nhận cũng dừng ở lần tải lại trang cha 
   }
 });
 
+test('CAPTCHA xuất hiện trong lần xác minh cuối giữ nguyên trang cha của cả hai luồng', async () => {
+  for (const recover of [recoverAdsmithFrameLoading, recoverOffer2615AdsmithFrameLoading]) {
+    const page = createLoadingPage('error');
+    await recover(page, {}, {}, 0);
+    const inspect = page.evaluate;
+    let inspections = 0;
+    page.evaluate = async (...args) => {
+      if (++inspections === 2) page._manualCaptchaPending = true;
+      return inspect(...args);
+    };
+    await recover(page, {}, {}, 4000);
+    assert.equal(inspections, 2);
+    assert.equal(page.navigations.length, 0);
+  }
+});
+
 test('bảo toàn iframe Adsmith khi request còn chờ qua toàn bộ ngưỡng tải lại', { skip: !existsSync(chromium.executablePath()) }, async t => {
   const browser = await chromium.launch();
   t.after(() => browser.close());

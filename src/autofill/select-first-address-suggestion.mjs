@@ -169,12 +169,12 @@ export async function resolveAddressSuggestion(context, field, action, expectedA
     };
     const request = { scope, input: handle, selectors: ADDRESS_SUGGESTION_SELECTORS, action, expectedAddress, isAddress: meaning === 'address' };
     const page = typeof context.page === 'function' ? context.page() : context;
-    if (action !== 'inspect' && shouldStopAfterLead(page._autofillSession)) return { success: false };
+    if (action !== 'inspect' && (page._manualCaptchaPending || shouldStopAfterLead(page._autofillSession))) return { success: false };
     if (action !== 'select') return await context.evaluate(findAddressOption, request);
     decision = await context.evaluateHandle(findAddressOption, request);
     const option = decision.asElement();
     if (!option) return await decision.jsonValue();
-    const clicked = !shouldStopAfterLead(page._autofillSession) &&
+    const clicked = !page._manualCaptchaPending && !shouldStopAfterLead(page._autofillSession) &&
       await option.click({ timeout: 1000 }).then(() => true, () => false);
     if (!clicked) {
       await handle.evaluate((input, item) => {

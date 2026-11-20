@@ -7,17 +7,21 @@ import { hasPendingFrameRequests, lastFrameRequestSettledAt } from '../../browse
 import { readSubOfferCloseReason } from './get-sub-offer-close-reason.mjs';
 
 /**
- * Xét trang trắng ở tab chính. Với tab phụ, chỉ tính phần việc còn lại bên trong iframe hợp lệ.
+ * Xét trang trắng và thời gian hết việc trong iframe từ sau khi người dùng xác minh CAPTCHA.
  * @param {object} page Tab cần kiểm tra.
  * @param {{key?: string, since?: number}} tracker Mốc bắt đầu của tài liệu hiện tại.
  * @param {object} options Lựa chọn phân loại tab phụ.
  * @return {Promise<string|null>} Lý do đóng hoặc null nếu cần giữ/chờ thêm.
  * @throws {Error} Khi API tab phát sinh lỗi ngoài quá trình đọc evidence.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function getEmptyOfferPageReason(page, tracker, { subTab = false } = {}) {
   const mainFrame = page?.mainFrame?.();
+  if (page?._manualCaptchaPending) {
+    tracker.since = undefined;
+    return null;
+  }
   if (!page || page.isClosed?.() || page._leadRecoveryInProgress) {
     if (subTab) tracker.since = undefined;
     return null;
@@ -67,7 +71,7 @@ export async function getEmptyOfferPageReason(page, tracker, { subTab = false } 
     return content;
   }).catch(() => null)));
   const frameAttachedDuringCheck = subTab && page.frames?.().some(frame => !frames.includes(frame));
-  if (!results.length || results.some(result => !result) || frameAttachedDuringCheck) {
+  if (page._manualCaptchaPending || !results.length || results.some(result => !result) || frameAttachedDuringCheck) {
     if (subTab) tracker.since = undefined;
     return null;
   }
@@ -82,7 +86,7 @@ export async function getEmptyOfferPageReason(page, tracker, { subTab = false } 
     // Chỉ đọc thông báo kết thúc sau khi mọi frame liên quan đều đã tải và không còn form/câu hỏi.
     const terminalReason = await readSubOfferCloseReason(page);
     const checkedFrames = frames.filter((frame, index) => !results[index].excluded);
-    if (page.frames?.().some(frame => !frames.includes(frame))) {
+    if (page._manualCaptchaPending || page.frames?.().some(frame => !frames.includes(frame))) {
       tracker.since = undefined;
       return null;
     }

@@ -1,8 +1,16 @@
-window.selectPickerOption = async (idx) => {
-      await sendInput({ type: 'select', index: idx });
-      closeSelectModal();
-      showToast('Đã chọn mục');
-    };
+/**
+ * Gửi lựa chọn thủ công về đúng ô đã mở và hiển thị kết quả xác nhận từ tab.
+ * @param {number} index Vị trí của mục đã chọn.
+ * @param {string} uid Mã của lần mở danh sách.
+ * @return {Promise<void>}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+window.selectPickerOption = async (index, uid) => {
+  closeSelectModal();
+  const result = await sendInput({ type: 'select', index, uid });
+  showToast(result?.ok ? 'Đã chọn mục' : 'Chưa chọn được mục. Hãy mở lại danh sách.');
+};
 
     window.quickPickOption = async (choice) => {
       showToast(choice === 'random' ? '🎲 Đang chọn ngẫu nhiên 1 hoặc 2...' : `🎯 Đang chọn Option ${choice + 1}...`);

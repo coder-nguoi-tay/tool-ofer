@@ -65,7 +65,7 @@ export async function countPendingSweepstakesCards(page) {
 
 /**
  * Kết thúc màn card sweepstakes (trang cuối mở hết link):
- *  1. Mỗi tab con (offer mở từ màn card) làm tối đa 5 phút kể từ lúc xuất hiện rồi đóng.
+ *  1. Mỗi tab con có năm phút làm việc. Đếm lại từ đầu sau khi người dùng xác minh CAPTCHA.
  *  2. Khi đã mở hết thẻ và không còn tab con nào (ổn định 5 giây), đóng trình duyệt để nhường slot mới —
  *     áp dụng cả IP có lead như hoàn tất thankyou.php; riêng chế độ "dừng autofill sau lead" thì giữ nguyên.
  * Gọi mỗi nhịp của bộ canh phiên (watchTrafficBlockedPage).
@@ -76,7 +76,7 @@ export async function countPendingSweepstakesCards(page) {
  * @param {object} [deps] readPending, hasPendingOpenings, persistOutcome (tiêm cho test).
  * @return {Promise<boolean>} True nếu vừa đóng trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-15
+ * @since 2026-11-20
  */
 export async function finishSweepstakesCardSession(session, closeSession, now = Date.now(), {
   readPending = countPendingSweepstakesCards,
@@ -92,6 +92,7 @@ export async function finishSweepstakesCardSession(session, closeSession, now = 
 
     for (const tab of pages) {
       if (tab === root) continue;
+      if (tab._manualCaptchaPending) { subTabSeenAt.delete(tab); continue; }
       if (!subTabSeenAt.has(tab)) subTabSeenAt.set(tab, now);
       if (now - subTabSeenAt.get(tab) < SUB_TAB_MAX_MS) continue;
       const url = tab.url();
@@ -101,16 +102,17 @@ export async function finishSweepstakesCardSession(session, closeSession, now = 
     }
 
     const subTabsLeft = pages.some(tab => tab !== root && !tab.isClosed());
-    const busy = subTabsLeft || hasPendingOpenings(root.context?.()) || session.leadCheckStatus === 'checking' || shouldPauseForLead(session)
+    const busy = root._manualCaptchaPending || subTabsLeft || hasPendingOpenings(root.context?.()) || session.leadCheckStatus === 'checking' || shouldPauseForLead(session)
       || root._aiAssistRunning || root._aiFormFixing || root._continuousAgent || root._leadRecoveryInProgress;
     if (busy) { stableSince.delete(session); return false; }
     const pending = await readPending(root);
-    if (pending !== 0) { stableSince.delete(session); return false; }
+    if (pending !== 0 || root._manualCaptchaPending) { stableSince.delete(session); return false; }
     if (!stableSince.has(session)) { stableSince.set(session, now); return false; }
     if (now - stableSince.get(session) < FINISH_STABLE_MS) return false;
 
     stableSince.delete(session);
     await persistOutcome(session).catch(() => {});
+    if (root._manualCaptchaPending) return false;
     session.addBrowserLog?.({ type: 'sweepstakes_completed', detail: 'Màn card đã mở hết offer và không còn tab con; đóng trình duyệt để nhường slot mới.' });
     await closeSession({ completedFinancialFlow: true });
     return session.isClosed === true;

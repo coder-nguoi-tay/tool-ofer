@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { normalizeOfferRunOptions } from '../src/config/normalize-offer-run-options.mjs';
@@ -19,6 +20,105 @@ function load(context, file) {
 }
 
 /**
+ * Read cap constants in a clean child process so module-load environment parsing is isolated.
+ * @param {object} [overrides={}] Environment values for the two cap variables.
+ * @return {{alive: number, concurrency: number}} Parsed finite cap values.
+ * @throws {Error} When the child process or its JSON output is invalid.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+function readRuntimeCaps(overrides = {}) {
+  const aliveUrl = new URL('../src/runtime/constants/max-alive-browsers.mjs', import.meta.url).href;
+  const concurrencyUrl = new URL('../src/runtime/constants/max-concurrent-profiles.mjs', import.meta.url).href;
+  const environment = { ...process.env };
+  delete environment.AUTOLEADPC_MAX_ALIVE;
+  delete environment.AUTOLEADPC_CONCURRENCY;
+  Object.assign(environment, overrides);
+  const script = `import { maxAliveBrowsers } from ${JSON.stringify(aliveUrl)}; import { maxConcurrentProfiles } from ${JSON.stringify(concurrencyUrl)}; console.log(JSON.stringify({ alive: maxAliveBrowsers, concurrency: maxConcurrentProfiles }));`;
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { env: environment, encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(result.stderr || 'Không đọc được cap runtime.');
+  return JSON.parse(result.stdout.trim());
+}
+
+/**
+ * Verify every supported browser launcher rejects counts above a child-process cap.
+ * @param {number} cap Configured AUTOLEADPC_MAX_ALIVE value.
+ * @param {string} requestedCount Count supplied to each launcher.
+ * @return {void} All five launcher paths rejected the request before API/browser work.
+ * @throws {Error} When the child process reports a missing or inconsistent rejection.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+function verifyLauncherCountCap(cap, requestedCount) {
+  const root = new URL('../', import.meta.url).pathname;
+  const environment = { ...process.env, AUTOLEADPC_MAX_ALIVE: String(cap), AUTOLEADPC_CONCURRENCY: '2' };
+  const script = `
+    const [{ launchRequestedBrowsers }, { launchAdsPowerBrowsers }, { launchGoLoginBrowsers }, { launchMultiloginBrowsers }] = await Promise.all([
+      import('./src/browser/actions/launch-requested-browsers.mjs'),
+      import('./src/browser/actions/launch-ads-power-browsers.mjs'),
+      import('./src/browser/actions/launch-gologin-browsers.mjs'),
+      import('./src/browser/actions/launch-multilogin-browsers.mjs'),
+    ]);
+    const request = count => JSON.stringify({ requestedCount: count, concurrency: count, websiteUrl: 'https://fixture.invalid/' });
+    const launchers = [
+      ['Chrome', () => launchRequestedBrowsers(request(${JSON.stringify(requestedCount)}))],
+      ['Obscura', () => launchRequestedBrowsers(request(${JSON.stringify(requestedCount)}), { browserEngine: 'obscura' })],
+      ['AdsPower', () => launchAdsPowerBrowsers(request(${JSON.stringify(requestedCount)}))],
+      ['GoLogin', () => launchGoLoginBrowsers(request(${JSON.stringify(requestedCount)}))],
+      ['Multilogin', () => launchMultiloginBrowsers(request(${JSON.stringify(requestedCount)}))],
+    ];
+    const errors = [];
+    for (const [name, launch] of launchers) {
+      try { await launch(); throw new Error(name + ' accepted an over-cap count'); }
+      catch (error) { errors.push(name + ': ' + error.message); }
+    }
+    const expected = 'Chỉ được mở tối đa ${cap} phiên trình duyệt cùng lúc.';
+    if (errors.some(error => !error.endsWith(expected))) throw new Error(errors.join(' | '));
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { cwd: root, env: environment, encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout || 'Launcher count cap test failed.');
+}
+
+test('Cap runtime hữu hạn, mặc định 30 và chuẩn hóa override không an toàn', () => {
+  assert.deepEqual(readRuntimeCaps(), { alive: 30, concurrency: 30 });
+  assert.deepEqual(readRuntimeCaps({ AUTOLEADPC_MAX_ALIVE: '31', AUTOLEADPC_CONCURRENCY: '7' }), { alive: 31, concurrency: 7 });
+  assert.deepEqual(readRuntimeCaps({ AUTOLEADPC_MAX_ALIVE: '1000', AUTOLEADPC_CONCURRENCY: '1e2' }), { alive: 256, concurrency: 30 });
+  for (const invalid of ['', '1.5', '1e2', '12suffix', '-2', '9007199254740992']) {
+    assert.deepEqual(readRuntimeCaps({ AUTOLEADPC_MAX_ALIVE: invalid, AUTOLEADPC_CONCURRENCY: invalid }), { alive: 30, concurrency: 30 }, invalid);
+  }
+});
+
+/**
+ * Check cap enforcement and strict parsing across Chrome, Obscura and managed-browser launchers.
+ * @param {void} None.
+ * @return {void} Resolves after default and explicitly lowered cap cases pass.
+ * @throws {Error} When any launcher accepts or inconsistently rejects an over-cap count.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+function verifyAllLauncherCountCaps() {
+  verifyLauncherCountCap(30, '31');
+  verifyLauncherCountCap(2, '3');
+}
+test('Chrome, Obscura, AdsPower, GoLogin và Multilogin cùng tôn trọng cap được cấu hình', verifyAllLauncherCountCaps);
+
+/**
+ * Normalize the route fixture count with the production default cap.
+ * @param {string|number} value Requested count from the mocked request.
+ * @return {number} Bounded positive integer.
+ * @throws {Error} When the fixture request is malformed or above 30.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+function normalizeFixtureRequestedCount(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^\d+$/.test(raw) || /^0+$/.test(raw)) throw new Error('Số trình duyệt cần mở phải là số nguyên dương.');
+  const digits = raw.replace(/^0+(?=\d)/, '');
+  if (digits.length > 2 || digits.length === 2 && digits > '30') throw new Error('Chỉ được mở tối đa 30 phiên trình duyệt cùng lúc.');
+  return Number(digits);
+}
+
+/**
  * Tạo hàng đợi bù dùng deferred promises để tái hiện Stop/Start trong khi còn I/O.
  * @return {object} Context và các lượt mở có thể chủ động hoàn tất.
  * @author ductv <ductv@getflycrm.com> @since 2026-11-18
@@ -28,6 +128,7 @@ function refillFixture() {
   const state = { enabled: true, stopRequested: false, noSlotRefill: false, targetCount: 1,
     queued: false, settings: { websiteUrl: 'https://fixture.invalid/old' } };
   const context = vm.createContext({ autoRefill: state, activeBrowsers: new Set(), maxAliveBrowsers: 30,
+    normalizeRequestedBrowserCount: normalizeFixtureRequestedCount,
     countLiveBrowsers: () => browsers.length, getLiveBrowsers: () => [...browsers],
     normalizeUrl: value => value, pruneStaleAgents() {}, remoteAgents: new Map(), offerStrategyState: new Map(),
     setTimeout: (resolve, milliseconds) => milliseconds === 800 ? queueMicrotask(resolve) : delayed.push(resolve),
@@ -104,8 +205,16 @@ test('sau delay phải đếm lại browser sống để không bù dư slot', a
   assert.equal(state.queued, false);
 });
 
-test('Stop rồi Sequential xóa cờ dừng, tôn trọng số luồng và Không bù slot', async () => {
-  for (const requestedCount of [1, 4, 40]) {
+/**
+ * Check sequential mode resets Stop while retaining a bounded requested target.
+ * @param {void} None.
+ * @return {Promise<void>} Resolves after the sequential route assertions pass.
+ * @throws {AssertionError} When sequential state or count bounds differ.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+async function verifySequentialRequestedCountBounds() {
+  for (const requestedCount of [1, 4, 30]) {
     const { context, state, jobs } = refillFixture();
     Object.assign(state, { stopRequested: true, enabled: false, isRefilling: true });
     context.applyRunMode = () => {};
@@ -117,7 +226,7 @@ test('Stop rồi Sequential xóa cờ dừng, tôn trọng số luồng và Khô
     await context.handlePostAutoRefillSequential({ method: 'POST', url: '/auto-refill/sequential' }, {});
     assert.equal(state.stopRequested, false);
     assert.equal(state.isRefilling, false);
-    assert.equal(state.targetCount, Math.min(requestedCount, 30));
+    assert.equal(state.targetCount, requestedCount);
     assert.equal(state.settings.multiTab, false);
     assert.equal(jobs.length, 1);
     state.noSlotRefill = true;
@@ -125,7 +234,20 @@ test('Stop rồi Sequential xóa cờ dừng, tôn trọng số luồng và Khô
     assert.equal(state.noSlotRefill, true);
     assert.equal(jobs.length, 1);
   }
-});
+  const { context, state } = refillFixture();
+  context.applyRunMode = () => {};
+  context.readRequestBody = async () => JSON.stringify({ enabled: true, settings: {
+    websiteUrl: 'https://fixture.invalid/1', requestedCount: '31',
+  } });
+  context.respondWithJson = () => {};
+  load(context, 'src/http/routes/auto/post-refill-sequential.mjs');
+  await assert.rejects(
+    () => context.handlePostAutoRefillSequential({ method: 'POST', url: '/auto-refill/sequential' }, {}),
+    /Chỉ được mở tối đa 30/
+  );
+  assert.equal(state.targetCount, 1);
+}
+test('Stop rồi Sequential xóa cờ dừng, tôn trọng số luồng và Không bù slot', verifySequentialRequestedCountBounds);
 
 test('cờ Fonts/API Fake IP được giữ nguyên từ Start sang cấu hình tự bù', async () => {
   const state = {}, launched = [];
@@ -183,6 +305,7 @@ function dashboardFixture() {
     return elements.get(id);
   };
   getElement('cbxRunInApp').checked = true;
+  getElement('nudThread').value = '1';
   getElement('txtLinkOffer').value = 'https://fixture.invalid/offer';
   getElement('cbxAuto').value = 'auto';
   const context = vm.createContext({ document: { getElementById: getElement }, currentSavedOffers: [],
@@ -199,6 +322,44 @@ function dashboardFixture() {
   return { context, getElement, storage, requests };
 }
 
+/**
+ * Check Desktop count normalization and round-trip persistence for exact decimal values.
+ * @param {void} None.
+ * @return {Promise<void>} Resolves after local and backend settings reload checks pass.
+ * @throws {AssertionError} When the count is corrupted or persisted beyond the UI hard bound.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+async function verifyDesktopCountPersistence() {
+  const { context, getElement, storage, requests } = dashboardFixture();
+  const field = getElement('nudThread');
+  let onChange;
+  field.addEventListener = (event, listener) => { if (event === 'change') onChange = listener; };
+  await context.loadOfferConfig();
+  const largeCount = '123456789012345678901234567890';
+  for (const [typed, expected] of [['31', '31'], ['00050', '50'], ['0', '1'], ['-2', '1'], ['1.5', '1'], ['1e2', '1'], ['2x', '1'], ['', '1'], [largeCount, '1']]) {
+    field.value = typed;
+    onChange();
+    assert.equal(field.value, expected);
+    assert.equal(storage.get('autoleadpc_thread_count'), expected);
+  }
+  field.value = '31';
+  onChange();
+  load(context, 'ui/desktop/functions/save-offer-config.js');
+  await context.saveOfferConfig(true);
+  const saved = requests.find(request => request.url === '/pc/offer/save').body;
+  assert.equal(saved.Thread, '31');
+  field.value = '';
+  await context.loadOfferConfig();
+  assert.equal(field.value, '31');
+  storage.clear();
+  context.api = async () => saved;
+  field.value = '';
+  await context.loadOfferConfig();
+  assert.equal(field.value, '31');
+}
+test('Số luồng Desktop giữ số thập phân an toàn và chuẩn hóa dữ liệu lỗi khi lưu/tải', verifyDesktopCountPersistence);
+
 test('Start thường và Sequential cùng truyền multiTab=false và các lựa chọn chờ lead', async () => {
   for (const mode of ['auto', 'sequential']) {
     const { context, getElement, requests } = dashboardFixture();
@@ -213,6 +374,57 @@ test('Start thường và Sequential cùng truyền multiTab=false và các lự
     assert.equal(settings.stopAutofillOnLead, true);
   }
 });
+
+/**
+ * Check Desktop Start sends a decimal count as text and a bounded integer alias.
+ * @param {void} None.
+ * @return {Promise<void>} Resolves after the mocked launch request is asserted.
+ * @throws {AssertionError} When the payload changes the requested count.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+async function verifyDesktopStartCountPayload() {
+  const { context, getElement, requests } = dashboardFixture();
+  getElement('nudThread').value = '100';
+  await context.handleStart();
+  const launch = requests.find(request => request.url === '/launch');
+  assert.equal(launch.body.requestedCount, '100');
+  assert.equal(launch.body.concurrency, 100);
+}
+test('Desktop Start gửi số luồng thập phân an toàn chính xác xuống backend', verifyDesktopStartCountPayload);
+
+/**
+ * Check Mac sequential Start sends the exact bounded count in both request fields.
+ * @param {void} None.
+ * @return {Promise<void>} Resolves after two mocked sequential requests are asserted.
+ * @throws {AssertionError} When Mac omits or numerically corrupts the count.
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
+async function verifyMacSequentialCountPayload() {
+  let listener;
+  let requestedCount = '12';
+  const button = { disabled: false, addEventListener: (event, callback) => { listener = callback; } };
+  const requests = [];
+  const context = vm.createContext({
+    document: { querySelector: () => button },
+    buildRequestBody: () => ({ requestedCount }),
+    fetch: async (url, options) => {
+      requests.push({ url, body: JSON.parse(options.body) });
+      return { json: async () => ({ message: 'ok' }) };
+    },
+    autoRefillStatus: { textContent: '' }
+  });
+  load(context, 'ui/mac/setup/sequential-start-btn-click.js');
+  await listener();
+  assert.equal(requests[0].body.settings.requestedCount, '12');
+  assert.equal(requests[0].body.settings.concurrency, '12');
+  requestedCount = '123';
+  await listener();
+  assert.equal(requests[1].body.settings.requestedCount, '123');
+  assert.equal(requests[1].body.settings.concurrency, '123');
+}
+test('Mac Sequential gửi requestedCount/concurrency từ ô số luồng mà không mất chính xác', verifyMacSequentialCountPayload);
 
 test('nạp cấu hình trên trình duyệt mới và đổi preset giữ đúng mọi checkbox phụ thuộc', async () => {
   const { context, getElement, storage } = dashboardFixture();

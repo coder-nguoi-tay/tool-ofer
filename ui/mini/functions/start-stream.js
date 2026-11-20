@@ -3,10 +3,13 @@
  * @param {number} slot slot.
  * @return {void} Kết quả xử lý start stream.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 function startStream(slot) {
       currentSlot = slot;
+      // Không dùng kích thước của slot/tab trước khi stream mới phát frame đầu tiên.
+      canvasNaturalWidth = 0;
+      canvasNaturalHeight = 0;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -19,12 +22,12 @@ function startStream(slot) {
       // Pre-load snapshot ngay lập tức để canvas có hình 0ms
       const preImg = new Image();
       preImg.onload = () => {
+        canvasNaturalWidth = preImg.width;
+        canvasNaturalHeight = preImg.height;
         if (!isRendering) {
           if (canvas.width !== preImg.width || canvas.height !== preImg.height) {
             canvas.width = preImg.width;
             canvas.height = preImg.height;
-            canvasNaturalWidth = preImg.width;
-            canvasNaturalHeight = preImg.height;
           }
           ctx.drawImage(preImg, 0, 0);
           canvasMsg.style.display = 'none';

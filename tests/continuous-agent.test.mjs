@@ -251,8 +251,8 @@ test('AI Vận hành giữ tab, chỉ điền form đã khai báo, hủy phản 
     fillVisibleForms: async () => { autoPasses++; delayed.emit('auto'); }, record: {}, checkLeadAfterEmailOnPage() {},
     isSpamAdUrl: () => false, watchPage() {}
   });
-  assert.ok(page._continuousAgent);
   await page.waitForTimeout(720);
+  assert.ok(page._continuousAgent);
   assert.equal(prompts.length, 0);
   await page.goto('https://unrelated.test/form');
   await page.setContent(form);

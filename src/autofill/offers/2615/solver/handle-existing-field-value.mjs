@@ -1,4 +1,5 @@
 // Bản giải riêng của offer 2615, chép từ src/autofill/handle-existing-field-value.mjs ngày 2026-11-17. Sửa ở đây không ảnh hưởng giải chung.
+import { markValidFormValue } from '../../../mark-valid-form-value.mjs';
 import { resolveContactField } from '../../../resolve-contact-field.mjs';
 import { readAddressSelection } from '../../../read-address-selection.mjs';
 
@@ -6,6 +7,7 @@ import { readAddressSelection } from '../../../read-address-selection.mjs';
  * Giữ giá trị đã điền hợp lệ và ghi nhận email sẵn có trên form.
  * @param {object} context Trường hoặc frame đang xử lý cùng dữ liệu và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần bỏ qua trường hiện tại.
+ * @throws {Error} Khi không đọc được trạng thái lựa chọn địa chỉ trong frame.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -23,18 +25,7 @@ export async function handleExistingFieldValue({
     }
     const currentVal = metadata.value.trim();
     if (currentVal.toLowerCase() === String(valueToFill).trim().toLowerCase()) {
-      await field.evaluate(el => {
-        el.dataset.uxFilled = '1';
-        el.classList.remove('invalid', 'error');
-        el.classList.add('valid', 'has-value');
-        const parent = el.closest('.field-item, .form-group, .input-group, .loco-group');
-        if (parent) {
-          parent.classList.remove('invalid', 'error');
-          parent.classList.add('valid', 'non-empty');
-          const err = parent.querySelector('.error-entry, .error');
-          if (err) err.style.display = 'none';
-        }
-      }).catch(() => {});
+      await field.evaluate(markValidFormValue, metadata.value).catch(() => false);
       return true;
     }
     const isPlaceholderMask = /^(\+1|\+1\s*|\(___\)\s*___-____|___-__-____|[_\-\(\)\s\.\/]+|mm\/dd\/yyyy)$/i.test(currentVal);

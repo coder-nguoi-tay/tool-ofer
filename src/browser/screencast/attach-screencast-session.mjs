@@ -12,7 +12,7 @@ import { isWindowMinimized } from './is-window-minimized.mjs';
  * @param {object|null} [session]
  * @return {Promise<void>}
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-11
+ * @since 2026-11-20
  */
 async function attachScreencastSession(scObj, cdpSession, targetPage, slot = null, session = null) {
   // Route đổi/mở/đóng tab gọi lại không kèm slot/session: giữ của lần gắn trước để còn tự khôi phục được.
@@ -29,6 +29,10 @@ async function attachScreencastSession(scObj, cdpSession, targetPage, slot = nul
   scObj.page = targetPage;
   scObj.slot = slot;
   scObj.session = session;
+  // Không dùng kích thước của tab cũ cho lần bấm đầu tiên trên tab mới.
+  // Frame đầu tiên của tab mới sẽ cập nhật lại hai giá trị này.
+  scObj.deviceWidth = null;
+  scObj.deviceHeight = null;
   scObj.lastFrameTime = Date.now();
 
   // 1. Kích hoạt Page domain trên CDP để đảm bảo nhận event screencastFrame

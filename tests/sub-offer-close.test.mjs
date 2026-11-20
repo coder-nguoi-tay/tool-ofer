@@ -171,6 +171,7 @@ test('watcher: phiên ĐÃ CÓ LEAD vẫn đóng tab offer phụ (lifepointspane
   const lifepoints = await openPopup(browser, 'https://start.lifepointspanel.com/aff_c?offer_id=1807&aff_id=1610', '');
   const gone = await openPopup(browser, 'https://www.searchcactus.com/publisher/trackofr.asp?chnl=221341&ofr=1089163', 'This offer is no longer available.');
   const networkError = await openPopup(browser, 'chrome-error://chromewebdata/', '');
+  networkError._manualCaptchaPending = true;
   const live = await openPopup(browser, 'https://account.yougov.com/us-en/join/new/question-2', 'What is your gender?');
   watchTrafficBlockedPage(session);
   ticks[0]();
@@ -206,9 +207,11 @@ test('watcher: tab phụ chỉ có form hoặc câu hỏi ở trang cha được
   const quiz = await popupWith('https://survey.example.com/q1', { ...EMPTY, hasChoices: true });
   const question = await popupWith('https://survey.example.com/prompt', { ...EMPTY, hasQuestion: true });
   const loading = await popupWith('https://slow.example.com/', { ...EMPTY, loading: true });
+  const challenge = await popupWith('https://verify.test/form', EMPTY);
   watchTrafficBlockedPage(session);
   const tickAt = async at => { now = at; ticks[0](); for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
   await tickAt(0);
+  challenge._manualCaptchaPending = true;
   await tickAt(29_000);
   assert.equal(article.closed, false, 'chưa đủ 30s thì chưa đóng');
   // Đọc DOM tab con tối đa mỗi 5 giây (giảm tải 2026-11-16): quyết định đóng có thể trễ thêm tối đa 5 giây sau mốc 30s.
@@ -219,6 +222,13 @@ test('watcher: tab phụ chỉ có form hoặc câu hỏi ở trang cha được
   assert.equal(quiz.closed, true);
   assert.equal(question.closed, true);
   assert.equal(loading.closed, false);
+  assert.equal(challenge.closed, false, 'giữ đúng tab đang xác minh');
+  challenge._manualCaptchaPending = false;
+  await tickAt(45_000);
+  await tickAt(70_000);
+  assert.equal(challenge.closed, false, 'đếm lại thời gian trống sau khi xác minh');
+  await tickAt(75_000);
+  assert.equal(challenge.closed, true);
   assert.equal(page.closed, false, 'tab đầu giữ nguyên');
   assert.equal(counters.browserCloses, 0);
 });

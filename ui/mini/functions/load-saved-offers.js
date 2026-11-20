@@ -1,6 +1,7 @@
 /**
  * Load saved offers.
  * @return {Promise<void>} Kết quả xử lý load saved offers.
+ * @throws {never} Lỗi đọc danh sách offer được bỏ qua để Mini vẫn có thể sử dụng.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-10
  */
@@ -32,10 +33,10 @@ async function loadSavedOffers() {
               document.getElementById('detailsMultiLinks').open = true;
             }
 
-            if (chosen.Thread) {
-              inputThreadCount.value = chosen.Thread;
+            if (chosen.Thread !== undefined) {
+              inputThreadCount.value = normalizeMiniRequestedThreadCount(chosen.Thread);
               document.querySelectorAll('#threadsPills .pill-btn').forEach((b) => {
-                b.classList.toggle('active', b.dataset.thread === chosen.Thread);
+                b.classList.toggle('active', b.dataset.thread === inputThreadCount.value);
               });
             }
             if (chosen.LimitRun !== undefined) {

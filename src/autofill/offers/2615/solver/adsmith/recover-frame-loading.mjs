@@ -11,7 +11,7 @@ const maxReloads = 5;
 const maxFrameReloads = 2;
 
 /**
- * Giữ quyền phục hồi frame Adsmith: chờ lag, GET lại trang cha tối đa năm lần mỗi URL và chống chạy chồng.
+ * Chờ frame Adsmith tải và giữ quyền điều khiển của người dùng khi xuất hiện CAPTCHA trong lượt phục hồi.
  * @param {object} page Tab chứa iframe, không đóng browser hoặc thay IP.
  * @param {object} session Phiên sở hữu tab và cờ bảo vệ lead.
  * @param {object} options Callback log và chính sách chờ lead.
@@ -19,7 +19,7 @@ const maxFrameReloads = 2;
  * @return {Promise<boolean>} True khi handler đang giữ tab chờ/phục hồi/hết lượt, ngăn AI/F5 khác.
  * @throws {never} Reload thất bại vẫn tính một lượt và chờ lại, không thoát browser.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function recoverAdsmithFrameLoading(page, session, options = {}, now = Date.now()) {
   let tab = observations.get(page);
@@ -33,14 +33,18 @@ export async function recoverAdsmithFrameLoading(page, session, options = {}, no
     tab.currentKey = key;
   }
   let state = tab.urls.get(key);
-  if (session.isClosed || page.isClosed() || ['manual', 'skip', 'consent_only'].includes(session.offerMode) || shouldPauseForLead(session, options) || shouldStopAfterLead(session)
+  if (page._manualCaptchaPending || session.isClosed || page.isClosed() || ['manual', 'skip', 'consent_only'].includes(session.offerMode) || shouldPauseForLead(session, options) || shouldStopAfterLead(session)
     || page._aiAssistRunning || page._aiFormFixing || page._continuousAgent || page._leadRecoveryInProgress) {
     if (state) { state.kind = null; state.since = now; }
-    return false;
+    return page._manualCaptchaPending === true;
   }
   tab.pending = true;
   try {
     const snapshot = await inspectAdsmithFrameLoading(page);
+    if (page._manualCaptchaPending) {
+      if (state) state.kind = null;
+      return true;
+    }
     if (page.isClosed() || page.url() !== url) return false;
     if (snapshot.state === 'normal' || snapshot.state === 'not_applicable') {
       if (state) state.kind = null;
@@ -91,7 +95,7 @@ export async function recoverAdsmithFrameLoading(page, session, options = {}, no
     if (current.state !== snapshot.state || current.documentId !== snapshot.documentId || current.source !== snapshot.source ||
       current.childUrl !== snapshot.childUrl || current.childDocumentId !== snapshot.childDocumentId ||
       page.url() !== url || hasPendingFrameRequests(page) || lastIframeContentRequestSettledAt(page, current.frame) !== settledAt ||
-      session.isClosed || shouldPauseForLead(session, options) || shouldStopAfterLead(session) ||
+      page._manualCaptchaPending || session.isClosed || shouldPauseForLead(session, options) || shouldStopAfterLead(session) ||
       page._aiAssistRunning || page._aiFormFixing || page._continuousAgent || page._leadRecoveryInProgress) return true;
     state.reloads++;
     options.onLog?.({ type: 'adsmith_loading_timeout_reload', detail: `${snapshot.reason} Tải lại trang cha bằng GET, lần ${state.reloads}/${maxReloads}.`, reloads: state.reloads, loadingState: state.kind }, page);

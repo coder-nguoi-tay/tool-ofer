@@ -3,12 +3,12 @@ import { formatBytes } from '../../../monitoring/bandwidth.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 
 /**
- * Xử lý API screen-tabs.
+ * Liệt kê các tab đang mở của slot và đánh dấu tab cần người dùng xác minh CAPTCHA.
  * @param {import('node:http').IncomingMessage} request Yêu cầu HTTP.
  * @param {import('node:http').ServerResponse} response Phản hồi HTTP.
  * @return {Promise<boolean>} True khi handler đã xử lý yêu cầu.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 export async function handleGetScreenTabs(request, response) {
   if (request.method === 'GET' && request.url.startsWith('/screen/tabs/')) {
@@ -23,6 +23,8 @@ export async function handleGetScreenTabs(request, response) {
     const pages = session.browser.pages().filter(p => !p.isClosed());
     const tabs = await Promise.all(pages.map(async (p, i) => ({
       index: i,
+      manualCaptchaPending: p._manualCaptchaPending === true,
+      manualCaptchaRequestId: p._manualCaptchaPending === true ? p._manualCaptchaRequestId : undefined,
       url: p.url(),
       title: await p.title().catch(() => p.url()),
       bandwidthBytes: p._bandwidthBytes || 0,

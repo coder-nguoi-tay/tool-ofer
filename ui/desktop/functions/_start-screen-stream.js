@@ -1,9 +1,9 @@
 /**
- *  start screen stream.
- * @param {number} slot slot.
- * @return {void} Kết quả xử lý  start screen stream.
+ * Mở Screen View cho một slot và chuyển thao tác trên khung hình tới tab đang xem.
+ * @param {number} slot Số slot cần xem và điều khiển.
+ * @return {void} Kết nối luồng ảnh và đăng ký thao tác của người dùng.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 function _startScreenStream(slot) {
       _stopScreenStream();
@@ -226,12 +226,17 @@ function _startScreenStream(slot) {
         pasteCatcher.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
         document.body.appendChild(pasteCatcher);
       }
-      canvas.onmousedown = (e) => {
+      let latestMouseDown = 0;
+      canvas.onmousedown = async (e) => {
+        const clickNumber = ++latestMouseDown;
+        const tabIndex = _screenActiveTabIndex;
         _closeSelectPicker();
-        fetch(`/screen/input/${slot}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_buildMouseEvent('mousedown', e, canvas)) })
-          .then((r) => r.json())
-          .then((data) => { if (data?.select) _openSelectPicker(slot, data.select, e.clientX, e.clientY); })
-          .catch(() => { });
+        const result = await api(`/screen/input/${slot}`, {
+          method: 'POST', body: JSON.stringify(_buildMouseEvent('mousedown', e, canvas))
+        });
+        if (clickNumber !== latestMouseDown || es !== _screenEventSource || tabIndex !== _screenActiveTabIndex) return;
+        if (result?.select) _openSelectPicker(slot, result.select, e.clientX, e.clientY);
+        else if (result?.error) showToast(result.error, 'error');
       };
       canvas.onmouseup = (e) => {
         if (_mouseMoveTimer) { clearTimeout(_mouseMoveTimer); _mouseMoveTimer = null; }

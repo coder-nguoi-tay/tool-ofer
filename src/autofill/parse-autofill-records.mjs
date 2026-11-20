@@ -1,3 +1,4 @@
+import { getDobString } from './get-dob-string.mjs';
 import { getFallbackCity } from './get-fallback-city.mjs';
 import { getNormalizedPhone } from './get-normalized-phone.mjs';
 import { getPhoneAreaCode } from './get-phone-area-code.mjs';
@@ -13,7 +14,7 @@ import { normalizeFieldName } from './normalize-field-name.mjs';
  * @return {object[]} Các bản ghi có tên cột và giá trị dạng chuỗi.
  * @throws {Error} Khi cấu trúc hoặc số lượng dữ liệu không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 function parseAutofillRecords(source) {
   const content = String(source ?? '').trim();
@@ -153,17 +154,17 @@ function parseAutofillRecords(source) {
     }));
 
     // Tự động làm giàu các trường (Enrichment) để tương thích tối đa với mọi mẫu form:
-    // 1. Ngày sinh gộp (DOB): nếu có birthyear và birthmonth
+    // Chỉ tạo các bí danh ngày sinh khi hồ sơ có đủ ngày, tháng và năm.
     if (normalized.birthyear && normalized.birthmonth) {
-      const mm = String(normalized.birthmonth).padStart(2, '0');
-      const dd = String(normalized.birthday || '1').padStart(2, '0');
-      const yyyy = String(normalized.birthyear);
-      normalized.dob = `${mm}/${dd}/${yyyy}`;
-      normalized.dateofbirth = normalized.dob;
-      normalized.birthdate = normalized.dob;
+      const dob = getDobString(normalized);
+      if (dob) {
+        normalized.dob ||= dob;
+        normalized.dateofbirth ||= dob;
+        normalized.birthdate ||= dob;
+      }
       if (!normalized.age) {
-        const yr = parseInt(yyyy, 10);
-        if (!Number.isNaN(yr)) normalized.age = String(new Date().getFullYear() - yr);
+        const year = parseInt(normalized.birthyear, 10);
+        if (!Number.isNaN(year)) normalized.age = String(new Date().getFullYear() - year);
       }
     }
 
@@ -210,15 +211,15 @@ function parseAutofillRecords(source) {
       normalized.street = resolvedAddress;
     }
 
-    // 5. Số điện thoại (Phone, Home Phone, Cell Phone) - mặc định đầu 814 / 817
-    if (!normalized.phone) {
-      normalized.phone = normalized.cellphone || normalized.homephone || normalized.workphone || '';
+    // Bổ sung bí danh còn thiếu, giữ nguyên các số riêng đã khai cho nhà và di động.
+    const phone = getNormalizedPhone(normalized);
+    if (phone) {
+      normalized.phone ||= phone;
+      normalized.phonenumber ||= phone;
+      normalized.cellphone ||= phone;
+      const areaCode = getPhoneAreaCode(normalized);
+      if (areaCode) normalized.areacode ||= areaCode;
     }
-    const normalizedPhoneVal = getNormalizedPhone(normalized);
-    normalized.phone = normalizedPhoneVal;
-    normalized.phonenumber = normalizedPhoneVal;
-    normalized.cellphone = normalizedPhoneVal;
-    normalized.areacode = getPhoneAreaCode(normalized);
 
     // 6. Họ tên gộp
     if (!normalized.fullname && normalized.firstname && normalized.lastname) {

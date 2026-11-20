@@ -1,3 +1,10 @@
+/**
+ * Xử lý kết thúc thao tác chạm, phóng to hoặc mở danh sách khi người dùng chạm vào ô chọn.
+ * @param {TouchEvent} e Sự kiện kết thúc chạm.
+ * @return {Promise<void>}
+ * @author ductv <ductv@getflycrm.com>
+ * @since 2026-11-20
+ */
 viewport.addEventListener('touchend', async (e) => {
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
       if (longPressTriggered) return;
@@ -51,7 +58,7 @@ viewport.addEventListener('touchend', async (e) => {
             });
 
             if (res?.select && Array.isArray(res.select.options)) {
-              openSelectPicker(res.select.options, res.select.selectedIndex);
+              openSelectPicker(res.select);
             } else if (res?.input?.isTextLike) {
               // Chạm trúng ô gõ chữ: tự động hiện hộp thoại gõ để bàn phím điện thoại bật lên
               openTypeModalWithInput(res.input);

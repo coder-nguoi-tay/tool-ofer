@@ -328,6 +328,18 @@ test('Back ném lỗi: nhả khóa phục hồi, giữ IP có lead và không đ
   assert.equal(counters.browserCloses + counters.pageCloses, 0);
 });
 
+test('xác minh thủ công trên HTTP 403 giữ nguyên trang mà không F5 hoặc Back', async t => {
+  const { session, page } = createLeadTestSession(confirmedIp);
+  session.leadCheckStatus = 'confirmed';
+  page._uxMainStatus = 403;
+  page._manualCaptchaPending = true;
+  const reload = t.mock.method(page, 'reload');
+  page.goBack = t.mock.fn();
+  assert.equal(await recoverConfirmedLeadErrorPage(session, page), false);
+  assert.equal(reload.mock.callCount(), 0);
+  assert.equal(page.goBack.mock.callCount(), 0);
+});
+
 test('GoLogin đã có lead gặp trang lỗi: không dừng Orbita, F5 tải lại trang để điền tiếp như Chrome', async (t) => {
   const ticks = captureLeadWatcherTicks(t);
   const { session, page, counters } = createLeadTestSession(confirmedIp);

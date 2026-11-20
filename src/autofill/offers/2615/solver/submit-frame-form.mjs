@@ -35,10 +35,10 @@ export async function submitFrameForm({
   screenInfo,
   scanStartUrl
 }) {
-  if (shouldStopAfterLead(session)) return true;
+  if (page?._manualCaptchaPending || shouldStopAfterLead(session)) return true;
   if (options.autoSubmit !== false) {
     const formScope = frameProgress.formScope ?? await resolveActiveFormScope(frame);
-    if (!formScope?.active || formScope.unavailable) return false;
+    if (page?._manualCaptchaPending || !formScope?.active || formScope.unavailable) return false;
     const yesNo = await handleYesNoStep({ frame, page, options });
     if (yesNo.waitingForInput) return false;
     if (yesNo.handled) {
@@ -123,6 +123,7 @@ export async function submitFrameForm({
           });
 
           // Cuộn phần tử vào tầm nhìn
+          if (page?._manualCaptchaPending) return true;
           await scrollToFormControl(submitBtn);
 
           // Trên trình duyệt thật: di chuyển chuột Bézier tới nút và hover 140ms - 260ms trước khi nhấn
@@ -208,7 +209,8 @@ export async function submitFrameForm({
             page.off?.('popup', popupHandler);
 
             // 1. Tắt tab popup quảng cáo mở không đúng (nếu có)
-            if (openedPopup && !openedPopup.isClosed()) {
+            if (page?._manualCaptchaPending) return true;
+            if (openedPopup && !openedPopup._manualCaptchaPending && !openedPopup.isClosed()) {
               console.log(`[Autofill] Phát hiện tab mới bật lên (${openedPopup.url()}) sau submit lần 1. Đang tắt tab này...`);
               options.onLog?.({
                 type: 'first_submit_popup_closed',
@@ -253,6 +255,7 @@ export async function submitFrameForm({
             fieldType: 'email',
             fieldValue: session.assignedEmail || record?.email || 'email'
           } : submitError;
+          if (page?._manualCaptchaPending) return true;
           if (rejectInfo?.hasError && (await rotateRejectedFormData(frame, record, session, options, rejectInfo))) {
             session.hasSubmittedCurrentScreen = false;
             return true;
@@ -314,6 +317,7 @@ export async function submitFrameForm({
         // Chỉ chạy khi TRONG LƯỢT QUÉT NÀY vừa điền thêm được ô mới.
         // Trả về định danh phần tử đã gửi (id/class của div/button/form) để log nâng cấp matcher.
         if (await hasUnconfirmedAddress(frame, formScope, record?.address)) return false;
+        if (page?._manualCaptchaPending) return true;
         const formSubmitted = await frame.evaluate(submitVisibleFormFallback, formScope).catch(() => ({
           method: 'error'
         }));

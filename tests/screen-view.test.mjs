@@ -1,5 +1,154 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { chromium } from 'playwright';
+import { Readable } from 'node:stream';
+
+test('Screen View chỉ tiếp tục đúng tab và lượt CAPTCHA đã được người dùng xác minh', async t => {
+  const { createLeadTestSession } = await import('./helpers/lead-session-fixture.mjs');
+  const { activeBrowsers } = await import('../src/browser/sessions.mjs');
+  const { screencastSessions } = await import('../src/runtime/constants/screencast-sessions.mjs');
+  const { handleGetScreenTabs } = await import('../src/http/routes/screen/get-tabs.mjs');
+  const { handlePostScreenTabs } = await import('../src/http/routes/screen/post-tabs.mjs');
+  const { handlePostScreenInput } = await import('../src/http/routes/screen/post-input.mjs');
+  const { getAutoRefillStatus } = await import('../src/refill/actions/get-auto-refill-status.mjs');
+  const { session, page: mainPage, browser } = createLeadTestSession('192.0.2.85', 85);
+  const waitingPage = await browser.newPage();
+  mainPage.title = waitingPage.title = async () => 'Form fixture';
+  waitingPage._manualCaptchaPending = true;
+  waitingPage._manualCaptchaRequestId = 'second-tab';
+  activeBrowsers.add(session);
+  t.after(() => { activeBrowsers.delete(session); screencastSessions.delete(85); });
+
+  const response = { writeHead(code) { this.status = code; }, end(json) { this.body = JSON.parse(json); } };
+  await handleGetScreenTabs({ method: 'GET', url: '/screen/tabs/85' }, response);
+  assert.deepEqual(response.body.tabs.map(tab => tab.manualCaptchaRequestId), [undefined, 'second-tab']);
+  const state = getAutoRefillStatus().chromeSessions.find(row => row.slot === 85);
+  assert.deepEqual(state.tabs.map(tab => tab.autofillWaitReason), [null, 'Chờ xác minh CAPTCHA']);
+  const command = { type: 'confirmManualCaptcha', manualCaptchaRequestId: 'second-tab' };
+  const inputRequest = () => Object.assign(Readable.from([JSON.stringify(command)]), { method: 'POST', url: '/screen/input/85' });
+  const staleSwitch = Object.assign(Readable.from([JSON.stringify({ index: 0, manualCaptchaRequestId: 'second-tab' })]), { method: 'POST', url: '/screen/tabs/85' });
+  await handlePostScreenTabs(staleSwitch, response);
+  assert.equal(response.status, 409, 'Từ chối khi vị trí tab đã đổi');
+
+  const screencast = { page: mainPage };
+  screencastSessions.set(85, screencast);
+  let inspections = 0, completed = false;
+  waitingPage.confirmManualCaptcha = async id => { inspections++; return completed && id === 'second-tab'; };
+  await handlePostScreenInput(inputRequest(), response);
+  assert.equal(response.status, 409, 'Đang xem tab khác');
+  screencast.page = waitingPage;
+  command.manualCaptchaRequestId = 'previous-request';
+  await handlePostScreenInput(inputRequest(), response);
+  assert.equal(response.status, 409, 'Mã lượt chờ cũ');
+  assert.equal(inspections, 0);
+  command.manualCaptchaRequestId = 'second-tab';
+  await handlePostScreenInput(inputRequest(), response);
+  assert.equal(response.status, 409, 'Widget còn hoạt động');
+  completed = true;
+  await handlePostScreenInput(inputRequest(), response);
+  assert.equal(response.status, 200);
+  assert.equal(inspections, 2);
+});
+
+test('Desktop đặt nút Đã xác minh trên đúng tab CAPTCHA đang xem', {
+  skip: !existsSync(chromium.executablePath())
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const view = await browser.newPage();
+  await view.setContent('<div id="screenTabBar"></div>');
+  await view.evaluate(() => {
+    Object.assign(window, {
+      _screenActiveSlot: 3, _screenActiveTabIndex: 0,
+      requests: [], tabs: [{ index: 0, title: 'Form' }, { index: 1, title: 'Fixture', manualCaptchaPending: true, manualCaptchaRequestId: 'tab-2' }],
+      fetch: async () => ({ ok: true, json: async () => ({ tabs }) }),
+      _switchTab: async (slot, index, requestId) => { requests.push([slot, index, requestId]); _screenActiveTabIndex = index; await _fetchAndRenderTabs(slot); },
+      api: async (url, options) => { requests.push([url, JSON.parse(options.body)]); tabs[1].manualCaptchaPending = false; return { ok: true }; },
+    });
+  });
+  await view.addScriptTag({ path: fileURLToPath(new URL('../ui/desktop/functions/_fetch-and-render-tabs.js', import.meta.url)) });
+  await view.evaluate(() => _fetchAndRenderTabs(3));
+  const confirmButton = view.getByRole('button', { name: 'Đã xác minh' });
+  assert.equal(await confirmButton.count(), 0);
+  await view.getByText('Tab 2 · Chờ xác minh CAPTCHA', { exact: false }).click();
+  await confirmButton.click();
+  await confirmButton.waitFor({ state: 'detached' });
+  assert.deepEqual(await view.evaluate(() => requests), [[3, 1, 'tab-2'], ['/screen/input/3', { type: 'confirmManualCaptcha', manualCaptchaRequestId: 'tab-2' }]]);
+});
+
+test('Desktop Screen View gửi đúng ô select, hiện lỗi và bỏ phản hồi của lượt bấm cũ', {
+  skip: !existsSync(chromium.executablePath())
+}, async (t) => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<div id="screenModal" style="display:block"><canvas id="screenCanvas"></canvas><div id="screenTabBar"></div></div>');
+  await page.evaluate(() => {
+    Object.assign(window, {
+      _screenReconnectTimer: null, _screenEventSource: null, _screenFpsTimer: null,
+      _screenTabPollTimer: null, _mouseMoveTimer: null, _wheelTimer: null,
+      _screenFpsCounter: 0, _screenActiveTabIndex: 0,
+      EventSource: class { close() {} },
+      _fetchAndRenderTabs() {}, _buildMouseEvent: type => ({ type }),
+      requests: [], notices: [], closes: 0,
+      showToast: text => notices.push(text),
+      closeScreenModal: () => { closes++; _stopScreenStream(); },
+      api: (url, { body }) => new Promise(resolve => requests.push({ url, body: JSON.parse(body), resolve })),
+      picker: {
+        uid: 'second', selectedIndex: 35, options: Array.from({ length: 40 }, (_, i) => ({
+          label: 'Chọn ' + i, disabled: i === 34
+        }))
+      }
+    });
+  });
+  for (const file of ['functions/_close-select-picker.js', 'functions/_open-select-picker.js',
+    'functions/_stop-screen-stream.js', 'functions/_start-screen-stream.js', 'setup/keydown-escape.js']) {
+    await page.addScriptTag({ path: fileURLToPath(new URL('../ui/desktop/' + file, import.meta.url)) });
+  }
+  await page.evaluate(() => _startScreenStream(2));
+  const canvas = page.locator('#screenCanvas');
+  await canvas.dispatchEvent('mousedown');
+  await canvas.dispatchEvent('mousedown');
+  await page.evaluate(() => {
+    requests[1].resolve({ select: picker });
+    requests[0].resolve({ select: { ...picker, uid: 'first', options: [{ label: 'Cũ' }] } });
+  });
+  const menu = page.locator('#screenSelectPicker');
+  await menu.waitFor();
+  assert.equal(await menu.getByRole('button').count(), 40);
+  assert.equal(await menu.getByRole('button', { name: 'Chọn 34' }).isDisabled(), true);
+  assert.ok(await menu.evaluate(el => el.scrollTop > 0), 'Cuộn tới mục đang chọn');
+  await menu.getByRole('button', { name: 'Chọn 35' }).click();
+  assert.deepEqual(await page.evaluate(() => ({ url: requests[2].url, body: requests[2].body })), {
+    url: '/screen/input/2', body: { type: 'select', uid: 'second', index: 35 }
+  });
+  await page.evaluate(() => requests[2].resolve({ error: 'Ô đã thay đổi' }));
+  assert.deepEqual(await page.evaluate(() => notices), ['Ô đã thay đổi']);
+
+  await page.evaluate(() => _openSelectPicker(2, picker, 15, 30));
+  await menu.getByRole('button', { name: 'Chọn 36' }).click();
+  await page.evaluate(() => requests[3].resolve({ ok: true }));
+  assert.equal(await page.evaluate(() => requests[3].body.index), 36);
+  assert.deepEqual(await page.evaluate(() => notices), ['Ô đã thay đổi']);
+
+  await page.evaluate(() => {
+    _openSelectPicker(2, picker, 15, 30);
+    _openSelectPicker(2, picker, 15, 30);
+  });
+  await menu.getByRole('button', { name: 'Chọn 34' }).dispatchEvent('mousedown');
+  assert.equal(await menu.isVisible(), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await menu.count(), 0);
+  assert.equal(await page.evaluate(() => closes), 0);
+
+  await canvas.dispatchEvent('mousedown');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => requests[4].resolve({ select: picker }));
+  assert.equal(await page.evaluate(() => closes), 1);
+  assert.equal(await menu.count(), 0, 'Phản hồi đến sau khi đóng Screen View phải bị bỏ qua');
+});
 
 test('screen view wheel deltaMode scaling calculates correctly', () => {
   // DOM_DELTA_PIXEL (trackpad)

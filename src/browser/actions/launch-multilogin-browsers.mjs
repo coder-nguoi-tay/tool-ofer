@@ -17,7 +17,13 @@ import { importAutofillRecords } from '../../records/actions/import-autofill-rec
 import { isExitIpCurrentlyInUse } from '../../proxy/actions/is-exit-ip-currently-in-use.mjs';
 import { isProxyCurrentlyActive } from '../../proxy/actions/is-proxy-currently-active.mjs';
 import { loadScript } from '../../../script.mjs';
-import { maxAliveBrowsers } from '../../runtime/constants/max-alive-browsers.mjs';
+import {
+  browserLaunchReservations,
+  maxAliveBrowsers,
+  normalizeRequestedBrowserCount,
+  releaseBrowserLaunchSlot,
+  reserveBrowserLaunchSlot
+} from '../../runtime/constants/max-alive-browsers.mjs';
 import { offerStrategyState } from '../../runtime/constants/offer-strategy-state.mjs';
 import { openMultiloginBrowser } from './open-multilogin-browser.mjs';
 import { parseAutofillRecords } from '../../../autofill.mjs';
@@ -49,6 +55,14 @@ import { stopMultiloginProfile } from '../../../multilogin-profile.mjs';
  */
 export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
+  const requestedCount = normalizeRequestedBrowserCount(body.requestedCount ?? body.concurrency, 1);
+  body.requestedCount = String(requestedCount);
+  body.concurrency = requestedCount;
+  await pruneDeadManagedSessions();
+  const usedBeforeLaunch = activeBrowsers.size + browserLaunchReservations.size;
+  if (usedBeforeLaunch + requestedCount > maxAliveBrowsers) {
+    throw new Error(`Máy này chỉ còn chỗ cho ${Math.max(0, maxAliveBrowsers - usedBeforeLaunch)} phiên trình duyệt (giới hạn ${maxAliveBrowsers}, đang dùng ${usedBeforeLaunch}).`);
+  }
   const mlConfig = await readMultiloginConfig();
   const apiToken = body.multiloginToken || mlConfig.token;
   const folderId = body.multiloginFolderId || mlConfig.folderId;
@@ -64,8 +78,7 @@ export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = 
     autoRefill.stopRequested = false;
     autoRefill.enabled = true;
   }
-  const concurrency = Math.min(maxAliveBrowsers, parseInt(body.requestedCount ?? body.concurrency) || 1);
-  const requestedCount = concurrency;
+  const concurrency = requestedCount;
   const websiteUrl = body.websiteUrl ? String(body.websiteUrl).trim() : '';
   const offerUrls = (body.offerUrls || [websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4]).filter(Boolean);
   const multiTab = body.multiTab !== false;
@@ -95,28 +108,30 @@ export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = 
     if (i > 0) {
       await new Promise(r => setTimeout(r, Math.min(i * 800, 3000)));
     }
-    if (activeBrowsers.size >= maxAliveBrowsers) {
+    const reservation = reserveBrowserLaunchSlot(activeBrowsers.size);
+    if (!reservation) {
       warnings.push(`Đã đạt giới hạn tối đa ${maxAliveBrowsers} phiên đồng thời.`);
       break;
     }
 
-    const slot = getNextFreeSlot();
-    const proxyCandidate = proxyQueue.available.shift();
-    let proxy = null;
-    let verifiedExitIp = '';
+    try {
+      const slot = getNextFreeSlot();
+      const proxyCandidate = proxyQueue.available.shift();
+      let proxy = null;
+      let verifiedExitIp = '';
 
-    if (proxyCandidate) {
-      proxy = parseProxyLine(proxyCandidate, body.proxyType ?? 'socks5');
-      try {
-        const checkResult = await checkProxyExitIp(proxy);
-        verifiedExitIp = checkResult.exitIp;
-      } catch (checkErr) {
-        warnings.push(`Slot ${slot}: Kiểm tra IP proxy thất bại: ${checkErr.message}`);
-        continue;
+      if (proxyCandidate) {
+        proxy = parseProxyLine(proxyCandidate, body.proxyType ?? 'socks5');
+        try {
+          const checkResult = await checkProxyExitIp(proxy);
+          verifiedExitIp = checkResult.exitIp;
+        } catch (checkErr) {
+          warnings.push(`Slot ${slot}: Kiểm tra IP proxy thất bại: ${checkErr.message}`);
+          continue;
+        }
       }
-    }
 
-    const profileRequest = buildMultiloginProfileRequest({
+      const profileRequest = buildMultiloginProfileRequest({
       slot,
       proxy,
       exitIp: verifiedExitIp,
@@ -129,26 +144,26 @@ export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = 
         webgl: body.antiFpWebgl !== false,
         webrtc: body.antiFpWebrtc !== false
       }
-    });
+      });
 
-    let profileId = '';
-    try {
-      profileId = await getOrCreateMultiloginProfile({
+      let profileId = '';
+      try {
+        profileId = await getOrCreateMultiloginProfile({
         token: apiToken,
         folderId,
         slot,
         profileRequest,
         activeProfileIds
-      });
-      activeProfileIds.add(profileId);
-    } catch (createErr) {
-      warnings.push(`Slot ${slot}: Không tạo hoặc tái sử dụng được profile Multilogin: ${createErr.message}`);
-      if (proxyCandidate) proxyQueue.available.unshift(proxyCandidate);
-      continue;
-    }
+        });
+        activeProfileIds.add(profileId);
+      } catch (createErr) {
+        warnings.push(`Slot ${slot}: Không tạo hoặc tái sử dụng được profile Multilogin: ${createErr.message}`);
+        if (proxyCandidate) proxyQueue.available.unshift(proxyCandidate);
+        continue;
+      }
 
-    try {
-      const session = await openMultiloginBrowser({
+      try {
+        const session = await openMultiloginBrowser({
         tileIndex: slot - 1,
         slot,
         profileId,
@@ -181,19 +196,22 @@ export async function launchMultiloginBrowsers(requestBody, isAutomaticRefill = 
           profileId: pid,
           launcherUrl
         })
-      });
+        });
 
-      results.push({
-        slot,
-        profileId,
-        exitIp: session.exitIp,
-        status: 'opened'
-      });
-    } catch (openErr) {
-      warnings.push(`Slot ${slot}: Khởi chạy Multilogin thất bại: ${openErr.message}`);
-      await stopMultiloginProfile({ token: apiToken, folderId, profileId, launcherUrl }).catch(() => {});
-      activeProfileIds.delete(profileId);
-      if (proxyCandidate) proxyQueue.available.unshift(proxyCandidate);
+        results.push({
+          slot,
+          profileId,
+          exitIp: session.exitIp,
+          status: 'opened'
+        });
+      } catch (openErr) {
+        warnings.push(`Slot ${slot}: Khởi chạy Multilogin thất bại: ${openErr.message}`);
+        await stopMultiloginProfile({ token: apiToken, folderId, profileId, launcherUrl }).catch(() => {});
+        activeProfileIds.delete(profileId);
+        if (proxyCandidate) proxyQueue.available.unshift(proxyCandidate);
+      }
+    } finally {
+      releaseBrowserLaunchSlot(reservation);
     }
   }
 

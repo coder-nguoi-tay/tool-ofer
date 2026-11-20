@@ -13,7 +13,7 @@ import { syncUplevelRewardsFields } from './sync-uplevel-rewards-fields.mjs';
  * @param {object} context Frame, dữ liệu lead và tiến độ của lượt quét.
  * @return {Promise<boolean>} True khi cần bỏ qua frame hiện tại.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function completeFrameControls({
   frameProgress,
@@ -31,6 +31,7 @@ export async function completeFrameControls({
 
   // Tự động trả lời câu hỏi khảo sát: chọn ngẫu nhiên radio buttons hoặc lựa chọn Yes/No/Tuổi/Thu nhập
   try {
+    if (page?._manualCaptchaPending) return true;
     const customGenderPass = await handleCustomGenderButtons(frame, record);
     if (customGenderPass > 0) {
       frameProgress.filledInThisPass += customGenderPass;
@@ -38,6 +39,7 @@ export async function completeFrameControls({
       addVerifiedFieldCount(session, customGenderPass);
       session.autofillError = null;
     }
+    if (page?._manualCaptchaPending) return true;
     const uplevelPass = await syncUplevelRewardsFields(frame, record);
     if (uplevelPass > 0) {
       frameProgress.filledInThisPass += uplevelPass;
@@ -45,6 +47,7 @@ export async function completeFrameControls({
       addVerifiedFieldCount(session, uplevelPass);
       session.autofillError = null;
     }
+    if (page?._manualCaptchaPending) return true;
     const answeredSurvey = await handleRadioAndSurveyOptions(frame, record, session, options);
     if (answeredSurvey > 0) {
       frameProgress.filledInThisPass += answeredSurvey;
@@ -58,6 +61,7 @@ export async function completeFrameControls({
     }
 
     // Tích hợp SurveySolver chuyên sâu (Ratings, Matrix, Custom Checkboxes)
+    if (page?._manualCaptchaPending) return true;
     if (session.offerMode !== 'consent_only') {
       const surveySolverRes = await solveSurveyStep(frame, record, {
         ...options,
@@ -85,6 +89,7 @@ export async function completeFrameControls({
   // Các tab offer con được điền song song (mỗi tab một vòng quét riêng), giới hạn
   // số tab đồng thời bằng options.maxConcurrentSubOffers (mặc định MAX_CONCURRENT_SUB_OFFERS = 3), để không
   // nghẽn CPU/proxy; thẻ chưa mở được sẽ tự thử lại khi có tab hoàn tất.
+  if (page?._manualCaptchaPending) return true;
   if (!frameProgress.formScope) try {
     const openedOffers = await handleOfferwallCards(frame, page, options);
     if (openedOffers > 0) {
@@ -101,6 +106,7 @@ export async function completeFrameControls({
   // Lượt quét cuối chỉ xử lý checkbox đơn/consent. Nhóm nhiều đáp án đã được
   // solveSurveyCheckboxes chọn ngẫu nhiên đúng 2 ô và không được đổi lựa chọn ở đây.
   try {
+    if (page?._manualCaptchaPending) return true;
     const cbClassification = await frame.evaluate(scopeSelector => {
       if (!scopeSelector) return [];
       const isVisible = el => {
@@ -131,6 +137,7 @@ export async function completeFrameControls({
       if ((await cb.count().catch(() => 0)) === 0) continue;
       const readiness = await cb.evaluate(inspectInteractionReadiness, frameProgress.formScope).catch(() => null);
       if (!readiness?.ready) continue;
+      if (page?._manualCaptchaPending) return true;
       await cb.check({ force: false, timeout: 600 }).catch(() => {});
       const nowChecked = await cb.isChecked().catch(() => false);
       if (nowChecked) {
@@ -149,6 +156,7 @@ export async function completeFrameControls({
 
   // Đảm bảo đồng bộ lần cuối cho Uplevel Rewards (#reg-container) trước khi kiểm tra lỗi và bấm submit
   try {
+    if (page?._manualCaptchaPending) return true;
     const finalUplevel = await syncUplevelRewardsFields(frame, record);
     if (finalUplevel > 0) {
       frameProgress.filledInThisPass += finalUplevel;

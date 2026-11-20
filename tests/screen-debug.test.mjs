@@ -4,10 +4,113 @@ import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
+import { findSelectAtPoint } from '../src/browser/screen/find-select-at-point.mjs';
 import { openPageDevtools } from '../src/browser/screen/open-page-devtools.mjs';
 import { screenRouteHandlers } from '../src/http/routes/screen-handlers.mjs';
+import { handlePostScreenInput } from '../src/http/routes/screen/post-input.mjs';
 import { activeBrowsers } from '../src/browser/sessions.mjs';
 import { screencastSessions } from '../src/runtime/constants/screencast-sessions.mjs';
+
+test('Screen View mở đúng select trong Shadow DOM và iframe lồng, giữ trạng thái khóa của HTML', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('https://select.fixture.test/**', route => {
+    const depth = Number(new URL(route.request().url()).pathname.slice(1));
+    const body = depth < 3
+      ? `<iframe style="width:500px;height:260px;border:3px solid" src="/${depth + 1}"></iframe>`
+      : '<div id="host"></div>';
+    return route.fulfill({ contentType: 'text/html', body });
+  });
+  await page.goto('https://select.fixture.test/0');
+  const innerFrame = page.frames().find(frame => frame.url().endsWith('/3'));
+  await innerFrame.evaluate(() => {
+    const root = document.querySelector('#host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<div id="inner"></div>';
+    root.querySelector('#inner').attachShadow({ mode: 'open' }).innerHTML = `
+      <select id="drop"><option>A</option><option selected>B</option><optgroup disabled label="Khóa"><option>C</option></optgroup></select>
+      <fieldset disabled><select id="locked"><option>Khóa</option></select></fieldset>
+      <select id="list" size="2"><option>Danh sách</option></select>
+      <select id="multi" multiple><option>Nhiều mục</option></select>
+    `;
+  });
+  for (const id of ['drop', 'locked', 'list', 'multi']) {
+    const box = await innerFrame.locator('#' + id).boundingBox();
+    const pick = await findSelectAtPoint(page, box.x + box.width / 2, box.y + box.height / 2);
+    if (id === 'drop') {
+      assert.ok(pick, 'Điểm bấm phải mở đúng ô chọn');
+      assert.ok(pick.frame === innerFrame, 'Phải trả về frame sở hữu ô đã bấm');
+      assert.equal(pick.selectedIndex, 1);
+      assert.deepEqual(pick.options, [
+        { label: 'A', disabled: false }, { label: 'B', disabled: false }, { label: 'C', disabled: true }
+      ]);
+      assert.equal(await innerFrame.locator('#drop').getAttribute('data-ux-screen-select'), pick.uid);
+      const reopened = await findSelectAtPoint(page, box.x + box.width / 2, box.y + box.height / 2);
+      assert.notEqual(reopened.uid, pick.uid);
+    } else {
+      assert.ok(pick === null, id);
+    }
+  }
+});
+
+test('Screen View giữ mouseup cho control thường khi không nhận diện được select theo điểm bấm', {
+  skip: !existsSync(chromium.executablePath())
+}, async t => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  await page.setContent('<button id="button">Bấm</button><select id="select"><option>A</option><option>B</option></select>');
+  await page.locator('#button').evaluate(button => {
+    button.addEventListener('click', () => { button.dataset.clicked = 'true'; });
+  });
+  const cdpClient = await page.context().newCDPSession(page);
+  const slot = 97;
+  // Mô phỏng metadata còn sót của tab trước. Handler phải lấy viewport sống của page.
+  screencastSessions.set(slot, { page, cdpClient, deviceWidth: 400, deviceHeight: 300 });
+  t.after(async () => {
+    screencastSessions.delete(slot);
+    await cdpClient.detach().catch(() => {});
+  });
+
+  const server = createServer((request, response) => {
+    void handlePostScreenInput(request, response);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const endpoint = 'http://127.0.0.1:' + server.address().port + '/screen/input/' + slot;
+  const send = body => fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(response => response.json());
+
+  const selectRect = await page.locator('#select').boundingBox();
+  const selectPoint = {
+    x: Math.round((selectRect.x + selectRect.width / 2) / 2),
+    y: Math.round((selectRect.y + selectRect.height / 2) / 2),
+    clientWidth: 400,
+    clientHeight: 300
+  };
+  const openedSelect = await send({ type: 'mousedown', ...selectPoint, button: 'left' });
+  assert.ok(openedSelect.select, 'Select phải được tìm thấy sau khi quy đổi viewport khác kích thước');
+  assert.deepEqual(await send({
+    type: 'select',
+    uid: openedSelect.select.uid,
+    index: 1
+  }), { ok: true });
+  assert.equal(await page.locator('#select').inputValue(), 'B');
+
+  const buttonRect = await page.locator('#button').boundingBox();
+  const point = {
+    x: Math.round((buttonRect.x + buttonRect.width / 2) / 2),
+    y: Math.round((buttonRect.y + buttonRect.height / 2) / 2),
+    clientWidth: 400,
+    clientHeight: 300
+  };
+  assert.deepEqual(await send({ type: 'mousedown', ...point, button: 'left' }), { ok: true });
+  assert.deepEqual(await send({ type: 'mouseup', ...point, button: 'left' }), { ok: true });
+  assert.equal(await page.locator('#button').getAttribute('data-clicked'), 'true');
+});
 
 // Fixture không truy cập website, proxy hoặc profile thật.
 test('DevTools dùng CDP cấp browser của đúng target và chỉ detach client tạm', async () => {

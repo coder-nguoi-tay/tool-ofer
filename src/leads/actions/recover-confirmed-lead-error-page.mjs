@@ -19,18 +19,18 @@ export function hasOfferProgress(session) {
 }
 
 /**
- * Giữ browser có lead hoặc đã thao tác offer, tải lại trang bằng F5 (page.reload) khi gặp lỗi, rồi đánh thức autofill.
+ * Giữ browser có lead hoặc đã thao tác offer, tải lại trang lỗi khi tab chưa chuyển sang xác minh thủ công.
  * Tuyệt đối không tắt trình duyệt khi IP đã có lead. Phiên chỉ mới thao tác offer: hết 3 lượt vẫn lỗi thì đặt
  * page._uxErrorRecoveryExhausted để watcher đóng và bù slot.
  * @param {object} session Phiên có IP được xác nhận lead.
  * @param {object} page Tab cần kiểm tra và phục hồi.
  * @return {Promise<boolean>} True khi đã gặp lỗi và giữ tab để phục hồi/chờ xử lý.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-20
  */
 export async function recoverConfirmedLeadErrorPage(session, page) {
   const canRecover = () => protectConfirmedLeadSession(session) || hasOfferProgress(session);
-  if (!canRecover() || session.isClosed || session.suppressAutoRefill || page?.isClosed?.()) return false;
+  if (!canRecover() || session.isClosed || session.suppressAutoRefill || page?.isClosed?.() || page?._manualCaptchaPending) return false;
   const state = recoveries.get(page) || { busy: false, attempts: 0, lastAt: 0, url: '' };
   recoveries.set(page, state);
   if (state.busy || Date.now() - state.lastAt < 15_000) return false;
@@ -39,7 +39,7 @@ export async function recoverConfirmedLeadErrorPage(session, page) {
     const errorUrl = page.url();
     const mainFrame = page.mainFrame?.() || page;
     const reason = page._uxMainStatus >= 400 ? 'Lỗi HTTP của trang' : await readThrottledPageHealth(mainFrame);
-    if (!reason || !canRecover() || page.isClosed?.() || page.url() !== errorUrl) return false;
+    if (!reason || !canRecover() || page._manualCaptchaPending || page.isClosed?.() || page.url() !== errorUrl) return false;
     if (state.url !== errorUrl) {
       Object.assign(state, { url: errorUrl, attempts: 0 });
       page._uxErrorRecoveryExhausted = false;
@@ -84,7 +84,7 @@ export async function recoverConfirmedLeadErrorPage(session, page) {
       await readThrottledPageHealth(mainFrame);
 
     // 2. Nếu F5 vẫn lỗi và có thể quay lại trang trước: thử goBack
-    if (reloadStillDead && typeof page.goBack === 'function') {
+    if (reloadStillDead && !page._manualCaptchaPending && typeof page.goBack === 'function') {
       try {
         const backResponse = await page.goBack({ waitUntil: 'domcontentloaded', timeout: 8000 });
         if (backResponse) response = backResponse;
@@ -94,7 +94,7 @@ export async function recoverConfirmedLeadErrorPage(session, page) {
       } catch {}
     }
 
-    if (!canRecover() || page.isClosed?.() || session.isClosed) return true;
+    if (!canRecover() || page._manualCaptchaPending || page.isClosed?.() || session.isClosed) return true;
 
     const stillDead = page.url() === errorUrl && !response ||
       !/^https?:/.test(page.url()) ||

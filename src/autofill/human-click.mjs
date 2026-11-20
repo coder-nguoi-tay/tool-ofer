@@ -29,12 +29,12 @@ function centerHitsControl(element) {
  * @return {Promise<boolean>} Đã gửi một lần bấm tới control đã xác minh.
  * @throws {never} Dừng khi control bị thay thế, bị che hoặc scope đã đổi.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 export async function humanClick(page, target) {
   if (!target) return false;
   const activePage = page || target.page?.();
-  if (activePage?._autofillWaitingForFormFrame || shouldStopAfterLead(activePage?._autofillSession)) return false;
+  if (activePage?._manualCaptchaPending || activePage?._autofillWaitingForFormFrame || shouldStopAfterLead(activePage?._autofillSession)) return false;
   let pinned, pointer;
   try {
     // Locator có thể trỏ sang phần tử khác sau khi UI render lại.
@@ -61,6 +61,7 @@ export async function humanClick(page, target) {
         } finally { await labelHandle?.dispose(); }
       }
     }
+    if (activePage?._manualCaptchaPending) return false;
     await scrollToFormControl(control);
     if (shouldAnimatePageMouse(activePage) && activePage?.mouse && control.boundingBox) {
       const box = await control.boundingBox();
@@ -74,14 +75,15 @@ export async function humanClick(page, target) {
     if (currentScope?.id !== scope?.id || currentScope?.unavailable || currentScope?.active === false) return false;
     if (control.evaluate && !(await control.evaluate(inspectInteractionReadiness, currentScope || null))?.ready) return false;
     if ((pinned || control.ownerFrame) && !await control.evaluate(centerHitsControl)) return false;
-    if (activePage?._activeAutofillFrame !== selected || activePage?._autofillWaitingForFormFrame || shouldStopAfterLead(activePage?._autofillSession)) return false;
+    if (activePage?._manualCaptchaPending || activePage?._activeAutofillFrame !== selected || activePage?._autofillWaitingForFormFrame || shouldStopAfterLead(activePage?._autofillSession)) return false;
     if (usesGoLoginAndroidTouchInput(activePage)) {
       if (!pointer) return false;
       await control.hover({ trial: true, timeout: 500 });
       const current = await control.boundingBox();
       if (!current || Math.abs(current.x + current.width / 2 - pointer.x) > 1 || Math.abs(current.y + current.height / 2 - pointer.y) > 1) return false;
+      if (activePage?._manualCaptchaPending) return false;
       await activePage.mouse.move(pointer.x, pointer.y);
-      if (!await control.evaluate(centerHitsControl) || shouldStopAfterLead(activePage?._autofillSession)) return false;
+      if (!await control.evaluate(centerHitsControl) || activePage?._manualCaptchaPending || shouldStopAfterLead(activePage?._autofillSession)) return false;
       try {
         await activePage.mouse.down();
         await activePage.mouse.up();

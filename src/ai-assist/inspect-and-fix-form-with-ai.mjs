@@ -25,9 +25,10 @@ import { resolveAiTimeoutSeconds } from './resolve-ai-timeout-seconds.mjs';
  * @param {object} [options={}] Tùy chọn mở rộng.
  * @return {Promise<{status: string, fixed: boolean, errors: string[], actionsCount: number}>} Trạng thái sửa form đã được xác minh hoặc lý do chưa sửa được.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
 async function inspectAndFixFormWithAi(page, record, session = {}, options = {}) {
+  if (page?._manualCaptchaPending) return { status: 'manual_captcha', fixed: false, errors: [], actionsCount: 0 };
   if (shouldStopAfterLead(session)) return { status: 'lead_confirmed_paused', fixed: false, errors: [], actionsCount: 0 };
   if (!page || typeof page.isClosed === 'function' && page.isClosed()) {
     return {
@@ -217,7 +218,7 @@ async function inspectAndFixFormWithAi(page, record, session = {}, options = {})
       if (page._assignedRecord !== assignedRecordAtInspection) {
         return { status: 'record_changed', fixed: false, errors: diag.errors, actionsCount };
       }
-      if (!globalAiConfig.enabled || ['disabled', 'form_agent'].includes(globalAiConfig.mode) || shouldStopAfterLead(session)) break;
+      if (page._manualCaptchaPending || !globalAiConfig.enabled || ['disabled', 'form_agent'].includes(globalAiConfig.mode) || shouldStopAfterLead(session)) break;
       if (page.isClosed() || session.isClosed) break;
       try {
         const actionResult = await executeAction(page, act, session, { repairOnly: true, allowSubmit: false, record });

@@ -18,7 +18,13 @@ import { isExitIpCurrentlyInUse } from '../../proxy/actions/is-exit-ip-currently
 import { isProxyCurrentlyActive } from '../../proxy/actions/is-proxy-currently-active.mjs';
 import { listInstalledAdsPowerKernelVersions } from '../../../adspower-profile.mjs';
 import { loadScript } from '../../../script.mjs';
-import { maxAliveBrowsers } from '../../runtime/constants/max-alive-browsers.mjs';
+import {
+  browserLaunchReservations,
+  maxAliveBrowsers,
+  normalizeRequestedBrowserCount,
+  releaseBrowserLaunchSlot,
+  reserveBrowserLaunchSlot
+} from '../../runtime/constants/max-alive-browsers.mjs';
 import { offerStrategyState } from '../../runtime/constants/offer-strategy-state.mjs';
 import { openAdsPowerBrowser } from './open-ads-power-browser.mjs';
 import { parseAutofillRecords } from '../../../autofill.mjs';
@@ -51,6 +57,14 @@ import { stopAdsPowerProfile } from '../../../adspower-profile.mjs';
  */
 export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = false, assignedStreamRoles = null) {
   const body = JSON.parse(requestBody);
+  const concurrency = normalizeRequestedBrowserCount(body.requestedCount ?? body.concurrency, 1);
+  body.requestedCount = String(concurrency);
+  body.concurrency = concurrency;
+  await pruneDeadManagedSessions();
+  if (activeBrowsers.size + browserLaunchReservations.size + concurrency > maxAliveBrowsers) {
+    const used = activeBrowsers.size + browserLaunchReservations.size;
+    throw new Error(`Máy này chỉ còn chỗ cho ${Math.max(0, maxAliveBrowsers - used)} phiên trình duyệt (giới hạn ${maxAliveBrowsers}, đang dùng ${used}).`);
+  }
   const apiToken = await readAdsPowerApiKey();
   if (!apiToken) throw new Error('Nhập AdsPower API key trong Settings > Browser trước khi chạy.');
   const installedAdsPowerKernelVersions = await listInstalledAdsPowerKernelVersions();
@@ -60,7 +74,6 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
     autoRefill.stopRequested = false;
     autoRefill.enabled = true;
   }
-  const concurrency = Math.min(maxAliveBrowsers, parseInt(body.requestedCount ?? body.concurrency) || 1);
   const websiteUrl = body.websiteUrl || '';
   const offerUrls = body.offerUrls || (body.websiteUrl3 || body.websiteUrl4 || body.websiteUrl2 ? [body.websiteUrl, body.websiteUrl2, body.websiteUrl3, body.websiteUrl4].filter(Boolean) : [websiteUrl].filter(Boolean));
   const multiTab = body.multiTab !== false; // Mặc định chạy đa luồng là đa tab trong 1 trình duyệt
@@ -125,8 +138,6 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
   const hideUntilTarget = Boolean(body.hideUntilTarget ?? body.hideBrowser);
   const hideUntilLead = Boolean(body.hideUntilLead);
 
-  // Dọn dẹp các session cũ đã đóng hoặc zombie trước khi khởi chạy
-  await pruneDeadManagedSessions();
   const count = concurrency;
   const results = [],
     warnings = [];
@@ -269,7 +280,32 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
   });
 
   // Khởi chạy song song các profile với giãn cách nhẹ giữa các lần gọi daemon.
-  await Promise.all(launchableWorkers.map(async (worker, workerIdx) => {
+  /**
+   * Reserve one bounded browser slot, then create/start the assigned AdsPower profile.
+   * @param {object} worker Slot assignment, proxy and selected kernel version.
+   * @param {number} workerIdx Stable index used for stagger and assigned offer role.
+   * @return {Promise<void>} Resolves after this worker starts or records a warning.
+   * @throws {never} Startup failures are recorded and their profile/proxy resources are cleaned up.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-20
+   */
+  const launchWorker = async (worker, workerIdx) => {
+    let reservation;
+    try {
+      reservation = reserveBrowserLaunchSlot(activeBrowsers.size);
+    } catch (error) {
+      warnings.push(`Slot ${worker.slot}: ${error.message}`);
+      releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
+      if (worker.actualExitIp === 'Direct') activeExitIpLocks.delete('Direct');
+      return;
+    }
+    if (!reservation) {
+      warnings.push(`Đã đạt giới hạn tối đa ${maxAliveBrowsers} phiên trình duyệt đồng thời; bỏ slot ${worker.slot}.`);
+      releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
+      if (worker.actualExitIp === 'Direct') activeExitIpLocks.delete('Direct');
+      return;
+    }
+    try {
     if (workerIdx > 0) {
       const staggerMs = Math.max(800, delayStart > 0 ? delayStart * 1000 : 800);
       await new Promise(r => setTimeout(r, workerIdx * staggerMs));
@@ -277,6 +313,7 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
     if (autoRefill.stopRequested || !autoRefill.enabled) {
       releaseProxyLock(worker.assignedProxy, worker.actualExitIp);
       if (worker.actualExitIp === 'Direct') activeExitIpLocks.delete('Direct');
+      releaseBrowserLaunchSlot(reservation);
       return;
     }
     try {
@@ -385,7 +422,11 @@ export async function launchAdsPowerBrowsers(requestBody, isAutomaticRefill = fa
       }
       warnings.push(`Slot ${worker.slot}: ${err.message}`);
     }
-  }));
+    } finally {
+      releaseBrowserLaunchSlot(reservation);
+    }
+  };
+  await Promise.all(launchableWorkers.map(launchWorker));
   return {
     results,
     warnings

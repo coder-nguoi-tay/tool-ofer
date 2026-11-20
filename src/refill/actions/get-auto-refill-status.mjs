@@ -9,7 +9,7 @@ import { leadIpStatsMap } from '../../../lead-check.mjs';
 import { pruneDeadManagedSessions } from '../../runtime/actions/prune-dead-managed-sessions.mjs';
 
 /**
- * Trả trạng thái tự bù và phiên trình duyệt cho bảng chạy/preview, kể cả Obscura không có phiên bản Chrome.
+ * Trả trạng thái tự bù, tiến trình phiên và các tab cần người dùng xác minh trong Screen View.
  *
  * @return {object} Trạng thái hiện tại của trình duyệt và cơ chế tự bù.
  * @author ductv <ductv@getflycrm.com>
@@ -34,7 +34,8 @@ export function getAutoRefillStatus() {
       const tabsInfo = livePages.map((p, idx) => ({
         index: idx,
         url: (typeof p.url === 'function' ? p.url() : '') || '',
-        autofillWaitReason: p._autofillWaitReason || null,
+        manualCaptchaPending: p._manualCaptchaPending === true,
+        autofillWaitReason: p._manualCaptchaPending === true ? 'Chờ xác minh CAPTCHA' : p._autofillWaitReason || null,
         aiRunning: Boolean(p._aiAssistRunning || p._aiFormFixing),
         bandwidthBytes: p._bandwidthBytes || 0,
         bandwidthFormatted: formatBytes(p._bandwidthBytes || 0),

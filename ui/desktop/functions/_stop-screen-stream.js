@@ -1,10 +1,11 @@
 /**
- *  stop screen stream.
- * @return {void} Kết quả xử lý  stop screen stream.
+ * Dừng luồng Screen View và gỡ các điều khiển thuộc phiên đang xem.
+ * @return {void} Giải phóng kết nối, bộ hẹn giờ và bộ chọn.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-20
  */
 function _stopScreenStream() {
+      _closeSelectPicker();
       if (_screenReconnectTimer) { clearTimeout(_screenReconnectTimer); _screenReconnectTimer = null; }
       if (_screenEventSource) { _screenEventSource.close(); _screenEventSource = null; }
       if (_screenFpsTimer) { clearInterval(_screenFpsTimer); _screenFpsTimer = null; }

@@ -11,15 +11,16 @@ const completionStates = new WeakMap();
 
 /**
  * Xác minh mọi tab đã hết form/câu hỏi/offer chưa mở trước khi cho đóng tại trang thankyou chỉ định.
- * Chờ danh sách tab ổn định ba giây; renderer lỗi, AI chạy hoặc popup đang mở đều giữ phiên.
+ * Chờ danh sách tab ổn định ba giây sau khi mọi tab đã hết việc, kể cả xác minh CAPTCHA.
  * @param {object} session Phiên cần xét, kể cả IP đã có lead.
  * @return {Promise<boolean>} True chỉ khi chắc chắn không còn offer đang làm hoặc đang tải.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-12
+ * @since 2026-11-20
  */
 export async function canCompleteFinancialhelpSession(session) {
   if (session.isClosed || session.suppressAutoRefill || isSessionWorkingOnOffer(session) || session.aiAssistRunning || session.aiFormFixing || hasPendingOfferwallOpenings(session.browser)) return false;
   const pages = session.browser.pages().filter(page => !page.isClosed());
+  if (pages.some(page => page._manualCaptchaPending)) { completionStates.delete(session); return false; }
   if (!pages.some(page => isFinancialhelpThankyouUrl(page.url()))) return false;
   const urls = pages.map(page => page.url());
   const previous = completionStates.get(session);
@@ -52,6 +53,6 @@ export async function canCompleteFinancialhelpSession(session) {
     }
     const current = session.browser.pages().filter(page => !page.isClosed());
     return !session.isClosed && !session.suppressAutoRefill && !session.aiAssistRunning && !session.aiFormFixing && !hasPendingOfferwallOpenings(session.browser)
-      && current.length === pages.length && current.every((page, index) => page === pages[index] && page.url() === urls[index]);
+      && current.length === pages.length && current.every((page, index) => !page._manualCaptchaPending && page === pages[index] && page.url() === urls[index]);
   } catch { return false; }
 }

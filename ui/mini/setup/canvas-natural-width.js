@@ -1,1 +1,1 @@
-let canvasNaturalWidth = 1280;
+let canvasNaturalWidth = 0;

@@ -64,6 +64,14 @@ async function handleStart(options = {}) {
           return;
         }
 
+        const threadField = document.getElementById('nudThread');
+        const normalizedThreadCount = parseRequestedThreadCount(threadField?.value);
+        if (!normalizedThreadCount) {
+          showWinAlert('Số luồng phải là số nguyên từ 1 đến 256.');
+          return;
+        }
+        if (threadField) threadField.value = normalizedThreadCount;
+
         // Tự động lưu các link offer mới điền để không bị mất khi chạy
         const savedOffer = await saveOfferConfig(true);
         if (!savedOffer?.success) {
@@ -71,7 +79,7 @@ async function handleStart(options = {}) {
           return;
         }
 
-        const concurrency = Math.min(30, Math.max(1, parseInt(document.getElementById('nudThread').value) || 1));
+        const concurrency = Number(normalizedThreadCount);
         const scriptPath = document.getElementById('cbbScript').value;
         // Ô Chờ tối đa (phút): phiên chạy quá thời gian này thì tự tắt và bù slot; 0 = không giới hạn.
         const maxRunMinutes = Math.max(0, parseFloat(document.getElementById('txtTimeLimit').value) || 0);
@@ -157,7 +165,7 @@ async function handleStart(options = {}) {
                 offerUrls,
                 offerList: offerUrls,
                 concurrency: streamCount,
-                requestedCount: streamCount,
+                requestedCount: normalizedThreadCount,
                 multiTab: document.getElementById('cbxMultiTab')?.checked ?? true,
                 proxyList: proxyLines,
                 proxyType,
@@ -217,7 +225,7 @@ async function handleStart(options = {}) {
               websiteUrl4,
               offerUrls,
               offerList: offerUrls,
-              requestedCount: concurrency,
+              requestedCount: normalizedThreadCount,
               concurrency,
               proxyList: proxyLines,
               proxyType,

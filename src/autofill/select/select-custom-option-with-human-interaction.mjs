@@ -8,7 +8,7 @@ import { findVisibleCustomSelectOption } from './find-visible-custom-select-opti
  * @param {object} context Page, select gốc, trigger hiển thị và option đích.
  * @return {Promise<object>} Kết quả chọn và xác minh giá trị select gốc.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-20
  */
 export async function selectCustomOptionWithHumanInteraction({ page, field, trigger, target }) {
   if (!await humanClick(page, trigger)) return { ...target, verified: false, reason: 'click_failed' };
@@ -17,6 +17,7 @@ export async function selectCustomOptionWithHumanInteraction({ page, field, trig
   let optionHandle;
   const deadline = Date.now() + 2000;
   do {
+    if (page?._manualCaptchaPending) return { ...target, verified: false, reason: 'manual_captcha_pending' };
     if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
     optionHandle = await field.evaluateHandle(findVisibleCustomSelectOption, target);
     option = optionHandle.asElement();
@@ -25,6 +26,7 @@ export async function selectCustomOptionWithHumanInteraction({ page, field, trig
     await new Promise(resolve => setTimeout(resolve, 80));
   } while (Date.now() < deadline);
   try {
+    if (page?._manualCaptchaPending) return { ...target, verified: false, reason: 'manual_captcha_pending' };
     if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
     if (!option) {
       await page.keyboard.press('Escape').catch(() => {});
@@ -37,6 +39,7 @@ export async function selectCustomOptionWithHumanInteraction({ page, field, trig
   const deadlineVerification = Date.now() + 1500;
   let actualValue = '';
   do {
+    if (page?._manualCaptchaPending) return { ...target, verified: false, reason: 'manual_captcha_pending' };
     if (shouldStopAfterLead(page?._autofillSession)) return { ...target, verified: false, reason: 'lead_confirmed_paused' };
     actualValue = await field.inputValue().catch(() => '');
     if (actualValue === target.value) return { ...target, verified: true, reason: 'option_verified' };

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
 import { chromium } from 'playwright';
 import { waitForSurveyReady } from '../src/autofill/offers/2615/solver/survey/wait-for-survey-ready.mjs';
@@ -18,6 +19,123 @@ import { selectActiveForm } from '../src/autofill/form-scope/select-active-form.
 import { updateBrowserMousePointer } from '../src/autofill/interaction/update-browser-mouse-pointer.mjs';
 import { handlePostScreenInput } from '../src/http/routes/screen/post-input.mjs';
 import { activeBrowsers } from '../src/browser/sessions.mjs';
+import { screencastSessions } from '../src/runtime/constants/screencast-sessions.mjs';
+
+test('Screen View giữ đúng ô select qua ảnh dự phòng và nối lại stream', { skip: !existsSync(chromium.executablePath()) && 'Chưa cài Chromium' }, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const otherTab = await context.newPage();
+  const slot = 889;
+  const session = { slot, browser: context, mainPage: page };
+  activeBrowsers.add(session);
+  t.after(() => { activeBrowsers.delete(session); screencastSessions.delete(slot); });
+  const server = createServer(handlePostScreenInput);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+
+  /**
+   * Gửi thao tác tay tới API Screen View đang chạy trên loopback.
+   * @param {object} input Thao tác của người dùng tại ô chọn.
+   * @return {Promise<Response>} Phản hồi từ handler thật.
+   * @author ductv <ductv@getflycrm.com>
+   * @since 2026-11-20
+   */
+  function postInput(input) {
+    return fetch(`http://127.0.0.1:${server.address().port}/screen/input/${slot}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input)
+    });
+  }
+
+  const form = '<select onchange="this.dataset.changes = String(Number(this.dataset.changes || 0) + 1)"><option>A</option><option>B</option><option disabled>C</option></select>';
+  await page.setContent(form);
+  await otherTab.setContent(form);
+  const rect = await page.locator('select').boundingBox();
+  const point = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  const opened = await postInput({ type: 'mousedown', ...point });
+  assert.equal(opened.status, 200);
+  const { select } = await opened.json();
+  assert.ok(select.uid);
+  assert.deepEqual(select.options.map(option => option.label), ['A', 'B', 'C']);
+  assert.equal((await postInput({ type: 'mouseup', ...point })).status, 200);
+  assert.equal((await postInput({ type: 'select', uid: select.uid, index: 2 })).status, 400);
+  session.mainPage = otherTab;
+  assert.equal((await postInput({ type: 'select', uid: select.uid, index: 1 })).status, 409);
+  assert.equal(await otherTab.locator('select').inputValue(), 'A');
+  session.mainPage = page;
+  assert.equal((await postInput({ type: 'select', uid: select.uid, index: 1 })).status, 200);
+  assert.equal(await page.locator('select').inputValue(), 'B');
+  assert.equal((await postInput({ type: 'select', uid: select.uid, index: 0 })).status, 409);
+
+  const reopened = (await (await postInput({ type: 'click', ...point })).json()).select;
+  const cdpClient = await context.newCDPSession(page);
+  screencastSessions.set(slot, { page, cdpClient });
+  assert.equal((await postInput({ type: 'select', uid: select.uid, index: 0 })).status, 409);
+  await page.locator('option').first().evaluate(option => { option.disabled = true; });
+  assert.equal((await postInput({ type: 'select', uid: reopened.uid, index: 0 })).status, 409);
+  await page.locator('option').first().evaluate(option => { option.disabled = false; option.label = 'D'; });
+  assert.equal((await postInput({ type: 'select', uid: reopened.uid, index: 0 })).status, 409);
+  await page.locator('option').first().evaluate(option => { option.removeAttribute('label'); });
+  assert.equal((await postInput({ type: 'select', uid: reopened.uid, index: 0 })).status, 200);
+  assert.equal(await page.locator('select').inputValue(), 'A');
+  assert.equal(await page.locator('select').getAttribute('data-changes'), '2');
+
+  await page.setContent(`<select style="width:200px" oninput="events.push('input')" onchange="events.push('change')">
+    <option hidden selected value="">Ẩn</option>
+    <optgroup hidden label="Nhóm ẩn"><option>Không hiển thị</option></optgroup>
+    <option style="display:none">Ẩn qua CSS</option>
+    <option value="east">Cùng tên</option><option value="west">Cùng tên</option>
+    <optgroup disabled label="Nhóm khóa"><option>Khóa</option></optgroup>
+  </select><script>window.events = []</script>`);
+  const menu = (await (await postInput({ type: 'click', ...point })).json()).select;
+  assert.deepEqual(menu.options, [
+    { label: 'Cùng tên', disabled: false }, { label: 'Cùng tên', disabled: false }, { label: 'Khóa', disabled: true }
+  ]);
+  assert.equal(menu.selectedIndex, -1);
+  assert.equal((await postInput({ type: 'select', index: 0 })).status, 409);
+  await page.locator('option[value="west"]').evaluate(option => option.before(option.previousElementSibling.cloneNode(true)));
+  assert.equal((await postInput({ type: 'select', uid: menu.uid, index: 1 })).status, 409);
+  await page.locator('option[value="west"]').evaluate(option => option.previousElementSibling.remove());
+  await page.locator('option[value="east"]').evaluate(option => option.before(option.nextElementSibling));
+  assert.equal((await postInput({ type: 'select', uid: menu.uid, index: 0 })).status, 409);
+  assert.equal(await page.locator('select').inputValue(), '');
+
+  const currentMenu = (await (await postInput({ type: 'click', ...point })).json()).select;
+  await page.locator('select').evaluate(control => { control.hidden = true; });
+  assert.equal((await postInput({ type: 'select', uid: currentMenu.uid, index: 0 })).status, 409);
+  await page.locator('select').evaluate(control => { control.hidden = false; });
+  await page.locator('option[value="west"]').evaluate(option => { option.hidden = true; });
+  assert.equal((await postInput({ type: 'select', uid: currentMenu.uid, index: 0 })).status, 409);
+  await page.locator('option[value="west"]').evaluate(option => { option.hidden = false; });
+  assert.deepEqual(await page.evaluate(() => events), []);
+  assert.equal((await postInput({ type: 'select', uid: currentMenu.uid, index: 0 })).status, 200);
+  assert.equal(await page.locator('select').inputValue(), 'west');
+  assert.deepEqual(await page.evaluate(() => events), ['input', 'change']);
+
+  // Hai POST nhấn/nhả riêng có thể mở CDP ngược thứ tự khi dùng ảnh dự phòng.
+  screencastSessions.delete(slot);
+  await page.setContent('<button style="width:90px;height:40px">OK</button>');
+  await page.evaluate(() => {
+    window.pointerEvents = [];
+    for (const event of ['mousedown', 'mouseup', 'click']) {
+      document.addEventListener(event, () => window.pointerEvents.push(event));
+    }
+  });
+  const newCDPSession = context.newCDPSession.bind(context);
+  let firstConnectionStarted;
+  const connecting = new Promise(resolve => { firstConnectionStarted = resolve; });
+  t.mock.method(context, 'newCDPSession', async target => {
+    firstConnectionStarted();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    return newCDPSession(target);
+  }, { times: 1 });
+  const down = postInput({ type: 'mousedown', x: 20, y: 20 });
+  await connecting;
+  const up = postInput({ type: 'mouseup', x: 20, y: 20 });
+  assert.deepEqual((await Promise.all([down, up])).map(result => result.status), [200, 200]);
+  assert.deepEqual(await page.evaluate(() => window.pointerEvents), ['mousedown', 'mouseup', 'click']);
+});
 
 test('Khảo sát: Đảm bảo khảo sát load ra đầy đủ và click chọn chính xác', { skip: !existsSync(chromium.executablePath()) && 'Chưa cài Chromium' }, async t => {
   const browser = await chromium.launch({ headless: true });

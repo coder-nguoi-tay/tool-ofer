@@ -94,6 +94,7 @@ export function collectFieldMetadata(element) {
     type: element.getAttribute('type')?.toLowerCase(),
     value: element.value,
     readOnly: element.readOnly,
+    pattern: element.getAttribute('pattern') || '',
     maxLength: element.maxLength
   };
 }

@@ -1,8 +1,8 @@
 /**
- * Cập nhật trạng thái chạy và khóa Start trong suốt quá trình Stop đang đóng browser.
+ * Cập nhật bảng phiên, chỉ rõ các tab cần xác minh và khóa Start khi đang đóng trình duyệt.
  * @return {Promise<void>} Kết quả xử lý fetch running state.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-18
+ * @since 2026-11-20
  */
 async function fetchRunningState() {
       const state = await api('/state');
@@ -210,9 +210,13 @@ async function fetchRunningState() {
                       ? `<span class="run-status-pill status-idle" title="${escHtml(s.leadObserveMessage || 'Chưa thấy lead')}">— Chưa thấy lead • ${screenLabel}</span>`
                       : `<span class="run-status-pill status-idle" title="Tiến trình hiện tại: ${screenLabel}">${screenLabel}</span>`;
 
-        const actionText = s.aiRunning
+        const captchaTabNumbers = (s.tabs || []).filter(tab => tab.manualCaptchaPending).map(tab => Number(tab.index) + 1);
+        const sessionAction = s.aiRunning
           ? `<span class="run-ai-pill">🤖 AI</span> <span class="run-action-text">${escHtml(s.action || 'Đang hỗ trợ điền form')}</span>`
           : `<span class="run-action-text">${escHtml(s.action || s.websiteUrl || 'Running')}</span>`;
+        const actionText = captchaTabNumbers.length
+          ? `<span class="run-status-pill status-checking">Chờ xác minh CAPTCHA · Tab ${captchaTabNumbers.join(', ')}</span> ${sessionAction}`
+          : sessionAction;
 
         const offerNum = s.offerNumber || s.streamRole || 1;
         const threadBadge = `<span class="run-slot-badge">Slot ${s.slot}</span><span class="badge-log badge-offer" style="font-size:9px;margin-left:4px;">Offer ${offerNum}</span>`;

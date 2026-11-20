@@ -2,16 +2,17 @@
  * Chỉ đổi tab được chọn sau khi server xác nhận đã chuyển nguồn Screen View.
  * @param {number} slot slot.
  * @param {number} index index.
+ * @param {string} [manualCaptchaRequestId] Mã lượt chờ để xác nhận tab chưa đổi vị trí.
  * @return {Promise<void>} Kết quả xử lý  switch tab.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
-async function _switchTab(slot, index) {
+async function _switchTab(slot, index, manualCaptchaRequestId) {
       try {
         const response = await fetch(`/screen/tabs/${slot}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ index }),
+          body: JSON.stringify({ index, manualCaptchaRequestId }),
         });
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.error || 'Chưa chuyển được tab đang xem.');

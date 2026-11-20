@@ -1,7 +1,8 @@
 import { resolveContactField } from '../resolve-contact-field.mjs';
 import { getAddressString } from '../get-address-string.mjs';
 import { getDobString } from '../get-dob-string.mjs';
-import { getNormalizedPhone } from '../get-normalized-phone.mjs';
+import { resolveRecordName } from './resolve-record-name.mjs';
+import { resolveRecordPhone } from './resolve-record-phone.mjs';
 import { matchFieldValue } from '../match-field-value.mjs';
 import { resolveRecordCity } from './resolve-record-city.mjs';
 
@@ -11,6 +12,7 @@ import { resolveRecordCity } from './resolve-record-city.mjs';
  * @param {object} record Dữ liệu được cung cấp cho phiên.
  * @param {object} session Email đã được gán cho phiên.
  * @return {string|null} Giá trị có nguồn dữ liệu, hoặc null để giữ field chưa hoàn tất.
+ * @throws {never} Giá trị thiếu hoặc không phù hợp với ô được trả về null.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
@@ -18,7 +20,7 @@ export function resolveProvidedFieldValue(metadata, record = {}, session = {}) {
   const contact = resolveContactField(metadata);
   if (contact === 'conflict') return null;
   if (contact === 'address2') return record.address2 || record.apt || record.suite || null;
-  if (/^phone[123]$/.test(contact)) return matchFieldValue([contact], record, metadata);
+  if (/^phone/.test(contact)) return resolveRecordPhone(record, contact, metadata);
   const names = contact ? [contact] : [...(metadata.names || []), metadata.name, metadata.id, metadata.placeholder, metadata.label, metadata.type].filter(Boolean);
   const identity = names.join(' ').toLowerCase();
   if (/e-?mail|\bmail\b/.test(identity) && !/mailing address/.test(identity)) {
@@ -28,13 +30,11 @@ export function resolveProvidedFieldValue(metadata, record = {}, session = {}) {
   if (/city|town|address-level2/.test(identity)) return resolveRecordCity(record) || null;
   if (/zip|postal|postcode/.test(identity)) return String(record.zipcode || record.zip || record.postalcode || record.postcode || '') || null;
   if (/address|street|\baddr\b/.test(identity) && !/address2|street2|suite|unit|apt/.test(identity)) return getAddressString(record) || null;
-  const fullname = String(record.fullname || record.name || '').trim();
-  if (/first|given|\bfname\b|\bfn\b/.test(identity)) return record.firstname || record.fname || fullname.split(/\s+/)[0] || null;
-  if (/last|family|surname|\blname\b|\bln\b/.test(identity)) return record.lastname || record.lname || fullname.split(/\s+/).slice(1).join(' ') || null;
-  if (/full.?name|\bname\b/.test(identity) && !/user|company|bank|card|street|city|state/.test(identity)) return fullname || `${record.firstname || ''} ${record.lastname || ''}`.trim() || null;
+  if (/first|given|\bfname\b|\bfn\b/.test(identity)) return resolveRecordName('firstname', record);
+  if (/last|family|surname|\blname\b|\bln\b/.test(identity)) return resolveRecordName('lastname', record);
+  if (/full.?name|\bname\b/.test(identity) && !/user|company|bank|card|street|city|state/.test(identity)) return resolveRecordName('fullname', record);
   if (/phone|telephone|mobile|cell|\btel\b/.test(identity) && !/headphone|microphone/.test(identity)) {
-    const raw = record.phone || record.phonenumber || record.cellphone || record.homephone || record.workphone;
-    return raw && String(raw).replace(/\D/g,'').length >= 7 ? getNormalizedPhone(record) : null;
+    return resolveRecordPhone(record, 'phone', metadata);
   }
   if (/birth|dob|\bmonth\b|\bday\b|\byear\b|\bage\b/.test(identity)) {
     if (!getDobString(record) && !record.age && !record.birthyear) return null;

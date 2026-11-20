@@ -28,7 +28,7 @@ const states = new WeakMap();
  * mới. Offer con = mọi tab ngoài tab chính, sống ít nhất 10 giây. Chỉ đóng khi trang chính cũng hết việc (không còn
  * form/câu hỏi/offer chưa mở, kể cả offer Addept chưa bấm) và giữ cùng URL 15 giây. Màn card sweepstakes do finishSweepstakesCardSession
  * xử lý riêng (mở hết thẻ, tab con tối đa 5 phút). Giữ trình duyệt khi bật "dừng autofill khi có lead".
- * Gọi mỗi nhịp của bộ canh phiên; không bao giờ ném lỗi ra ngoài.
+ * Gọi mỗi nhịp của bộ canh phiên và đợi người dùng xác minh CAPTCHA trên tab chính.
  *
  * @param {object} session Phiên trình duyệt.
  * @param {Function} closeSession closeSessionAndRefill của bộ canh phiên.
@@ -36,7 +36,7 @@ const states = new WeakMap();
  * @param {{hasPendingOpenings?:Function,readPendingWork?:Function}} [deps] Tiêm cho test.
  * @return {Promise<boolean>} True nếu vừa đóng trình duyệt.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-16
+ * @since 2026-11-20
  */
 export async function finishLeadSessionAfterSubOffers(session, closeSession, now = Date.now(), { hasPendingOpenings = hasPendingOfferwallOpenings, readPendingWork = mainPageHasPendingWork } = {}) {
   try {
@@ -52,11 +52,11 @@ export async function finishLeadSessionAfterSubOffers(session, closeSession, now
       if (!state.seenAt.has(page)) state.seenAt.set(page, now);
       if (now - state.seenAt.get(page) >= SUB_OFFER_MIN_LIFETIME_MS) state.worked = true;
     }
-    const busy = subs.length > 0 || hasPendingOpenings(main.context?.()) || session.leadCheckRunning
+    const busy = main._manualCaptchaPending || subs.length > 0 || hasPendingOpenings(main.context?.()) || session.leadCheckRunning
       || main._aiAssistRunning || main._aiFormFixing || main._continuousAgent || main._leadRecoveryInProgress;
     if (!state.worked || busy) { state.stableSince = null; return false; }
     // Trang cuối còn offer/form chưa làm (chưa kịp bấm offer con đầu tiên) thì chưa phải "đã xong offer con".
-    if (await readPendingWork(main)) { state.stableSince = null; return false; }
+    if (await readPendingWork(main) || main._manualCaptchaPending) { state.stableSince = null; return false; }
     const url = main.url();
     if (state.stableUrl !== url) { state.stableUrl = url; state.stableSince = null; }
     state.stableSince ??= now;

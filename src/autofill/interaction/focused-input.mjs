@@ -56,12 +56,15 @@ export async function withPinnedInput(field, operation) {
  * Xác minh trang còn cho nhập vào chính phần tử đã chọn, hoặc chỉ kiểm tra ô chưa từng mất focus.
  * @param {object} field Handle được giữ trong lượt nhập.
  * @param {boolean} [beforeFocus] Cho phép phần tử chưa nhận focus lần đầu.
- * @return {Promise<boolean>} False khi phần tử bị thay thế, mất focus hoặc không đọc được.
+ * @param {object|null} [page] Tab sở hữu thao tác autofill; CAPTCHA đang chờ sẽ nhường bàn phím cho người dùng.
+ * @return {Promise<boolean>} False khi tab chờ xác minh, phần tử bị thay thế hoặc đã mất focus.
  * @throws {never} Mất execution context được coi là kết thúc lượt nhập.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-19
+ * @since 2026-11-20
  */
-export async function retainsInputFocus(field, beforeFocus = false) {
+export async function retainsInputFocus(field, beforeFocus = false, page = null) {
+  if (page?._manualCaptchaPending) return false;
   const guard = focusGuards.get(field);
-  return !guard || guard.evaluate((state, initial) => initial ? !state.left() : state.focused(), beforeFocus).catch(() => false);
+  const focused = !guard || await guard.evaluate((state, initial) => initial ? !state.left() : state.focused(), beforeFocus).catch(() => false);
+  return focused && !page?._manualCaptchaPending;
 }
