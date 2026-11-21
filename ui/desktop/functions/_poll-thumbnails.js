@@ -1,8 +1,8 @@
 /**
- * Đồng bộ các ô trình duyệt và chỉ tải thumbnail đang nằm trong vùng nhìn của người dùng.
+ * Hiển thị hành động và lý do chờ trên các thẻ trình duyệt, chỉ tải ảnh trong vùng nhìn.
  * @return {void} Cập nhật thông tin và lên lịch tải ảnh có giới hạn.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-20
+ * @since 2026-11-20 (cập nhật 2026-11-21)
  */
 function _pollThumbnails() {
       if (!_screenViewActive || document.hidden) return;
@@ -121,10 +121,13 @@ function _pollThumbnails() {
           } else if (completedScreens > 0) {
             statusHtml = `<span class="tile-status status-jump">📄 Màn ${completedScreens + 1} (${pageJumps || completedScreens} lần nhảy)</span>`;
           } else {
-            statusHtml = `<span class="tile-status status-idle">⚡ ${escHtml(currentAction || 'Đang mở offer...')}</span>`;
+            statusHtml = `<span class="tile-status status-idle">⚡ ${escHtml(currentAction || 'Chưa có trạng thái')}</span>`;
           }
 
-          const waitingTabs = (entry.tabs || []).filter(tab => tab.autofillWaitReason).map(tab =>
+          const waitingTabs = (entry.tabs || []).filter(tab => tab.autofillWaitReason);
+          const sessionError = entry.autofillError && !waitingTabs.some(tab => tab.autofillWaitReason === entry.autofillError)
+            ? `<div class="tile-status status-checking">Tự điền · ${escHtml(entry.autofillError)}</div>` : '';
+          const tabWaitMessages = waitingTabs.map(tab =>
             `<div class="tile-status status-checking" title="${escHtml(tab.autofillWaitReason)}">Tab ${Number(tab.index) + 1} · ${escHtml(tab.autofillWaitReason)}</div>`).join('');
           const bwBadge = entry.bandwidthFormatted
             ? `<span class="screen-tile-bw-badge" title="Băng thông: ↑${entry.bytesSent ? formatBytes(entry.bytesSent) : '0 B'} · ↓${entry.bytesReceived ? formatBytes(entry.bytesReceived) : '0 B'}">📶 ${entry.bandwidthFormatted}</span>`
@@ -149,7 +152,8 @@ function _pollThumbnails() {
               ${statusHtml}
               ${emailChip}
             </div>
-            ${waitingTabs}
+            ${tabWaitMessages}
+            ${sessionError}
           `;
           if (footer._uxHtml !== footerHtml) {
             footer.innerHTML = footerHtml;

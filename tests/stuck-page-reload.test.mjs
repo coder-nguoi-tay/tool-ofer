@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { reloadStuckPage, STUCK_PAGE_RELOAD_MS } from '../src/autofill/stuck-page/reload-stuck-page.mjs';
+import { reloadStuckPage as reloadOfferPage } from '../src/autofill/offers/2615/solver/stuck-page/reload-stuck-page.mjs';
 
 /**
  * Tab giả: đếm số lần tải lại và cho test đổi URL.
@@ -23,6 +24,28 @@ async function observe(page, session, { from = 0, to, step = 5000, signature = '
   const results = [];
   for (let now = from; now <= to; now += step) results.push(await reloadStuckPage(page, session, signature, options, now));
   return results;
+}
+
+for (const [flow, reloadPage] of [['chung', reloadStuckPage], ['2615', reloadOfferPage]]) {
+  test(`luồng ${flow} ghi nguyên nhân lỗi tải lại mà không lộ nội dung từ trang`, async () => {
+    const privateUrl = 'https://example.invalid/?email=private@example.invalid';
+    for (const [name, message, expected] of [
+      ['TimeoutError', 'Timeout 15000ms exceeded', 'navigation_timeout'],
+      ['Error', 'page.goto: Target page, context or browser has been closed', 'page_closed'],
+      ['Error', 'page.goto: net::ERR_CONNECTION_RESET', 'network_error'],
+      ['Error', 'page.goto: net::ERR_ABORTED', 'navigation_aborted'],
+      ['CustomError', 'Lỗi khác', 'navigation_error'],
+    ]) {
+      const page = fakePage('https://example.invalid/form');
+      const events = [];
+      page.goto = async () => { throw Object.assign(new Error(message + ' ' + privateUrl), { name }); };
+      const options = { onLog: event => events.push(event) };
+      for (const now of [0, 1]) await reloadPage(page, {}, 'same', options, now, { thresholdMs: 1 });
+      const failed = events.find(event => event.type === 'stuck_page_reload_failed');
+      assert.equal(failed?.reasonCode, expected);
+      assert.doesNotMatch(JSON.stringify(failed), /private@example|example\.invalid|CustomError/);
+    }
+  });
 }
 
 test('đứng yên 2 phút (URL, giao diện, thao tác không đổi) thì F5; chưa tới 2 phút thì không', async () => {

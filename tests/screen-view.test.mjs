@@ -464,13 +464,28 @@ test('Screen View hiển thị lý do chờ theo đúng tab và xóa khi form đ
   for (const file of ['esc-html', 'get-device-icon', 'get-clean-device-name', 'get-clean-browser-version', 'get-short-domain', 'format-bytes', '_update-screen-slots', '_poll-thumbnails']) {
     await view.addScriptTag({ path: fileURLToPath(new URL('../ui/desktop/functions/' + file + '.js', import.meta.url)) });
   }
+  session.autofillFields = 2;
+  session.autofillError = waitingPage._autofillWaitReason;
   for (const reason of [waitingPage._autofillWaitReason, '']) {
     waitingPage._autofillWaitReason = reason;
     const reported = getAutoRefillStatus().chromeSessions.find(row => row.slot === 12);
     assert.deepEqual(reported.tabs.map(tab => tab.autofillWaitReason), [null, reason || null]);
     await view.evaluate(session => { _updateScreenSlots([session]); _pollThumbnails(); }, reported);
+    assert.equal(await view.locator('.screen-tile-status-row .status-idle').textContent(), '⚡ Đã điền 2 ô');
     const rows = view.locator('.screen-tile-footer .status-checking');
-    assert.deepEqual(await rows.allTextContents(), reason ? ['Tab 2 · ' + reason] : []);
+    assert.deepEqual(await rows.allTextContents(), [reason ? 'Tab 2 · ' + reason : 'Tự điền · ' + session.autofillError]);
+    assert.equal(await rows.locator('*').count(), 0);
+  }
+  session.autofillError = null;
+  const cleared = getAutoRefillStatus().chromeSessions.find(row => row.slot === 12);
+  for (const [action, expected] of [
+    [{ ...cleared, currentAction: 'Cũ' }, 'Đã điền 2 ô'],
+    [{ slot: 12, currentAction: 'Đang chạy' }, 'Đang chạy'],
+    [{ slot: 12 }, 'Chưa có trạng thái'],
+  ]) {
+    await view.evaluate(row => { _updateScreenSlots([row]); _pollThumbnails(); }, action);
+    assert.equal(await view.locator('.screen-tile-status-row .status-idle').textContent(), '⚡ ' + expected);
+    assert.equal(await view.locator('.screen-tile-footer .status-checking').count(), 0);
   }
 });
 

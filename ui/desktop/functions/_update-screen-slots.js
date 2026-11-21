@@ -1,9 +1,9 @@
 /**
- *  update screen slots.
- * @param {object} sessions sessions.
- * @return {void} Kết quả xử lý  update screen slots.
+ * Đồng bộ thông tin phiên, hành động và lỗi tự điền lên các thẻ Screen View.
+ * @param {object[]} sessions Các phiên trình duyệt từ API trạng thái.
+ * @return {void} Cập nhật danh sách slot để giao diện vẽ ở lượt kế tiếp.
  * @author ductv <ductv@getflycrm.com>
- * @since 2026-11-10
+ * @since 2026-11-10 (cập nhật 2026-11-21)
  */
 function _updateScreenSlots(sessions) {
       _screenSlots = sessions.filter(s => s.slot).map(s => ({
@@ -17,7 +17,8 @@ function _updateScreenSlots(sessions) {
         offerNumber: s.offerNumber || 1,
         completedScreens: s.completedScreens || 0,
         pageJumps: s.pageJumps || 0,
-        currentAction: s.currentAction || s.status || '',
+        currentAction: s.action || s.currentAction || s.status || '',
+        autofillError: s.autofillError || '',
         version: s.version || 'Chrome',
         engine: s.engine || 'Chrome',
         deviceProfile: s.deviceProfile || 'Windows 10',

@@ -155,6 +155,23 @@ test('tóm tắt vẫn giữ pha và mã lỗi GoLogin trước SDK/IP; lỗi c�
   assert.equal(summary.logs[1].actualExitIp, '192.0.2.2');
 });
 
+test('nhật ký phiên giữ lý do autofill chưa chạy và mã lỗi tải trang', async t => {
+  t.mock.method(console, 'log', () => {});
+  const { attachSessionLifecycleLogger } = await import('../src/logging/attach-session-lifecycle-logger.mjs');
+  const recording = { slot: 1, logs: [] };
+  const log = attachSessionLifecycleLogger(new EventEmitter(), {}, recording);
+  for (const type of ['offer_manual', 'offer_skipped', 'autofill_records_empty']) log({ type });
+  log({ type: 'stuck_page_reload_failed', reasonCode: 'navigation_timeout' });
+  log({ type: 'autofill_scan' });
+  assert.deepEqual(recording.logs.map(event => event.type),
+    ['offer_manual', 'offer_skipped', 'autofill_records_empty', 'stuck_page_reload_failed']);
+  assert.equal(recording.logs.at(-1).reasonCode, 'navigation_timeout');
+  const { summarizeRecordingSession } = await import('../src/logging/recorder/summarize-recording-session.mjs');
+  const summary = summarizeRecordingSession(recording, Date.now());
+  assert.deepEqual(summary.logs.map(event => event.type), recording.logs.map(event => event.type));
+  assert.equal(summary.logs.at(-1).reasonCode, 'navigation_timeout');
+});
+
 test('log tối giản giữ mốc phục hồi/tới trần Adsmith để nhìn được nguyên nhân proxy chậm', () => {
   const context = new EventEmitter();
   context.pages = () => [];

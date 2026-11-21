@@ -14,6 +14,7 @@ const lifecycleTypes = new Set([
   'traffic_blocked', 'toffers_duplicate_ip', 'adtrapper_disabled_close', 'adtrapper_stuck_close',
   'sub_offer_tab_closed', 'thankyou_tab_closed', 'duplicate_tab_closed', 'excluded_tab_closed', 'tab_limit_closed',
   'stuck_page_reload', 'stuck_page_reload_exhausted', 'stuck_page_reload_failed',
+  'offer_manual', 'offer_skipped', 'autofill_records_empty',
   'sweepstakes_sub_tab_timeout', 'sweepstakes_completed', 'lead_sub_offers_finished', 'slot_launch_abandoned_stop',
   'offer_2615_invalid_landing',
 ]);

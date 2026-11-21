@@ -1,4 +1,5 @@
 import { readStalledAddressFormStatus } from './describe-address-form.mjs';
+import { describeReloadFailure } from './describe-reload-failure.mjs';
 import { shouldPauseForLead } from '../should-pause-for-lead.mjs';
 import { isThankYouUrl } from '../../leads/actions/is-thank-you-url.mjs';
 import { isFinancialhelpThankyouUrl } from '../../leads/actions/is-financialhelp-thankyou-url.mjs';
@@ -84,8 +85,8 @@ export async function reloadStuckPage(page, session, signature, options = {}, no
   try {
     if (url.includes('#')) await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
     else await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-  } catch {
-    options.onLog?.({ type: 'stuck_page_reload_failed', detail: 'F5 chưa tải xong; giữ trình duyệt, đếm lại từ đầu.' }, page);
+  } catch (error) {
+    options.onLog?.({ type: 'stuck_page_reload_failed', ...describeReloadFailure(error, page.isClosed()) }, page);
   } finally {
     // Đếm lại 2 phút từ lúc F5 xong (cộng thời gian tải vào mốc quan sát).
     state.since = state.lastCheckAt = now + (Date.now() - startedAt);
