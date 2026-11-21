@@ -401,6 +401,12 @@ pub enum RetainedAttributeMutationKind {
 /// and `itemprop`; forcing a document cascade for an unreferenced attribute is
 /// both unnecessary and particularly costly during hydration. Known HTML
 /// document-global attributes remain an explicit full fallback.
+/// @param tree Document containing the changed attribute.
+/// @param node Element receiving the mutation.
+/// @param name Attribute whose rendering impact is classified.
+/// @return Scope of the style refresh needed after this mutation.
+/// @author ductv <ductv@getflycrm.com>
+/// @since 2026-11-20
 pub fn retained_attribute_mutation_kind(
     tree: &DomTree,
     node: NodeId,
@@ -513,7 +519,8 @@ pub fn retained_attribute_mutation_kind(
             | "width"
     ) || (local == "dialog" && name == "open")
         || (local == "input" && matches!(name.as_str(), "size" | "type" | "value"))
-        || (matches!(local.as_str(), "select" | "font") && name == "size")
+        || (local == "select" && matches!(name.as_str(), "size" | "multiple"))
+        || (local == "font" && name == "size")
         || (local == "textarea" && matches!(name.as_str(), "cols" | "rows" | "wrap"))
         || matches!(name.as_str(), "dir" | "lang" | "xml:lang")
     {
@@ -13009,6 +13016,18 @@ fn is_in_flow_grid_item(
     }
 }
 
+/// Build a layout box and the children that participate in its formatting context.
+/// @param tree Document supplying the element and its native control state.
+/// @param id Node whose computed style is being laid out.
+/// @param taffy_tree Destination layout tree.
+/// @param id_map Mapping of layout boxes to their DOM owners.
+/// @param words Text fragments belonging to each layout box.
+/// @param engine Text and native-control measurement contexts.
+/// @param ifc_items Inline formatting items for this pass.
+/// @param styles Computed styles keyed by DOM node.
+/// @return The Taffy box for this node when it participates in layout.
+/// @author ductv <ductv@getflycrm.com>
+/// @since 2026-11-20
 fn build(
     tree: &DomTree,
     id: NodeId,
@@ -13021,7 +13040,7 @@ fn build(
 ) -> Option<taffy::NodeId> {
     // Only the name and native-control flags survive this read. Avoid
     // copying every attribute (including inline data URLs) for each box.
-    let (_name, has_controls, has_embed_source, is_open) = tree.with_node(id, |node| {
+    let (_name, has_controls, has_embed_source, is_open, is_dropdown) = tree.with_node(id, |node| {
         let name = node.as_element()?;
         Some((
             name.clone(),
@@ -13029,6 +13048,7 @@ fn build(
             name.local.as_ref() != "embed"
                 || node.get_attribute("src").is_some_and(|value| !value.trim().is_empty()),
             node.get_attribute("open").is_some(),
+            name.local.as_ref() == "select" && node.uses_select_dropdown(),
         ))
     })??;
     let style = styles.get(&id)?;
@@ -13158,13 +13178,19 @@ fn build(
         }
     }
 
-    if matches!(_name.local.as_ref(), "input" | "select" | "textarea") {
-        if let Some((width, height)) = style.intrinsic_size {
+    let native_metrics = style.intrinsic_size.filter(|_| {
+        matches!(_name.local.as_ref(), "input" | "select" | "textarea")
+    });
+    if is_dropdown || native_metrics.is_some() {
+        let leaf = if let Some((width, height)) = native_metrics {
             let context = engine.register_native_control(width, height, style);
-            let leaf = taffy_tree.new_leaf_with_context(taffy_style, context).ok()?;
-            id_map.insert(leaf, id);
-            return Some(leaf);
-        }
+            taffy_tree.new_leaf_with_context(taffy_style, context)
+        } else {
+            // Dropdown dimensions are already resolved. Options live in the popup.
+            taffy_tree.new_leaf(taffy_style)
+        }.ok()?;
+        id_map.insert(leaf, id);
+        return Some(leaf);
     }
 
     // An inline SVG is an atomic replaced box in the surrounding formatting

@@ -16258,6 +16258,45 @@ mod tests {
         );
     }
 
+    /// Checks which option labels affect the pixels of a closed select and a listbox.
+    ///
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    #[test]
+    fn native_select_repaints_only_visible_option_labels() {
+        let render = |layout: &str, attributes: &str, unselected: &str, selected: &str| {
+            let tree = parse_html(&format!(
+                r#"<html><body style="margin:0"><div style="display:{layout}">
+                <select {attributes} style="width:180px">
+                    <optgroup label="Seasons"><option>{unselected}</option></optgroup>
+                    <option selected>{selected}</option>
+                </select></div></body></html>"#
+            ));
+            paint_dom(&tree, (200.0, 100.0), None).expect("select pixmap")
+        };
+
+        for layout in ["block", "flex", "grid"] {
+            for attributes in ["", "size=1"] {
+                let closed = render(layout, attributes, "Summer", "Spring");
+                assert!(
+                    closed.data() == render(layout, attributes, "Winter", "Spring").data(),
+                    "a hidden option changed the closed dropdown in {layout} ({attributes})"
+                );
+                assert!(
+                    closed.data() != render(layout, attributes, "Summer", "Autumn").data(),
+                    "the selected option did not repaint in {layout} ({attributes})"
+                );
+            }
+        }
+        for attributes in ["multiple", "size=2"] {
+            assert!(
+                render("block", attributes, "Summer", "Spring").data()
+                    != render("block", attributes, "Winter", "Spring").data(),
+                "the unselected row must remain visible in a listbox with {attributes}"
+            );
+        }
+    }
+
     #[test]
     fn authored_combobox_button_paints_css_math_border() {
         let tree = parse_html(

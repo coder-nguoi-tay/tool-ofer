@@ -178,6 +178,20 @@ impl Node {
         })
     }
 
+    /// Determine whether an HTML select uses a closed, single-choice dropdown.
+    /// @return True for single-select controls with an absent, invalid, zero or one-row size.
+    /// @author ductv <ductv@getflycrm.com>
+    /// @since 2026-11-20
+    pub fn uses_select_dropdown(&self) -> bool {
+        if self.get_attribute("multiple").is_some() {
+            return false;
+        }
+        let size = self.get_attribute("size").unwrap_or("").trim_start();
+        let digits = size.strip_prefix('+').unwrap_or(size)
+            .split(|c: char| !c.is_ascii_digit()).next().unwrap_or("");
+        digits.parse::<u32>().unwrap_or(0) <= 1
+    }
+
     pub fn set_attribute(&mut self, name: &str, value: String) {
         if let NodeData::Element { attrs, .. } = &mut self.data {
             // Match by qualified name, consistent with get_attribute and the
@@ -1728,8 +1742,6 @@ impl DomTree {
         let inner = self.inner.borrow();
         let Some(control) = inner.nodes.get(select.index()).and_then(Option::as_ref) else { return vec![] };
         let multiple = control.get_attribute("multiple").is_some();
-        let size = control.get_attribute("size").unwrap_or("").trim_start().trim_start_matches('+')
-            .split(|c: char| !c.is_ascii_digit()).next().unwrap_or("").parse::<u32>().unwrap_or(0);
         let mut chosen = Vec::new();
         let mut has_live_state = false;
         let mut first_enabled = None;
@@ -1745,7 +1757,7 @@ impl DomTree {
                 first_enabled = Some(index);
             }
         }
-        if chosen.is_empty() && !multiple && size <= 1 && (!has_live_state || reselect_default) {
+        if chosen.is_empty() && (!has_live_state || reselect_default) && control.uses_select_dropdown() {
             chosen.extend(first_enabled);
         }
         chosen
