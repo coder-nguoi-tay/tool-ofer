@@ -822,7 +822,7 @@ pub(crate) fn queue_screencast_frame(
         let activity_generation = page
             .js
             .as_ref()
-            .map(|js| js.activity_generation())
+            .map(|js| js.screen_activity_generation())
             .unwrap_or(0);
         (viewport, scroll, raster, activity_generation)
     };
@@ -862,6 +862,48 @@ pub(crate) fn queue_screencast_frame(
     Ok(true)
 }
 
+/// Show a navigating document's early paint to every viewer of that tab.
+/// The live page is owned by the navigation task, so the task paints and this
+/// only encodes, honouring each stream's size and acknowledgement window.
+/// The activity generation is left alone: the committed page still emits its
+/// own frame once navigation hands it back.
+/// @param ctx Connection. @param page_id Navigating target. @param preview Raster from the task.
+/// @return Emits frames into the CDP event queue. @author ductv <ductv@getflycrm.com> @since 2026-11-21
+#[cfg(feature = "render")]
+pub(crate) fn queue_navigation_preview(ctx: &mut CdpContext, page_id: &str, preview: obscura_browser::NavigationPreview) {
+    let Some(raster) = image::RgbaImage::from_raw(preview.width, preview.height, preview.rgba) else { return; };
+    let viewers: Vec<String> = ctx.screencasts.keys()
+        .filter(|session| ctx.sessions.get(*session).map(String::as_str) == Some(page_id))
+        .cloned().collect();
+    for cdp_session_id in viewers {
+        let Some(state) = ctx.screencasts.get(&cdp_session_id).cloned() else { continue; };
+        if state.frames_in_flight >= MAX_SCREENCAST_FRAMES_IN_FLIGHT { continue; }
+        let (_, output) = screencast_capture_region(preview.viewport, (0.0, 0.0), &state);
+        let frame = if raster.dimensions() == output { raster.clone() } else {
+            match resize_screencast_frame(&raster, output) { Ok(frame) => frame, Err(_) => continue }
+        };
+        let Ok(encoded) = encode_screencast_frame(&frame, &state) else { continue; };
+        use base64::Engine as _;
+        let data = base64::engine::general_purpose::STANDARD.encode(encoded);
+        let Some(live) = ctx.screencasts.get_mut(&cdp_session_id) else { continue; };
+        if live.session_id != state.session_id { continue; }
+        live.frames_in_flight = live.frames_in_flight.saturating_add(1);
+        ctx.pending_events.push(CdpEvent {
+            method: "Page.screencastFrame".into(),
+            params: json!({
+                "data": data,
+                "metadata": {
+                    "offsetTop": 0.0, "pageScaleFactor": 1.0,
+                    "deviceWidth": preview.viewport.0, "deviceHeight": preview.viewport.1,
+                    "scrollOffsetX": 0.0, "scrollOffsetY": 0.0, "timestamp": timestamp(),
+                },
+                "sessionId": state.session_id,
+            }),
+            session_id: Some(cdp_session_id),
+        });
+    }
+}
+
 /// Advance active page task queues for one bounded compositor slice and emit
 /// a frame when connected-document activity has changed. Chromium feeds
 /// `Page.screencastFrame` from its video consumer on compositor frames; this
@@ -893,7 +935,7 @@ pub(crate) async fn pump_screencast_frames(ctx: &mut CdpContext, resume_cold_pag
             let Some(js) = page.js.as_ref() else {
                 continue;
             };
-            let generation = js.activity_generation();
+            let generation = js.screen_activity_generation();
             let css_animation_active = page.prepared_has_active_css_animations();
             (generation, css_animation_active)
         };

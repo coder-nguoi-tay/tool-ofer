@@ -270,3 +270,220 @@ test('Obscura phân biệt timeout trước header, giữa body và tài nguyên
     });
   }
 });
+
+test('tab gốc vẫn chạy timer, evaluate và click trong lúc popup chờ header/ảnh chậm', { skip: !available, timeout: 90000 }, async t => {
+  // Tái hiện câu hỏi linkout Alpha Intent (2026-11-21): onclick tự window.open(_blank) rồi đổi câu sau 100ms.
+  const opener = `<!doctype html><html><body><div id="card"><a id="cta" href="/slow-popup" style="display:block;width:300px;height:60px"
+    onclick="event.preventDefault(); window.open(this.href, '_blank'); setTimeout(() => { document.getElementById('card').textContent = 'NEXT QUESTION'; }, 100)">See If I Qualify</a></div></body></html>`;
+  const server = http.createServer((request, response) => {
+    response.setHeader('Content-Type', 'text/html');
+    if (request.url === '/root') return response.end(opener);
+    if (request.url === '/slow-popup') return setTimeout(() => response.end('<!doctype html><body>Offer<img src="/slow.png"></body>'), 4000);
+    if (request.url === '/slow.png') return setTimeout(() => { response.setHeader('Content-Type', 'image/png'); response.end(); }, 4000);
+    response.end('<!doctype html><body>ok</body>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let session;
+  t.after(async () => { await session?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  session = await openObscuraBrowser({ slot: 985, port: 0, registerSession: false });
+  const { page, browser: context } = session;
+  await page.goto(origin + '/root');
+  const box = await page.locator('#cta').boundingBox();
+  const cdp = await context.newCDPSession(page);
+  // Cùng đường với click tay của Screen View.
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await cdp.send('Input.dispatchMouseEvent', { type, x: box.x + 20, y: box.y + 20, button: 'left', clickCount: 1 });
+  }
+  const clickedAt = Date.now();
+  await assertEventually(() => context.pages().length === 2, 'popup được tạo');
+  await assertEventually(async () => await page.evaluate(() => document.getElementById('card').textContent) === 'NEXT QUESTION', 'tab gốc đổi câu');
+  assert.ok(Date.now() - clickedAt < 2000, `tab gốc đổi câu sau ${Date.now() - clickedAt}ms, popup còn đang chờ header`);
+  const started = Date.now();
+  assert.equal(await page.evaluate(() => 1 + 1), 2);
+  assert.ok(Date.now() - started < 1000, 'evaluate của tab gốc không bị hoãn tới khi popup tải xong');
+  const popup = context.pages().find(candidate => candidate !== page);
+  // Popup cần 4s header + tối đa 2 lượt warmup ảnh 1s: chờ lâu hơn hạn 5s của assertEventually.
+  const deadline = Date.now() + 15000;
+  let popupText = '';
+  while (Date.now() < deadline && !popupText.includes('Offer')) {
+    popupText = await popup.evaluate(() => document.body.innerText).catch(() => '');
+    if (!popupText.includes('Offer')) await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  assert.ok(popupText.includes('Offer'), 'popup vẫn tải xong');
+});
+
+test('stylesheet <link> trong HTML của iframe được tải và áp dụng (ô ẩn bằng CSS ngoài vẫn ẩn)', { skip: !available, timeout: 60000 }, async t => {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    if (request.url.endsWith('.css')) { response.setHeader('Content-Type', 'text/css'); return response.end('#label{color:rgb(25,26,27)} .step-hidden{display:none}'); }
+    response.setHeader('Content-Type', 'text/html');
+    if (request.url === '/root') return response.end('<!doctype html><body><iframe id="outer" src="/frame"></iframe></body>');
+    if (request.url === '/frame') return response.end('<!doctype html><html><head><link rel="stylesheet" href="/frame.css"></head><body><p id="label">Email</p><input id="honeypot" class="step-hidden"><iframe src="/nested"></iframe><script>document.querySelector("link").addEventListener("load", () => { window.cssLoadEvent = 1; });</script></body></html>');
+    if (request.url === '/nested') return response.end('<!doctype html><link rel="stylesheet" href="/nested.css"><body><p id="label">nested</p></body>');
+    response.end('');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let session;
+  t.after(async () => { await session?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  session = await openObscuraBrowser({ slot: 982, port: 0, registerSession: false });
+  await session.page.goto(origin + '/root');
+  const frame = path => session.page.frames().find(candidate => candidate.url() === origin + path);
+  await assertEventually(async () => await frame('/frame')?.evaluate(() => getComputedStyle(document.getElementById('label')).color).catch(() => '') === 'rgb(25, 26, 27)', 'CSS của iframe');
+  assert.deepEqual(await frame('/frame').evaluate(() => [getComputedStyle(document.getElementById('honeypot')).display, document.styleSheets.length, window.cssLoadEvent]), ['none', 1, 1]);
+  await assertEventually(async () => await frame('/nested')?.evaluate(() => getComputedStyle(document.getElementById('label')).color).catch(() => '') === 'rgb(25, 26, 27)', 'CSS của iframe lồng');
+  assert.equal(requests.filter(url => url === '/frame.css').length, 1, 'mỗi stylesheet chỉ tải một lần');
+});
+
+test('lệnh chuyển trang mới huỷ lần đang treo; input vào tab đang tải không bị phát lại lên trang mới', { skip: !available, timeout: 90000 }, async t => {
+  const server = http.createServer((request, response) => {
+    response.setHeader('Content-Type', 'text/html');
+    if (request.url === '/hang' || request.url === '/hang-again') return; // server treo như offer lỗi
+    if (request.url === '/slow') return setTimeout(() => response.end('<!doctype html><body><h1 id="t">slow</h1></body>'), 3000);
+    if (request.url === '/target') return response.end('<!doctype html><body style="margin:0"><button id="b" style="width:400px;height:400px" onclick="window.clicks=(window.clicks||0)+1">B</button><h1 id="t">target</h1></body>');
+    response.end(`<!doctype html><body><h1 id="t">${request.url.slice(1)}</h1></body>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let session;
+  t.after(async () => { await session?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  session = await openObscuraBrowser({ slot: 981, port: 0, registerSession: false });
+  const page = session.page;
+  const title = () => page.evaluate(() => document.getElementById('t')?.textContent);
+
+  // Giống F5 của app: goto hết hạn phía client, lần goto sau không được xếp hàng sau lần treo (hạn engine 30s).
+  await assert.rejects(page.goto(origin + '/hang', { timeout: 2000 }));
+  let started = Date.now();
+  await page.goto(origin + '/after-hang', { timeout: 5000 });
+  assert.equal(await title(), 'after-hang');
+  assert.ok(Date.now() - started < 3000, `goto sau trang treo mất ${Date.now() - started}ms`);
+
+  // Lần sau thắng lần trước đang chậm, trang chậm không được ghi đè.
+  const slow = page.goto(origin + '/slow').catch(error => error);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  await page.goto(origin + '/winner', { timeout: 5000 });
+  assert.ok(await slow instanceof Error, 'goto bị thay thế phải báo lỗi như Chrome');
+  await new Promise(resolve => setTimeout(resolve, 3500));
+  assert.equal(await title(), 'winner');
+
+  // Click gửi khi tab đang tải được trả lời ngay và không rơi xuống nút của trang mới.
+  const cdp = await session.browser.newCDPSession(page);
+  const navigation = cdp.send('Page.navigate', { url: origin + '/target-slow' }).catch(() => {});
+  server.removeAllListeners('request');
+  server.on('request', (request, response) => {
+    response.setHeader('Content-Type', 'text/html');
+    if (request.url === '/target-slow') return setTimeout(() => response.end('<!doctype html><body style="margin:0"><button id="b" style="width:400px;height:400px" onclick="window.clicks=(window.clicks||0)+1">B</button><h1 id="t">target</h1></body>'), 2000);
+    response.end('');
+  });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  started = Date.now();
+  for (const type of ['mousePressed', 'mouseReleased']) await cdp.send('Input.dispatchMouseEvent', { type, x: 100, y: 100, button: 'left', clickCount: 1 });
+  assert.ok(Date.now() - started < 500, `click lúc đang tải bị giữ ${Date.now() - started}ms`);
+  await navigation;
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(await title(), 'target');
+  assert.equal(await page.evaluate(() => window.clicks || 0), 0, 'click cũ không được bấm lên trang mới');
+});
+
+test('link #anchor cuộn tới phần tử đích như Chrome', { skip: !available, timeout: 60000 }, async t => {
+  const session = await openObscuraBrowser({ slot: 980, port: 0, registerSession: false });
+  t.after(() => session.close());
+  const page = session.page;
+  await page.goto('data:text/html,<!doctype html><body style="margin:0"><a id="go" href="%23sec%C3%A9">go</a> <a id="name" href="%23legacy">name</a> <a id="to-top" href="%23top">top</a><div style="height:3000px"></div><p id="secé">here</p><div style="height:3000px"></div><a name="legacy">legacy</a><div style="height:3000px"></div></body>');
+  const y = () => page.evaluate(() => Math.round(scrollY));
+  await page.evaluate(() => document.getElementById('go').click());
+  assert.ok(Math.abs(await y() - await page.evaluate(() => Math.round(document.getElementById('secé').getBoundingClientRect().top + scrollY))) <= 1 && await y() > 2000, `id đích, scrollY=${await y()}`);
+  await page.evaluate(() => document.getElementById('name').click());
+  assert.ok(await y() > 5000, `a[name], scrollY=${await y()}`);
+  await page.evaluate(() => document.getElementById("to-top").click());
+  assert.equal(await y(), 0);
+});
+
+test('điều hướng lỗi/tải tệp không thay trang hiện tại và không làm hỏng lần goto sau', { skip: !available, timeout: 60000 }, async t => {
+  const server = http.createServer((request, response) => {
+    if (request.url === '/hang') return;
+    if (request.url === '/empty-500') { response.writeHead(500); return response.end(); }
+    if (request.url === '/download') { response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="a.bin"' }); return response.end('binary'); }
+    response.setHeader('Content-Type', 'text/html');
+    response.end(`<!doctype html><h1 id="t">${request.url.slice(1)}</h1>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let session;
+  t.after(async () => { await session?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  session = await openObscuraBrowser({ slot: 978, port: 0, registerSession: false });
+  const page = session.page;
+  const title = () => page.evaluate(() => document.getElementById('t')?.textContent);
+  await page.goto(origin + '/start');
+  await assert.rejects(page.goto(origin + '/empty-500'));
+  assert.equal(page.url(), origin + '/start', 'lỗi 500 rỗng giữ trang cũ');
+  await assert.rejects(page.goto(origin + '/hang', { timeout: 1500 }));
+  await page.goto(origin + '/linked', { timeout: 5000 });
+  assert.equal(await title(), 'linked');
+  await page.evaluate(url => { location.href = url; }, origin + '/download');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  assert.equal(await title(), 'linked', 'tệp tải về không thay trang');
+  assert.equal(page.url(), origin + '/linked');
+});
+
+test('Screen View vẽ lại khi chỉ nội dung bên trong iframe thay đổi', { skip: !available, timeout: 60000 }, async t => {
+  const { createHash } = await import('node:crypto');
+  const server = http.createServer((request, response) => {
+    response.setHeader('Content-Type', 'text/html');
+    if (request.url === '/child') return response.end('<!doctype html><body style="margin:0;background:rgb(0,160,0);font:40px sans-serif"><p id="n">0</p><script>let i=0;setInterval(()=>{document.body.style.background=++i%2?"rgb(200,0,0)":"rgb(0,160,0)";document.getElementById("n").textContent=i},500)</script></body>');
+    response.end('<!doctype html><body style="margin:0"><iframe src="/child" style="width:400px;height:200px;border:0"></iframe></body>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let session;
+  t.after(async () => { await session?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  session = await openObscuraBrowser({ slot: 975, port: 0, registerSession: false });
+  await session.page.goto(origin + '/root');
+  const cdp = await session.browser.newCDPSession(session.page);
+  const frames = new Set();
+  cdp.on('Page.screencastFrame', frame => {
+    frames.add(createHash('md5').update(frame.data).digest('hex'));
+    cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+  });
+  await cdp.send('Page.enable');
+  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 58, maxWidth: 800, maxHeight: 600 });
+  await new Promise(resolve => setTimeout(resolve, 2500));
+  await cdp.send('Page.stopScreencast');
+  assert.ok(frames.size >= 3, `chỉ có ${frames.size} khung hình khác nhau khi iframe đổi màu 4 lần`);
+});
+
+test('Screen View hiện trang mới trước khi script và tài nguyên chậm tải xong', { skip: !available, timeout: 60000 }, async t => {
+  const { createHash } = await import('node:crypto');
+  const server = http.createServer((request, response) => {
+    if (request.url === '/slow.js') return setTimeout(() => { response.setHeader('Content-Type', 'text/javascript'); response.end('window.late = 1'); }, 3000);
+    response.setHeader('Content-Type', 'text/html');
+    if (request.url === '/next') return response.end('<!doctype html><body style="margin:0;background:rgb(0,0,200)"><h1>Next question</h1><script src="/slow.js"></script></body>');
+    response.end('<!doctype html><body style="margin:0;background:rgb(255,255,255)"><h1>start</h1></body>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let session;
+  t.after(async () => { await session?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  session = await openObscuraBrowser({ slot: 974, port: 0, registerSession: false });
+  await session.page.goto(origin + '/start');
+  const cdp = await session.browser.newCDPSession(session.page);
+  const frames = [];
+  cdp.on('Page.screencastFrame', frame => {
+    frames.push({ at: Date.now(), hash: createHash('md5').update(frame.data).digest('hex') });
+    cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+  });
+  await cdp.send('Page.enable');
+  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 58, maxWidth: 800, maxHeight: 600 });
+  await new Promise(resolve => setTimeout(resolve, 600));
+  const startHash = frames.at(-1)?.hash;
+  const navigatedAt = Date.now();
+  const navigation = cdp.send('Page.navigate', { url: origin + '/next' });
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  const early = frames.filter(frame => frame.at > navigatedAt && frame.hash !== startHash);
+  await navigation;
+  await cdp.send('Page.stopScreencast');
+  assert.ok(early.length > 0, 'Screen View vẫn giữ trang cũ trong lúc script cuối body đang tải');
+  assert.ok(early[0].at - navigatedAt < 1500, `khung hình trang mới đầu tiên sau ${early[0]?.at - navigatedAt}ms`);
+});

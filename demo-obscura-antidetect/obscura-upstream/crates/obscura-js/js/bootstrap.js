@@ -14240,6 +14240,13 @@ globalThis.atob = globalThis.atob || ((s) => {
         forwardCleared = true;
       }
       applyVirtual(replace ? 'replace' : 'push');
+      // HTML "scroll to the fragment": id, then a[name]; '' and 'top' mean the top.
+      let fragment = '';
+      try { fragment = decodeURIComponent(new URL(url).hash.slice(1)); } catch { fragment = new URL(url).hash.slice(1); }
+      const indicated = fragment && (document.getElementById(fragment)
+        || Array.from(document.getElementsByName(fragment)).find(element => element.localName === 'a'));
+      if (indicated) indicated.scrollIntoView();
+      else if (fragment === '' || fragment.toLowerCase() === 'top') globalThis.scrollTo(0, 0);
       setTimeout(() => {
         const ev = new HashChangeEvent('hashchange');
         ev.oldURL = prevUrl; ev.newURL = url;
@@ -20723,7 +20730,12 @@ globalThis.__obscura_init_frames = function() {
     else if (src && src !== 'about:blank') frame._loadIframeSrc(src);
     else if (_ensureInitialFrameRealm(frame)) frame.dispatchEvent(new Event('load'));
   }
-
+  // The top document's parser stylesheets are fetched natively during
+  // navigation; a frame document has no such pass, so its <link> sheets were
+  // never requested and CSS-hidden controls looked visible (2026-11-21).
+  if (_realmFrameId !== 0) {
+    for (const link of globalThis.document.querySelectorAll('link[rel]')) _loadLinkedStylesheet(link);
+  }
 };
 
 globalThis.__obscura_init = (function() {

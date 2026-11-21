@@ -1458,7 +1458,7 @@ async fn cdp_processor(
                             "sessionId": session_id,
                         })
                         .to_string();
-                        process_with_interception(
+                        process_navigation_with_peers(
                             &navigation,
                             &mut ctx,
                             reply_tx,
@@ -1467,6 +1467,7 @@ async fn cdp_processor(
                             &mut intercepted_paused,
                             &mut deferred,
                             false,
+                            Some(&mut pending_runtime),
                         )
                         .await;
                         idle_pages.clear();
@@ -1547,10 +1548,10 @@ async fn cdp_processor(
                     (timing, start)
                 });
                 if is_navigation {
-                    process_with_interception(
+                    process_navigation_with_peers(
                         &cdp_msg.text, &mut ctx, &cdp_msg.reply_tx, &mut rx,
                         &mut intercept_rx, &mut intercepted_paused,
-                        &mut deferred, true,
+                        &mut deferred, true, Some(&mut pending_runtime),
                     ).await;
                 } else {
                     let fetch_was_resolved = cdp_msg.text.contains("Fetch.")
@@ -1580,9 +1581,10 @@ async fn cdp_processor(
                 "params": navigation_params,
                 "sessionId": session_id,
             }).to_string();
-            process_with_interception(
+            process_navigation_with_peers(
                 &navigation, &mut ctx, reply_tx, &mut rx,
                 &mut intercept_rx, &mut intercepted_paused, &mut deferred, false,
+                Some(&mut pending_runtime),
             ).await;
         }
 
@@ -2117,11 +2119,52 @@ async fn serve_navigation_view(command: &CdpRequest, msg: &CdpMessage, ctx: &mut
     true
 }
 
+/// Decide whether a command for another live tab may run during a navigation.
+/// @param command Parsed command. @param ctx Connection. @param loading_id Navigating target.
+/// @param deferred Commands already waiting; a session with queued work stays FIFO.
+/// @return True when the command targets a peer tab and cannot start a navigation.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-21
+fn is_peer_command(command: &CdpRequest, ctx: &CdpContext, loading_id: &str, deferred: &std::collections::VecDeque<ServerMessage>) -> bool {
+    let Some(session) = command.session_id.as_deref() else { return false; };
+    let Some(target) = ctx.sessions.get(session) else { return false; };
+    if target == loading_id || !ctx.pages.iter().any(|page| &page.id == target && page.has_js()) { return false; }
+    if command.method.starts_with("Target.") || command.method.starts_with("Browser.")
+        || matches!(command.method.as_str(), "Page.navigate" | "Page.reload" | "Page.close" | "Page.navigateToHistoryEntry") {
+        return false;
+    }
+    !deferred.iter().any(|queued| matches!(queued, ServerMessage::Cdp(message)
+        if serde_json::from_str::<CdpRequest>(&message.text).ok().and_then(|request| request.session_id).as_deref() == Some(session)))
+}
+
+/// Answer awaited evaluations of peer tabs whose promise settled during a navigation.
+/// @param ctx Connection, with the V8 lock held by the caller. @param pending Connection's awaited evaluations.
+/// @param loading_id Navigating target; its evaluations wait for the outer loop.
+/// @return Completes after ready replies are sent. @author ductv <ductv@getflycrm.com> @since 2026-11-21
+async fn finish_ready_peer_evaluations(ctx: &mut CdpContext, pending: &mut Vec<PendingRuntimeReply>, loading_id: &str) {
+    let mut index = 0;
+    while index < pending.len() {
+        if pending[index].evaluation.page_id == loading_id || !pending[index].evaluation.ready(ctx) { index += 1; continue; }
+        let reply = pending.remove(index);
+        let result = reply.evaluation.finish(ctx, &reply.session_id).await;
+        dispatch::drain_runtime_events(ctx);
+        dispatch::drain_binding_calls(ctx);
+        dispatch::drain_frame_events(ctx);
+        forward_pending_events(ctx, Some(&reply.reply_tx));
+        let response = match result {
+            Ok(value) => crate::types::CdpResponse::success(reply.id, value, reply.session_id),
+            Err(error) => crate::types::CdpResponse::error(reply.id, -32000, error, reply.session_id),
+        };
+        if let Ok(json) = serde_json::to_string(&response) { let _ = reply.reply_tx.send(json); }
+    }
+}
+
 /// @param text Navigation envelope. @param ctx Connection state. @param reply_tx Event and reply transport.
 /// @param rx Incoming commands. @param intercept_rx Network events. @param intercepted_paused Pending requests.
 /// @param deferred Commands waiting for navigation. @param send_command_response Whether a client is awaiting a reply.
 /// @return Completes after the navigation result and its events are queued.
 /// @author ductv <ductv@getflycrm.com> @since 2026-11-20
+/// Test entry point kept on the original signature; production passes pending evaluations.
+#[cfg(test)]
 async fn process_with_interception(
     text: &str,
     ctx: &mut CdpContext,
@@ -2131,6 +2174,27 @@ async fn process_with_interception(
     intercepted_paused: &mut HashMap<String, PausedIntercept>,
     deferred: &mut std::collections::VecDeque<ServerMessage>,
     send_command_response: bool,
+) {
+    process_navigation_with_peers(text, ctx, reply_tx, rx, intercept_rx, intercepted_paused, deferred, send_command_response, None).await;
+}
+
+/// Run one navigation while the connection's other tabs keep executing.
+/// Peer tabs are pumped and their commands answered whenever the navigation
+/// has lent the V8 lock back (main-document network time), so a slow popup
+/// redirect no longer freezes the opener's timers, input and screencast.
+/// @param pending_runtime Awaited evaluations owned by the connection processor.
+/// @return Completes after the navigation result and its events are queued.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-21
+async fn process_navigation_with_peers(
+    text: &str,
+    ctx: &mut CdpContext,
+    reply_tx: &mpsc::UnboundedSender<String>,
+    rx: &mut mpsc::UnboundedReceiver<ServerMessage>,
+    intercept_rx: &mut Option<mpsc::UnboundedReceiver<obscura_js::ops::InterceptedRequest>>,
+    intercepted_paused: &mut HashMap<String, PausedIntercept>,
+    deferred: &mut std::collections::VecDeque<ServerMessage>,
+    send_command_response: bool,
+    mut pending_runtime: Option<&mut Vec<PendingRuntimeReply>>,
 ) {
     let req: CdpRequest = match serde_json::from_str(text) {
         Ok(r) => r,
@@ -2219,6 +2283,10 @@ async fn process_with_interception(
     let trace = nav_start.map(|_| std::rc::Rc::new(std::cell::Cell::new(obscura_net::navigation_trace::NavigationTrace::default())));
     let task_trace = trace.clone();
     let nav_v8_lock = ctx.v8_lock.clone();
+    // Early paints only matter to someone watching this tab.
+    let (preview_tx, mut preview_rx) = mpsc::unbounded_channel::<obscura_browser::NavigationPreview>();
+    let watched = ctx.screencasts.keys().any(|session| ctx.sessions.get(session) == Some(&page_id));
+    if watched { page.set_navigation_preview(Some(preview_tx)); } else { drop(preview_tx); }
 
     tokio::task::spawn_local(async move {
         // Issue #19: serialize this connection's V8 work across its pages. This
@@ -2226,7 +2294,10 @@ async fn process_with_interception(
         // messages via `dispatch` (which takes the same per-connection lock), so
         // both sides coordinate on one page's isolate at a time on this thread.
         // The lock is per-connection, so other connections are unaffected (#430).
-        let _v8_guard = nav_v8_lock.lock_owned().await;
+        let v8_guard = nav_v8_lock.clone().lock_owned().await;
+        // The page hands the lock back only while its main document is on the
+        // network; everything that runs V8 still holds it.
+        page.lend_navigation_v8_lock(nav_v8_lock, v8_guard);
         // Preloads (addBinding shims, addScriptToEvaluateOnNewDocument sources)
         // must run BEFORE the page's own scripts (CDP contract). Hand them
         // to the page so navigate_single can inject them at the right point.
@@ -2249,7 +2320,7 @@ async fn process_with_interception(
             } => (result.map_err(|e| e.to_string()), false),
             _ = cancel_rx => (Err("net::ERR_ABORTED".into()), true),
         };
-        drop(_v8_guard);
+        drop(page.return_navigation_v8_lock());
         let _ = nav_done_tx.send((page, result, cancelled)).await;
     });
 
@@ -2279,6 +2350,9 @@ async fn process_with_interception(
     // LocalSet).
     let mut view_tick = tokio::time::interval(tokio::time::Duration::from_millis(33));
     view_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let peer_lock = ctx.v8_lock.clone();
+    let mut peer_idle = HashSet::new();
+    let mut peers_armed = ctx.pages.iter().any(|page| page.has_js());
     loop {
         let has_irx = intercept_rx.is_some();
 
@@ -2287,6 +2361,40 @@ async fn process_with_interception(
                 #[cfg(feature = "render")]
                 crate::domains::page::pump_screencast_frames(ctx, false).await;
                 forward_pending_events(ctx, Some(reply_tx));
+            }
+            Some(preview) = preview_rx.recv(), if watched => {
+                #[cfg(feature = "render")]
+                crate::domains::page::queue_navigation_preview(ctx, &page_id, preview);
+                #[cfg(not(feature = "render"))]
+                drop(preview);
+                forward_pending_events(ctx, Some(reply_tx));
+            }
+            // Bounded slice: the navigation re-locks after its network wait,
+            // and Fetch resolutions must keep flowing through this loop.
+            (peer_guard, pumped) = async {
+                let guard = peer_lock.clone().lock_owned().await;
+                let pumped = tokio::time::timeout(tokio::time::Duration::from_millis(50),
+                    pump_page_event_loops(ctx.pages.iter_mut(), &mut peer_idle)).await;
+                (guard, pumped)
+            }, if peers_armed => {
+                match pumped {
+                    Ok(Ok(reached_idle)) => peers_armed = !reached_idle,
+                    Ok(Err(error)) => {
+                        peers_armed = false;
+                        tracing::warn!("peer page task failed during navigation: {error}");
+                    }
+                    Err(_) => {}
+                }
+                service_live_page_render_resources(ctx);
+                sync_live_page_background_events(ctx);
+                dispatch::drain_runtime_events(ctx);
+                dispatch::drain_binding_calls(ctx);
+                dispatch::drain_frame_events(ctx);
+                forward_pending_events(ctx, Some(reply_tx));
+                if let Some(pending) = pending_runtime.as_deref_mut() {
+                    finish_ready_peer_evaluations(ctx, pending, &page_id).await;
+                }
+                drop(peer_guard);
             }
             Some((returned_page, result, was_cancelled)) = nav_done_rx.recv() => {
                 page_back = Some(returned_page);
@@ -2334,6 +2442,21 @@ async fn process_with_interception(
                             let close = (command.method == "Page.close" && same_page)
                                 || (command.method == "Target.closeTarget"
                                     && command.params.get("targetId").and_then(|id| id.as_str()) == Some(page_id.as_str()));
+                            // Chrome: a newer navigation replaces the pending one. Queuing it
+                            // behind a hung document kept F5 waiting for the 30s engine deadline.
+                            let supersede = same_page && matches!(command.method.as_str(),
+                                "Page.navigate" | "Page.reload" | "Page.navigateToHistoryEntry");
+                            // Input aimed at a document being replaced: Chrome delivers it to the old
+                            // document, which the commit discards. Replaying it later clicked the
+                            // new page at stale viewer coordinates.
+                            if same_page && command.method.starts_with("Input.") {
+                                let response = crate::types::CdpResponse::success(command.id, json!({}), command.session_id);
+                                if let Ok(json) = serde_json::to_string(&response) { let _ = msg.reply_tx.send(json); }
+                                continue;
+                            }
+                            if supersede {
+                                if let Some(cancel) = cancel_tx.take() { let _ = cancel.send(()); }
+                            }
                             if stop || close {
                                 if let Some(cancel) = cancel_tx.take() { let _ = cancel.send(()); }
                                 if stop {
@@ -2341,6 +2464,14 @@ async fn process_with_interception(
                                     if let Ok(json) = serde_json::to_string(&response) { let _ = msg.reply_tx.send(json); }
                                     continue;
                                 }
+                            }
+                            // try_lock: never park this loop behind the navigation's
+                            // V8 phase, which may itself wait for a Fetch resolution.
+                            if is_peer_command(&command, ctx, &page_id, deferred) && ctx.v8_lock.try_lock().is_ok() {
+                                process_cdp_message_with_pending(&msg.text, ctx, &msg.reply_tx, pending_runtime.as_deref_mut()).await;
+                                peer_idle.clear();
+                                peers_armed = true;
+                                continue;
                             }
                         }
                         if msg.text.contains("Fetch.continueRequest")
@@ -2395,6 +2526,7 @@ async fn process_with_interception(
     // (it drains `deferred` before pulling the next message off `rx`).
 
     let mut page = page_back.expect("navigation task should return the page");
+    page.set_navigation_preview(None);
     let committed = page.network_events.iter().any(|event| event.resource_type == "Document")
         || page.js.as_ref().is_some_and(|js| previous_url.as_ref().is_some_and(|url| js.document_url() != url.as_str()));
     let uncommitted_failure = navigate_result.is_err() && !committed;
@@ -2408,6 +2540,11 @@ async fn process_with_interception(
     if uncommitted_failure {
         page.url = previous_url;
         page.lifecycle = previous_lifecycle;
+        // location.href previews the target before the request; the document
+        // stayed, so its location must too (Chrome keeps it on a failed load).
+        if let Some(js) = page.js.as_mut() {
+            let _ = js.execute_script("<navigation-failed>", "globalThis.__virtualUrl = null");
+        }
     }
     if navigate_result.is_err() {
         intercepted_paused.retain(|_, paused| !paused.resolver.is_closed());

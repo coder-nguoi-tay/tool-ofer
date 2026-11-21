@@ -9710,7 +9710,7 @@ fn document_base_url_for_javascript_task(state: &ObscuraState) -> Option<String>
 /// styles. `animation_sample` on PreparedRender remains behind intentionally,
 /// making a later paint or computed-style consumer take the exact path above.
 #[cfg(feature = "render")]
-fn ensure_prepared_geometry(state: &mut ObscuraState) -> Option<&obscura_render::PreparedRender> {
+pub(crate) fn ensure_prepared_geometry(state: &mut ObscuraState) -> Option<&obscura_render::PreparedRender> {
     let base_url = document_base_url_for_javascript_task(state);
     let reusable = state.pending_style_mutations.is_empty()
         && !state.animation_timeline.has_pending_start_candidates()

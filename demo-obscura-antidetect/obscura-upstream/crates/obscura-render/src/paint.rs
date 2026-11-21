@@ -4995,7 +4995,10 @@ fn paint_laid_dom_scrolled(
             }
         }
 
-        if box_on_surface && name.local.as_ref() == "canvas" {
+        // An iframe's child document is replaced content too: the host paints
+        // it into the content box, so stacking, clipping and object-fit follow
+        // the frame element exactly like a canvas bitmap.
+        if box_on_surface && matches!(name.local.as_ref(), "canvas" | "iframe") {
             if let Some(surface) = canvas_surfaces.surface(nid) {
                 // A canvas bitmap is replaced content: CSS sizing and
                 // object-fit operate on the content box, never the padding or

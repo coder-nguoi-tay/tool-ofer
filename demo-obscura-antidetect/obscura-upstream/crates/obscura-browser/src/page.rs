@@ -254,6 +254,17 @@ pub enum PendingNavigationOutcome {
 /// A browser page owning its document realms, configuration and context-scoped resources.
 /// @author ductv <ductv@getflycrm.com>
 /// @since 2026-11-19
+/// Viewport raster of a document that is still navigating, painted before
+/// its scripts and subresources finish so a viewer is not left on the
+/// previous page for the whole load.
+/// @author ductv <ductv@getflycrm.com> @since 2026-11-21
+pub struct NavigationPreview {
+    pub viewport: (f32, f32),
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 pub struct Page {
     pub id: String,
     pub frame_id: String,
@@ -283,6 +294,12 @@ pub struct Page {
     pub viewport: (f32, f32),
     browser_identity_override: Option<String>,
     browser_identity_network_pending: bool,
+    /// Connection V8 lock lent by the CDP navigation task. The page releases it
+    /// only while the main document is on the network, so peer tabs keep
+    /// running instead of freezing behind a slow redirect or header.
+    navigation_v8_gate: Option<(std::sync::Arc<tokio::sync::Mutex<()>>, Option<tokio::sync::OwnedMutexGuard<()>>)>,
+    /// Viewer of an in-flight navigation; None when nobody watches this tab.
+    navigation_preview: Option<tokio::sync::mpsc::UnboundedSender<NavigationPreview>>,
     /// Optional CDP physical-screen override. This is separate from the CSS
     /// viewport and survives navigation, matching device-metrics emulation.
     screen_size_override: Option<(f32, f32)>,
@@ -397,6 +414,14 @@ fn subresource_fetch_deadline(now: tokio::time::Instant, deadline: tokio::time::
 
 fn default_navigation_timeout() -> std::time::Duration {
     navigation_timeout_from_env_value(std::env::var("OBSCURA_NAV_TIMEOUT_MS").ok().as_deref())
+}
+
+/// Whether a navigation response is a download rather than a document.
+/// @param headers Lower-cased response headers. @param content_type Response MIME type.
+/// @return True for attachments and octet-stream bodies. @author ductv <ductv@getflycrm.com> @since 2026-11-21
+fn is_download_response(headers: &std::collections::HashMap<String, String>, content_type: &str) -> bool {
+    headers.get("content-disposition").is_some_and(|value| value.trim().to_ascii_lowercase().starts_with("attachment"))
+        || content_type.split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("application/octet-stream")
 }
 
 fn navigation_timeout_from_env_value(value: Option<&str>) -> std::time::Duration {
@@ -1167,6 +1192,8 @@ impl Page {
             viewport: (1280.0, 720.0),
             browser_identity_override: None,
             browser_identity_network_pending: false,
+            navigation_v8_gate: None,
+            navigation_preview: None,
             screen_size_override: None,
             screen_metrics_emulated: false,
             locale_override: None,
@@ -1743,6 +1770,55 @@ impl Page {
         if Arc::ptr_eq(&self.http_client, &self.context.http_client) {
             self.http_client = Arc::new(self.http_client.fork_for_page().await);
             if let Some(js) = &mut self.js { js.set_http_client(self.http_client.clone()); }
+        }
+    }
+
+    /// Route early paints of the next document to a viewer, or stop doing so.
+    /// @param sink Receiver owned by the CDP connection. @return No value.
+    /// @author ductv <ductv@getflycrm.com> @since 2026-11-21
+    pub fn set_navigation_preview(&mut self, sink: Option<tokio::sync::mpsc::UnboundedSender<NavigationPreview>>) {
+        self.navigation_preview = sink;
+    }
+
+    /// Paint the parsed document at its current state for the viewer. Missing
+    /// images simply paint as not-yet-loaded; nothing is fetched for this.
+    /// @return No value; a document that cannot lay out yet is skipped.
+    /// @author ductv <ductv@getflycrm.com> @since 2026-11-21
+    #[cfg(feature = "render")]
+    fn send_navigation_preview(&self) {
+        let Some(sink) = &self.navigation_preview else { return; };
+        let viewport = self.viewport;
+        let region = obscura_js::CaptureRegion::new(0.0, 0.0, viewport.0, viewport.1, 1.0);
+        if let Ok(raster) = self.screenshot_region_raster_with_animation_sample(region, self.live_animation_sample()) {
+            let (width, height) = raster.dimensions();
+            let _ = sink.send(NavigationPreview { viewport, width, height, rgba: raster.into_raw() });
+        }
+    }
+
+    /// Lend the connection's V8 lock (already held) to this navigation.
+    /// @param lock Connection lock. @param guard Guard acquired by the navigation task.
+    /// @return No value. @author ductv <ductv@getflycrm.com> @since 2026-11-21
+    pub fn lend_navigation_v8_lock(&mut self, lock: std::sync::Arc<tokio::sync::Mutex<()>>, guard: tokio::sync::OwnedMutexGuard<()>) {
+        self.navigation_v8_gate = Some((lock, Some(guard)));
+    }
+
+    /// End the loan and hand back the guard, if the page currently holds it.
+    /// @return Guard for the caller to drop. @author ductv <ductv@getflycrm.com> @since 2026-11-21
+    pub fn return_navigation_v8_lock(&mut self) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        self.navigation_v8_gate.take().and_then(|(_, guard)| guard)
+    }
+
+    /// Let peer tabs use V8 while this page waits on pure network I/O.
+    /// @return No value. @author ductv <ductv@getflycrm.com> @since 2026-11-21
+    fn release_navigation_v8(&mut self) {
+        if let Some((_, guard)) = &mut self.navigation_v8_gate { guard.take(); }
+    }
+
+    /// Take the lent lock back before this page touches V8 again.
+    /// @return No value. @author ductv <ductv@getflycrm.com> @since 2026-11-21
+    async fn reacquire_navigation_v8(&mut self) {
+        if let Some((lock, guard @ None)) = &mut self.navigation_v8_gate {
+            *guard = Some(lock.clone().lock_owned().await);
         }
     }
 
@@ -3842,6 +3918,9 @@ impl Page {
         }
 
         self.navigation_timing.record("fetchStart");
+        // Redirects and slow headers are pure network time. Error exits below
+        // return without touching V8, so only the success path re-locks.
+        self.release_navigation_v8();
         let intercepted = self.intercept_navigation(&url, method, body, initiator).await.map_err(|error| {
             self.lifecycle = LifecycleState::Failed; error
         })?;
@@ -3877,6 +3956,30 @@ impl Page {
             self.lifecycle = LifecycleState::Failed;
             PageError::NetworkError(e.to_string())
         })?;
+        self.reacquire_navigation_v8().await;
+        // An HTTP error status with no body at all (a bare 429/403/503 from a
+        // rate limiter or WAF) is not a document. Chrome fails that navigation
+        // with net::ERR_HTTP_RESPONSE_CODE_FAILURE and shows its own error
+        // page, so Page.navigate / page.goto reject. Parsing the empty body
+        // instead commits `<html><head></head><body></body></html>` as a
+        // successful load and the block looks like an empty site. An error
+        // status that carries a body (a real 404 page) still renders.
+        // Checked before any commit state changes: recording this URL kept the
+        // old document under a new URL, so every later cancelled navigation
+        // re-announced the failed URL and interrupted the next page.goto.
+        if response.status >= 400 && response.body.is_empty() {
+            self.lifecycle = LifecycleState::Failed;
+            return Err(PageError::NetworkError(format!(
+                "net::ERR_HTTP_RESPONSE_CODE_FAILURE: HTTP {} with an empty body for {}",
+                response.status, response.url
+            )));
+        }
+        // Chrome hands attachments and opaque binaries to the download manager
+        // and keeps the current document; committing them replaced the page.
+        if is_download_response(&response.headers, response.content_type().unwrap_or("")) {
+            self.lifecycle = LifecycleState::Failed;
+            return Err(PageError::NetworkError(format!("net::ERR_ABORTED: download {}", response.url)));
+        }
         // A provisional request can fail before the body arrives. Its URL and
         // resource cancellation must never be applied to the preceding document.
         self.url = Some(url.clone());
@@ -3904,21 +4007,6 @@ impl Page {
         }
         if !response.redirected_from.is_empty() {
             self.url = Some(response.url.clone());
-        }
-
-        // An HTTP error status with no body at all (a bare 429/403/503 from a
-        // rate limiter or WAF) is not a document. Chrome fails that navigation
-        // with net::ERR_HTTP_RESPONSE_CODE_FAILURE and shows its own error
-        // page, so Page.navigate / page.goto reject. Parsing the empty body
-        // instead commits `<html><head></head><body></body></html>` as a
-        // successful load and the block looks like an empty site. An error
-        // status that carries a body (a real 404 page) still renders.
-        if response.status >= 400 && response.body.is_empty() {
-            self.lifecycle = LifecycleState::Failed;
-            return Err(PageError::NetworkError(format!(
-                "net::ERR_HTTP_RESPONSE_CODE_FAILURE: HTTP {} with an empty body for {}",
-                response.status, response.url
-            )));
         }
 
         // Honor the response charset: HTTP Content-Type → <meta charset> sniff
@@ -4001,6 +4089,10 @@ impl Page {
             let _ = js.execute_script("<iframe-load>",
                 "(function() { var iframes = document.querySelectorAll('iframe[src]'); for (var i = 0; i < iframes.length; i++) { var src = iframes[i].getAttribute('src'); if (src && src !== 'about:blank') iframes[i]._loadIframeSrc(src); } })()");
         }
+        // First paint: parsed and styled, before scripts and the resource
+        // warmups, like a browser rendering what has arrived.
+        #[cfg(feature = "render")]
+        self.send_navigation_preview();
 
         // Scripts can synchronously flush style/layout through
         // getComputedStyle(), geometry, ResizeObserver, or IntersectionObserver.
@@ -4028,6 +4120,8 @@ impl Page {
         // of waitUntil and DCL means "DOM parsed AND scripts executed".
         obscura_net::navigation_trace::stage("scripts");
         self.execute_scripts_with_module_budget(None, Some(deadline)).await;
+        #[cfg(feature = "render")]
+        self.send_navigation_preview();
         // The document's own scripts are the common source of storage writes,
         // so the profile is flushed once they have run, not before.
         self.context.save_local_storage();
@@ -4467,7 +4561,11 @@ impl Page {
             if !self.has_pending_render_resources() {
                 break;
             }
-            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+            // Only network bytes are awaited here; peer tabs may use V8 meanwhile.
+            self.release_navigation_v8();
+            let timed_out = tokio::time::timeout_at(deadline, notified).await.is_err();
+            self.reacquire_navigation_v8().await;
+            if timed_out {
                 loaded += self.drain_render_resource_results();
                 break;
             }
@@ -8458,6 +8556,36 @@ mod tests {
             "https://assets.test/dir/", "https://assets.test/dir/next", "parent", "undefined",
             [["about:srcdoc", "yes", 42]], true, "CSS1Compat"]));
         assert_eq!(page.frame_urls(), vec!["about:srcdoc", "about:srcdoc"]);
+    }
+
+    /// Screen View showed an empty box wherever a page had an iframe: frames
+    /// were painted as empty replaced elements. Child documents (and frames
+    /// nested in them) now paint into the iframe's content box, under any
+    /// parent content stacked above the frame.
+    /// @author ductv <ductv@getflycrm.com> @since 2026-11-21
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn screenshot_composites_iframe_documents_into_their_boxes() {
+        let mut page = import_map_test_page("frame-paint", "https://parent.test",
+            r#"<html><body style="margin:0;background:rgb(255,255,255)"></body></html>"#);
+        page.evaluate_script(r#"(() => {
+            const frame = document.createElement('iframe');
+            frame.style = 'position:absolute;left:10px;top:10px;width:100px;height:60px;border:0';
+            frame.srcdoc = '<body style="margin:0;background:rgb(0,160,0)"><iframe style="position:absolute;left:50px;top:10px;width:40px;height:30px;border:0" srcdoc="<body style=&quot;margin:0;background:rgb(0,0,200)&quot;>"></iframe></body>';
+            document.body.appendChild(frame);
+            const overlay = document.createElement('div');
+            overlay.style = 'position:absolute;left:10px;top:50px;width:20px;height:20px;background:rgb(200,0,0)';
+            document.body.appendChild(overlay);
+            return 1;
+        })()"#).unwrap();
+        pump_srcdoc_frames(&mut page).await;
+        pump_srcdoc_frames(&mut page).await;
+        let png = page.screenshot(page.viewport).expect("screenshot");
+        let pixels = image::load_from_memory(&png).unwrap().into_rgb8();
+        assert_eq!(pixels.get_pixel(20, 20).0, [0, 160, 0], "child document background");
+        assert_eq!(pixels.get_pixel(75, 35).0, [0, 0, 200], "nested frame inside the child");
+        assert_eq!(pixels.get_pixel(15, 60).0, [200, 0, 0], "parent overlay stays above the frame");
+        assert_eq!(pixels.get_pixel(150, 90).0, [255, 255, 255], "outside every frame");
     }
 
     /// A child realm's node ids index its own document. Native ops that
