@@ -23,17 +23,69 @@ import { findFreePort } from '../src/obscura-engine/find-free-port.mjs';
  * Gửi thao tác tay qua route thật bằng request/response trong bộ nhớ.
  * @param {number} slot Slot chứa nguồn giả lập.
  * @param {object} command Nội dung thao tác cần kiểm tra.
+ * @param {object} [connection] Thông tin kết nối của giao diện gửi thao tác.
  * @return {Promise<object>} Trạng thái HTTP và JSON trả về.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
-async function sendManualInput(slot, command) {
+async function sendManualInput(slot, command, connection = {}) {
   const request = Readable.from([JSON.stringify(command)]);
-  Object.assign(request, { method: 'POST', url: '/screen/input/' + slot });
+  Object.assign(request, { method: 'POST', url: '/screen/input/' + slot }, connection);
   const response = { writeHead(code) { this.statusCode = code; }, end(body) { this.body = JSON.parse(body); } };
   await handlePostScreenInput(request, response);
   return response;
 }
+
+test('chèn cột hồ sơ do người dùng chọn đúng ô và đúng bản ghi của tab', {
+  skip: !existsSync(chromium.executablePath()),
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<input id="recipient" aria-label="Recipient identifier">');
+  const field = page.locator('input');
+  const slot = 9986;
+  const screenSourceId = 'record-picker-fixture';
+  const record = { ein: '00-0000000', nickname: "Test O’Neil", floor: 0, empty: '', __internal: 'hidden' };
+  page._assignedRecord = record;
+  const cdpClient = await page.context().newCDPSession(page);
+  screencastSessions.set(slot, { page, cdpClient, screenSourceId });
+  t.after(() => screencastSessions.delete(slot));
+  const local = { headers: { host: 'localhost:3211', origin: 'http://localhost:3211' }, socket: { remoteAddress: '::1', localPort: 3211 } };
+  const proxy = { ...local, headers: { ...local.headers, 'x-forwarded-for': '192.0.2.1' } };
+  const otherOrigin = { ...local, headers: { ...local.headers, origin: 'https://fixture.invalid' } };
+  const lan = { ...local, socket: { ...local.socket, remoteAddress: '192.0.2.2' } };
+  const { x, y, width, height } = await field.boundingBox();
+  const click = { type: 'click', x: x + width / 2, y: y + height / 2, screenSourceId };
+  const remoteInfo = (await sendManualInput(slot, click, proxy)).body.input;
+  assert.ok(remoteInfo.fieldId);
+  assert.equal(remoteInfo.recordFields, undefined);
+  const info = (await sendManualInput(slot, click, local)).body.input;
+  assert.deepEqual(info.recordFields, ['ein', 'nickname', 'floor']);
+  assert.doesNotMatch(JSON.stringify(info), /00-0000000|Test O’Neil|hidden/);
+  const insert = { type: 'insertRecordField', screenSourceId, fieldId: info.fieldId, recordField: 'ein' };
+  for (const connection of [proxy, otherOrigin, lan]) assert.equal((await sendManualInput(slot, insert, connection)).statusCode, 403);
+  assert.equal((await sendManualInput(slot, { ...insert, fieldId: 'stale' }, local)).statusCode, 409);
+  assert.equal((await sendManualInput(slot, { ...insert, recordField: '__internal' }, local)).statusCode, 409);
+  const result = await sendManualInput(slot, insert, local);
+  assert.equal(result.statusCode, 200);
+  assert.doesNotMatch(JSON.stringify(result.body), /00-0000000/);
+  assert.equal((await sendManualInput(slot, insert, local)).statusCode, 409);
+  assert.equal(await field.inputValue(), record.ein);
+  const next = (await sendManualInput(slot, { ...click, type: 'mousedown' }, local)).body.input;
+  await sendManualInput(slot, { ...click, type: 'mouseup' }, local);
+  assert.deepEqual(next.recordFields, info.recordFields);
+  page._assignedRecord = { ...record, ein: 'replacement' };
+  assert.equal((await sendManualInput(slot, { ...insert, fieldId: next.fieldId }, local)).statusCode, 409);
+  assert.equal(await field.inputValue(), record.ein);
+  await field.fill('');
+  await field.evaluate(node => node.addEventListener('input', () => { node.value = 'ID-' + node.value; }, { once: true }));
+  const formatted = (await sendManualInput(slot, click, local)).body.input;
+  const retry = { ...insert, fieldId: formatted.fieldId, recordField: 'nickname' };
+  assert.equal((await sendManualInput(slot, retry, local)).statusCode, 422);
+  assert.equal((await sendManualInput(slot, retry, local)).statusCode, 409);
+  assert.equal(await field.inputValue(), 'ID-' + record.nickname);
+});
 
 test('hồ sơ giữ số nguồn và thiếu dữ liệu tên/ngày sinh không tự tạo giá trị', () => {
   assert.equal(getNormalizedPhone({ phone: '2025550147' }), '2025550147');

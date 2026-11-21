@@ -3,6 +3,7 @@ import { copyHtmlToClipboard } from '../../../autofill/copy-html-to-clipboard.mj
 import { executeFile } from '../../../runtime/constants/execute-file.mjs';
 import { findScreenControlAtPoint, interactWithScreenSelect } from '../../../browser/screen/find-select-at-point.mjs';
 import { sendBoundManualFieldInput, useFocusedManualTextField } from '../../../browser/screen/manual-text-field.mjs';
+import { canPickLocalRecordField, getManualRecordFields } from '../../../browser/screen/manual-record-fields.mjs';
 import { readRequestBody } from '../../actions/read-request-body.mjs';
 import { respondWithJson } from '../../actions/respond-with-json.mjs';
 import { screencastSessions } from '../../../runtime/constants/screencast-sessions.mjs';
@@ -103,6 +104,40 @@ export async function handlePostScreenInput(request, response) {
       }
       // Giữ đúng cặp tab/CDP đã kiểm tra khi người xem khác chuyển nguồn trong lúc await.
       sc = { ...sc };
+      const localRecordPicker = Boolean(body.screenSourceId) && canPickLocalRecordField(request);
+      if (body.type === 'insertRecordField') {
+        if (!localRecordPicker) {
+          respondWithJson(response, 403, { error: 'Chọn cột hồ sơ từ giao diện trên máy chạy app.' });
+          return true;
+        }
+        const pending = pendingControlByPage.get(sc.page);
+        const control = await pending;
+        const opened = control?.recordPicker;
+        const currentStream = screencastSessions.get(slot);
+        if (!opened || !body.fieldId || control.input?.fieldId !== body.fieldId ||
+            pending !== pendingControlByPage.get(sc.page) || currentStream?.page !== sc.page ||
+            currentStream.screenSourceId !== body.screenSourceId || sc.page.isClosed()) {
+          respondWithJson(response, 409, { error: 'Ô nhập đã thay đổi. Hãy mở lại ô.' });
+          return true;
+        }
+        const session = [...activeBrowsers].find(item => !item.isClosed && (item.slot ?? item.tileIndex + 1) === slot);
+        const current = getManualRecordFields(sc.page, session);
+        const value = opened.values.get(body.recordField);
+        if (value === undefined || opened.record !== current.record || value !== current.values.get(body.recordField)) {
+          respondWithJson(response, 409, { error: 'Cột hoặc hồ sơ đã đổi. Hãy mở lại ô.' });
+          return true;
+        }
+        delete control.recordPicker;
+        const accepted = await sendBoundManualFieldInput(control, { type: 'insertText', fieldId: body.fieldId, text: value });
+        if (accepted !== true) {
+          respondWithJson(response, accepted === null ? 409 : 422, {
+            error: accepted === null ? 'Ô nhập đã thay đổi. Hãy mở lại ô.' : 'Form chưa xác nhận giá trị. Kiểm tra nội dung ô trước khi chèn lại.',
+          });
+          return true;
+        }
+        respondWithJson(response, 200, { ok: true });
+        return true;
+      }
       // mouseup phải chờ mousedown trên cùng tab, kể cả khi mở CDP dự phòng chậm.
       let pendingPress;
       if (sc.page && (body.type === 'mousedown' || body.type === 'click')) {
@@ -149,7 +184,7 @@ export async function handlePostScreenInput(request, response) {
           void renderBrowserMousePointer(sc.page, targetX, targetY, body.type === 'mousedown' || body.type === 'click');
         }
         if (pendingPress && (body.button || 'left') === 'left' && !sc.page.isClosed()) {
-          picked = await findScreenControlAtPoint(sc.page, targetX, targetY, body.type === 'click').catch(() => null);
+          picked = await findScreenControlAtPoint(sc.page, targetX, targetY, body.type === 'click' || localRecordPicker).catch(() => null);
           if (picked?.options) {
             if (pendingPress !== pendingControlByPage.get(sc.page)) {
               picked = null;
@@ -191,15 +226,6 @@ export async function handlePostScreenInput(request, response) {
             source: 'manual', x: targetX, y: targetY,
             detail: `Click tay qua Screen View (${body.button || 'left'}) tại (${targetX}, ${targetY})`
           }, sc.page);
-          const input = picked?.input;
-          const fieldFocused = input && await picked.frame.evaluate(useFocusedManualTextField, {
-            fieldId: input.fieldId, probe: true,
-          }).catch(() => false);
-          respondWithJson(response, 200, {
-            ok: true,
-            input: fieldFocused && pendingControlByPage.get(sc.page) === pendingPress ? input : null
-          });
-          return true;
         } else if (body.type === 'mousedown') {
           await cdpClient.send('Input.dispatchMouseEvent', {
             type: 'mousePressed',
@@ -261,6 +287,20 @@ export async function handlePostScreenInput(request, response) {
               return true;
             }
           }
+        }
+        if (body.type === 'click' || body.type === 'mousedown' && localRecordPicker && picked?.input) {
+          const input = picked?.input;
+          const focused = input && await picked.frame.evaluate(useFocusedManualTextField, {
+            fieldId: input.fieldId, probe: true,
+          }).catch(() => false);
+          const activeInput = focused && pendingControlByPage.get(sc.page) === pendingPress ? input : null;
+          if (activeInput && localRecordPicker) {
+            const session = [...activeBrowsers].find(item => !item.isClosed && (item.slot ?? item.tileIndex + 1) === slot);
+            picked.recordPicker = getManualRecordFields(sc.page, session);
+            activeInput.recordFields = [...picked.recordPicker.values.keys()];
+          }
+          respondWithJson(response, 200, { ok: true, input: activeInput });
+          return true;
         }
       } else if (body.type === 'reload') {
         if (sc.page && !sc.page.isClosed()) {

@@ -67,6 +67,7 @@ function _startScreenStream(slot) {
         if (es !== _screenEventSource) return;
         sourceVersion++;
         delete canvas.dataset.screenSourceId;
+        _closeSelectPicker();
         _pendingFrameData = null;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         canvas.inert = true;
@@ -294,19 +295,77 @@ function _startScreenStream(slot) {
         document.body.appendChild(pasteCatcher);
       }
       let latestMouseDown = 0;
+      /**
+       * Chuyển lần nhấn đến đúng tab và hiện lựa chọn điền tay cho ô vừa bấm.
+       * @param {MouseEvent} e Sự kiện trên khung hình hiện tại.
+       * @return {Promise<void>} Cập nhật công cụ nhập sau khi backend xác định đích.
+       * @author ductv <ductv@getflycrm.com>
+       * @since 2026-11-20
+       */
       canvas.onmousedown = async (e) => {
         const source = canvas.dataset.screenSourceId;
         pressedSourceId = source;
         if (!source) return;
         const clickNumber = ++latestMouseDown;
         const tabIndex = _screenActiveTabIndex;
+        const version = sourceVersion;
         _closeSelectPicker();
         const result = await api(`/screen/input/${slot}`, {
           method: 'POST', body: JSON.stringify({ ..._buildMouseEvent('mousedown', e, canvas), screenSourceId: source })
         });
-        if (clickNumber !== latestMouseDown || es !== _screenEventSource || tabIndex !== _screenActiveTabIndex || source !== canvas.dataset.screenSourceId) return;
+        /**
+         * Kiểm tra người dùng còn xem đúng lần bấm, tab và nguồn ảnh ban đầu.
+         * @return {boolean} True khi có thể tiếp tục dùng thông tin ô vừa bấm.
+         * @author ductv <ductv@getflycrm.com>
+         * @since 2026-11-20
+         */
+        const isCurrentPress = () => clickNumber === latestMouseDown && es === _screenEventSource
+          && tabIndex === _screenActiveTabIndex && source === canvas.dataset.screenSourceId && version === sourceVersion;
+        if (!isCurrentPress()) return;
         if (result?.select) _openSelectPicker(slot, result.select, e.clientX, e.clientY);
-        else if (result?.error) showToast(result.error, 'error');
+        else if (result?.input?.fieldId && result.input.recordFields?.length) {
+          const picker = document.createElement('span');
+          picker.id = 'screenRecordPicker';
+          const columns = document.createElement('select');
+          columns.setAttribute('aria-label', 'Cột hồ sơ');
+          columns.add(new Option('Chọn cột hồ sơ…', ''));
+          for (const key of result.input.recordFields) columns.add(new Option(key, key));
+          const insert = document.createElement('button');
+          insert.type = 'button';
+          insert.className = 'screen-tool-btn';
+          insert.textContent = 'Chèn';
+          insert.disabled = true;
+          /**
+           * Mở nút chèn sau khi người dùng chọn một cột có dữ liệu.
+           * @return {void} Cập nhật trạng thái nút trên thanh địa chỉ.
+           * @author ductv <ductv@getflycrm.com>
+           * @since 2026-11-20
+           */
+          columns.onchange = () => { insert.disabled = !columns.value; };
+          /**
+           * Gửi khóa cột người dùng chọn tới đúng ô của lượt nhấn và khóa lượt gửi trùng.
+           * @return {Promise<void>} Đóng công cụ sau khi chèn hoặc hiện lỗi từ form.
+           * @author ductv <ductv@getflycrm.com>
+           * @since 2026-11-20
+           */
+          insert.onclick = async () => {
+            if (!picker.isConnected || !isCurrentPress() || _screenActiveSlot !== slot) { picker.remove(); return; }
+            if (!columns.value || columns.disabled) return;
+            columns.disabled = insert.disabled = true;
+            const applied = await api(`/screen/input/${slot}`, {
+              method: 'POST', body: JSON.stringify({ type: 'insertRecordField', recordField: columns.value,
+                fieldId: result.input.fieldId, screenSourceId: source })
+            });
+            if (!picker.isConnected || !isCurrentPress() || _screenActiveSlot !== slot) return;
+            if (applied?.ok) picker.remove();
+            else {
+              columns.disabled = insert.disabled = false;
+              showToast(applied?.error || 'Chưa chèn được dữ liệu hồ sơ.', 'error');
+            }
+          };
+          picker.append(columns, insert);
+          document.querySelector('.screen-address-bar')?.appendChild(picker);
+        } else if (result?.error) showToast(result.error, 'error');
       };
       canvas.onmouseup = (e) => {
         if (_mouseMoveTimer) { clearTimeout(_mouseMoveTimer); _mouseMoveTimer = null; }
@@ -326,6 +385,7 @@ function _startScreenStream(slot) {
        * @since 2026-11-20
        */
       canvas.onkeydown = (e) => {
+        if (e.key === 'Tab') document.getElementById('screenRecordPicker')?.remove();
         // Phím tắt hệ thống: Cmd/Ctrl + A/X/C/V → gửi shortcut để trình duyệt thực hiện copy/cut/paste/select-all
         // tự nhiên thay vì gửi phím thường (tránh double-action hoặc bị preventDefault làm mất paste).
         const isMac = navigator.platform === 'MacIntel';

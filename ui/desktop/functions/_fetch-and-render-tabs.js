@@ -19,6 +19,7 @@ async function _fetchAndRenderTabs(slot) {
 
         // Cập nhật ô địa chỉ URL
         const activeTab = tabs?.find(tab => tab.active);
+        if (_screenActiveTabIndex !== (activeTab?.index ?? -1)) document.getElementById('screenRecordPicker')?.remove();
         _screenActiveTabIndex = activeTab?.index ?? -1;
         const urlInput = document.getElementById('screenUrlInput');
         if (urlInput && activeTab && document.activeElement !== urlInput) {

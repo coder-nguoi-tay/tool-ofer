@@ -193,6 +193,13 @@
         <input id="modalTextInput" class="input-text" type="text" placeholder="Nhập văn bản cần gõ..." autocomplete="off">
         <button id="btnModalSendText" class="btn btn-primary" style="padding:8px 14px; font-weight:700;" onclick="submitModalText()">Gửi ➔</button>
       </div>
+      <div id="modalRecordPicker" hidden>
+        <div style="display:flex; gap:6px;">
+          <select id="modalRecordField" class="input-select" aria-label="Cột hồ sơ" style="flex:1; min-width:0;"
+            onchange="document.getElementById('btnModalInsertRecord').disabled = !this.value"></select>
+          <button id="btnModalInsertRecord" type="button" class="btn" disabled onclick="submitModalText(true)">Chèn từ hồ sơ</button>
+        </div>
+      </div>
       <div id="modalTextActions" style="display:flex; gap:6px; overflow-x:auto;">
         <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="pressModalKey('Enter')">⏎ Enter</button>
         <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="pressModalKey('Tab')">⇥ Tab</button>

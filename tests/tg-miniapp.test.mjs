@@ -283,6 +283,86 @@ test('Mini giữ bản nháp khi đổi ô cùng tab và chỉ xử lý phản h
   });
 });
 
+test('Mini chỉ tạo nút điền nhanh cho giá trị hiện có và chèn nguyên văn khi người dùng chọn', {
+  skip: !existsSync(chromium.executablePath()),
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<div id="autofillChipsContainer"></div>');
+  await page.addScriptTag({ content: `
+    const currentSlot = 2;
+    const activeSessions = [{slot: 2, autofillRecord: 37, assignedEmail: 'demo@example.invalid', assignedPass: '******'}];
+    const inserted = [];
+    const injectAutofillText = text => inserted.push(text);
+  ` });
+  await page.addScriptTag({ path: join(projectDirectory, 'ui/mini/functions/update-smart-autofill-chips.js') });
+  await page.evaluate(() => updateSmartAutofillChips());
+  assert.equal(await page.locator('.autofill-chip').count(), 1);
+  await page.locator('.chip-email').click();
+  await page.evaluate(() => {
+    activeSessions[0].autofillRecord = { lastname: "O'Neil <b>" };
+    activeSessions[0].assignedPass = "fixture'private";
+    updateSmartAutofillChips();
+  });
+  assert.deepEqual(await page.evaluate(() => inserted), ['demo@example.invalid']);
+  assert.equal(await page.locator('.chip-name b').count(), 0);
+  assert.doesNotMatch(await page.locator('#autofillChipsContainer').innerHTML(), /fixture|onclick=/);
+  await page.locator('.chip-name').click();
+  await page.locator('.chip-pass').click();
+  assert.deepEqual(await page.evaluate(() => inserted), ['demo@example.invalid', "O'Neil <b>", "fixture'private"]);
+});
+
+test('Mini chèn cột hồ sơ theo lựa chọn của người dùng vào đúng ô đang xem', {
+  skip: !existsSync(chromium.executablePath()),
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const html = readFileSync(join(projectDirectory, 'ui/mini/index.html'), 'utf8');
+  await page.evaluate(markup => {
+    const source = document.createElement('template');
+    source.innerHTML = markup;
+    document.body.append(source.content.querySelector('#typeModal'));
+  }, html);
+  await page.addScriptTag({ content: `
+    const canvas = { dataset: { screenSourceId: 'source-A' } };
+    const sent = [];
+    const showToast = () => {};
+    const sendInput = body => new Promise(resolve => sent.push({ body, resolve }));
+  ` });
+  for (const file of ['window-open-type-modal-modal', 'window-close-type-modal-modal', 'window-submit-modal-text-input']) {
+    await page.addScriptTag({ path: join(projectDirectory, 'ui/mini/setup', file + '.js') });
+  }
+  const picker = page.getByRole('combobox', { name: 'Cột hồ sơ' });
+  const insert = page.getByRole('button', { name: 'Chèn từ hồ sơ' });
+  const key = "Trường 'mẫu' <b>";
+  await page.evaluate(column => openTypeModal({ fieldId: 'field-A', recordFields: [column] }), key);
+  assert.equal(await picker.isVisible(), true);
+  assert.equal(await picker.inputValue(), '');
+  await picker.selectOption(key);
+  assert.deepEqual(await page.evaluate(() => sent), []);
+  await page.evaluate(() => { canvas.dataset.screenSourceId = 'source-B'; });
+  await insert.click();
+  assert.deepEqual(await page.evaluate(() => sent), []);
+  await page.evaluate(() => { canvas.dataset.screenSourceId = 'source-A'; });
+  await insert.click();
+  assert.equal(await insert.isDisabled(), true);
+  assert.equal(await picker.isDisabled(), true);
+  await page.evaluate(() => { document.getElementById('btnModalInsertRecord').click(); });
+  assert.deepEqual(await page.evaluate(() => sent.map(request => request.body)), [
+    { type: 'insertRecordField', recordField: key, screenSourceId: 'source-A', fieldId: 'field-A' },
+  ]);
+  await page.evaluate(() => sent[0].resolve({ ok: false }));
+  assert.equal(await picker.inputValue(), key);
+  await insert.click();
+  await page.evaluate(() => sent[1].resolve({ ok: true }));
+  assert.equal(await picker.isVisible(), false);
+  await page.evaluate(() => openTypeModal({ fieldId: 'field-B' }));
+  assert.equal(await picker.isVisible(), false);
+  assert.equal(await page.locator('#modalRecordField option').count(), 0);
+});
+
 test('Mini xác nhận đủ nội dung sau khi form xử lý input và giữ vị trí chỉnh sửa do trình duyệt đặt', {
   skip: !existsSync(chromium.executablePath()),
 }, async t => {

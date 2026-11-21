@@ -5,6 +5,58 @@ import test from 'node:test';
 import { chromium } from 'playwright';
 import { Readable } from 'node:stream';
 
+test('Desktop chèn cột hồ sơ sau khi người dùng chọn cột và bấm Chèn trên đúng nguồn', {
+  skip: !existsSync(chromium.executablePath())
+}, async t => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<div id="screenTabBar"></div><div class="screen-address-bar"></div><canvas id="screenCanvas"></canvas>');
+  await page.evaluate(() => Object.assign(window, {
+    _screenActiveSlot: 2, _screenEventSource: null, _screenReconnectTimer: null, _screenFpsTimer: null,
+    _screenTabPollTimer: null, _mouseMoveTimer: null, _wheelTimer: null, _screenFpsCounter: 0,
+    EventSource: class extends EventTarget { close() {} }, _fetchAndRenderTabs() {}, _buildMouseEvent: type => ({ type }),
+    notices: [], requests: [], showToast: message => notices.push(message),
+    api: (url, { body }) => new Promise(resolve => requests.push({ url, body: JSON.parse(body), resolve })),
+  }));
+  for (const file of ['_close-select-picker', '_stop-screen-stream', '_start-screen-stream']) {
+    await page.addScriptTag({ path: fileURLToPath(new URL('../ui/desktop/functions/' + file + '.js', import.meta.url)) });
+  }
+  await page.evaluate(() => {
+    _startScreenStream(2);
+    screenCanvas.dataset.screenSourceId = 'screen-A';
+    window.fixtureInput = { input: { fieldId: 'field-B', recordFields: ['givenName', "member's code"] } };
+  });
+  const canvas = page.locator('canvas');
+  const choices = page.getByRole('combobox', { name: 'Cột hồ sơ' });
+  const insert = page.getByRole('button', { name: 'Chèn', exact: true });
+  await canvas.dispatchEvent('mousedown');
+  await canvas.dispatchEvent('mousedown');
+  await page.evaluate(() => {
+    requests[1].resolve(fixtureInput);
+    requests[0].resolve({ input: { fieldId: 'field-A', recordFields: ['old'] } });
+  });
+  await choices.waitFor({ timeout: 1500 });
+  assert.equal(await choices.locator('option[value="old"]').count(), 0);
+  assert.equal(await insert.isDisabled(), true);
+  await choices.selectOption("member's code");
+  assert.equal(await page.evaluate(() => requests.length), 2);
+  await insert.evaluate(button => { button.click(); button.click(); });
+  const sent = await page.evaluate(() => requests.map(({ url, body }) => ({ url, body })));
+  assert.equal(sent.length, 3);
+  assert.deepEqual(sent[2], { url: '/screen/input/2', body: {
+    type: 'insertRecordField', recordField: "member's code", fieldId: 'field-B', screenSourceId: 'screen-A'
+  } });
+  await page.evaluate(() => requests[2].resolve({ ok: true }));
+  await choices.waitFor({ state: 'hidden' });
+  await canvas.dispatchEvent('mousedown');
+  await page.evaluate(() => requests[3].resolve(fixtureInput));
+  await choices.selectOption('givenName');
+  await page.evaluate(() => _screenEventSource.dispatchEvent(new Event('screen-source')));
+  assert.equal(await choices.isVisible(), false);
+  assert.equal(await page.evaluate(() => requests.length), 4);
+});
+
 test('Screen View chỉ tiếp tục đúng tab và lượt CAPTCHA đã được người dùng xác minh', async t => {
   const { createLeadTestSession } = await import('./helpers/lead-session-fixture.mjs');
   const { activeBrowsers } = await import('../src/browser/sessions.mjs');

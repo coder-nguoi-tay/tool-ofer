@@ -183,3 +183,15 @@
   color: #ffffff !important;
 }
 
+#screenRecordPicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 45%;
+}
+
+#screenRecordPicker select {
+  min-width: 0;
+  max-width: 13rem;
+}
+
