@@ -78,6 +78,17 @@ test('hồ sơ giữ số nguồn và thiếu dữ liệu tên/ngày sinh không
   assert.equal(isSwappedContactValue('firstname', 'Tran', { fullname: 'An Tran' }, false), false);
 });
 
+test('phân biệt EIN với SSN dù hồ sơ cấp cả hai cột định danh', () => {
+  const record = { ein: '00-0000000', ssn: '000-00-0000' };
+  const mixed = { name: 'ein', id: 'ssn', type: 'text', names: ['ein', 'ssn'] };
+  assert.equal(matchFieldValue(['ssn', 'ein'], record, { ...mixed, names: ['ssn', 'ein'] }), null);
+  assert.equal(resolveProvidedFieldValue(mixed, record), null);
+  for (const key of ['ssn', 'ein']) {
+    const metadata = { name: key, label: key.toUpperCase(), names: [key], type: 'text' };
+    assert.equal(matchFieldValue(metadata.names, record, metadata), record[key]);
+  }
+});
+
 test('đánh dấu ô hợp lệ tôn trọng pattern, giới hạn ngày và lỗi do trang khai báo', {
   skip: !existsSync(chromium.executablePath()),
 }, async t => {

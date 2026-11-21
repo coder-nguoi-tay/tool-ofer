@@ -1,6 +1,7 @@
 import { getRecordNameKind, resolveRecordName } from './record-values/resolve-record-name.mjs';
 import { validateSsnMatch } from './record-values/restrict-profile-field.mjs';
 import { resolveRecordPhone } from './record-values/resolve-record-phone.mjs';
+import { recordForAddressField } from './record-values/record-for-address-field.mjs';
 import { resolveContactField } from './resolve-contact-field.mjs';
 import { formatMatchedValue } from './format-matched-value.mjs';
 import { getAddressString } from './get-address-string.mjs';
@@ -15,7 +16,7 @@ import { semanticCategories } from './state/semantic-categories.mjs';
  * Tìm giá trị phù hợp trong record cho danh sách tên/nhãn của ô input.
  *
  * @param {string[]} candidateNames Danh sách tên, id, nhãn, placeholder, autocomplete của ô.
- * @param {Record<string, string>} record Bản ghi dữ liệu đã chuẩn hóa tên trường.
+ * @param {Record<string, string>} record Bản ghi đã chuẩn hóa, có thể khai riêng từng bí danh địa chỉ.
  * @param {object} metadata Nhãn, placeholder, ariaLabel và cấu trúc của ô input.
  * @return {string|null} Giá trị cần điền hoặc null nếu không khớp.
  * @throws {never} Nhãn địa chỉ không có dữ liệu phù hợp trả về null, không mượn phone.
@@ -25,6 +26,8 @@ import { semanticCategories } from './state/semantic-categories.mjs';
 function matchFieldValue(candidateNames, record, metadata = { names: candidateNames }) {
   const contact = resolveContactField(metadata, candidateNames);
   if (contact === 'conflict') return null;
+  record = recordForAddressField(contact, record, metadata, candidateNames);
+  if (!record) return null;
   if (contact.startsWith('ssn')) {
     const matched = matchIdentifiedValue(candidateNames, record, metadata);
     return validateSsnMatch(contact, matched, record, metadata.maxLength);

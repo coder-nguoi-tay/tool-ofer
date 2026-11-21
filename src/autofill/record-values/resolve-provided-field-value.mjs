@@ -5,11 +5,12 @@ import { getRecordNameKind, resolveRecordName } from './resolve-record-name.mjs'
 import { resolveRecordPhone } from './resolve-record-phone.mjs';
 import { matchFieldValue } from '../match-field-value.mjs';
 import { resolveRecordCity } from './resolve-record-city.mjs';
+import { recordForAddressField } from './record-for-address-field.mjs';
 
 /**
  * Giải giá trị repair từ record/alias và quy tắc đã có; không tạo email, tên, địa chỉ hay giá trị field lạ.
  * @param {object} metadata Nhãn, tên, id, type của field thật trong DOM.
- * @param {object} record Dữ liệu được cung cấp cho phiên.
+ * @param {object} record Dữ liệu được cung cấp cho phiên, kể cả các cột địa chỉ khai riêng.
  * @param {object} session Email đã được gán cho phiên.
  * @return {string|null} Giá trị có nguồn dữ liệu, hoặc null để giữ field chưa hoàn tất.
  * @throws {never} Giá trị thiếu hoặc không phù hợp với ô được trả về null.
@@ -19,6 +20,8 @@ import { resolveRecordCity } from './resolve-record-city.mjs';
 export function resolveProvidedFieldValue(metadata, record = {}, session = {}) {
   const contact = resolveContactField(metadata);
   if (contact === 'conflict' || contact.startsWith('ssn')) return null;
+  record = recordForAddressField(contact, record, metadata);
+  if (!record) return null;
   if (contact === 'address2') return record.address2 || record.apt || record.suite || null;
   if (/^phone/.test(contact)) return resolveRecordPhone(record, contact, metadata);
   const names = contact ? [contact] : [...(metadata.names || []), metadata.name, metadata.id, metadata.placeholder, metadata.label, metadata.type].filter(Boolean);

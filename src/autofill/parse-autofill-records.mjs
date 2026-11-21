@@ -12,21 +12,29 @@ import { normalizeFieldName } from './normalize-field-name.mjs';
  *
  * @param {string} source Nội dung người dùng dán vào ô dữ liệu.
  * @return {object[]} Các bản ghi có tên cột chuẩn hóa, giữ giá trị đã cung cấp và bổ sung bí danh còn thiếu.
- * @throws {Error} Khi cấu trúc không hợp lệ hoặc một bản ghi có nhiều cột trùng tên sau chuẩn hóa.
+ * @throws {Error} Khi cấu trúc, tên cột hoặc độ chính xác của giá trị số JSON không hợp lệ.
  * @author ductv <ductv@getflycrm.com>
  * @since 2026-11-20
  */
 function parseAutofillRecords(source) {
-  const content = String(source ?? '').trim();
+  const rawContent = String(source ?? '');
+  const content = rawContent.trim();
   if (!content) return [];
   let records;
   let delimitedHeaders;
+  let jsonMemberCount;
   const trimmedJson = content.replace(/,\s*$/, '').trim();
-  const firstDataLine = content.match(/^(?![ \t]*#)[^\r\n]+/m)?.[0] || '';
+  const isJson = trimmedJson.startsWith('[') || trimmedJson.startsWith('{');
+  const firstDataLine = isJson ? '' : content.match(/^(?![ \t]*#)[^\r\n]+/m)?.[0] || '';
   const delimiter = firstDataLine.replace(/"(?:[^"]|"")*"/g, '').match(/[,|\t]/)?.[0];
-  if (trimmedJson.startsWith('[') || trimmedJson.startsWith('{')) {
+  if (isJson) {
     const tryCleanJson = str => {
-      const cleaned = str.replace(/"(?:\\.|[^"\\])*"|,\s*([}\]])/g, (token, closing) => closing || token).replace(/,\s*$/, '');
+      // JSON.parse gộp các khóa trùng nhau trước khi trả về bản ghi.
+      jsonMemberCount = 0;
+      const cleaned = str.replace(/"(?:\\.|[^"\\])*"(\s*:)?|,\s*([}\]])/g, (token, member, closing) => {
+        if (member) jsonMemberCount++;
+        return closing || token;
+      }).replace(/,\s*$/, '');
       return JSON.parse(cleaned);
     };
     try {
@@ -60,7 +68,7 @@ function parseAutofillRecords(source) {
     throw new Error('Hãy dùng CSV hoặc JSON; bảng phân tách bằng tab chưa được hỗ trợ.');
   } else if (delimiter === '|') {
     // 3. Hỗ trợ định dạng phân tách bằng dấu gạch đứng (|) tương tự file Config/Info/info.txt của tool PC
-    const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    const lines = rawContent.split(/\r?\n/).filter(line => line.trim() && !line.trimStart().startsWith('#'));
     if (!lines.length) throw new Error('Dữ liệu dạng pipe (|) không có dòng dữ liệu hợp lệ.');
     const firstCells = lines[0].split('|').map(c => c.trim().replace(/^\uFEFF/, ''));
     const isFirstLineData = firstCells.some(c => c.includes('@')) || /^(male|female|mr|ms|mrs)$/i.test(firstCells[2] || firstCells[3] || '') || /^\d{4}$/.test(firstCells[6] || '');
@@ -78,7 +86,7 @@ function parseAutofillRecords(source) {
     }
     if (!dataLines.length) throw new Error('Dữ liệu tự điền cần ít nhất một bản ghi.');
     records = dataLines.map(line => {
-      const cells = line.split('|').map(c => c.trim());
+      const cells = line.split('|');
       if (cells.length > delimitedHeaders.length) throw new Error('Dòng dữ liệu dạng pipe có nhiều ô hơn số cột.');
       return cells;
     });
@@ -87,10 +95,12 @@ function parseAutofillRecords(source) {
     let row = [];
     let value = '';
     let quoted = false;
-    for (let index = 0; index < content.length; index += 1) {
-      const character = content[index];
+    let rowHasQuotedField = false;
+    for (let index = 0; index < rawContent.length; index += 1) {
+      const character = rawContent[index];
       if (character === '"') {
-        if (quoted && content[index + 1] === '"') {
+        rowHasQuotedField = true;
+        if (quoted && rawContent[index + 1] === '"') {
           value += '"';
           index += 1;
         } else {
@@ -101,17 +111,18 @@ function parseAutofillRecords(source) {
         value = '';
       } else if ((character === '\n' || character === '\r') && !quoted) {
         row.push(value);
-        if (row.some(cell => cell.trim())) rows.push(row);
+        if (rowHasQuotedField || row.some(cell => cell.trim())) rows.push(row);
         row = [];
         value = '';
-        if (character === '\r' && content[index + 1] === '\n') index += 1;
+        rowHasQuotedField = false;
+        if (character === '\r' && rawContent[index + 1] === '\n') index += 1;
       } else {
         value += character;
       }
     }
     if (quoted) throw new Error('CSV có dấu nháy kép chưa đóng.');
     row.push(value);
-    if (row.some(cell => cell.trim())) rows.push(row);
+    if (rowHasQuotedField || row.some(cell => cell.trim())) rows.push(row);
     delimitedHeaders = rows.shift()?.map(header => header.trim().replace(/^\uFEFF/, ''));
     if (!delimitedHeaders?.length || !rows.length) throw new Error('CSV cần hàng tiêu đề và ít nhất một bản ghi.');
     if (rows.some(cells => cells.length !== delimitedHeaders.length)) throw new Error('CSV có dòng không cùng số cột với tiêu đề.');
@@ -121,11 +132,13 @@ function parseAutofillRecords(source) {
     throw new Error('Dữ liệu tự điền cần ít nhất một bản ghi.');
   }
   const allHeaders = new Set();
+  let suppliedMemberCount = 0;
   const suppliedRecords = records.map(record => {
     if (!delimitedHeaders && (!record || Array.isArray(record) || typeof record !== 'object')) {
       throw new Error('Mỗi bản ghi phải là một đối tượng dữ liệu.');
     }
     const entries = delimitedHeaders ? delimitedHeaders.map((header, index) => [header, record[index] ?? '']) : Object.entries(record);
+    suppliedMemberCount += entries.length;
     const supplied = Object.fromEntries(entries.map(([header, value]) => {
       const key = normalizeFieldName(header);
       if (!key) throw new Error('Tên cột tự điền không hợp lệ.');
@@ -136,11 +149,16 @@ function parseAutofillRecords(source) {
       if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) {
         throw new Error('Giá trị tự điền phải là chữ, số hoặc true/false.');
       }
-      return [key, String(value ?? '').trim()];
+      if (typeof value === 'number' && (!Number.isFinite(value) || Number.isInteger(value) && !Number.isSafeInteger(value))) {
+        throw new Error('Giá trị số JSON vượt phạm vi chính xác. Hãy nhập số đó dưới dạng chuỗi trong dấu nháy kép.');
+      }
+      const text = String(value ?? '');
+      return [key, key === 'password' || key === 'pass' ? text : text.trim()];
     }));
     if (Object.keys(supplied).length !== entries.length) throw new Error('Tên cột tự điền bị trùng sau chuẩn hóa.');
     return supplied;
   });
+  if (isJson && suppliedMemberCount !== jsonMemberCount) throw new Error('Tên cột JSON bị trùng trong cùng bản ghi.');
   if (!allHeaders.size) throw new Error('Dữ liệu tự điền cần ít nhất một tên cột hợp lệ.');
   const emptyRecord = Object.fromEntries(Array.from(allHeaders, key => [key, '']));
   return suppliedRecords.map(supplied => {

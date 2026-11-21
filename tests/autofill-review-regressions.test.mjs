@@ -10,8 +10,32 @@ import { takeNextRecord } from '../src/records/actions/take-next-record.mjs';
 import { autofillQueue } from '../src/runtime/constants/autofill-queue.mjs';
 import { activeBrowsers } from '../src/browser/sessions.mjs';
 import { clickYesNoContinue } from '../src/autofill/yes-no/click-continue.mjs';
+import { matchFieldValue } from '../src/autofill/match-field-value.mjs';
+import { resolveProvidedFieldValue } from '../src/autofill/record-values/resolve-provided-field-value.mjs';
+import { parseAutofillRecords } from '../src/autofill/parse-autofill-records.mjs';
 
 const browserAvailable = existsSync(chromium.executablePath());
+
+test('điền và sửa đúng cột địa chỉ được khai riêng với nhãn, tên hoặc id của ô', () => {
+  const [record] = parseAutofillRecords('city,town,zip,postalcode,address,street\nOak City,Birch Town,01234,09876-1111,1 Oak St,2 Birch St');
+  for (const [attributes, filled, repaired = filled] of [
+    [{ ariaLabelledByText: 'Town', label: 'City', name: 'city' }, 'Birch Town'],
+    [{ name: 'town' }, 'Birch Town'],
+    [{ id: 'postalcode', maxLength: 5 }, '09876', '09876-1111'],
+    [{ label: 'Street', name: 'address' }, '2 Birch St'],
+    [{ label: 'City', name: 'town' }, 'Oak City'],
+    [{ name: 'town', id: 'city' }, null],
+    [{ name: 'postalcode', id: 'zip' }, null],
+    [{ name: 'street', id: 'address' }, null],
+    [{ names: ['town', 'postalcode'] }, null],
+  ]) {
+    const metadata = { type: 'text', ...attributes };
+    metadata.names ??= [metadata.name, metadata.id, metadata.ariaLabelledByText, metadata.label].filter(Boolean);
+    assert.equal(matchFieldValue(metadata.names, record, metadata), filled);
+    assert.equal(resolveProvidedFieldValue(metadata, record), repaired);
+  }
+});
+
 /**
  * Tạo trang thử offline cho kiểm tra chọn dropdown.
  * @param {object} t Ngữ cảnh test và cleanup.

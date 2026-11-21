@@ -10,7 +10,7 @@ const otherPerson = /emergencycontact|nextofkin|child|dependent|spouse|guardian|
 const personalDetail = /name|phone|email|address|birth|dob|ssn|socialsecurity|hoten|ngaysinh|dienthoai|diachi/;
 
 /**
- * Chặn lấy dữ liệu hồ sơ cho mã xác minh, người khác hoặc ô định danh mơ hồ.
+ * Nhận diện phần SSN được yêu cầu và phát hiện bằng chứng trỏ sang định danh doanh nghiệp, người khác hoặc mã xác minh.
  * @param {object} metadata Nhãn của đúng control và các định danh trong DOM.
  * @param {string[]} candidates Tên bổ sung do bộ đối sánh hiện tại cung cấp.
  * @return {string} conflict, loại ô SSN có thể kiểm chứng, hoặc rỗng cho trường thông thường.
@@ -33,7 +33,7 @@ export function restrictProfileField(metadata, candidates = metadata.names || []
   if (/\p{L}/u.test(metadata.placeholder || '') && ssnFieldKinds.get(normalizeFieldName(metadata.placeholder)) !== kind) return 'conflict';
   if (metadata.type && !['text', 'number', 'tel'].includes(metadata.type)) return 'conflict';
   if (metadata.autocomplete && !/^(?:on|off)$/i.test(metadata.autocomplete)) return 'conflict';
-  if (hints.some(hint => /(?:card|account|phone|bank|email)/.test(hint))) return 'conflict';
+  if (hints.some(hint => /(?:card|account|phone|bank|email|employeridentification|businesstaxid)|^(?:f?ein)(?:number)?$/.test(hint))) return 'conflict';
   if (kind !== 'ssn3' && hints.some(hint => /last(?:4|four)/.test(hint))) return 'conflict';
   return kind;
 }

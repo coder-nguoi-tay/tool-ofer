@@ -407,7 +407,7 @@ for (const [column, value] of Object.entries(importedColumns)) {
 assert.equal(independentColumns.cvv, 'test-a');
 const differentHeaderSpellings = parseAutofillRecords('[{" My Code ":"a"},{"my-code":"b","label":0}]');
 assert.deepEqual(differentHeaderSpellings.map(row => [row.mycode, row.label]), [['a', ''], ['b', '0']]);
-for (const duplicateColumns of ['[{"Code":"a"," Code ":"b"}]', 'Code,Code\na,b', 'Code|Code\na|b']) {
+for (const duplicateColumns of ['[{"Code":"a"," Code ":"b"}]', '{"code":"a","code":"b"}', 'Code,Code\na,b', 'Code|Code\na|b']) {
   assert.throws(() => parseAutofillRecords(duplicateColumns), /trùng/);
 }
 const [independentCsv] = parseAutofillRecords('city,town,zip,postalcode\nCity A,Town B,01234,04567');
@@ -415,6 +415,18 @@ assert.equal(independentCsv.town, 'Town B');
 assert.equal(independentCsv.postalcode, '04567');
 assert.equal(parseAutofillRecords('name,note\nFixture,"A | B"')[0].note, 'A | B');
 assert.equal(parseAutofillRecords('{\n\t"note": "mốc ,} và ,]"\n}')[0].note, 'mốc ,} và ,]');
+assert.throws(() => parseAutofillRecords('{"reference":1234567890123456789}'), /chuỗi/);
+assert.equal(parseAutofillRecords('{"reference":"001234567890123456789"}')[0].reference, '001234567890123456789');
+assert.equal(parseAutofillRecords('{"reference":9007199254740991}')[0].reference, '9007199254740991');
+for (const content of [
+  '{"password":"  mẫu  ","pass":"  khác  ","nickname":"  Tên  "}',
+  'password,pass,nickname\n"  mẫu  ","  khác  ","  Tên  "',
+  'nickname|password|pass\n  Tên  |  mẫu  |  khác  ',
+]) {
+  const [supplied] = parseAutofillRecords(content);
+  assert.deepEqual([supplied.password, supplied.pass, supplied.nickname], ['  mẫu  ', '  khác  ', 'Tên']);
+}
+assert.equal(parseAutofillRecords('password\n"  "')[0].password, '  ');
 
 // Test parseAutofillRecords: hỗ trợ đầy đủ các trường SSN, Email, Banking và tự phục hồi JSON cắt cụt
 const sampleLeadJson = `[
