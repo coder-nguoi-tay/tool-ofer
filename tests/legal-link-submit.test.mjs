@@ -112,3 +112,26 @@ test('primitive giữ đúng form và hủy thao tác nếu link chân trang che
   assert.equal(await humanClick(page, page.locator('#answer')), true);
   assert.deepEqual(await page.evaluate(() => window.clicked), ['answer']);
 });
+
+test('link đáp án mở tab mới (Alpha Intent ai-cta, đáp án đã chọn) được bấm; link quảng cáo/download vẫn bị chặn', { skip: !existsSync(chromium.executablePath()) }, async t => {
+  const { inspectInteractionReadiness } = await import('../src/browser/locators/inspect-interaction-readiness.mjs');
+  const { humanClick } = await import('../src/autofill/human-click.mjs');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  // Cấu trúc lấy từ thẻ linkout offer 3965 của sweepstakesalerts (2026-11-21): CTA là link tracking thật, onclick tự window.open.
+  const { context, page } = await createFormScopeFixture(browser, `<div id="alpha-intent-content"><div id="offers_list-3965">
+    <a id="cta" ai-cta="true" href="https://engine.ai.example/path/click/?offer_id=3965" onclick="event.preventDefault(); window.clicked.push(this.id)">See If I Qualify</a>
+    <a id="cta-download" ai-cta="true" download href="https://engine.ai.example/file.pdf">Download</a></div>
+    <div class="question"><p>Pick one?</p><a id="choice" data-ux-choice-id="c1" target="_blank" href="https://offer.example/a">Option A</a></div>
+    <p><a id="ad" target="_blank" href="https://ads.example/banner">Sponsored</a></p></div>`);
+  t.after(() => context.close());
+  await page.evaluate(() => { window.clicked = []; });
+  const ready = async id => (await page.locator('#' + id).evaluate(inspectInteractionReadiness, null)).ready;
+  assert.equal(await ready('cta'), true);
+  assert.equal(await ready('choice'), true);
+  assert.equal(await ready('ad'), false, 'link quảng cáo thường vẫn bị chặn');
+  assert.equal(await ready('cta-download'), false, 'link download vẫn bị chặn');
+  page._activeAutofillFrame = page.mainFrame();
+  assert.equal(await humanClick(page, page.locator('#cta')), true);
+  assert.deepEqual(await page.evaluate(() => window.clicked), ['cta']);
+});

@@ -27,7 +27,10 @@ export function inspectInteractionReadiness(element, formScope) {
     const localAction = href === '#' || href === '' || /^javascript:void\(0\);?$/i.test(href);
     const formAction = (localAction && (formScope || question || surveyContinue || link.closest('form, [role="form"]')))
       || (href.startsWith('#') && link.hasAttribute('data-ux-choice-id') && (question || link.closest('.question, .q, fieldset, main, [role="main"]')));
-    if (!verifiedCard && (!formAction || link.hasAttribute('download') || (link.target && link.target.toLowerCase() !== '_self'))) return { ready: false, reason: 'navigation_link' };
+    // Đáp án dạng link (CTA ai-cta của Alpha Intent, đáp án bộ dò khảo sát đã chọn) có href thật và tự mở tab mới:
+    // chặn chúng làm câu hỏi đứng yên tới khi F5 (offer 3965, 2026-11-21).
+    const answerLink = link.matches('[ai-cta]') || (link.hasAttribute('data-ux-choice-id') && (question || link.closest('.question, .q, fieldset, main, [role="main"]')));
+    if (!verifiedCard && (link.hasAttribute('download') || !answerLink && (!formAction || (link.target && link.target.toLowerCase() !== '_self')))) return { ready: false, reason: 'navigation_link' };
   }
   const header = element.closest?.('header, [role="banner"], .site-header');
   if (header) {
