@@ -33,4 +33,9 @@ function _updateScreenSlots(sessions) {
         websiteUrl: s.websiteUrl || (s.tabs && s.tabs[0] ? s.tabs[0].url : '') || '',
         assignedEmail: s.assignedEmail || '',
       }));
+      // Ô của slot đã đóng phải biến mất ngay, không chờ lượt tải ảnh 5 giây của _pollThumbnails.
+      const liveSlots = new Set(_screenSlots.map(entry => String(entry.slot)));
+      for (const tile of globalThis.document?.querySelectorAll('#thumbnailTiles [data-slot]') ?? []) {
+        if (!liveSlots.has(tile.dataset.slot)) tile.remove();
+      }
     }

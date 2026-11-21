@@ -653,3 +653,38 @@ test('Mini bỏ phản hồi click cũ, giữ đúng nguồn của nhấp đúp 
   assert.equal(await draft.isVisible(), false, 'Phản hồi chạm tới muộn không được mở lại hộp người dùng đã đóng');
   assert.doesNotMatch(await page.evaluate(() => notices.join(' ')), /secret/);
 });
+
+test('Bấm đóng: ô slot hiện "Đang tắt" ngay và biến mất ngay khi trạng thái không còn slot, không chờ lượt ảnh 5 giây', async t => {
+  const { existsSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { chromium } = await import('playwright');
+  if (!existsSync(chromium.executablePath())) return t.skip('Chưa cài Chromium');
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const view = await browser.newPage();
+  await view.setContent('<div id="lbStatus"></div><div id="thumbnailTiles"></div><div id="thumbnailEmpty"></div>');
+  await view.evaluate(() => Object.assign(window, {
+    _screenViewActive: true, currentSelectedRunningOfferTab: 'all', _screenActiveSlot: null,
+    refreshes: 0, fetchRunningState: () => { window.refreshes++; },
+    api: () => new Promise(resolve => { window.finishClose = resolve; }),
+  }));
+  for (const file of ['esc-html', 'get-device-icon', 'get-clean-device-name', 'get-clean-browser-version', 'get-short-domain', 'format-bytes', '_is-thumbnail-visible', '_update-screen-slots', '_poll-thumbnails', 'close-single-browser']) {
+    await view.addScriptTag({ path: fileURLToPath(new URL('../ui/desktop/functions/' + file + '.js', import.meta.url)) });
+  }
+  const tiles = () => view.evaluate(() => [...document.querySelectorAll('#thumbnailTiles [data-slot]')].map(tile => tile.dataset.slot));
+  await view.evaluate(() => { _updateScreenSlots([{ slot: 5 }, { slot: 6 }]); _pollThumbnails(); });
+  assert.deepEqual(await tiles(), ['5', '6']);
+
+  // Server báo lỗi: ô trở lại như cũ.
+  await view.evaluate(() => { window.closing = closeSingleBrowser(6); });
+  assert.equal(await view.locator('[data-slot="6"]').getAttribute('data-closing'), '1');
+  assert.match(await view.locator('[data-slot="6"] .tile-closing-label').textContent(), /Đang tắt/);
+  await view.evaluate(async () => { finishClose({ error: 'Obscura chưa dừng' }); await closing; });
+  assert.equal(await view.locator('[data-slot="6"]').getAttribute('data-closing'), null);
+  assert.equal(await view.locator('[data-slot="6"] .tile-closing-label').count(), 0);
+
+  // Đóng thành công: trạng thái mới không còn slot 6 thì ô biến mất ngay, chưa cần _pollThumbnails.
+  await view.evaluate(async () => { const done = closeSingleBrowser(6); finishClose({ ok: true }); await done; _updateScreenSlots([{ slot: 5 }]); });
+  assert.deepEqual(await tiles(), ['5']);
+  assert.equal(await view.evaluate(() => window.refreshes), 2);
+});
