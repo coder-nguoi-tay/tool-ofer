@@ -489,6 +489,9 @@ impl StealthHttpClient {
                 }
                 req = req.body(bytes.clone());
             }
+            // Release before awaiting the network: a held read guard blocks
+            // Network.setUserAgentOverride and, through it, the whole CDP connection.
+            drop(user_agent);
             drop(extra_headers);
             if !request_callback_fired {
                 if let Some(callbacks) = callbacks {
@@ -679,6 +682,7 @@ impl StealthHttpClient {
         for (k, v) in extra_headers.iter().filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent")) {
             req = req.header(k.as_str(), v.as_str());
         }
+        drop(user_agent);
         drop(extra_headers);
         for (k, v) in headers.iter().filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent")) {
             req = req.header(k.as_str(), v.as_str());
@@ -773,6 +777,42 @@ mod tests {
                     .map(|(_,value)|value.trim()).collect::<Vec<_>>();
                 assert_eq!(agents,vec![if override_mode == 2 {"RequestUA/3.0"} else if extra {"HeaderUA/2.0"} else {"TestingUA/1.0"}],"scripted={scripted}, override={override_mode}: {wire}");
             }
+        }
+    }
+
+    /// A slow in-flight request must not hold the UA read guard: CDP
+    /// `Network.setUserAgentOverride` takes the write side, and the connection
+    /// processor awaits it, so every tab of the profile froze until the slow
+    /// popup resource finished (2026-11-21).
+    /// @author ductv <ductv@getflycrm.com> @since 2026-11-21
+    #[tokio::test]
+    async fn slow_in_flight_request_does_not_block_user_agent_override() {
+        for scripted in [false, true] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = Url::parse(&format!("http://{}/slow.png", listener.local_addr().unwrap())).unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut bytes = [0; 4096];
+                let _ = Read::read(&mut socket, &mut bytes);
+                std::thread::sleep(Duration::from_millis(3000));
+                let _ = Write::write_all(&mut socket, b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+            });
+            let client = Arc::new(StealthHttpClient::with_proxy(Arc::new(CookieJar::new()), None, true).with_user_agent(Some("Before/1.0".into())));
+            let request = {
+                let client = client.clone();
+                let url = url.clone();
+                tokio::spawn(async move {
+                    if scripted { client.send_single("GET", &url, &std::collections::HashMap::new(), &[], true, true).await.map(|_| ()) }
+                    else { client.fetch(&url).await.map(|_| ()) }
+                })
+            };
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let started = std::time::Instant::now();
+            tokio::time::timeout(Duration::from_millis(500), client.set_user_agent("After/2.0")).await
+                .unwrap_or_else(|_| panic!("scripted={scripted}: set_user_agent waited for the in-flight request"));
+            assert!(started.elapsed() < Duration::from_millis(500));
+            request.await.unwrap().unwrap();
+            server.join().unwrap();
         }
     }
 
